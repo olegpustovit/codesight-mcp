@@ -1,0 +1,49 @@
+= My AsciiDoc Document
+:author: J. Gravelle
+:version: 1.0
+
+This is the document preamble. Attribute entries above are treated as
+preamble content and do not form a separate section.
+
+== Introduction
+
+AsciiDoc uses leading '=' characters for headings, similar to Markdown's '#'.
+One '=' is the document title (level 1), '==' is a section (level 2), and so on.
+
+== Installation
+
+Install via the package manager of your choice.
+
+=== Prerequisites
+
+Make sure you have Python 3.10 or later installed.
+
+=== Quick Install
+
+----
+pip install mypackage
+----
+
+Note: the '----' above is a listing block delimiter, not a heading.
+
+==== Verifying the Install
+
+Run the following to confirm::
+
+    mypackage --version
+
+== Advanced Usage
+
+Some advanced content lives here.
+
+=== Configuration Options
+
+A table of available configuration knobs.
+
+==== Environment Variables
+
+Variables you can set to override defaults.
+
+== API Reference
+
+Full API documentation follows.

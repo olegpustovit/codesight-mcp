@@ -1,0 +1,9 @@
+This is the first paragraph of the document.
+It has multiple lines that belong together.
+References: https://example.com/docs
+
+This is the second paragraph.
+It talks about something different.
+
+Third paragraph here.
+Short one.

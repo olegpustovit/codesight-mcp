@@ -1,0 +1,184 @@
+mod al;
+mod asm;
+mod blade;
+pub(crate) mod classifier;
+pub(crate) mod common;
+mod ejs;
+pub mod engine;
+pub(crate) mod fallback_pipeline;
+mod luau;
+mod openapi;
+mod razor;
+mod registry_builder;
+mod scss;
+mod sql;
+mod verse;
+mod vue;
+pub(crate) mod yaml;
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use crate::model::StoredSymbol;
+
+pub use al::AlExtractor;
+pub use asm::AsmExtractor;
+pub use blade::BladeExtractor;
+pub use ejs::EjsExtractor;
+pub use luau::LuauExtractor;
+pub use openapi::OpenApiExtractor;
+pub use razor::RazorExtractor;
+pub use scss::{LessExtractor, SassExtractor, ScssExtractor, StylExtractor};
+pub use sql::SqlExtractor;
+pub use verse::VerseExtractor;
+pub use vue::VueExtractor;
+pub use yaml::{AnsibleExtractor, YamlExtractor};
+
+/// Strategy pattern: each `LanguageExtractor` extracts symbols from source files.
+///
+/// Most languages are handled by `.scm` query files via [`engine::scm::ScmExtractor`].
+/// Override extractors in this module handle languages without tree-sitter grammars
+/// (assembly), domain-specific extraction (SQL dbt, YAML/Ansible), or delegation (OpenAPI).
+pub trait LanguageExtractor: Send + Sync {
+    fn language_name(&self) -> &'static str;
+    fn supported_extensions(&self) -> &'static [&'static str];
+    fn extract(&self, file_path: &str, source: &str) -> anyhow::Result<Vec<StoredSymbol>>;
+}
+
+pub struct ExtractorRegistry {
+    extractors: Vec<Box<dyn LanguageExtractor>>,
+    /// Special-purpose extractors matched by path heuristics, not extensions.
+    ansible_extractor: Box<dyn LanguageExtractor>,
+    openapi_extractor: Box<dyn LanguageExtractor>,
+    /// Runtime extension overrides: maps lowercase extension (without dot) to
+    /// the language name of an already-registered extractor.
+    extra_extensions: HashMap<String, String>,
+}
+
+impl ExtractorRegistry {
+    pub(crate) fn new_with_extractors(
+        extractors: Vec<Box<dyn LanguageExtractor>>,
+        ansible_extractor: Box<dyn LanguageExtractor>,
+        openapi_extractor: Box<dyn LanguageExtractor>,
+    ) -> Self {
+        Self {
+            extractors,
+            ansible_extractor,
+            openapi_extractor,
+            extra_extensions: HashMap::new(),
+        }
+    }
+}
+
+impl Default for ExtractorRegistry {
+    fn default() -> Self {
+        registry_builder::build_default_registry()
+    }
+}
+
+impl ExtractorRegistry {
+    /// Returns the set of all language names known to this registry.
+    pub fn known_languages(&self) -> Vec<&str> {
+        let mut langs: Vec<&str> = self.extractors.iter().map(|e| e.language_name()).collect();
+        langs.push(self.ansible_extractor.language_name());
+        langs.push(self.openapi_extractor.language_name());
+        langs.sort();
+        langs.dedup();
+        langs
+    }
+
+    /// Apply extra extension-to-language mappings at runtime.
+    pub fn apply_extra_extensions(&mut self, mappings: &HashMap<String, String>) -> Vec<String> {
+        let mut warnings = Vec::new();
+        let known: Vec<String> = self
+            .known_languages()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        for (ext_raw, lang_raw) in mappings {
+            let ext = ext_raw.trim().to_string();
+            let lang = lang_raw.trim().to_lowercase();
+
+            if ext.is_empty() || ext == "." {
+                let msg =
+                    format!("extra_extensions: skipping empty extension for language '{lang_raw}'");
+                eprintln!("{msg}");
+                warnings.push(msg);
+                continue;
+            }
+
+            if lang.is_empty() {
+                let msg =
+                    format!("extra_extensions: skipping extension '{ext}' with empty language");
+                eprintln!("{msg}");
+                warnings.push(msg);
+                continue;
+            }
+
+            let ext_norm = ext.strip_prefix('.').unwrap_or(&ext).to_ascii_lowercase();
+
+            if !known.iter().any(|k| k.eq_ignore_ascii_case(&lang)) {
+                let msg = format!(
+                    "extra_extensions: unknown language '{lang}' for extension '.{ext_norm}', skipping"
+                );
+                eprintln!("{msg}");
+                warnings.push(msg);
+                continue;
+            }
+
+            self.extra_extensions.insert(ext_norm, lang);
+        }
+        warnings
+    }
+
+    pub fn extractor_for_path(&self, path: &Path) -> Option<&dyn LanguageExtractor> {
+        match classifier::classify_special_path(path) {
+            Some(classifier::SpecialExtractor::OpenApi) => {
+                return Some(self.openapi_extractor.as_ref());
+            }
+            Some(classifier::SpecialExtractor::Ansible) => {
+                return Some(self.ansible_extractor.as_ref());
+            }
+            None => {}
+        }
+
+        // --- Compound extension check (e.g. .blade.php before .php) ---
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+            let lower = file_name.to_ascii_lowercase();
+            // Check compound extensions first (before single-extension fallback)
+            for extractor in &self.extractors {
+                for ext in extractor.supported_extensions() {
+                    if ext.contains('.')
+                        && lower.ends_with(&format!(".{}", ext.to_ascii_lowercase()))
+                    {
+                        return Some(extractor.as_ref());
+                    }
+                }
+            }
+        }
+
+        // --- Runtime extra_extensions override ---
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            let ext_lower = ext.to_ascii_lowercase();
+            if let Some(lang) = self.extra_extensions.get(&ext_lower) {
+                return self
+                    .extractors
+                    .iter()
+                    .find(|e| e.language_name().eq_ignore_ascii_case(lang))
+                    .map(Box::as_ref);
+            }
+        }
+
+        // --- Extension-based fallback ---
+        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+        self.extractors
+            .iter()
+            .find(|extractor| {
+                extractor.supported_extensions().iter().any(|candidate| {
+                    !candidate.contains('.') && candidate.eq_ignore_ascii_case(extension.as_str())
+                })
+            })
+            .map(Box::as_ref)
+    }
+}

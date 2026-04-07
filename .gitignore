@@ -1,0 +1,10 @@
+/target/
+**/target/
+.DS_Store
+*.swp
+.idea/
+.vscode/
+inc_test
+inc_test2
+t
+

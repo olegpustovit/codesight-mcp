@@ -1,0 +1,378 @@
+//! Index lifecycle + column search.
+
+use std::collections::HashSet;
+
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+use crate::db;
+use crate::rate_limit;
+use crate::repo_id::normalize_repo_id;
+use crate::savings::MetaBuilder;
+use crate::service::CodeService;
+use crate::service::agent_v1::args::{IngestSourcesArgs, ManageIndexesArgs};
+use crate::service::args::parse_args;
+use crate::service::helpers::{ToolError, canonicalize_root};
+use crate::storage::{IndexStore, list_repo_summaries};
+
+impl CodeService {
+    pub(in crate::service) fn manage_indexes(&self, v: Value) -> anyhow::Result<Value> {
+        let args: ManageIndexesArgs = parse_args(v)?;
+        let action = args.action.to_ascii_lowercase();
+        let timer = MetaBuilder::new(0);
+
+        match action.as_str() {
+            "invalidate" | "delete" => {
+                let Some(ref sid) = args.source_id else {
+                    return self.error_response(
+                        &timer,
+                        ToolError {
+                            code: "INVALID_REQUEST",
+                            message: "source_id required for invalidate/delete.".to_string(),
+                            detail: json!({}),
+                        },
+                    );
+                };
+                let had_any =
+                    self.config.repo_dir(sid).exists() || self.config.doc_dir(sid).exists();
+                if !had_any {
+                    return self.error_response(
+                        &timer,
+                        ToolError {
+                            code: "NOT_INDEXED",
+                            message: format!("No index for '{sid}'."),
+                            detail: json!({ "source_id": sid }),
+                        },
+                    );
+                }
+                self.wipe_indexes_for_repo(sid)?;
+                self.success_response(
+                    &timer,
+                    json!({
+                        "action": action,
+                        "source_id": sid,
+                        "message": "Indexes removed for source.",
+                    }),
+                )
+            }
+            "rebuild" => {
+                let Some(ref root) = args.root_hint else {
+                    return self.error_response(
+                        &timer,
+                        ToolError {
+                            code: "INVALID_REQUEST",
+                            message: "root_hint required for rebuild.".to_string(),
+                            detail: json!({}),
+                        },
+                    );
+                };
+                let Some(ref sid) = args.source_id else {
+                    return self.error_response(
+                        &timer,
+                        ToolError {
+                            code: "INVALID_REQUEST",
+                            message: "source_id required for rebuild.".to_string(),
+                            detail: json!({}),
+                        },
+                    );
+                };
+                self.wipe_indexes_for_repo(sid)?;
+                let dom = args.domains.clone().unwrap_or_else(|| "auto".to_string());
+                let ingest = IngestSourcesArgs {
+                    input_kind: "local_path".to_string(),
+                    domains: dom,
+                    path: root.clone(),
+                    incremental: false,
+                    enrichment: vec![],
+                };
+                self.ingest_sources(serde_json::to_value(ingest)?)
+            }
+            "status" => {
+                let Some(ref sid) = args.source_id else {
+                    return self.error_response(
+                        &timer,
+                        ToolError {
+                            code: "INVALID_REQUEST",
+                            message: "source_id required for status.".to_string(),
+                            detail: json!({}),
+                        },
+                    );
+                };
+                if let Ok(store) = self.ensure_repo_store(sid, None) {
+                    let meta = store.repo_metadata()?;
+                    let timer_b = MetaBuilder::new(meta.estimated_naive_tokens.saturating_mul(4));
+                    return self.success_response(
+                        &timer_b,
+                        json!({
+                            "action": "status",
+                            "source_id": sid,
+                            "code_index": serde_json::to_value(&meta)?,
+                        }),
+                    );
+                }
+                if let Ok(dstore) = self.ensure_doc_store(sid, None) {
+                    let b = dstore.repo_total_bytes()?;
+                    let timer_b = MetaBuilder::new(b);
+                    let toc = dstore.toc().map(|t| t.len()).unwrap_or(0);
+                    return self.success_response(
+                        &timer_b,
+                        json!({
+                            "action": "status",
+                            "source_id": sid,
+                            "doc_index": { "sections_indexed": toc },
+                        }),
+                    );
+                }
+                self.error_response(
+                    &timer,
+                    ToolError {
+                        code: "NOT_INDEXED",
+                        message: format!("No index for '{sid}'."),
+                        detail: json!({ "source_id": sid }),
+                    },
+                )
+            }
+            _ => self.error_response(
+                &timer,
+                ToolError {
+                    code: "INVALID_REQUEST",
+                    message: format!("Unknown manage_indexes action '{}'.", args.action),
+                    detail: json!({ "action": args.action }),
+                },
+            ),
+        }
+    }
+
+    // ── embed_repo ─────────────────────────────────────────────────────────
+    pub(in crate::service) fn embed_repo(&self, v: Value) -> anyhow::Result<Value> {
+        #[derive(Deserialize)]
+        struct Args {
+            source_id: String,
+            #[serde(default)]
+            force: bool,
+        }
+        let args: Args = parse_args(v)?;
+        let timer = MetaBuilder::new(0);
+
+        // Check for embedding provider
+        let provider = crate::semantic::detect_embedding_provider();
+        let Some(provider) = provider else {
+            return self.error_response(&timer, ToolError {
+                code: "no_embedding_provider",
+                message: "No embedding provider configured. Set CODESIGHT_EMBED_MODEL, or OPENAI_API_KEY+OPENAI_EMBED_MODEL, or GOOGLE_API_KEY+GOOGLE_EMBED_MODEL.".into(),
+                detail: json!({}),
+            });
+        };
+
+        let store = match self.ensure_repo_store(&args.source_id, None) {
+            Ok(s) => s,
+            Err(e) => return self.error_response(&timer, e),
+        };
+
+        // Get all symbols for embedding
+        let sym_infos = store.all_symbols_with_source()?;
+        let emb_path = self.config.embedding_path(&args.source_id);
+        let model_path = emb_path.with_extension("tfidf.json");
+        let mut emb_store = crate::semantic::EmbeddingStore::open(&emb_path);
+
+        // Check if already embedded (cached)
+        let already_embedded = if !args.force {
+            sym_infos.iter().all(|s| emb_store.contains(&s.id))
+        } else {
+            false
+        };
+
+        if already_embedded {
+            return self.success_response(
+                &timer,
+                json!({
+                    "source_id": args.source_id,
+                    "symbols_embedded": 0,
+                    "cached": true,
+                    "provider": provider.provider,
+                    "model": provider.model,
+                }),
+            );
+        }
+
+        // Build TF-IDF embeddings
+        let documents: Vec<(String, String)> = sym_infos
+            .iter()
+            .map(|s| (s.id.clone(), format!("{} {} {}", s.name, s.kind, s.source)))
+            .collect();
+
+        let (vocab, embeddings) = crate::semantic::compute_tfidf_embeddings(&documents);
+
+        // Build DF map for query vector computation
+        let mut df: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for (_, text) in &documents {
+            let tokens: HashSet<String> = text
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_lowercase())
+                .collect();
+            for tok in tokens {
+                *df.entry(tok).or_insert(0) += 1;
+            }
+        }
+
+        let model = crate::semantic::TfidfModel {
+            vocab: vocab.clone(),
+            doc_count: documents.len(),
+            df,
+        };
+        let _ = model.save(&model_path);
+
+        let count = embeddings.len();
+        emb_store.set_many(embeddings);
+        if !vocab.is_empty() {
+            emb_store.set_dimension(vocab.len(), &provider.model);
+        }
+
+        self.success_response(
+            &timer,
+            json!({
+                "source_id": args.source_id,
+                "symbols_embedded": count,
+                "cached": false,
+                "provider": provider.provider,
+                "model": provider.model,
+            }),
+        )
+    }
+
+    // ── search_columns ─────────────────────────────────────────────────────
+    pub(in crate::service) fn search_columns(&self, v: Value) -> anyhow::Result<Value> {
+        #[derive(Deserialize)]
+        struct Args {
+            source_id: String,
+            query: String,
+            #[serde(default)]
+            model_pattern: Option<String>,
+            #[serde(default)]
+            max_results: Option<usize>,
+        }
+        let args: Args = parse_args(v)?;
+        let timer = MetaBuilder::new(0);
+
+        let store = match self.ensure_repo_store(&args.source_id, None) {
+            Ok(s) => s,
+            Err(e) => return self.error_response(&timer, e),
+        };
+
+        // Load context_metadata from meta table
+        let meta_str = store.get_meta("context_metadata")?;
+        let Some(meta_str) = meta_str else {
+            return self.error_response(
+                &timer,
+                ToolError {
+                    code: "NOT_FOUND",
+                    message: "No column metadata found for this source.".into(),
+                    detail: json!({}),
+                },
+            );
+        };
+        let meta: Value = serde_json::from_str(&meta_str).unwrap_or(json!({}));
+
+        // Collect columns from all *_columns keys
+        let mut all_columns: Vec<(String, String, String, String)> = Vec::new(); // (source, model, column, description)
+        let mut sources: Vec<String> = Vec::new();
+
+        if let Some(obj) = meta.as_object() {
+            for (key, val) in obj {
+                if !key.ends_with("_columns") {
+                    continue;
+                }
+                let source_name = key.trim_end_matches("_columns");
+                if !sources.contains(&source_name.to_string()) {
+                    sources.push(source_name.to_string());
+                }
+                if let Some(models) = val.as_object() {
+                    for (model, columns) in models {
+                        // Apply model_pattern filter
+                        if let Some(ref pat) = args.model_pattern {
+                            let pat = pat.replace('*', "");
+                            if !model.starts_with(&pat) {
+                                continue;
+                            }
+                        }
+                        if let Some(cols) = columns.as_object() {
+                            for (col_name, desc) in cols {
+                                all_columns.push((
+                                    source_name.to_string(),
+                                    model.clone(),
+                                    col_name.clone(),
+                                    desc.as_str().unwrap_or("").to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if all_columns.is_empty() && sources.is_empty() {
+            return self.error_response(
+                &timer,
+                ToolError {
+                    code: "NOT_FOUND",
+                    message: "No column metadata found for this source.".into(),
+                    detail: json!({}),
+                },
+            );
+        }
+
+        // Score columns against query
+        let query_tokens: Vec<String> = args
+            .query
+            .split_whitespace()
+            .map(|s| s.to_lowercase())
+            .collect();
+
+        let mut results: Vec<Value> = Vec::new();
+        for (source, model, col_name, desc) in &all_columns {
+            let col_lower = col_name.to_lowercase();
+            let desc_lower = desc.to_lowercase();
+            let mut score: i64 = 0;
+            for qt in &query_tokens {
+                if &col_lower == qt {
+                    score += 30; // exact match
+                } else if col_lower.contains(qt.as_str()) {
+                    score += 15; // partial match in name
+                } else if desc_lower.contains(qt.as_str()) {
+                    score += 5; // match in description
+                }
+            }
+            if score > 0 {
+                results.push(json!({
+                    "column": col_name,
+                    "model": model,
+                    "description": desc,
+                    "score": score,
+                    "source": source,
+                }));
+            }
+        }
+
+        // Sort by score descending
+        results.sort_by(|a, b| {
+            b["score"]
+                .as_i64()
+                .unwrap_or(0)
+                .cmp(&a["score"].as_i64().unwrap_or(0))
+        });
+
+        // Apply max_results cap
+        let max_results = args.max_results.unwrap_or(25);
+        results.truncate(max_results);
+
+        self.success_response(
+            &timer,
+            json!({
+                "results": results,
+                "result_count": results.len(),
+                "sources": sources,
+            }),
+        )
+    }
+}

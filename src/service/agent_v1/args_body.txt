@@ -1,0 +1,291 @@
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct IngestSourcesArgs {
+    /// `local_path`, `single_file`, or `git_repo` (unsupported).
+    #[serde(default = "default_input_kind")]
+    pub input_kind: String,
+    /// `code`, `docs`, or `auto` (both indexes for the same `source_id`).
+    #[serde(default = "default_domains")]
+    pub domains: String,
+    pub path: String,
+    #[serde(default = "default_incremental")]
+    pub incremental: bool,
+    #[serde(default)]
+    pub enrichment: Vec<String>,
+}
+
+fn default_input_kind() -> String {
+    "local_path".to_string()
+}
+fn default_domains() -> String {
+    "auto".to_string()
+}
+fn default_incremental() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CatalogSourcesArgs {
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SearchCatalogArgs {
+    pub source_id: String,
+    pub query: String,
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// `symbol`, `section`, `file`.
+    #[serde(default)]
+    pub unit_kinds: Option<Vec<String>>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub file_pattern: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default = "crate::service::args::default_max_results")]
+    pub limit: usize,
+    #[serde(default)]
+    pub query_mode: Option<String>,
+    /// Surrounding lines for `unit_kinds: ["file"]` text hits (clamped).
+    #[serde(default)]
+    pub context_lines: Option<usize>,
+    /// Cap total serialized size of returned `items` (~bytes / BYTES_PER_TOKEN). Alias: `token_budget`.
+    #[serde(default, alias = "token_budget")]
+    pub max_tokens: Option<u32>,
+    /// Augment FTS hits with case-insensitive name substring matches (deduped).
+    #[serde(default)]
+    pub fuzzy: Option<bool>,
+    /// Trigram Jaccard threshold for fuzzy augmentation (default 0.3). When set while BM25
+    /// returns no symbol hits, fuzzy augmentation runs even if `fuzzy` is false.
+    #[serde(default)]
+    pub fuzzy_threshold: Option<f64>,
+    /// When set, symbols within this Levenshtein distance (on a normalized compare key) qualify.
+    #[serde(default)]
+    pub max_edit_distance: Option<u32>,
+    #[serde(default)]
+    pub repo_path: Option<String>,
+    /// Enable semantic (embedding) search.
+    #[serde(default)]
+    pub semantic: Option<bool>,
+    /// Blend weight for semantic vs BM25 (0.0 = pure BM25, 1.0 = pure semantic).
+    #[serde(default)]
+    pub semantic_weight: Option<f64>,
+    /// If true, skip BM25 entirely and use only semantic similarity.
+    #[serde(default)]
+    pub semantic_only: Option<bool>,
+    /// Sort-by mode: "relevance" (default), "centrality", etc.
+    #[serde(default)]
+    pub sort_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ContentRef {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub stable_id: Option<String>,
+    pub kind: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub start_line: Option<u32>,
+    #[serde(default)]
+    pub end_line: Option<u32>,
+    #[serde(default)]
+    pub new_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ReadContentArgs {
+    pub source_id: String,
+    pub refs: Vec<ContentRef>,
+    #[serde(default)]
+    pub include: Option<Vec<String>>,
+    #[serde(default)]
+    pub verify: bool,
+    #[serde(default)]
+    pub context_lines: i64,
+    #[serde(default)]
+    pub repo_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InspectStructureArgs {
+    pub source_id: String,
+    pub view: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub file_paths: Option<Vec<String>>,
+    /// Cap the number of **files** listed (`file_tree` only; default 500).
+    #[serde(default)]
+    pub max_files: Option<usize>,
+    #[serde(default)]
+    pub repo_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InspectGraphArgs {
+    pub source_id: String,
+    pub graph: String,
+    #[serde(default)]
+    pub r#ref: Option<Value>,
+    #[serde(default)]
+    pub limit: usize,
+    #[serde(default)]
+    pub repo_path: Option<String>,
+    /// For `coupling_metrics` graph mode: file to analyze.
+    #[serde(default)]
+    pub module_path: Option<String>,
+    /// For `layer_violations` graph mode: layer rules.
+    #[serde(default)]
+    pub rules: Option<Vec<crate::dep_graph::LayerDef>>,
+    /// For `calls` mode: symbol to analyze.
+    #[serde(default)]
+    pub symbol_id: Option<String>,
+    /// For `calls` mode: "callers", "callees", or "both" (default).
+    #[serde(default)]
+    pub direction: Option<String>,
+    /// For `calls`/`centrality` mode: traversal depth.
+    #[serde(default)]
+    pub depth: Option<usize>,
+    /// For `centrality` mode: "pagerank" or "degree".
+    #[serde(default)]
+    pub algorithm: Option<String>,
+    /// For `centrality` mode: top N results.
+    #[serde(default)]
+    pub top_n: Option<usize>,
+    /// For `importers` mode: file path to find importers for.
+    #[serde(default)]
+    pub file_path: Option<String>,
+    /// For `find_references` mode: identifier to search for.
+    #[serde(default)]
+    pub identifier: Option<String>,
+    /// For `find_references` batch mode: multiple identifiers.
+    #[serde(default)]
+    pub identifiers: Option<Vec<String>>,
+    /// For `find_references` mode: include calling symbol chain info.
+    #[serde(default)]
+    pub include_call_chain: Option<bool>,
+    /// Enable cross-repo analysis for importers/dependencies.
+    #[serde(default)]
+    pub cross_repo: Option<bool>,
+    /// For `resolve_fqn` mode: fully-qualified name.
+    #[serde(default)]
+    pub fqn: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EvaluateImpactArgs {
+    pub source_id: String,
+    pub analysis: String,
+    #[serde(default)]
+    pub refs: Option<Vec<ContentRef>>,
+    #[serde(default)]
+    pub repo_path: Option<String>,
+    #[serde(default)]
+    pub depth: Option<u64>,
+    #[serde(default)]
+    pub include_depth_scores: Option<bool>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub days: Option<u64>,
+    /// Symbol name for impact_preview / blast_radius (alternative to refs).
+    #[serde(default)]
+    pub symbol_id: Option<String>,
+    /// Call hierarchy depth for blast_radius (callers lookup).
+    #[serde(default)]
+    pub call_depth: Option<usize>,
+    /// Enable cross-repo analysis.
+    #[serde(default)]
+    pub cross_repo: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EvaluateQualityArgs {
+    pub source_id: String,
+    pub analysis: String,
+    #[serde(default)]
+    pub refs: Option<Vec<ContentRef>>,
+    #[serde(default)]
+    pub repo_path: Option<String>,
+    // dead_code / dead_code_v2 fields
+    #[serde(default)]
+    pub granularity: Option<String>,
+    #[serde(default)]
+    pub min_confidence: Option<f64>,
+    #[serde(default)]
+    pub include_tests: Option<bool>,
+    #[serde(default)]
+    pub entry_point_patterns: Option<Vec<String>>,
+    // hotspots fields
+    #[serde(default)]
+    pub min_complexity: Option<u64>,
+    #[serde(default)]
+    pub top_n: Option<usize>,
+    // extraction_candidates fields
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub min_callers: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AssembleContextArgs {
+    pub source_id: String,
+    pub mode: String,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub refs: Option<Vec<ContentRef>>,
+    #[serde(default = "default_ctx_limit")]
+    pub limit: usize,
+    #[serde(default = "default_include_children")]
+    pub include_children: bool,
+    #[serde(default, alias = "token_budget")]
+    pub max_tokens: Option<u32>,
+    /// `context_bundle`: `compact`, `most_relevant`, or unset for full bodies.
+    #[serde(default)]
+    pub budget_strategy: Option<String>,
+    #[serde(default)]
+    pub include_budget_report: Option<bool>,
+    /// `ranked`: accepted strategy label (default `bm25`); stored for reporting only today.
+    #[serde(default)]
+    pub strategy: Option<String>,
+    /// `ranked`: restrict hits to these symbol kinds (`class`, `function`, …).
+    #[serde(default, alias = "include_kinds")]
+    pub kind_filter: Option<Vec<String>>,
+    #[serde(default)]
+    pub repo_path: Option<String>,
+}
+
+/// `get_ranked_context` reference oracle caps query length at 500 chars.
+const RANKED_CONTEXT_MAX_QUERY_LEN: usize = 500;
+
+fn default_include_children() -> bool {
+    true
+}
+
+fn default_ctx_limit() -> usize {
+    5
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ManageIndexesArgs {
+    pub action: String,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub root_hint: Option<String>,
+    #[serde(default)]
+    pub domains: Option<String>,
+}

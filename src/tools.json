@@ -1,0 +1,283 @@
+[
+  {
+    "name": "ingest_sources",
+    "description": "Create or refresh indexes for a local path. Use domains code, docs, or auto.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "input_kind": {
+          "type": "string",
+          "enum": ["local_path", "single_file", "git_repo"],
+          "default": "local_path",
+          "description": "git_repo is not implemented."
+        },
+        "domains": {
+          "type": "string",
+          "enum": ["code", "docs", "auto"],
+          "default": "auto"
+        },
+        "path": { "type": "string" },
+        "incremental": { "type": "boolean", "default": true },
+        "enrichment": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Optional; not implemented."
+        }
+      }
+    }
+  },
+  {
+    "name": "catalog_sources",
+    "description": "List indexed sources (code and docs) with capabilities and hints.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cursor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "search_catalog",
+    "description": "Unified search over symbols, sections, and file text.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["source_id", "query"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "query": { "type": "string" },
+        "domain": { "type": "string", "enum": ["code", "docs", "hybrid"] },
+        "unit_kinds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "scope": { "type": "string" },
+        "limit": { "type": "integer", "default": 10 },
+        "query_mode": { "type": "string", "enum": ["keyword", "natural_language", "regex"] },
+        "context_lines": {
+          "type": "integer",
+          "description": "Lines of context before/after for file text hits (code domain, unit_kinds file)."
+        },
+        "file_pattern": { "type": "string" },
+        "max_tokens": {
+          "type": "integer",
+          "description": "Optional cap on serialized size of items (token_budget alias). Uses BYTES_PER_TOKEN (~4 bytes per token)."
+        },
+        "token_budget": { "type": "integer", "description": "Alias of max_tokens." },
+        "fuzzy": {
+          "type": "boolean",
+          "description": "Augment symbol hits with fuzzy name matching (trigram Jaccard + optional edit distance) in the code domain."
+        },
+        "fuzzy_threshold": {
+          "type": "number",
+          "description": "Trigram Jaccard threshold for fuzzy candidates (default 0.3). When set and BM25 finds no symbols, fuzzy runs even if fuzzy=false."
+        },
+        "max_edit_distance": {
+          "type": "integer",
+          "description": "Optional Levenshtein cutoff on a normalized compare key; pairs within this distance may match even when trigram similarity is low."
+        },
+        "repo_path": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "read_content",
+    "description": "Batch read symbols, sections, or files by ref.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["source_id", "refs"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["symbol", "section", "file"] },
+              "id": { "type": "string" },
+              "stable_id": { "type": "string" },
+              "path": { "type": "string" },
+              "source_id": { "type": "string" },
+              "start_line": { "type": "integer" },
+              "end_line": { "type": "integer" }
+            }
+          }
+        },
+        "include": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "e.g. body, hash, window"
+        },
+        "verify": { "type": "boolean", "default": false },
+        "context_lines": { "type": "integer", "default": 0 },
+        "repo_path": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "inspect_structure",
+    "description": "Tree, outline, TOC, and document structure views.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["source_id", "view"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "view": {
+          "type": "string",
+          "enum": [
+            "file_tree",
+            "repo_outline",
+            "repository_rollup",
+            "file_outline",
+            "toc",
+            "toc_tree",
+            "document_outline",
+            "class_hierarchy"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "description": "Optional subtree prefix for file_tree (repo-relative, trailing slash optional). file_outline uses file_path / path as file path."
+        },
+        "file_path": { "type": "string" },
+        "file_paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Batch file_outline (mutually exclusive with path/file_path)."
+        },
+        "max_files": {
+          "type": "integer",
+          "description": "file_tree only: max files before truncation (default 500)."
+        },
+        "repo_path": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "inspect_graph",
+    "description": "Heuristic references and same-file related symbols; other graph modes may be unsupported.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["source_id", "graph"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "graph": {
+          "type": "string",
+          "enum": [
+            "references",
+            "related",
+            "importers",
+            "calls",
+            "dependencies",
+            "dependency_cycles",
+            "cross_source"
+          ]
+        },
+        "ref": {
+          "type": "object",
+          "description": "Target symbol ref for references/related."
+        },
+        "limit": { "type": "integer", "default": 20 },
+        "repo_path": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "evaluate_impact",
+    "description": "Change-oriented analysis; diff supported for two symbols in the same file.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["source_id", "analysis"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "analysis": {
+          "type": "string",
+          "enum": [
+            "blast_radius",
+            "impact_preview",
+            "rename_safety",
+            "changed_units",
+            "diff"
+          ]
+        },
+        "refs": { "type": "array" },
+        "repo_path": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "evaluate_quality",
+    "description": "Quality metrics; complexity and repo_health supported; others may return warnings.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["source_id", "analysis"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "analysis": { "type": "string" },
+        "refs": { "type": "array" },
+        "repo_path": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "assemble_context",
+    "description": "Bundle search+read, section neighbor context, suggestions, or workspace digest.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["source_id", "mode"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "mode": {
+          "type": "string",
+          "enum": ["bundle", "context_bundle", "section_context", "ranked", "query_suggestions", "workspace_digest"]
+        },
+        "query": { "type": "string" },
+        "refs": {
+          "type": "array",
+          "description": "Required for section_context (section ref). Same shape as read_content refs."
+        },
+        "limit": { "type": "integer", "default": 5 },
+        "include_children": {
+          "type": "boolean",
+          "default": true,
+          "description": "section_context: include direct child headings."
+        },
+        "max_tokens": {
+          "type": "integer",
+          "description": "section_context: cap primary section body. context_bundle / ranked: token budget (≈4 bytes/token). Alias: token_budget."
+        },
+        "token_budget": { "type": "integer", "description": "Alias of max_tokens for context_bundle and ranked." },
+        "budget_strategy": {
+          "type": "string",
+          "description": "context_bundle: compact (strip sources) or most_relevant (ordering label; packing uses token budget when set)."
+        },
+        "include_budget_report": {
+          "type": "boolean",
+          "description": "context_bundle: include budget_report block when true."
+        },
+        "strategy": { "type": "string", "description": "ranked: strategy label (default bm25)." },
+        "include_kinds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "ranked: filter symbol hits to these kinds (e.g. class)."
+        },
+        "repo_path": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "manage_indexes",
+    "description": "Invalidate, delete, rebuild, or status for a source index.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status"] },
+        "source_id": { "type": "string" },
+        "root_hint": { "type": "string", "description": "Filesystem path for rebuild." },
+        "domains": { "type": "string" }
+      }
+    }
+  }
+]
