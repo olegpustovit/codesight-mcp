@@ -40,6 +40,8 @@ fn migration_columns_regex(content: &str) -> HashMap<String, Vec<String>> {
     let Some(col_re) = Regex::new(r#"\$table->\w+\(\s*['"]([\w]+)['"]\s*\)"#).ok() else {
         return HashMap::new();
     };
+    let mod_re = Regex::new(r"^(->(\w+)\(\))+").unwrap();
+    let single_mod = Regex::new(r"->(\w+)\(\)").unwrap();
     let mut columns: HashMap<String, Vec<String>> = HashMap::new();
     for cap in col_re.captures_iter(content) {
         let col_name = cap[1].to_string();
@@ -49,10 +51,8 @@ fn migration_columns_regex(content: &str) -> HashMap<String, Vec<String>> {
         let full_match_end = cap.get(0).unwrap().end();
         let rest = &content[full_match_end..];
         let mut modifiers = Vec::new();
-        let mod_re = Regex::new(r"^(->(\w+)\(\))+").unwrap();
         if let Some(m) = mod_re.find(rest) {
             let chain = m.as_str();
-            let single_mod = Regex::new(r"->(\w+)\(\)").unwrap();
             for mc in single_mod.captures_iter(chain) {
                 modifiers.push(mc[1].to_string());
             }

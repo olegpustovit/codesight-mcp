@@ -47,12 +47,13 @@ pub fn parse_response(text: &str, count: usize) -> Vec<String> {
         // Find the position of the first ". " — the prefix must be all digits.
         if let Some(dot_pos) = trimmed.find(". ") {
             let prefix = &trimmed[..dot_pos];
-            if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) {
-                if let Ok(num) = prefix.parse::<usize>() {
-                    if num >= 1 && num <= count {
-                        result[num - 1] = trimmed[dot_pos + 2..].to_string();
-                    }
-                }
+            if !prefix.is_empty()
+                && prefix.chars().all(|c| c.is_ascii_digit())
+                && let Ok(num) = prefix.parse::<usize>()
+                && num >= 1
+                && num <= count
+            {
+                result[num - 1] = trimmed[dot_pos + 2..].to_string();
             }
         }
     }

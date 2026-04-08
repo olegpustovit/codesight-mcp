@@ -209,6 +209,7 @@ mod re {
         LazyLock::new(|| Regex::new(r"^(?:var\s+)?(\w+)(?:<[^>]*>)\s*:\s*\w+").unwrap());
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_symbol(
     file_path: &str,
     name: &str,

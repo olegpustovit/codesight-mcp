@@ -38,10 +38,10 @@ pub fn build_dependency_graph_with_aliases(
                 &known_files,
                 &known_files_vec,
                 alias_map,
-            ) {
-                if resolved != *path && seen_deps.insert(resolved.clone()) {
-                    deps.push(resolved);
-                }
+            ) && resolved != *path
+                && seen_deps.insert(resolved.clone())
+            {
+                deps.push(resolved);
             }
         }
 

@@ -51,10 +51,10 @@ impl CodeService {
             };
             let content_hash = blake3::hash(&bytes).to_hex().to_string();
 
-            if let Some(existing_file) = existing.get(&relative_path) {
-                if existing_file.content_hash == content_hash {
-                    continue;
-                }
+            if let Some(existing_file) = existing.get(&relative_path)
+                && existing_file.content_hash == content_hash
+            {
+                continue;
             }
 
             let source = String::from_utf8_lossy(&bytes).into_owned();
@@ -189,14 +189,14 @@ impl CodeService {
     ) -> Result<DocStore, ToolError> {
         match self.open_doc_store(repo) {
             Ok(store) => {
-                if self.config.auto_reindex {
-                    if let Ok(root) = store.root_path() {
-                        if root.is_dir() && store.is_stale(&root).unwrap_or(false) {
-                            eprintln!("codesight-mcp: auto-reindexing stale doc source '{repo}'");
-                            let _ = self.do_index_local(&root);
-                            return self.open_doc_store(repo);
-                        }
-                    }
+                if self.config.auto_reindex
+                    && let Ok(root) = store.root_path()
+                    && root.is_dir()
+                    && store.is_stale(&root).unwrap_or(false)
+                {
+                    eprintln!("codesight-mcp: auto-reindexing stale doc source '{repo}'");
+                    let _ = self.do_index_local(&root);
+                    return self.open_doc_store(repo);
                 }
                 Ok(store)
             }

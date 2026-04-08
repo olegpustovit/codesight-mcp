@@ -76,15 +76,14 @@ fn collect_import_statement(node: Node<'_>, source: &str, edges: &mut Vec<Import
                 }
             }
             "aliased_import" => {
-                if let Some(name_n) = child.child_by_field_name("name") {
-                    if name_n.kind() == "dotted_name" {
-                        if let Some(spec) = dotted_name_text(name_n, source) {
-                            edges.push(ImportEdge {
-                                specifier: spec,
-                                names: Vec::new(),
-                            });
-                        }
-                    }
+                if let Some(name_n) = child.child_by_field_name("name")
+                    && name_n.kind() == "dotted_name"
+                    && let Some(spec) = dotted_name_text(name_n, source)
+                {
+                    edges.push(ImportEdge {
+                        specifier: spec,
+                        names: Vec::new(),
+                    });
                 }
             }
             _ => {}
@@ -142,12 +141,11 @@ fn collect_import_from_statement(node: Node<'_>, source: &str, edges: &mut Vec<I
                         }
                     }
                     "aliased_import" => {
-                        if let Some(name_n) = c.child_by_field_name("name") {
-                            if name_n.kind() == "dotted_name" {
-                                if let Some(sym) = dotted_name_text(name_n, source) {
-                                    names.push(sym);
-                                }
-                            }
+                        if let Some(name_n) = c.child_by_field_name("name")
+                            && name_n.kind() == "dotted_name"
+                            && let Some(sym) = dotted_name_text(name_n, source)
+                        {
+                            names.push(sym);
                         }
                     }
                     _ => {}

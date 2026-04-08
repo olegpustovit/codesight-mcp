@@ -3,24 +3,17 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use walkdir::WalkDir;
 
-use crate::class_hierarchy;
-use crate::doc_storage::DocStore;
-use crate::framework;
 use crate::savings::MetaBuilder;
-use crate::sections;
+use crate::service::CodeService;
 use crate::service::agent_v1::args::{DEFAULT_FILE_TREE_MAX_FILES, InspectStructureArgs};
 use crate::service::agent_v1::file_tree::{
     FileTreeBuildNode, file_tree_hint, file_tree_insert, file_tree_to_json,
     normalize_file_tree_path_prefix,
 };
-use crate::service::agent_v1::util::*;
 use crate::service::agent_v1::util_graph::build_toc_tree;
 use crate::service::args::parse_args;
-use crate::service::helpers::{ToolError, should_descend, to_repo_relative};
-use crate::service::{CodeService, MAX_QUERY_LEN};
-use crate::storage::IndexStore;
+use crate::service::helpers::ToolError;
 
 impl CodeService {
     pub(in crate::service) fn inspect_structure(&self, v: Value) -> anyhow::Result<Value> {
@@ -56,10 +49,12 @@ impl CodeService {
                     // If a .h file has symbols but none are C++ specific (class,
                     // method, namespace, type), reclassify as "c".
                     // Files with no symbols keep their default "cpp" classification.
-                    if lang == "cpp" && path.ends_with(".h") && sym_count > 0 {
-                        if !store.file_has_cpp_symbols(&path).unwrap_or(true) {
-                            lang = "c".to_string();
-                        }
+                    if lang == "cpp"
+                        && path.ends_with(".h")
+                        && sym_count > 0
+                        && !store.file_has_cpp_symbols(&path).unwrap_or(true)
+                    {
+                        lang = "c".to_string();
                     }
                     let file_json = json!({
                         "type": "file",
@@ -82,12 +77,12 @@ impl CodeService {
                         json!(file_tree_hint(listed, total, max_files)),
                     );
                 }
-                return self.success_response_with_meta_extra(
+                self.success_response_with_meta_extra(
                     &timer,
                     Value::Object(body),
                     warnings,
                     [("file_count".to_string(), json!(listed))],
-                );
+                )
             }
             "repo_outline" => {
                 let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref())

@@ -12,6 +12,7 @@ pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
     let mut lowlinks: HashMap<String, usize> = HashMap::new();
     let mut sccs: Vec<Vec<String>> = Vec::new();
 
+    #[allow(clippy::too_many_arguments)]
     fn strongconnect(
         v: &str,
         adj: &HashMap<String, Vec<String>>,
@@ -95,6 +96,6 @@ pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
         }
     }
 
-    sccs.sort_by(|a, b| a.cmp(b));
+    sccs.sort();
     sccs
 }

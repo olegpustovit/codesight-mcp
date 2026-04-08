@@ -1,5 +1,5 @@
 //! **Vue single-file components**: `<script>`, `<template>`, and `<style>` blocks need SFC-aware
-//! parsing, not one flat `symbols.scm` over the whole file.
+//! parsing, not one flat query pack over the whole file.
 use anyhow::Result;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -369,27 +369,27 @@ fn visit_composition_node(
             // Handle const/let declarations
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
-                if child.kind() == "variable_declarator" {
-                    if let Some(name_node) = child.child_by_field_name("name") {
-                        let name = node_text(name_node, &block.content)?.to_string();
-                        let value = child.child_by_field_name("value");
+                if child.kind() == "variable_declarator"
+                    && let Some(name_node) = child.child_by_field_name("name")
+                {
+                    let name = node_text(name_node, &block.content)?.to_string();
+                    let value = child.child_by_field_name("value");
 
-                        let kind = classify_composition_value(&value, &block.content);
-                        let doc = extract_preceding_comment(node, &block.content);
+                    let kind = classify_composition_value(&value, &block.content);
+                    let doc = extract_preceding_comment(node, &block.content);
 
-                        push_vue_symbol(
-                            symbols,
-                            file_path,
-                            scopes,
-                            &name,
-                            kind,
-                            node,
-                            &block.content,
-                            block,
-                            vue_source,
-                            doc,
-                        )?;
-                    }
+                    push_vue_symbol(
+                        symbols,
+                        file_path,
+                        scopes,
+                        &name,
+                        kind,
+                        node,
+                        &block.content,
+                        block,
+                        vue_source,
+                        doc,
+                    )?;
                 }
             }
             return Ok(());
@@ -452,6 +452,7 @@ fn extract_preceding_comment(node: tree_sitter::Node<'_>, source: &str) -> Optio
 // Symbol emission with line-offset adjustment
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn push_vue_symbol(
     symbols: &mut Vec<StoredSymbol>,
     file_path: &str,

@@ -86,7 +86,7 @@ pub(super) fn extract_symbols(
                         name_start_byte = cap.node.start_byte();
                     }
                     "doc" => {
-                        doc_text = node_text(cap.node, source).ok().map(|s| clean_docstring(s));
+                        doc_text = node_text(cap.node, source).ok().map(clean_docstring);
                     }
                     "scope" => {
                         scope_text = node_text(cap.node, source)
@@ -216,15 +216,15 @@ pub(super) fn extract_symbols(
         }
 
         // Check exclude_inside.
-        if let Some(exclude) = &raw.props.exclude_inside {
-            if scope_stack.iter().any(|s| s.kind_str == *exclude) {
-                scope_stack.push(ScopeEntry {
-                    span_end: raw.def_end,
-                    name: raw.name.clone(),
-                    kind_str: raw.kind_str.clone(),
-                });
-                continue;
-            }
+        if let Some(exclude) = &raw.props.exclude_inside
+            && scope_stack.iter().any(|s| s.kind_str == *exclude)
+        {
+            scope_stack.push(ScopeEntry {
+                span_end: raw.def_end,
+                name: raw.name.clone(),
+                kind_str: raw.kind_str.clone(),
+            });
+            continue;
         }
 
         // Build qualified name.

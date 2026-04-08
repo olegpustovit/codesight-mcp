@@ -20,7 +20,7 @@ pub fn extract_rst_sections(file_path: &str, source: &str) -> Vec<Section> {
 
     fn is_adornment_line(line: &str, chars: &[u8]) -> Option<u8> {
         let trimmed = line.trim_end();
-        if trimmed.len() < 1 {
+        if trimmed.is_empty() {
             return None;
         }
         let first = trimmed.as_bytes()[0];
@@ -50,58 +50,54 @@ pub fn extract_rst_sections(file_path: &str, source: &str) -> Vec<Section> {
 
     let mut i = 0;
     while i < lines.len() {
-        if i + 2 < lines.len() {
-            if let Some(ch) = is_adornment_line(lines[i], rst_adornment_chars) {
-                let text = lines[i + 1].trim();
-                if !text.is_empty() {
-                    if let Some(ch2) = is_adornment_line(lines[i + 2], rst_adornment_chars) {
-                        if ch == ch2
-                            && lines[i].trim_end().len() >= text.len()
-                            && lines[i + 2].trim_end().len() >= text.len()
-                        {
-                            let style = (ch, true);
-                            let style_idx = match adornment_styles.iter().position(|s| *s == style)
-                            {
-                                Some(idx) => idx,
-                                None => {
-                                    adornment_styles.push(style);
-                                    adornment_styles.len() - 1
-                                }
-                            };
-                            headings.push((text.to_string(), i + 1, byte_offsets[i + 1]));
-                            heading_style_indices.push(style_idx);
-                            consumed.insert(i);
-                            consumed.insert(i + 1);
-                            consumed.insert(i + 2);
-                            i += 3;
-                            continue;
-                        }
+        if i + 2 < lines.len()
+            && let Some(ch) = is_adornment_line(lines[i], rst_adornment_chars)
+        {
+            let text = lines[i + 1].trim();
+            if !text.is_empty()
+                && let Some(ch2) = is_adornment_line(lines[i + 2], rst_adornment_chars)
+                && ch == ch2
+                && lines[i].trim_end().len() >= text.len()
+                && lines[i + 2].trim_end().len() >= text.len()
+            {
+                let style = (ch, true);
+                let style_idx = match adornment_styles.iter().position(|s| *s == style) {
+                    Some(idx) => idx,
+                    None => {
+                        adornment_styles.push(style);
+                        adornment_styles.len() - 1
                     }
-                }
+                };
+                headings.push((text.to_string(), i + 1, byte_offsets[i + 1]));
+                heading_style_indices.push(style_idx);
+                consumed.insert(i);
+                consumed.insert(i + 1);
+                consumed.insert(i + 2);
+                i += 3;
+                continue;
             }
         }
 
         if i + 1 < lines.len() && !consumed.contains(&i) {
             let text = lines[i].trim();
-            if !text.is_empty() {
-                if let Some(ch) = is_adornment_line(lines[i + 1], rst_adornment_chars) {
-                    if lines[i + 1].trim_end().len() >= text.len() {
-                        let style = (ch, false);
-                        let style_idx = match adornment_styles.iter().position(|s| *s == style) {
-                            Some(idx) => idx,
-                            None => {
-                                adornment_styles.push(style);
-                                adornment_styles.len() - 1
-                            }
-                        };
-                        headings.push((text.to_string(), i, byte_offsets[i]));
-                        heading_style_indices.push(style_idx);
-                        consumed.insert(i);
-                        consumed.insert(i + 1);
-                        i += 2;
-                        continue;
+            if !text.is_empty()
+                && let Some(ch) = is_adornment_line(lines[i + 1], rst_adornment_chars)
+                && lines[i + 1].trim_end().len() >= text.len()
+            {
+                let style = (ch, false);
+                let style_idx = match adornment_styles.iter().position(|s| *s == style) {
+                    Some(idx) => idx,
+                    None => {
+                        adornment_styles.push(style);
+                        adornment_styles.len() - 1
                     }
-                }
+                };
+                headings.push((text.to_string(), i, byte_offsets[i]));
+                heading_style_indices.push(style_idx);
+                consumed.insert(i);
+                consumed.insert(i + 1);
+                i += 2;
+                continue;
             }
         }
 

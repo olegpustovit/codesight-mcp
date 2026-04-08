@@ -104,6 +104,7 @@ impl super::LanguageExtractor for BladeExtractor {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_symbol(
     file_path: &str,
     name: &str,

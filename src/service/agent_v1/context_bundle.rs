@@ -20,7 +20,7 @@ impl CodeService {
     ) -> anyhow::Result<Value> {
         let Some(refs) = args.refs.as_ref().filter(|r| !r.is_empty()) else {
             return self.error_response(
-                &timer,
+                timer,
                 ToolError {
                     code: "INVALID_REQUEST",
                     message: "context_bundle requires refs with a symbol ref.".to_string(),
@@ -31,11 +31,11 @@ impl CodeService {
 
         let sym_refs: Vec<&ContentRef> = refs
             .iter()
-            .filter(|r| r.kind.to_ascii_lowercase() == "symbol")
+            .filter(|r| r.kind.eq_ignore_ascii_case("symbol"))
             .collect();
         if sym_refs.is_empty() {
             return self.error_response(
-                &timer,
+                timer,
                 ToolError {
                     code: "INVALID_REQUEST",
                     message: "context_bundle requires at least one symbol ref.".to_string(),
@@ -48,7 +48,7 @@ impl CodeService {
             let bsl = bs_raw.to_ascii_lowercase();
             if bsl != "compact" && bsl != "most_relevant" {
                 return self.error_response(
-                    &timer,
+                    timer,
                     ToolError {
                         code: "INVALID_REQUEST",
                         message: format!("Unknown budget_strategy '{bs_raw}'."),
@@ -65,7 +65,7 @@ impl CodeService {
 
         let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
             Ok(s) => s,
-            Err(e) => return self.error_response(&timer, e),
+            Err(e) => return self.error_response(timer, e),
         };
 
         #[derive(Clone)]
@@ -88,7 +88,7 @@ impl CodeService {
                 .filter(|s| !s.is_empty())
             else {
                 return self.error_response(
-                    &timer,
+                    timer,
                     ToolError {
                         code: "INVALID_REQUEST",
                         message: "symbol ref needs id or stable_id.".to_string(),
@@ -99,7 +99,7 @@ impl CodeService {
 
             let sym = match self.retrieve_symbol(&store, &sym_id, false, 0) {
                 Ok(s) => s,
-                Err(e) => return self.error_response(&timer, e),
+                Err(e) => return self.error_response(timer, e),
             };
 
             let name = store
@@ -133,7 +133,7 @@ impl CodeService {
                 Ok(c) => c,
                 Err(_) => {
                     return self.error_response(
-                        &timer,
+                        timer,
                         ToolError {
                             code: "NOT_FOUND",
                             message: format!("File '{}' is missing from disk.", sym.file),
@@ -248,10 +248,10 @@ impl CodeService {
                 "imports": r0.imports,
                 "file": r0.file.clone(),
             });
-            if let Some(br) = budget_report {
-                if let Value::Object(ref mut m) = o {
-                    m.insert("budget_report".to_string(), br);
-                }
+            if let Some(br) = budget_report
+                && let Value::Object(ref mut m) = o
+            {
+                m.insert("budget_report".to_string(), br);
             }
             o
         } else {
@@ -273,10 +273,10 @@ impl CodeService {
                 "mode": "context_bundle",
                 "symbols": symbols,
             });
-            if let Some(br) = budget_report {
-                if let Value::Object(ref mut m) = o {
-                    m.insert("budget_report".to_string(), br);
-                }
+            if let Some(br) = budget_report
+                && let Value::Object(ref mut m) = o
+            {
+                m.insert("budget_report".to_string(), br);
             }
             o
         };

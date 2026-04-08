@@ -34,11 +34,11 @@ pub fn validate_path(root: &Path, path: &Path) -> bool {
         }
         // For non-existent paths, resolve what we can.
         // Try to canonicalize the path without the last component.
-        if let Some(parent) = path.parent() {
-            if let Ok(canon_parent) = fs::canonicalize(parent) {
-                let full = canon_parent.join(path.file_name().unwrap_or_default());
-                return full.starts_with(&canon_root);
-            }
+        if let Some(parent) = path.parent()
+            && let Ok(canon_parent) = fs::canonicalize(parent)
+        {
+            let full = canon_parent.join(path.file_name().unwrap_or_default());
+            return full.starts_with(&canon_root);
         }
         return false;
     };
@@ -209,10 +209,10 @@ pub fn is_binary_content(data: &[u8]) -> bool {
 /// Returns `true` if the file at `path` is binary, checking extension first,
 /// then sampling file content for null bytes.
 pub fn is_binary_file(path: &Path) -> bool {
-    if let Some(name) = path.file_name() {
-        if is_binary_extension(&name.to_string_lossy()) {
-            return true;
-        }
+    if let Some(name) = path.file_name()
+        && is_binary_extension(&name.to_string_lossy())
+    {
+        return true;
     }
     // Read a small prefix to check for null bytes.
     if let Ok(data) = fs::read(path) {
@@ -300,17 +300,17 @@ pub fn should_exclude_file(
     }
 
     // 2. Binary extension check.
-    if let Some(name) = path.file_name() {
-        if is_binary_extension(&name.to_string_lossy()) {
-            return Some(ExcludeReason::BinaryExtension);
-        }
+    if let Some(name) = path.file_name()
+        && is_binary_extension(&name.to_string_lossy())
+    {
+        return Some(ExcludeReason::BinaryExtension);
     }
 
     // 3. File size check (requires the file to exist).
-    if let Ok(meta) = fs::metadata(path) {
-        if meta.len() > opts.max_file_size {
-            return Some(ExcludeReason::FileTooLarge);
-        }
+    if let Ok(meta) = fs::metadata(path)
+        && meta.len() > opts.max_file_size
+    {
+        return Some(ExcludeReason::FileTooLarge);
     }
 
     // 4. Binary content check (sample).
@@ -346,12 +346,12 @@ pub fn get_max_index_files(
         }
         return Ok(v);
     }
-    if let Some(v) = config.max_index_files {
-        if v > 0 {
-            return Ok(v);
-        }
-        // Invalid config value — fall back to default.
+    if let Some(v) = config.max_index_files
+        && v > 0
+    {
+        return Ok(v);
     }
+    // Invalid config value — fall back to default.
     Ok(DEFAULT_MAX_INDEX_FILES)
 }
 
@@ -367,12 +367,12 @@ pub fn get_max_folder_files(
         }
         return Ok(v);
     }
-    if let Some(v) = config.max_folder_files {
-        if v > 0 {
-            return Ok(v);
-        }
-        // Invalid config value — fall back to default.
+    if let Some(v) = config.max_folder_files
+        && v > 0
+    {
+        return Ok(v);
     }
+    // Invalid config value — fall back to default.
     Ok(DEFAULT_MAX_FOLDER_FILES)
 }
 
@@ -467,19 +467,18 @@ pub fn discover_files(root: &Path, opts: &DiscoverOptions) -> DiscoverResult {
         let Ok(entry) = entry else { continue };
 
         // Skip directories.
-        if entry.file_type().map_or(true, |ft| ft.is_dir()) {
+        if entry.file_type().is_none_or(|ft| ft.is_dir()) {
             continue;
         }
 
         let path = entry.path();
 
         // Skip symlinks unless following.
-        if !opts.follow_symlinks {
-            if let Ok(meta) = fs::symlink_metadata(path) {
-                if meta.file_type().is_symlink() {
-                    continue;
-                }
-            }
+        if !opts.follow_symlinks
+            && let Ok(meta) = fs::symlink_metadata(path)
+            && meta.file_type().is_symlink()
+        {
+            continue;
         }
 
         // Apply composite filter.
@@ -494,11 +493,11 @@ pub fn discover_files(root: &Path, opts: &DiscoverOptions) -> DiscoverResult {
         files.push(path.to_path_buf());
 
         // Check file limit.
-        if let Some(max) = opts.max_files {
-            if files.len() >= max {
-                truncated = true;
-                break;
-            }
+        if let Some(max) = opts.max_files
+            && files.len() >= max
+        {
+            truncated = true;
+            break;
         }
     }
 

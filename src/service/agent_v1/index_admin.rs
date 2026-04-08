@@ -5,15 +5,11 @@ use std::collections::HashSet;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::db;
-use crate::rate_limit;
-use crate::repo_id::normalize_repo_id;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::{IngestSourcesArgs, ManageIndexesArgs};
 use crate::service::args::parse_args;
-use crate::service::helpers::{ToolError, canonicalize_root};
-use crate::storage::{IndexStore, list_repo_summaries};
+use crate::service::helpers::ToolError;
 
 impl CodeService {
     pub(in crate::service) fn manage_indexes(&self, v: Value) -> anyhow::Result<Value> {

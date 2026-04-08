@@ -6,7 +6,7 @@ pub fn should_skip_relative_doc_path(path: &str) -> bool {
         if seg.is_empty() {
             continue;
         }
-        if SKIP_DIRS.iter().any(|skip| *skip == seg) {
+        if SKIP_DIRS.contains(&seg) {
             return true;
         }
         if seg == ".git" {

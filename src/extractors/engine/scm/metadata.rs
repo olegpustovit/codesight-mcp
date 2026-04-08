@@ -1,4 +1,4 @@
-//! Query pack header comments (`; language:`, `; grammar:`, …).
+//! Query pack `tags.scm` header comments (`; language:`, `; grammar:`, …).
 
 #[derive(Debug, Clone, Default)]
 pub struct ScmMetadata {
@@ -8,7 +8,7 @@ pub struct ScmMetadata {
     pub override_extractor: Option<String>,
 }
 
-/// Parse `; key: value` header lines from the top of a .scm file.
+/// Parse `; key: value` header lines from the top of a `tags.scm` file.
 pub fn parse_scm_header(source: &str) -> ScmMetadata {
     let mut meta = ScmMetadata::default();
     for line in source.lines() {
@@ -29,7 +29,9 @@ pub fn parse_scm_header(source: &str) -> ScmMetadata {
                     meta.extensions = value.split_whitespace().map(String::from).collect()
                 }
                 "grammar" => meta.grammar = value.to_string(),
-                "override" => meta.override_extractor = Some(value.to_string()),
+                "override" | "override_extractor" => {
+                    meta.override_extractor = Some(value.to_string())
+                }
                 _ => {}
             }
         }

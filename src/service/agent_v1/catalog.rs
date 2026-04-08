@@ -58,10 +58,10 @@ impl CodeService {
                 "indexed_at": m.indexed_at,
                 "languages": m.languages,
             });
-            if let Some(w) = index_metadata_staleness_warning(&m.indexed_at) {
-                if let Value::Object(ref mut map) = entry {
-                    map.insert("staleness_warning".to_string(), json!(w));
-                }
+            if let Some(w) = index_metadata_staleness_warning(&m.indexed_at)
+                && let Value::Object(ref mut map) = entry
+            {
+                map.insert("staleness_warning".to_string(), json!(w));
             }
             sources.push(entry);
         }

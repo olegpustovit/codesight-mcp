@@ -27,8 +27,6 @@ mod util_graph;
 
 use serde_json::Value;
 
-pub(crate) use args::{ContentRef, DEFAULT_FILE_TREE_MAX_FILES, RANKED_CONTEXT_MAX_QUERY_LEN};
-
 pub(in crate::service) fn dispatch(
     svc: &super::CodeService,
     tool_name: &str,

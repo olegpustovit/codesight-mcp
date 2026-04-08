@@ -59,7 +59,7 @@ impl CodeService {
             .git_exclude(true) // respect .git/info/exclude
             .filter_entry(|entry| {
                 // Still apply our hardcoded skip-dirs on top of gitignore
-                if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                if entry.file_type().is_some_and(|ft| ft.is_dir()) {
                     let name = entry.file_name().to_string_lossy();
                     return !crate::db::SKIP_DIRS.iter().any(|skip| *skip == name);
                 }
@@ -78,7 +78,7 @@ impl CodeService {
                 }
             };
 
-            if !entry.file_type().map_or(false, |ft| ft.is_file()) {
+            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                 continue;
             }
 
@@ -408,19 +408,18 @@ impl CodeService {
     ) -> Result<IndexStore, ToolError> {
         match self.open_repo_store(repo) {
             Ok(store) => {
-                if self.config.auto_reindex {
-                    if let Ok(root) = store.root_path() {
-                        if root.is_dir() {
-                            let extractors = self.extractors_for_root(&root);
-                            if store
-                                .is_stale(&root, |p| extractors.extractor_for_path(p).is_some())
-                                .unwrap_or(false)
-                            {
-                                eprintln!("codesight-mcp: auto-reindexing stale repo '{repo}'");
-                                let _ = self.do_index_folder(&root);
-                                return self.open_repo_store(repo);
-                            }
-                        }
+                if self.config.auto_reindex
+                    && let Ok(root) = store.root_path()
+                    && root.is_dir()
+                {
+                    let extractors = self.extractors_for_root(&root);
+                    if store
+                        .is_stale(&root, |p| extractors.extractor_for_path(p).is_some())
+                        .unwrap_or(false)
+                    {
+                        eprintln!("codesight-mcp: auto-reindexing stale repo '{repo}'");
+                        let _ = self.do_index_folder(&root);
+                        return self.open_repo_store(repo);
                     }
                 }
                 Ok(store)

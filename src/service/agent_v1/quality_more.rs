@@ -1,22 +1,15 @@
 //! Quality analyses: hotspots, extraction, links, doc coverage.
 
 use std::collections::HashSet;
-use std::fs;
-use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 
 use crate::complexity::cyclomatic_complexity;
-use crate::doc_storage::DocStore;
 use crate::savings::MetaBuilder;
-use crate::security;
 use crate::service::CodeService;
-use crate::service::agent_v1::args::{ContentRef, EvaluateQualityArgs};
-use crate::service::agent_v1::util::*;
+use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::agent_v1::util_graph::extract_symbol_name_from_id;
 use crate::service::helpers::ToolError;
-use crate::summarizer;
 
 impl CodeService {
     pub(in crate::service) fn evaluate_quality_tail(
@@ -50,22 +43,19 @@ impl CodeService {
                 // Compute git churn per file (number of commits touching the file)
                 let mut file_churn: std::collections::HashMap<String, u64> =
                     std::collections::HashMap::new();
-                if git_available {
-                    if let Some(ref root) = root_path {
-                        if let Ok(output) = std::process::Command::new("git")
-                            .args(["log", "--format=", "--name-only"])
-                            .current_dir(root)
-                            .output()
-                        {
-                            if output.status.success() {
-                                let text = String::from_utf8_lossy(&output.stdout);
-                                for line in text.lines() {
-                                    let trimmed = line.trim();
-                                    if !trimmed.is_empty() {
-                                        *file_churn.entry(trimmed.to_string()).or_default() += 1;
-                                    }
-                                }
-                            }
+                if git_available
+                    && let Some(ref root) = root_path
+                    && let Ok(output) = std::process::Command::new("git")
+                        .args(["log", "--format=", "--name-only"])
+                        .current_dir(root)
+                        .output()
+                    && output.status.success()
+                {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    for line in text.lines() {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() {
+                            *file_churn.entry(trimmed.to_string()).or_default() += 1;
                         }
                     }
                 }
@@ -261,11 +251,11 @@ impl CodeService {
 
                 let mut broken_links: Vec<Value> = Vec::new();
 
+                let link_re = regex::Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").unwrap();
                 // Scan each doc file for internal links
                 for sec in &all_sections {
                     let content = &sec.content_text;
                     // Find markdown links: [text](target)
-                    let link_re = regex::Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").unwrap();
                     for cap in link_re.captures_iter(content) {
                         let target = cap.get(2).unwrap().as_str();
                         // Skip external links
@@ -313,11 +303,11 @@ impl CodeService {
                             } else if file_part.is_empty() {
                                 // Anchor-only link in current file
                                 let headings = file_headings.get(&sec.file_path);
-                                if let Some(headings) = headings {
-                                    if !headings.contains(&anchor_lower) {
-                                        is_broken = true;
-                                        broken_reason = format!("anchor '{}' not found", anchor);
-                                    }
+                                if let Some(headings) = headings
+                                    && !headings.contains(&anchor_lower)
+                                {
+                                    is_broken = true;
+                                    broken_reason = format!("anchor '{}' not found", anchor);
                                 }
                             }
                         }

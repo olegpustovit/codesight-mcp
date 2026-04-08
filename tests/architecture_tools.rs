@@ -143,10 +143,10 @@ fn find_file_path(svc: &CodeService, sid: &str, suffix: &str) -> String {
     let data = &r["data"];
     // Walk the tree to find a file ending with suffix
     fn find_in_tree(node: &Value, suffix: &str) -> Option<String> {
-        if let Some(path) = node["path"].as_str() {
-            if path.ends_with(suffix) {
-                return Some(path.to_string());
-            }
+        if let Some(path) = node["path"].as_str()
+            && path.ends_with(suffix)
+        {
+            return Some(path.to_string());
         }
         if let Some(children) = node["children"].as_array() {
             for child in children {

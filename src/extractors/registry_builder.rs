@@ -76,7 +76,13 @@ pub(crate) fn build_registry(project_root: Option<&Path>) -> ExtractorRegistry {
             .iter()
             .find(|extractor| extractor.language_name() == base_language)
             .cloned()
-            .map(|delegate| profiles::ProfiledExtractor::new(profile_name, base_language, delegate))
+            .map(|delegate| {
+                Arc::new(profiles::ProfiledExtractor::new(
+                    profile_name,
+                    base_language,
+                    delegate,
+                ))
+            })
     })
     .collect();
 

@@ -59,13 +59,13 @@ fn collect_go_import_spec(node: Node<'_>, source: &str, edges: &mut Vec<ImportEd
             continue;
         };
         let kind = p.kind();
-        if kind == "interpreted_string_literal" || kind == "raw_string_literal" {
-            if let Some(s) = go_string(p, source) {
-                edges.push(ImportEdge {
-                    specifier: s,
-                    names: Vec::new(),
-                });
-            }
+        if (kind == "interpreted_string_literal" || kind == "raw_string_literal")
+            && let Some(s) = go_string(p, source)
+        {
+            edges.push(ImportEdge {
+                specifier: s,
+                names: Vec::new(),
+            });
         }
     }
 }

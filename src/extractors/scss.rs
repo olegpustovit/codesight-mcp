@@ -1,5 +1,5 @@
 //! **SCSS / Sass / Less / Stylus** overrides: preprocessor-specific constructs and dialects need
-//! dedicated tree-sitter passes rather than the plain CSS `symbols.scm` queries alone.
+//! dedicated tree-sitter passes rather than the plain CSS query-pack patterns alone.
 use anyhow::Result;
 use tree_sitter::Node;
 
@@ -298,10 +298,7 @@ mod tests {
             names.iter().any(|n| n.contains("visually-hidden")),
             "missing placeholder: {names:?}"
         );
-        assert!(
-            names.iter().any(|n| *n == ".container"),
-            "missing rule set: {names:?}"
-        );
+        assert!(names.contains(&".container"), "missing rule set: {names:?}");
     }
 
     #[test]

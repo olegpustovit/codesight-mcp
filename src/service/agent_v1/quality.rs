@@ -1,24 +1,15 @@
 //! Quality / complexity / docs analyses.
 
-use std::collections::HashSet;
-use std::fs;
-use std::path::Path;
-use std::process::Command;
-
 use serde_json::{Value, json};
 
 use crate::analysis::dead_code;
 use crate::complexity::{complexity_assessment, cyclomatic_complexity};
-use crate::doc_storage::DocStore;
 use crate::savings::MetaBuilder;
-use crate::security;
 use crate::service::CodeService;
-use crate::service::agent_v1::args::{ContentRef, EvaluateQualityArgs};
+use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::agent_v1::util::*;
-use crate::service::agent_v1::util_graph::extract_symbol_name_from_id;
 use crate::service::args::parse_args;
 use crate::service::helpers::ToolError;
-use crate::summarizer;
 
 impl CodeService {
     pub(in crate::service) fn evaluate_quality(&self, v: Value) -> anyhow::Result<Value> {
@@ -42,7 +33,7 @@ impl CodeService {
                     .stable_id
                     .clone()
                     .or(r.id.clone())
-                    .filter(|_| r.kind.to_ascii_lowercase() == "symbol")
+                    .filter(|_| r.kind.eq_ignore_ascii_case("symbol"))
                 else {
                     return self.error_response(
                         &timer,
@@ -85,7 +76,7 @@ impl CodeService {
                 let repo_path = rec.root_path.to_string_lossy().to_string();
                 let raw_bytes = rec.file_size_bytes;
                 let timer = MetaBuilder::new(raw_bytes);
-                return self.success_response(
+                self.success_response(
                     &timer,
                     json!({
                         "analysis": "complexity",
@@ -108,7 +99,7 @@ impl CodeService {
                             "related_refs": [id],
                         }],
                     }),
-                );
+                )
             }
             "repo_health" => {
                 let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref())
@@ -137,7 +128,7 @@ impl CodeService {
                     "code": "PARTIAL_REPO_HEALTH",
                     "message": "dead_code_pct, dead_count, cycle_count, cycles_sample, and top_hotspots are placeholders until dependency/dead-code analysis is implemented.",
                 })];
-                return self.success_response_with_warnings(
+                self.success_response_with_warnings(
                     &timer,
                     json!({
                         "analysis": "repo_health",
@@ -164,7 +155,7 @@ impl CodeService {
                         }],
                     }),
                     warnings,
-                );
+                )
             }
             "dead_code" => {
                 let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref())

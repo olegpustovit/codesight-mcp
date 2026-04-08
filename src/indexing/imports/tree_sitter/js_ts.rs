@@ -96,15 +96,11 @@ fn collect_import_clause(node: Node<'_>, source: &str, names: &mut Vec<String>) 
                     if spec.kind() != "import_specifier" {
                         continue;
                     }
-                    if let Some(n) = spec.child_by_field_name("name") {
-                        match n.kind() {
-                            "identifier" => {
-                                if let Ok(s) = source_slice(n, source) {
-                                    names.push(s.to_string());
-                                }
-                            }
-                            _ => {}
-                        }
+                    if let Some(n) = spec.child_by_field_name("name")
+                        && n.kind() == "identifier"
+                        && let Ok(s) = source_slice(n, source)
+                    {
+                        names.push(s.to_string());
                     }
                 }
             }
@@ -113,10 +109,10 @@ fn collect_import_clause(node: Node<'_>, source: &str, names: &mut Vec<String>) 
                     let Some(id) = c.named_child(j as u32) else {
                         continue;
                     };
-                    if id.kind() == "identifier" {
-                        if let Ok(s) = source_slice(id, source) {
-                            names.push(s.to_string());
-                        }
+                    if id.kind() == "identifier"
+                        && let Ok(s) = source_slice(id, source)
+                    {
+                        names.push(s.to_string());
                     }
                 }
             }
@@ -147,12 +143,11 @@ fn collect_js_export_statement(node: Node<'_>, source: &str, edges: &mut Vec<Imp
             if spec.kind() != "export_specifier" {
                 continue;
             }
-            if let Some(n) = spec.child_by_field_name("name") {
-                if n.kind() == "identifier" {
-                    if let Ok(s) = source_slice(n, source) {
-                        names.push(s.to_string());
-                    }
-                }
+            if let Some(n) = spec.child_by_field_name("name")
+                && n.kind() == "identifier"
+                && let Ok(s) = source_slice(n, source)
+            {
+                names.push(s.to_string());
             }
         }
     }

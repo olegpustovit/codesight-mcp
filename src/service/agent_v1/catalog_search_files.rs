@@ -11,6 +11,7 @@ use crate::service::helpers::{normalize_search_scope, should_descend, to_repo_re
 use crate::storage::IndexStore;
 
 impl CodeService {
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::service) fn search_code_files_text(
         &self,
         store: &IndexStore,

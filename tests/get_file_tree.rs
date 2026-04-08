@@ -55,11 +55,11 @@ fn inspect_file_tree(svc: &CodeService, sid: &str, extra: Value) -> Value {
         "source_id": sid,
         "view": "file_tree",
     });
-    if let Value::Object(ref mut m) = base {
-        if let Value::Object(e) = extra {
-            for (k, v) in e {
-                m.insert(k, v);
-            }
+    if let Value::Object(ref mut m) = base
+        && let Value::Object(e) = extra
+    {
+        for (k, v) in e {
+            m.insert(k, v);
         }
     }
     svc.dispatch("inspect_structure", base).unwrap()
@@ -256,7 +256,7 @@ fn run_path_prefix_scoping(fixture: &TreeFixture) {
 /// extension default.
 ///
 /// The Rust extractor registry maps `.h` to the `cpp` grammar (since
-/// `runtime/queries/cpp/symbols.scm` lists `.h` in its extensions). There is
+/// `runtime/queries/cpp/tags.scm` lists `.h` in its extensions). There is
 /// no separate C grammar or per-symbol language override. The reference test
 /// expects the file tree to report `language='c'` when the symbols happen to
 /// look like C — this requires per-file language inference from symbol content,

@@ -97,6 +97,7 @@ mod re {
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_symbol(
     file_path: &str,
     name: &str,
@@ -133,6 +134,7 @@ fn make_symbol(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_symbol_with_sig(
     file_path: &str,
     name: &str,

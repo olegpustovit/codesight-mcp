@@ -56,7 +56,7 @@ impl NuxtProvider {
                 self.scan_pages_recursive(&path, root);
                 continue;
             }
-            if path.extension().map_or(true, |e| e != "vue") {
+            if path.extension().is_none_or(|e| e != "vue") {
                 continue;
             }
             let rel = match path.strip_prefix(root) {
@@ -214,7 +214,7 @@ impl FrameworkProvider for NuxtProvider {
         let mut imports: HashMap<String, Vec<ExtraImport>> = HashMap::new();
 
         // Scan all page files for auto-import usage
-        for (page_rel, _) in &self.page_routes {
+        for page_rel in self.page_routes.keys() {
             let page_path = root.join(page_rel);
             let content = match std::fs::read_to_string(&page_path) {
                 Ok(c) => c,

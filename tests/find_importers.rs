@@ -64,7 +64,7 @@ fn extract_imports_js_multiple_imports() {
         "should contain ../router: {specifiers:?}"
     );
     assert!(
-        specifiers.iter().any(|s| *s == "react"),
+        specifiers.contains(&"react"),
         "should contain react: {specifiers:?}"
     );
 }

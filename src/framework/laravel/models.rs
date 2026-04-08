@@ -33,13 +33,13 @@ fn pluralize(word: &str) -> String {
     {
         return word.to_string(); // already plural-looking
     }
-    if word.ends_with('y') {
+    if let Some(stem) = word.strip_suffix('y') {
         // Check if preceded by a consonant
-        let before_y = word.chars().rev().nth(1);
-        if let Some(c) = before_y {
-            if !"aeiou".contains(c) {
-                return format!("{}ies", &word[..word.len() - 1]);
-            }
+        let before_y = stem.chars().next_back();
+        if let Some(c) = before_y
+            && !"aeiou".contains(c)
+        {
+            return format!("{stem}ies");
         }
         return format!("{word}s");
     }

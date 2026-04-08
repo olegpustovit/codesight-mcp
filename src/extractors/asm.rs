@@ -68,6 +68,7 @@ fn detect_dialect(source: &str, file_path: &str) -> AsmDialect {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_symbol(
     file_path: &str,
     name: &str,
@@ -284,25 +285,24 @@ fn extract_wla_dx(file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
                 }
                 if !member_trimmed.is_empty() && !member_trimmed.starts_with(';') {
                     // First word on the line is the member name
-                    if let Some(member_name) = member_trimmed.split_whitespace().next() {
-                        if member_name
+                    if let Some(member_name) = member_trimmed.split_whitespace().next()
+                        && member_name
                             .chars()
                             .next()
                             .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
-                        {
-                            symbols.push(make_symbol(
-                                file_path,
-                                member_name,
-                                SymbolKind::Constant,
-                                member_line_num,
-                                member_trimmed,
-                                member_line_start,
-                                member_line_end,
-                                source,
-                                &[],
-                                None,
-                            ));
-                        }
+                    {
+                        symbols.push(make_symbol(
+                            file_path,
+                            member_name,
+                            SymbolKind::Constant,
+                            member_line_num,
+                            member_trimmed,
+                            member_line_start,
+                            member_line_end,
+                            source,
+                            &[],
+                            None,
+                        ));
                     }
                 }
                 member_byte_offset += lines[j].len() + 1;

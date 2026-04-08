@@ -28,10 +28,6 @@ impl ResolvedProfile {
 pub(crate) struct LanguageProfileRegistry;
 
 impl LanguageProfileRegistry {
-    pub(crate) fn language_names(&self) -> impl Iterator<Item = &'static str> {
-        ["ansible", "openapi"].into_iter()
-    }
-
     pub(crate) fn resolve_for_path(&self, path: &Path) -> Option<ResolvedProfile> {
         match classify_special_path(path)? {
             SpecialExtractor::Ansible => Some(ResolvedProfile {

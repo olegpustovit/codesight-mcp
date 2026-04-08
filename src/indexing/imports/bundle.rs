@@ -31,10 +31,10 @@ fn python_import_lines_for_display(content: &str) -> Vec<String> {
 
 /// Parity with `import_extract` Go helper: lines inside an `import (` block (header + specs + `)`).
 fn go_import_block_lines(content: &str) -> Vec<String> {
-    if let Some(edges) = tree_sitter::extract_go_imports_ts(content) {
-        if !edges.is_empty() {
-            return format_go_edges_as_block_lines(content, &edges);
-        }
+    if let Some(edges) = tree_sitter::extract_go_imports_ts(content)
+        && !edges.is_empty()
+    {
+        return format_go_edges_as_block_lines(content, &edges);
     }
     // Line fallback (malformed parse trees): preserve block shape when possible.
     let mut out = Vec::new();

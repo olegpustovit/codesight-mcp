@@ -5,8 +5,6 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::doc_storage::DocStore;
-use crate::doc_storage::list_doc_summaries;
-use crate::path_map;
 use crate::repo_id::normalize_repo_id;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
@@ -210,16 +208,13 @@ impl CodeService {
             }
         };
 
-        if indexed_docs {
-            if let Value::Object(ref mut map) = data {
-                if let Ok(store) = DocStore::open(self.config.doc_db_path(&source_id)) {
-                    if let Ok(fmts) = store.distinct_doc_formats() {
-                        let doc_types: Vec<String> =
-                            fmts.iter().map(|f| doc_format_to_type_label(f)).collect();
-                        map.insert("doc_types".to_string(), json!(doc_types));
-                    }
-                }
-            }
+        if indexed_docs
+            && let Value::Object(ref mut map) = data
+            && let Ok(store) = DocStore::open(self.config.doc_db_path(&source_id))
+            && let Ok(fmts) = store.distinct_doc_formats()
+        {
+            let doc_types: Vec<String> = fmts.iter().map(|f| doc_format_to_type_label(f)).collect();
+            map.insert("doc_types".to_string(), json!(doc_types));
         }
 
         self.success_response_with_warnings(&timer, data, warnings)

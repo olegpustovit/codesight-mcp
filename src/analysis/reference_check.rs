@@ -73,11 +73,10 @@ pub fn check_single_identifier(
                     && !trimmed.starts_with("class ")
                     && !trimmed.starts_with('#')
                     && dep_graph::word_match(trimmed, identifier)
+                    && !file_has_content
                 {
-                    if !file_has_content {
-                        content_count += 1;
-                        file_has_content = true;
-                    }
+                    content_count += 1;
+                    file_has_content = true;
                 }
             }
             if (file_has_import || file_has_content) && !referencing_files.contains(file) {

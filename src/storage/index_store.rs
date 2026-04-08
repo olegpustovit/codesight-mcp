@@ -74,6 +74,7 @@ impl IndexStore {
         Ok(items)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_index(
         &self,
         repo: &str,
@@ -96,6 +97,7 @@ impl IndexStore {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_index_with_deps(
         &self,
         repo: &str,

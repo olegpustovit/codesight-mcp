@@ -1,8 +1,5 @@
 //! Shared helpers for agent-v1 handlers.
 
-use std::collections::BTreeMap;
-
-use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::config::BYTES_PER_TOKEN;
@@ -22,8 +19,8 @@ pub(in crate::service) fn count_params(signature: &str) -> usize {
     let bytes = signature.as_bytes();
     let mut depth: i32 = 1;
     let mut close = signature.len();
-    for i in after_open..bytes.len() {
-        match bytes[i] {
+    for (i, &byte) in bytes.iter().enumerate().skip(after_open) {
+        match byte {
             b'(' => depth += 1,
             b')' => {
                 depth -= 1;
@@ -55,14 +52,6 @@ pub(in crate::service) fn count_params(signature: &str) -> usize {
         }
     }
     params
-}
-
-/// Simple glob matching: supports `*` (matches any non-`/` chars) and `**` is not special.
-pub(in crate::service) fn glob_match(pattern: &str, path: &str) -> bool {
-    let re_str = pattern.replace('.', r"\.").replace('*', "[^/]*");
-    regex::Regex::new(&format!("(?:^|/){re_str}$"))
-        .map(|re| re.is_match(path))
-        .unwrap_or(false)
 }
 
 /// Maximum nesting depth in a source body.
@@ -156,7 +145,7 @@ pub(in crate::service) fn token_estimate_for_context(source: &str) -> u32 {
         return 0;
     }
     let b = source.len() as u64;
-    let per = BYTES_PER_TOKEN as u64;
+    let per = BYTES_PER_TOKEN;
     ((b.saturating_add(per.saturating_sub(1))) / per).clamp(1, u32::MAX as u64) as u32
 }
 
@@ -315,22 +304,20 @@ pub(in crate::service) fn outline_neighbors(
     let mut offset = 1usize;
     while out.len() < max_neighbors {
         let mut progressed = false;
-        if idx >= offset {
-            if let Some(row) = all.get(idx - offset) {
-                if append_section_neighbor(&mut out, row, source_id, sec_id) {
-                    progressed = true;
-                }
-            }
+        if idx >= offset
+            && let Some(row) = all.get(idx - offset)
+            && append_section_neighbor(&mut out, row, source_id, sec_id)
+        {
+            progressed = true;
         }
         if out.len() >= max_neighbors {
             break;
         }
-        if idx + offset < all.len() {
-            if let Some(row) = all.get(idx + offset) {
-                if append_section_neighbor(&mut out, row, source_id, sec_id) {
-                    progressed = true;
-                }
-            }
+        if idx + offset < all.len()
+            && let Some(row) = all.get(idx + offset)
+            && append_section_neighbor(&mut out, row, source_id, sec_id)
+        {
+            progressed = true;
         }
         if !progressed {
             break;

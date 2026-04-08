@@ -55,17 +55,6 @@ fn ingest(svc: &CodeService, root: &std::path::Path) -> String {
     r["data"]["source_id"].as_str().unwrap().to_string()
 }
 
-fn get_repo_outline(svc: &CodeService, source_id: &str) -> serde_json::Value {
-    svc.dispatch(
-        "inspect_structure",
-        json!({
-            "source_id": source_id,
-            "view": "repo_outline",
-        }),
-    )
-    .unwrap()
-}
-
 fn get_file_outline(svc: &CodeService, source_id: &str, path: &str) -> serde_json::Value {
     svc.dispatch(
         "inspect_structure",
@@ -237,6 +226,10 @@ fn test_storage_roundtrip_file_summaries() {
     let r2 = get_file_outline(&svc, &sid2, "src/hello.py");
     assert!(r2["ok"].as_bool().unwrap(), "{r2:?}");
     let outline2 = serde_json::to_string(&r2["data"]).unwrap();
+    assert_eq!(
+        outline1, outline2,
+        "file outline should be stable across incremental re-ingest"
+    );
     assert!(
         outline2.contains("hello"),
         "expected 'hello' after re-ingest: {outline2}"
@@ -253,7 +246,7 @@ fn test_v2_index_storage() {
     fs::write(src.join("main.py"), "def main(): pass\n").unwrap();
 
     let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, ws.path());
+    let _sid = ingest(&svc, ws.path());
     // If the index loaded, the v2 compat path works.
     let r = svc.dispatch("catalog_sources", json!({})).unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");

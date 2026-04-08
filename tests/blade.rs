@@ -122,7 +122,7 @@ fn test_blade_push_extracted() {
         .filter(|s| s.kind == codesight_mcp::model::SymbolKind::Constant && s.name == "scripts")
         .collect();
     assert!(
-        pushes.len() >= 1,
+        !pushes.is_empty(),
         "expected at least one 'scripts' constant"
     );
 }

@@ -20,7 +20,7 @@ impl CodeService {
             "section_context" => {
                 let Some(refs) = args.refs.as_ref().filter(|r| !r.is_empty()) else {
                     return self.error_response(
-                        &timer,
+                        timer,
                         ToolError {
                             code: "INVALID_REQUEST",
                             message: "section_context requires refs with at least one section ref."
@@ -31,11 +31,11 @@ impl CodeService {
                 };
                 let sec_pref = refs
                     .iter()
-                    .find(|r| r.kind.to_ascii_lowercase() == "section")
+                    .find(|r| r.kind.eq_ignore_ascii_case("section"))
                     .or_else(|| refs.first());
                 let Some(pref) = sec_pref else {
                     return self.error_response(
-                        &timer,
+                        timer,
                         ToolError {
                             code: "INVALID_REQUEST",
                             message: "section_context requires a non-empty refs list.".to_string(),
@@ -43,9 +43,9 @@ impl CodeService {
                         },
                     );
                 };
-                if pref.kind.to_ascii_lowercase() != "section" {
+                if !pref.kind.eq_ignore_ascii_case("section") {
                     return self.error_response(
-                        &timer,
+                        timer,
                         ToolError {
                             code: "INVALID_REQUEST",
                             message: "section_context requires kind \"section\" on the target ref."
@@ -61,7 +61,7 @@ impl CodeService {
                     .filter(|s| !s.is_empty())
                 else {
                     return self.error_response(
-                        &timer,
+                        timer,
                         ToolError {
                             code: "INVALID_REQUEST",
                             message: "section ref needs id or stable_id.".to_string(),
@@ -73,7 +73,7 @@ impl CodeService {
                 let store = match self.ensure_doc_store(&args.source_id, args.repo_path.as_deref())
                 {
                     Ok(s) => s,
-                    Err(e) => return self.error_response(&timer, e),
+                    Err(e) => return self.error_response(timer, e),
                 };
 
                 let get = GetSectionArgs {
@@ -89,15 +89,14 @@ impl CodeService {
                 }
 
                 let mut section_json = primary_res["data"].clone();
-                if let Some(mt) = args.max_tokens {
-                    if let Some(obj) = section_json.as_object_mut() {
-                        if let Some(Value::String(content)) = obj.get("content") {
-                            let (c, trunc) = truncate_content_to_token_budget(content, mt);
-                            obj.insert("content".to_string(), json!(c));
-                            if trunc {
-                                obj.insert("content_truncated".to_string(), json!(true));
-                            }
-                        }
+                if let Some(mt) = args.max_tokens
+                    && let Some(obj) = section_json.as_object_mut()
+                    && let Some(Value::String(content)) = obj.get("content")
+                {
+                    let (c, trunc) = truncate_content_to_token_budget(content, mt);
+                    obj.insert("content".to_string(), json!(c));
+                    if trunc {
+                        obj.insert("content_truncated".to_string(), json!(true));
                     }
                 }
 
@@ -171,13 +170,13 @@ impl CodeService {
                         .and_then(|a| a.as_array())
                         .map(|a| a.len())
                         .unwrap_or(0);
-                    if let Some(meta_val) = top.get_mut("_meta") {
-                        if let Some(meta) = meta_val.as_object_mut() {
-                            meta.insert("ancestor_count".to_string(), json!(n_anc));
-                            meta.insert("child_count".to_string(), json!(n_ch));
-                            if let Some(t) = meta.get("timing_ms").cloned() {
-                                meta.insert("latency_ms".to_string(), t);
-                            }
+                    if let Some(meta_val) = top.get_mut("_meta")
+                        && let Some(meta) = meta_val.as_object_mut()
+                    {
+                        meta.insert("ancestor_count".to_string(), json!(n_anc));
+                        meta.insert("child_count".to_string(), json!(n_ch));
+                        if let Some(t) = meta.get("timing_ms").cloned() {
+                            meta.insert("latency_ms".to_string(), t);
                         }
                     }
                 }
@@ -187,15 +186,15 @@ impl CodeService {
                 let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref())
                 {
                     Ok(s) => s,
-                    Err(e) => return self.error_response(&timer, e),
+                    Err(e) => return self.error_response(timer, e),
                 };
                 let summary = match store.repo_summary() {
                     Ok(s) => s,
-                    Err(e) => return self.error_response(&timer, index_error(e)),
+                    Err(e) => return self.error_response(timer, index_error(e)),
                 };
                 if summary.symbol_count == 0 {
                     return self.error_response(
-                        &timer,
+                        timer,
                         ToolError {
                             code: "EMPTY_INDEX",
                             message: "Index contains no symbols.".to_string(),
@@ -205,7 +204,7 @@ impl CodeService {
                 }
                 let kind_distribution = match store.kind_distribution() {
                     Ok(m) => serde_json::to_value(m).unwrap_or(json!({})),
-                    Err(e) => return self.error_response(&timer, index_error(e)),
+                    Err(e) => return self.error_response(timer, index_error(e)),
                 };
                 let mut language_distribution = serde_json::Map::new();
                 for (lang, n) in &summary.languages {
@@ -214,7 +213,7 @@ impl CodeService {
 
                 let samples = match store.symbol_samples_for_suggestions(6) {
                     Ok(s) => s,
-                    Err(e) => return self.error_response(&timer, index_error(e)),
+                    Err(e) => return self.error_response(timer, index_error(e)),
                 };
                 let mut example_queries: Vec<Value> = vec![json!({
                     "query": format!("symbols in {}", summary.repo),
@@ -234,7 +233,7 @@ impl CodeService {
                         .into_iter()
                         .map(|(file, n)| json!({ "file": file, "imported_by": n }))
                         .collect(),
-                    Err(e) => return self.error_response(&timer, index_error(e)),
+                    Err(e) => return self.error_response(timer, index_error(e)),
                 };
 
                 let body = json!({
@@ -272,7 +271,7 @@ impl CodeService {
                 )
             }
             _ => self.error_response(
-                &timer,
+                timer,
                 ToolError {
                     code: "INVALID_REQUEST",
                     message: format!("Unknown assemble_context mode '{}'.", args.mode),

@@ -66,10 +66,10 @@ pub fn nuxt_api_route_from_path(path: &str) -> NuxtApiRoute {
         .map(|(base, _ext)| {
             // Check if the "extension" is actually a method suffix
             let methods = ["get", "post", "put", "patch", "delete", "head", "options"];
-            if let Some((inner_base, method_part)) = base.rsplit_once('.') {
-                if methods.contains(&method_part) {
-                    return (inner_base, Some(method_part));
-                }
+            if let Some((inner_base, method_part)) = base.rsplit_once('.')
+                && methods.contains(&method_part)
+            {
+                return (inner_base, Some(method_part));
             }
             (base, None)
         })

@@ -22,10 +22,10 @@ pub fn resolve_specifier(
         return None;
     }
 
-    if let Some(aliases) = alias_map {
-        if let Some(resolved) = resolve_with_aliases(specifier, source_files, aliases) {
-            return Some(resolved);
-        }
+    if let Some(aliases) = alias_map
+        && let Some(resolved) = resolve_with_aliases(specifier, source_files, aliases)
+    {
+        return Some(resolved);
     }
 
     if specifier.starts_with("./") || specifier.starts_with("../") {
@@ -69,8 +69,7 @@ fn resolve_with_aliases(
 
     for (pattern, replacements) in aliases {
         let prefix = pattern.trim_end_matches('*');
-        if specifier.starts_with(prefix) {
-            let rest = &specifier[prefix.len()..];
+        if let Some(rest) = specifier.strip_prefix(prefix) {
             for replacement in replacements {
                 let repl_prefix = replacement.trim_end_matches('*');
                 let resolved_base = format!("{repl_prefix}{rest}");
@@ -105,8 +104,7 @@ fn resolve_js_path(base: &str, source_files: &HashSet<String>) -> Option<String>
         }
     }
 
-    if base.ends_with(".js") {
-        let without = &base[..base.len() - 3];
+    if let Some(without) = base.strip_suffix(".js") {
         let ts_extensions = [".ts", ".tsx"];
         for ext in &ts_extensions {
             let mapped = format!("{without}{ext}");
@@ -301,7 +299,7 @@ pub fn resolve_import_edge_for_graph(
     if let Some(p) = resolve_specifier(&edge.specifier, from_file, source_files, alias_map) {
         return Some(p);
     }
-    if lang.to_ascii_lowercase() == "python"
+    if lang.eq_ignore_ascii_case("python")
         && !edge.specifier.starts_with("./")
         && !edge.specifier.starts_with("../")
         && edge.specifier.contains('.')

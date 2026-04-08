@@ -66,7 +66,7 @@ pub fn parse_routes_dir(dir: &Path) -> Vec<RouteInfo> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(true, |e| e != "php") {
+            if path.extension().is_none_or(|e| e != "php") {
                 continue;
             }
             if let Ok(content) = std::fs::read_to_string(&path) {

@@ -48,8 +48,12 @@ pub trait LanguageExtractor: Send + Sync {
 
 pub struct ExtractorRegistry {
     extractors: Vec<Arc<dyn LanguageExtractor>>,
-    profile_extractors: Vec<profiles::ProfiledExtractor>,
+    profile_extractors: Vec<Arc<profiles::ProfiledExtractor>>,
     profiles: profiles::LanguageProfileRegistry,
+    /// Best extractor per language for language-level capability lookup.
+    /// This prefers structural tiers over richer path-specific overrides:
+    /// curated query pack > generic AST fallback > manual override > profile wrapper.
+    language_extractors: HashMap<String, Arc<dyn LanguageExtractor>>,
     /// Runtime extension overrides: maps lowercase extension (without dot) to
     /// the language name of an already-registered extractor.
     extra_extensions: HashMap<String, String>,
@@ -58,13 +62,15 @@ pub struct ExtractorRegistry {
 impl ExtractorRegistry {
     pub(crate) fn new_with_extractors(
         extractors: Vec<Arc<dyn LanguageExtractor>>,
-        profile_extractors: Vec<profiles::ProfiledExtractor>,
+        profile_extractors: Vec<Arc<profiles::ProfiledExtractor>>,
         profiles: profiles::LanguageProfileRegistry,
     ) -> Self {
+        let language_extractors = build_language_lookup(&extractors, &profile_extractors);
         Self {
             extractors,
             profile_extractors,
             profiles,
+            language_extractors,
             extra_extensions: HashMap::new(),
         }
     }
@@ -81,13 +87,20 @@ impl ExtractorRegistry {
         registry_builder::build_registry(Some(root))
     }
 
+    /// Returns the set of languages this registry can serve by language name.
+    pub fn supported_languages(&self) -> Vec<&str> {
+        let mut langs: Vec<&str> = self
+            .language_extractors
+            .keys()
+            .map(String::as_str)
+            .collect();
+        langs.sort();
+        langs
+    }
+
     /// Returns the set of all language names known to this registry.
     pub fn known_languages(&self) -> Vec<&str> {
-        let mut langs: Vec<&str> = self.extractors.iter().map(|e| e.language_name()).collect();
-        langs.extend(self.profiles.language_names());
-        langs.sort();
-        langs.dedup();
-        langs
+        self.supported_languages()
     }
 
     pub fn curated_languages(&self) -> Vec<&str> {
@@ -102,11 +115,18 @@ impl ExtractorRegistry {
         langs
     }
 
+    /// Lookup by language name prefers the best structural extractor for that language,
+    /// even if path-based routing uses a richer manual override for some extensions.
+    pub fn extractor_for_language(&self, language_name: &str) -> Option<&dyn LanguageExtractor> {
+        let key = language_name.to_ascii_lowercase();
+        self.language_extractors.get(&key).map(Arc::as_ref)
+    }
+
     /// Apply extra extension-to-language mappings at runtime.
     pub fn apply_extra_extensions(&mut self, mappings: &HashMap<String, String>) -> Vec<String> {
         let mut warnings = Vec::new();
         let known: Vec<String> = self
-            .known_languages()
+            .supported_languages()
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -153,7 +173,7 @@ impl ExtractorRegistry {
                 .profile_extractors
                 .iter()
                 .find(|extractor| extractor.matches(resolved))
-                .map(|extractor| extractor as &dyn LanguageExtractor);
+                .map(|extractor| extractor.as_ref() as &dyn LanguageExtractor);
         }
 
         // --- Compound extension check (e.g. .blade.php before .php) ---
@@ -202,7 +222,7 @@ impl ExtractorRegistry {
                     .language_name()
                     .eq_ignore_ascii_case(language_name)
             })
-            .map(|extractor| extractor as &dyn LanguageExtractor)
+            .map(|extractor| extractor.as_ref() as &dyn LanguageExtractor)
             .or_else(|| {
                 self.extractors
                     .iter()
@@ -213,5 +233,43 @@ impl ExtractorRegistry {
                     })
                     .map(Arc::as_ref)
             })
+    }
+}
+
+fn build_language_lookup(
+    extractors: &[Arc<dyn LanguageExtractor>],
+    profile_extractors: &[Arc<profiles::ProfiledExtractor>],
+) -> HashMap<String, Arc<dyn LanguageExtractor>> {
+    let mut lookup = HashMap::new();
+    for extractor in extractors {
+        insert_best_language_extractor(&mut lookup, extractor.clone());
+    }
+    for extractor in profile_extractors {
+        let erased: Arc<dyn LanguageExtractor> = extractor.clone();
+        insert_best_language_extractor(&mut lookup, erased);
+    }
+    lookup
+}
+
+fn insert_best_language_extractor(
+    lookup: &mut HashMap<String, Arc<dyn LanguageExtractor>>,
+    candidate: Arc<dyn LanguageExtractor>,
+) {
+    let key = candidate.language_name().to_ascii_lowercase();
+    let should_replace = lookup.get(&key).is_none_or(|current| {
+        language_lookup_priority(candidate.extraction_tier())
+            < language_lookup_priority(current.extraction_tier())
+    });
+    if should_replace {
+        lookup.insert(key, candidate);
+    }
+}
+
+fn language_lookup_priority(tier: ExtractionTier) -> u8 {
+    match tier {
+        ExtractionTier::CuratedQueryPack => 0,
+        ExtractionTier::GenericAstFallback => 1,
+        ExtractionTier::ManualOverride => 2,
+        ExtractionTier::Profiled => 3,
     }
 }

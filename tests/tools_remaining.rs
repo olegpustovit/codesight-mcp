@@ -102,6 +102,7 @@ fn test_has_index_returns_true_after_save() {
 
 // ── TestNestedGitignore ──────────────────────────────────────────────────────
 
+#[test]
 #[ignore = "nested .gitignore support not implemented in Rust ingest"]
 fn test_nested_gitignore_excludes_subdirectory_files() {
     // nested .gitignore files should exclude files relative to their own directory.
@@ -136,6 +137,7 @@ fn test_nested_gitignore_excludes_subdirectory_files() {
     );
 }
 
+#[test]
 #[ignore = "root .gitignore filtering not implemented in Rust ingest"]
 fn test_root_gitignore_still_works() {
     // root .gitignore excludes *.pyc
@@ -143,7 +145,7 @@ fn test_root_gitignore_still_works() {
     let root = ws.path();
     fs::write(root.join(".gitignore"), "*.pyc\n__pycache__/\n").unwrap();
     fs::write(root.join("main.py"), "def main(): pass\n").unwrap();
-    fs::write(root.join("main.pyc"), &[0u8; 10]).unwrap();
+    fs::write(root.join("main.pyc"), [0u8; 10]).unwrap();
 
     let svc = CodeService::new(AppConfig::new(root.join("idx"))).unwrap();
     let sid = ingest_sid(&svc, root);
@@ -165,6 +167,7 @@ fn test_root_gitignore_still_works() {
 
 // ── TestFolderFileLimitEnvVar ────────────────────────────────────────────────
 
+#[test]
 #[ignore = "folder file limit config not exposed through MCP API"]
 fn test_folder_config_respected() {
     // max_folder_files config caps discover_local_files.
@@ -178,26 +181,31 @@ fn test_folder_config_respected() {
 // The Rust server does not have this trust mechanism — it indexes whatever path
 // is given via ingest_sources. These are all NA for the Rust surface.
 
+#[test]
 #[ignore = "trusted_folders security not implemented in Rust"]
 fn test_trusted_broad_root_emits_warning_and_proceeds() {
     // exact trusted broad root bypasses safeguard with warning.
 }
 
+#[test]
 #[ignore = "trusted_folders security not implemented in Rust"]
 fn test_untrusted_broad_root_still_rejected() {
     // broad root not in trusted_folders is rejected.
 }
 
+#[test]
 #[ignore = "trusted_folders security not implemented in Rust"]
 fn test_trusted_folder_matching_is_exact() {
     // trusted folder does not trust sibling broad roots.
 }
 
+#[test]
 #[ignore = "trusted_folders security not implemented in Rust"]
 fn test_non_broad_trusted_descendant_skips_bypass_warning() {
     // descendant under trusted root with sufficient depth skips bypass.
 }
 
+#[test]
 #[ignore = "trusted_folders security not implemented in Rust"]
 fn test_non_broad_untrusted_path_is_rejected_when_trusted_folders_configured() {
     // when trusted_folders is set, untrusted paths are rejected.
@@ -219,46 +227,55 @@ fn test_non_broad_paths_allow_indexing_when_trusted_folders_empty() {
     );
 }
 
+#[test]
 #[ignore = "trusted_folders security not implemented in Rust"]
 fn test_trusted_folders_configured_untrusted_path_returns_trust_error() {
     // configured trusted_folders rejects untrusted path before broad checks.
 }
 
+#[test]
 #[ignore = "trusted_folders security not implemented in Rust"]
 fn test_max_index_files_env_caps_index_folder() {
     // CODESIGHT_MAX_INDEX_FILES caps index_folder.
 }
 
+#[test]
 #[ignore = "trusted_folders security not implemented in Rust"]
 fn test_index_folder_uses_project_config_trusted_folders() {
     // .codesight.toml trusted_folders setting.
 }
 
+#[test]
 #[ignore = "trusted_folders security not implemented in Rust"]
 fn test_index_folder_project_config_escape_blocked() {
     // project config escape attempt with "../outside".
 }
 
+#[test]
 #[ignore = "trusted_folders blacklist mode not implemented in Rust"]
 fn test_blacklist_mode_empty_list_returns_error() {
     // blacklist mode with empty list returns helpful error.
 }
 
+#[test]
 #[ignore = "trusted_folders blacklist mode not implemented in Rust"]
 fn test_blacklist_mode_listed_path_untrusted() {
     // blacklist mode: paths in list are untrusted.
 }
 
+#[test]
 #[ignore = "trusted_folders blacklist mode not implemented in Rust"]
 fn test_blacklist_mode_unlisted_path_trusted() {
     // blacklist mode: paths NOT in list are trusted.
 }
 
+#[test]
 #[ignore = "trusted_folders blacklist mode not implemented in Rust"]
 fn test_blacklist_mode_broad_listed_untrusted() {
     // blacklist mode: broad path in list gets trust error.
 }
 
+#[test]
 #[ignore = "trusted_folders blacklist mode not implemented in Rust"]
 fn test_blacklist_mode_broad_unlisted_trusted() {
     // blacklist mode: broad path NOT in list gets bypass warning.
@@ -286,7 +303,7 @@ fn test_no_warning_when_gitignore_present() {
             !warnings.iter().any(|w| {
                 let msg = w.as_str().unwrap_or("");
                 let msg2 = w.get("message").and_then(|m| m.as_str()).unwrap_or("");
-                (msg.contains("No .gitignore") || msg2.contains("No .gitignore"))
+                msg.contains("No .gitignore") || msg2.contains("No .gitignore")
             }),
             "unexpected gitignore warning"
         );
@@ -318,12 +335,14 @@ fn test_no_warning_when_file_count_below_threshold() {
     }
 }
 
+#[test]
 #[ignore = "gitignore absence warning not implemented in Rust"]
 fn test_warning_emitted_when_no_gitignore_and_large_index() {
     // no .gitignore + >= 500 files → warning emitted.
     // The Rust server does not currently emit this warning.
 }
 
+#[test]
 #[ignore = "gitignore absence warning not implemented in Rust"]
 fn test_warning_message_includes_file_count_and_advice() {
     // warning message includes file count and advises adding .gitignore.

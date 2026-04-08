@@ -85,15 +85,14 @@ impl FrameworkProvider for DbtContextProvider {
 
         // Read model-paths from dbt_project.yml
         let project_yml = dbt_root.join("dbt_project.yml");
-        if let Ok(content) = std::fs::read_to_string(&project_yml) {
-            if let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                if let Some(serde_yaml::Value::Sequence(paths)) = yaml.get("model-paths") {
-                    self.model_paths = paths
-                        .iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect();
-                }
-            }
+        if let Ok(content) = std::fs::read_to_string(&project_yml)
+            && let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content)
+            && let Some(serde_yaml::Value::Sequence(paths)) = yaml.get("model-paths")
+        {
+            self.model_paths = paths
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
         }
 
         // Parse doc blocks from model dirs and docs/ dirs
@@ -159,11 +158,11 @@ impl DbtContextProvider {
                 let path = entry.path();
                 if path.is_dir() {
                     self.collect_doc_blocks_recursive(&path);
-                } else if path.extension().map_or(false, |e| e == "md") {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        self.doc_blocks
-                            .extend(parse_doc_blocks_from_content(&content));
-                    }
+                } else if path.extension().is_some_and(|e| e == "md")
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                {
+                    self.doc_blocks
+                        .extend(parse_doc_blocks_from_content(&content));
                 }
             }
         }
@@ -181,10 +180,10 @@ impl DbtContextProvider {
                     self.collect_yml_recursive_with_blocks(&path, doc_blocks);
                 } else {
                     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    if ext == "yml" || ext == "yaml" {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            self.models.extend(parse_yml_content(&content, doc_blocks));
-                        }
+                    if (ext == "yml" || ext == "yaml")
+                        && let Ok(content) = std::fs::read_to_string(&path)
+                    {
+                        self.models.extend(parse_yml_content(&content, doc_blocks));
                     }
                 }
             }

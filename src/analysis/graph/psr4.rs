@@ -21,34 +21,34 @@ pub fn load_psr4_map(source_root: &str) -> Psr4Map {
 
     let mut map = HashMap::new();
 
-    if let Some(autoload) = parsed.get("autoload") {
-        if let Some(psr4) = autoload.get("psr-4").and_then(|v| v.as_object()) {
-            for (ns, dir) in psr4 {
-                if let Some(dir_str) = dir.as_str() {
-                    // Normalize: ensure trailing "/" on directory
-                    let dir_norm = if dir_str.ends_with('/') {
-                        dir_str.to_string()
-                    } else {
-                        format!("{dir_str}/")
-                    };
-                    map.insert(ns.clone(), dir_norm);
-                }
+    if let Some(autoload) = parsed.get("autoload")
+        && let Some(psr4) = autoload.get("psr-4").and_then(|v| v.as_object())
+    {
+        for (ns, dir) in psr4 {
+            if let Some(dir_str) = dir.as_str() {
+                // Normalize: ensure trailing "/" on directory
+                let dir_norm = if dir_str.ends_with('/') {
+                    dir_str.to_string()
+                } else {
+                    format!("{dir_str}/")
+                };
+                map.insert(ns.clone(), dir_norm);
             }
         }
     }
 
     // Also check autoload-dev
-    if let Some(autoload_dev) = parsed.get("autoload-dev") {
-        if let Some(psr4) = autoload_dev.get("psr-4").and_then(|v| v.as_object()) {
-            for (ns, dir) in psr4 {
-                if let Some(dir_str) = dir.as_str() {
-                    let dir_norm = if dir_str.ends_with('/') {
-                        dir_str.to_string()
-                    } else {
-                        format!("{dir_str}/")
-                    };
-                    map.entry(ns.clone()).or_insert(dir_norm);
-                }
+    if let Some(autoload_dev) = parsed.get("autoload-dev")
+        && let Some(psr4) = autoload_dev.get("psr-4").and_then(|v| v.as_object())
+    {
+        for (ns, dir) in psr4 {
+            if let Some(dir_str) = dir.as_str() {
+                let dir_norm = if dir_str.ends_with('/') {
+                    dir_str.to_string()
+                } else {
+                    format!("{dir_str}/")
+                };
+                map.entry(ns.clone()).or_insert(dir_norm);
             }
         }
     }

@@ -197,12 +197,12 @@ pub(super) fn extract_dbt_macros(
 
 fn extract_block_comment_before(source: &str, start_byte: usize) -> Option<String> {
     let before = &source[..start_byte];
-    if let Some(end) = before.rfind("#}") {
-        if let Some(start) = before[..end].rfind("{#") {
-            let comment = before[start + 2..end].trim().to_string();
-            if !comment.is_empty() {
-                return Some(comment);
-            }
+    if let Some(end) = before.rfind("#}")
+        && let Some(start) = before[..end].rfind("{#")
+    {
+        let comment = before[start + 2..end].trim().to_string();
+        if !comment.is_empty() {
+            return Some(comment);
         }
     }
     let lines: Vec<&str> = before.lines().rev().collect();

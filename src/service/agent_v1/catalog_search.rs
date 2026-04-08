@@ -10,7 +10,6 @@ use crate::service::agent_v1::util::*;
 use crate::service::args::parse_args;
 use crate::service::helpers::{ToolError, index_error};
 use crate::service::{CodeService, MAX_QUERY_LEN};
-use crate::storage::IndexStore;
 use serde_json::{Value, json};
 
 impl CodeService {
@@ -195,7 +194,7 @@ impl CodeService {
                     let threshold = args.fuzzy_threshold.unwrap_or(0.3);
                     let primary_ids: HashSet<String> =
                         symbols.iter().map(|s| s.id.clone()).collect();
-                    let scan_cap = per_kind_cap.saturating_mul(50).max(500).min(12_000);
+                    let scan_cap = per_kind_cap.saturating_mul(50).clamp(500, 12_000);
                     if let Ok(candidates) =
                         store.symbols_light_scan(args.kind.as_deref(), scope.as_deref(), scan_cap)
                     {
@@ -225,7 +224,7 @@ impl CodeService {
                                 .unwrap_or(std::cmp::Ordering::Equal)
                                 .then_with(|| a.id.cmp(&b.id))
                         });
-                        let take_extra = per_kind_cap.saturating_mul(4).max(32).min(100);
+                        let take_extra = per_kind_cap.saturating_mul(4).clamp(32, 100);
                         fuzzy_rows.truncate(take_extra);
                         symbols.extend(fuzzy_rows);
                     }
@@ -396,10 +395,8 @@ impl CodeService {
 
         let timer = MetaBuilder::new(raw_bytes.max(1));
         let mut data = json!({ "items": items });
-        if limit_truncated {
-            if let Value::Object(ref mut map) = data {
-                map.insert("truncated".to_string(), json!(true));
-            }
+        if limit_truncated && let Value::Object(ref mut map) = data {
+            map.insert("truncated".to_string(), json!(true));
         }
         let mut extra: Vec<(String, Value)> =
             vec![("truncated".to_string(), json!(meta_truncated))];

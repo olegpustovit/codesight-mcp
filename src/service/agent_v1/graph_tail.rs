@@ -10,9 +10,6 @@ use crate::indexing::imports::{
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
-use crate::service::agent_v1::util_graph::{
-    build_call_chain, extract_symbol_names_from_content, graph_ref_symbol_id,
-};
 use crate::service::helpers::ToolError;
 use crate::storage::{IndexStore, list_repo_summaries};
 
@@ -79,14 +76,14 @@ impl CodeService {
                     let mut repo_entries = Vec::new();
                     for summary in &summaries {
                         let db_path = self.config.repo_db_path(&summary.repo);
-                        if db_path.exists() {
-                            if let Ok(s) = IndexStore::open(db_path) {
-                                let pkg_names = s.get_package_names().unwrap_or_default();
-                                repo_entries.push(crate::cross_repo::RepoEntry {
-                                    repo_id: summary.repo.clone(),
-                                    package_names: pkg_names,
-                                });
-                            }
+                        if db_path.exists()
+                            && let Ok(s) = IndexStore::open(db_path)
+                        {
+                            let pkg_names = s.get_package_names().unwrap_or_default();
+                            repo_entries.push(crate::cross_repo::RepoEntry {
+                                repo_id: summary.repo.clone(),
+                                package_names: pkg_names,
+                            });
                         }
                     }
                     let registry = crate::cross_repo::build_package_registry(&repo_entries);
@@ -421,14 +418,14 @@ impl CodeService {
                     let mut repo_entries = Vec::new();
                     for summary in &summaries {
                         let db_path = self.config.repo_db_path(&summary.repo);
-                        if db_path.exists() {
-                            if let Ok(s) = IndexStore::open(db_path) {
-                                let pkg_names = s.get_package_names().unwrap_or_default();
-                                repo_entries.push(crate::cross_repo::RepoEntry {
-                                    repo_id: summary.repo.clone(),
-                                    package_names: pkg_names,
-                                });
-                            }
+                        if db_path.exists()
+                            && let Ok(s) = IndexStore::open(db_path)
+                        {
+                            let pkg_names = s.get_package_names().unwrap_or_default();
+                            repo_entries.push(crate::cross_repo::RepoEntry {
+                                repo_id: summary.repo.clone(),
+                                package_names: pkg_names,
+                            });
                         }
                     }
                     // Get package names for current repo
@@ -440,21 +437,21 @@ impl CodeService {
                             continue;
                         }
                         let db_path = self.config.repo_db_path(&entry.repo_id);
-                        if let Ok(other_store) = IndexStore::open(db_path) {
-                            if let Ok(root) = other_store.root_path() {
-                                let files = other_store.all_file_paths().unwrap_or_default();
-                                for file in &files {
-                                    let full_path = root.join(file);
-                                    if let Ok(content) = std::fs::read_to_string(&full_path) {
-                                        for pkg in &my_pkg_names {
-                                            if content.contains(pkg) {
-                                                cross_importers.push(json!({
-                                                    "from_repo": entry.repo_id,
-                                                    "to_repo": args.source_id,
-                                                    "package_name": pkg,
-                                                }));
-                                                break;
-                                            }
+                        if let Ok(other_store) = IndexStore::open(db_path)
+                            && let Ok(root) = other_store.root_path()
+                        {
+                            let files = other_store.all_file_paths().unwrap_or_default();
+                            for file in &files {
+                                let full_path = root.join(file);
+                                if let Ok(content) = std::fs::read_to_string(&full_path) {
+                                    for pkg in &my_pkg_names {
+                                        if content.contains(pkg) {
+                                            cross_importers.push(json!({
+                                                "from_repo": entry.repo_id,
+                                                "to_repo": args.source_id,
+                                                "package_name": pkg,
+                                            }));
+                                            break;
                                         }
                                     }
                                 }

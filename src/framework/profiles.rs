@@ -215,12 +215,11 @@ fn react_spa_profile() -> FrameworkProfile {
 /// react-spa.  Returns `None` if nothing matches.
 pub fn detect_framework(root: &Path) -> Option<FrameworkProfile> {
     // Laravel: artisan + composer.json with laravel/framework
-    if root.join("artisan").exists() {
-        if let Ok(contents) = std::fs::read_to_string(root.join("composer.json")) {
-            if contents.contains("laravel/framework") {
-                return Some(laravel_profile());
-            }
-        }
+    if root.join("artisan").exists()
+        && let Ok(contents) = std::fs::read_to_string(root.join("composer.json"))
+        && contents.contains("laravel/framework")
+    {
+        return Some(laravel_profile());
     }
 
     // Nuxt: nuxt.config.ts or nuxt.config.js

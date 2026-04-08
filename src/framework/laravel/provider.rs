@@ -60,11 +60,11 @@ impl LaravelProvider {
 
     fn detect_inertia(&mut self, root: &Path) {
         // Check composer.json for inertia
-        if let Ok(content) = std::fs::read_to_string(root.join("composer.json")) {
-            if content.contains("inertiajs") {
-                self.has_inertia = true;
-                return;
-            }
+        if let Ok(content) = std::fs::read_to_string(root.join("composer.json"))
+            && content.contains("inertiajs")
+        {
+            self.has_inertia = true;
+            return;
         }
         // Check for HandleInertiaRequests middleware
         let middleware_path = root.join("app/Http/Middleware/HandleInertiaRequests.php");
@@ -81,7 +81,7 @@ impl LaravelProvider {
         if let Ok(entries) = std::fs::read_dir(&models_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(true, |e| e != "php") {
+                if path.extension().is_none_or(|e| e != "php") {
                     continue;
                 }
                 let rel = match path.strip_prefix(root) {
@@ -121,13 +121,13 @@ impl LaravelProvider {
         if let Ok(entries) = std::fs::read_dir(&migrations_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(true, |e| e != "php") {
+                if path.extension().is_none_or(|e| e != "php") {
                     continue;
                 }
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Some(migration) = parse_migration(&content) {
-                        self.migrations.insert(migration.table.clone(), migration);
-                    }
+                if let Ok(content) = std::fs::read_to_string(&path)
+                    && let Some(migration) = parse_migration(&content)
+                {
+                    self.migrations.insert(migration.table.clone(), migration);
                 }
             }
         }
@@ -140,16 +140,13 @@ impl LaravelProvider {
         // Create file contexts for controllers referenced by routes
         for route in &self.routes {
             let controller_path = format!("app/Http/Controllers/{}.php", route.controller);
-            if !self.file_contexts.contains_key(&controller_path) {
-                self.file_contexts.insert(
-                    controller_path,
-                    FileContext {
-                        description: format!("Laravel controller: {}", route.controller),
-                        tags: vec!["controller".into()],
-                        properties: vec![],
-                    },
-                );
-            }
+            self.file_contexts
+                .entry(controller_path)
+                .or_insert_with(|| FileContext {
+                    description: format!("Laravel controller: {}", route.controller),
+                    tags: vec!["controller".into()],
+                    properties: vec![],
+                });
         }
     }
 
@@ -261,6 +258,7 @@ impl FrameworkProvider for LaravelProvider {
         // Route -> Controller imports
         if !self.routes.is_empty() {
             let route_files = ["routes/web.php", "routes/api.php"];
+            let route_fqn_re = Regex::new(r#"(\\[A-Za-z\\]+Controller)::class"#).unwrap();
             for rf in &route_files {
                 let rf_path = root.join(rf);
                 if !rf_path.exists() {
@@ -279,8 +277,7 @@ impl FrameworkProvider for LaravelProvider {
                 let mut route_imports = Vec::new();
 
                 // Also check for inline FQN controllers
-                let fqn_re = Regex::new(r#"(\\[A-Za-z\\]+Controller)::class"#).unwrap();
-                for cap in fqn_re.captures_iter(&content) {
+                for cap in route_fqn_re.captures_iter(&content) {
                     let fqn = cap[1].to_string();
                     if seen_controllers.insert(fqn.clone()) {
                         route_imports.push(ExtraImport {
@@ -306,6 +303,7 @@ impl FrameworkProvider for LaravelProvider {
         }
 
         // Model relationship imports
+        let model_fqn_re = Regex::new(r#"(\\[A-Za-z\\]+)::class"#).unwrap();
         for (model_path, model_info) in &self.models {
             if model_info.relationships.is_empty() {
                 continue;
@@ -315,8 +313,7 @@ impl FrameworkProvider for LaravelProvider {
 
             // Check full content for FQN relationships
             if let Ok(content) = std::fs::read_to_string(root.join(model_path)) {
-                let fqn_re = Regex::new(r#"(\\[A-Za-z\\]+)::class"#).unwrap();
-                for cap in fqn_re.captures_iter(&content) {
+                for cap in model_fqn_re.captures_iter(&content) {
                     let fqn = cap[1].to_string();
                     let short = fqn.rsplit('\\').next().unwrap_or(&fqn).to_string();
                     // Only add if it's a relationship target
@@ -324,13 +321,12 @@ impl FrameworkProvider for LaravelProvider {
                         .relationships
                         .iter()
                         .any(|r| r.target == short || fqn.ends_with(&r.target))
+                        && seen.insert(fqn.clone())
                     {
-                        if seen.insert(fqn.clone()) {
-                            model_imports.push(ExtraImport {
-                                specifier: fqn,
-                                names: vec![short],
-                            });
-                        }
+                        model_imports.push(ExtraImport {
+                            specifier: fqn,
+                            names: vec![short],
+                        });
                     }
                 }
             }
@@ -414,7 +410,7 @@ impl LaravelProvider {
                 self.scan_php_for_facades(&path, root, imports);
                 continue;
             }
-            if path.extension().map_or(true, |e| e != "php") {
+            if path.extension().is_none_or(|e| e != "php") {
                 continue;
             }
             let rel = match path.strip_prefix(root) {
@@ -452,7 +448,7 @@ impl LaravelProvider {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(true, |e| e != "php") {
+            if path.extension().is_none_or(|e| e != "php") {
                 continue;
             }
             let rel = match path.strip_prefix(root) {
@@ -466,14 +462,14 @@ impl LaravelProvider {
             let pages = extract_inertia_renders(&content);
             let mut seen = std::collections::HashSet::new();
             for page in pages {
-                if let Some(resolved) = resolve_inertia_page(root, &page) {
-                    if seen.insert(resolved.clone()) {
-                        let entry = imports.entry(rel.clone()).or_default();
-                        entry.push(ExtraImport {
-                            specifier: resolved,
-                            names: vec![],
-                        });
-                    }
+                if let Some(resolved) = resolve_inertia_page(root, &page)
+                    && seen.insert(resolved.clone())
+                {
+                    let entry = imports.entry(rel.clone()).or_default();
+                    entry.push(ExtraImport {
+                        specifier: resolved,
+                        names: vec![],
+                    });
                 }
             }
         }

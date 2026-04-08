@@ -1,10 +1,11 @@
 //! SCM query-based extractor engine.
 //!
-//! Built-in packs live under `runtime/queries/<pack_id>/{tags,symbols}.scm`. The pack catalog is
-//! generated at build time by `build.rs`; [`super::catalogs::QueryPackCatalog`] loads those
-//! sources and hands them to [`ScmExtractor`]. Submodules hold header parsing, pattern metadata,
-//! capture types, doc cleanup, and the extract phases; [`ScmExtractor`] is the public façade over
-//! tree-sitter queries.
+//! Built-in packs live under `runtime/queries/<pack_id>/tags.scm`, with optional
+//! `injections.scm` and `pack.toml`. The pack catalog is generated at build time by `build.rs`;
+//! [`super::catalogs::QueryPackCatalog`] loads those sources and hands them to
+//! [`ScmExtractor`]. Submodules hold header parsing, pattern metadata, capture types, doc
+//! cleanup, and the extract phases; [`ScmExtractor`] is the public façade over tree-sitter
+//! queries.
 //!
 //! Language knowledge for symbol capture lives in `.scm` files. A small post-pass for C/C++
 //! headers lives in [`super::cpp_header_language_fallback`].
@@ -41,7 +42,7 @@ impl ScmExtractor {
         let grammar = crate::extractors::engine::builtin_grammar(&meta.grammar)
             .ok_or_else(|| anyhow!("unknown grammar: {}", meta.grammar))?;
 
-        let ts_lang: tree_sitter::Language = grammar.clone().into();
+        let ts_lang: tree_sitter::Language = grammar.clone();
         let query = Query::new(&ts_lang, query_source)
             .map_err(|e| anyhow!("query compile error for {}: {e}", meta.name))?;
 
@@ -104,8 +105,8 @@ pub fn build_scm_extractors_from_catalog(
             Ok(ext) => extractors.push(Box::new(ext)),
             Err(e) => {
                 eprintln!(
-                    "warning: failed to compile query pack {} ({}): {e}",
-                    pack.pack_id, pack.query_file_name
+                    "warning: failed to compile query pack {}: {e}",
+                    pack.pack_id
                 );
             }
         }

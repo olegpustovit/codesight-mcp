@@ -100,14 +100,13 @@ fn next_api_methods_from_ts_tsx(content: &str) -> Vec<String> {
 }
 
 fn collect_ts_route_http_handlers(node: Node<'_>, source: &str, out: &mut Vec<String>) {
-    if node.kind() == "function_declaration" {
-        if let Some(name_n) = node.child_by_field_name("name")
-            && let Ok(name) = name_n.utf8_text(source.as_bytes())
-            && is_next_http_verb(name)
-            && !out.contains(&name.to_string())
-        {
-            out.push(name.to_string());
-        }
+    if node.kind() == "function_declaration"
+        && let Some(name_n) = node.child_by_field_name("name")
+        && let Ok(name) = name_n.utf8_text(source.as_bytes())
+        && is_next_http_verb(name)
+        && !out.contains(&name.to_string())
+    {
+        out.push(name.to_string());
     }
     let mut c = node.walk();
     for ch in node.named_children(&mut c) {

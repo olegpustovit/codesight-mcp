@@ -100,10 +100,10 @@ pub fn fuzzy_candidate_passes(
     if score.jaccard >= threshold {
         return true;
     }
-    if let Some(limit) = max_edit_distance {
-        if score.edit_distance <= limit {
-            return true;
-        }
+    if let Some(limit) = max_edit_distance
+        && score.edit_distance <= limit
+    {
+        return true;
     }
     false
 }

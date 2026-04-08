@@ -30,10 +30,10 @@ pub fn list_repo_summaries(index_root: &Path) -> anyhow::Result<Vec<RepoMetadata
     for entry in fs::read_dir(index_root)? {
         let entry = entry?;
         let db_path = entry.path().join("index.sqlite3");
-        if let Some(store) = IndexStore::open_existing(db_path)? {
-            if let Ok(summary) = store.repo_summary() {
-                repos.push(summary);
-            }
+        if let Some(store) = IndexStore::open_existing(db_path)?
+            && let Ok(summary) = store.repo_summary()
+        {
+            repos.push(summary);
         }
     }
     repos.sort_by(|left, right| left.repo.cmp(&right.repo));

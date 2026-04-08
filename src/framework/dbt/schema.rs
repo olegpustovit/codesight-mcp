@@ -67,14 +67,14 @@ pub fn parse_yml_content(
                 }
             }
         }
-        if let Some(config) = model.get("config") {
-            if let Some(serde_yaml::Value::Sequence(cfg_tags)) = config.get("tags") {
-                for t in cfg_tags {
-                    if let Some(s) = t.as_str() {
-                        if !tags.contains(&s.to_string()) {
-                            tags.push(s.to_string());
-                        }
-                    }
+        if let Some(config) = model.get("config")
+            && let Some(serde_yaml::Value::Sequence(cfg_tags)) = config.get("tags")
+        {
+            for t in cfg_tags {
+                if let Some(s) = t.as_str()
+                    && !tags.contains(&s.to_string())
+                {
+                    tags.push(s.to_string());
                 }
             }
         }
@@ -120,10 +120,10 @@ pub fn parse_yml_files(
         for entry in entries.flatten() {
             let path = entry.path();
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if ext == "yml" || ext == "yaml" {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    result.extend(parse_yml_content(&content, doc_blocks));
-                }
+            if (ext == "yml" || ext == "yaml")
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                result.extend(parse_yml_content(&content, doc_blocks));
             }
         }
     }

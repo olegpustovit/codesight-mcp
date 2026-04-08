@@ -257,10 +257,10 @@ impl CodeService {
                         .unwrap_or("")
                         .to_string();
                     let tks = token_estimate_for_context(&source);
-                    if let Some(max_t) = budget {
-                        if total_tokens.saturating_add(tks as u64) > max_t as u64 {
-                            break 'hits;
-                        }
+                    if let Some(max_t) = budget
+                        && total_tokens.saturating_add(tks as u64) > max_t as u64
+                    {
+                        break 'hits;
                     }
                     total_tokens = total_tokens.saturating_add(tks as u64);
                     context_items.push(json!({
@@ -294,7 +294,7 @@ impl CodeService {
                     .unwrap_or(1)
                     .max(1);
                 let timer = MetaBuilder::new(raw_bytes);
-                return self.success_response_with_warnings(&timer, body, warnings);
+                self.success_response_with_warnings(&timer, body, warnings)
             }
             tail => self.assemble_context_tail(&args, tail, &timer),
         }

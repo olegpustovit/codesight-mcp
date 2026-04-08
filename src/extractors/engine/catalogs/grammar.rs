@@ -173,7 +173,7 @@ const BUILTIN_GRAMMARS: &[GrammarDefinition] = &[
         language_name: "scss",
         grammar_name: "scss",
         extensions: &["scss"],
-        loader: || tree_sitter_scss::language().into(),
+        loader: || tree_sitter_scss::language(),
     },
     GrammarDefinition {
         language_name: "sql",

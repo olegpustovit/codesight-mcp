@@ -67,10 +67,11 @@ pub fn dead_code_payload(
     if let Some(ref root) = root_path {
         for fp in &all_files {
             let abs = root.join(fp);
-            if let Ok(content) = fs::read_to_string(&abs) {
-                if content.contains("__name__") && content.contains("__main__") {
-                    files_with_main_guard.insert(fp.clone());
-                }
+            if let Ok(content) = fs::read_to_string(&abs)
+                && content.contains("__name__")
+                && content.contains("__main__")
+            {
+                files_with_main_guard.insert(fp.clone());
             }
         }
     }

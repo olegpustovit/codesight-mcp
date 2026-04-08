@@ -176,7 +176,7 @@ fn parse_atx_heading(line: &str) -> Option<(u8, String)> {
 
 fn parse_setext_underline(line: &str) -> Option<u8> {
     let trimmed = line.trim();
-    if trimmed.len() < 1 {
+    if trimmed.is_empty() {
         return None;
     }
     let first = trimmed.as_bytes()[0];
@@ -184,10 +184,8 @@ fn parse_setext_underline(line: &str) -> Option<u8> {
         if trimmed.bytes().all(|b| b == b'=') {
             return Some(1);
         }
-    } else if first == b'-' {
-        if trimmed.bytes().all(|b| b == b'-') {
-            return Some(2);
-        }
+    } else if first == b'-' && trimmed.bytes().all(|b| b == b'-') {
+        return Some(2);
     }
     None
 }

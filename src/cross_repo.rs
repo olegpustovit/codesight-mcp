@@ -22,64 +22,59 @@ pub fn extract_package_names(dir: &str) -> Vec<String> {
     let setup_cfg = root.join("setup.cfg");
     let mut found_python = false;
 
-    if pyproject.is_file() {
-        if let Ok(content) = fs::read_to_string(&pyproject) {
-            if let Some(name) = parse_pyproject_name(&content) {
-                // PEP 503 normalization: underscores -> hyphens
-                names.push(name.replace('_', "-"));
-                found_python = true;
-            }
-        }
+    if pyproject.is_file()
+        && let Ok(content) = fs::read_to_string(&pyproject)
+        && let Some(name) = parse_pyproject_name(&content)
+    {
+        // PEP 503 normalization: underscores -> hyphens
+        names.push(name.replace('_', "-"));
+        found_python = true;
     }
 
-    if !found_python && setup_cfg.is_file() {
-        if let Ok(content) = fs::read_to_string(&setup_cfg) {
-            if let Some(name) = parse_setup_cfg_name(&content) {
-                names.push(name);
-            }
-        }
+    if !found_python
+        && setup_cfg.is_file()
+        && let Ok(content) = fs::read_to_string(&setup_cfg)
+        && let Some(name) = parse_setup_cfg_name(&content)
+    {
+        names.push(name);
     }
 
     // JavaScript: package.json
     let package_json = root.join("package.json");
-    if package_json.is_file() {
-        if let Ok(content) = fs::read_to_string(&package_json) {
-            if let Some(name) = parse_package_json_name(&content) {
-                names.push(name);
-            }
-        }
+    if package_json.is_file()
+        && let Ok(content) = fs::read_to_string(&package_json)
+        && let Some(name) = parse_package_json_name(&content)
+    {
+        names.push(name);
     }
 
     // Go: go.mod
     let go_mod = root.join("go.mod");
-    if go_mod.is_file() {
-        if let Ok(content) = fs::read_to_string(&go_mod) {
-            if let Some(name) = parse_go_mod_module(&content) {
-                names.push(name);
-            }
-        }
+    if go_mod.is_file()
+        && let Ok(content) = fs::read_to_string(&go_mod)
+        && let Some(name) = parse_go_mod_module(&content)
+    {
+        names.push(name);
     }
 
     // Rust: Cargo.toml
     let cargo_toml = root.join("Cargo.toml");
-    if cargo_toml.is_file() {
-        if let Ok(content) = fs::read_to_string(&cargo_toml) {
-            if let Some(name) = parse_cargo_toml_name(&content) {
-                names.push(name);
-            }
-        }
+    if cargo_toml.is_file()
+        && let Ok(content) = fs::read_to_string(&cargo_toml)
+        && let Some(name) = parse_cargo_toml_name(&content)
+    {
+        names.push(name);
     }
 
     // C#: *.csproj
     if let Ok(entries) = fs::read_dir(root) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("csproj") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Some(name) = parse_csproj_name(&content) {
-                        names.push(name);
-                    }
-                }
+            if path.extension().and_then(|e| e.to_str()) == Some("csproj")
+                && let Ok(content) = fs::read_to_string(&path)
+                && let Some(name) = parse_csproj_name(&content)
+            {
+                names.push(name);
             }
         }
     }
@@ -106,12 +101,10 @@ fn parse_setup_cfg_name(content: &str) -> Option<String> {
             in_metadata = trimmed == "[metadata]";
             continue;
         }
-        if in_metadata {
-            if let Some(rest) = trimmed.strip_prefix("name") {
-                let rest = rest.trim_start();
-                if let Some(value) = rest.strip_prefix('=') {
-                    return Some(value.trim().to_string());
-                }
+        if in_metadata && let Some(rest) = trimmed.strip_prefix("name") {
+            let rest = rest.trim_start();
+            if let Some(value) = rest.strip_prefix('=') {
+                return Some(value.trim().to_string());
             }
         }
     }

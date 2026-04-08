@@ -1,14 +1,14 @@
-/// Smoke tests for all tree-sitter grammars to detect ABI/runtime crashes.
-/// Run with: cargo test -p codesight-mcp --test grammar_smoke
+//! Smoke tests for all tree-sitter grammars to detect ABI/runtime crashes.
+//! Run with: cargo test -p codesight-mcp --test grammar_smoke
 
 fn try_grammar(name: &str, lang: tree_sitter::Language, src: &str) {
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&lang)
-        .expect(&format!("{name}: set_language failed"));
+        .unwrap_or_else(|_| panic!("{name}: set_language failed"));
     let tree = parser
         .parse(src, None)
-        .expect(&format!("{name}: parse returned None"));
+        .unwrap_or_else(|| panic!("{name}: parse returned None"));
     let root = tree.root_node();
     assert!(!root.kind().is_empty(), "{name}: root node kind is empty");
     eprintln!(
@@ -66,7 +66,7 @@ fn smoke_php() {
 
 #[test]
 fn smoke_scss() {
-    try_grammar("scss", tree_sitter_scss::language().into(), "$x: 1;");
+    try_grammar("scss", tree_sitter_scss::language(), "$x: 1;");
 }
 
 #[test]

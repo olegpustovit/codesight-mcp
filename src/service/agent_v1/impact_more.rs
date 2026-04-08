@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
-use crate::service::agent_v1::util_graph::{build_call_chain, git_head_sha, git_show_file};
+use crate::service::agent_v1::util_graph::build_call_chain;
 use crate::service::helpers::ToolError;
 
 impl CodeService {

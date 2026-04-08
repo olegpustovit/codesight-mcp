@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::adaptive_languages::project_query_pack_roots;
@@ -13,7 +13,6 @@ include!(concat!(env!("OUT_DIR"), "/builtin_query_packs.rs"));
 #[derive(Clone)]
 pub struct QueryPackDefinition {
     pub pack_id: String,
-    pub query_file_name: String,
     pub query_source: String,
     pub injections_source: Option<String>,
     pub metadata: ScmMetadata,
@@ -24,6 +23,7 @@ pub struct QueryPackCatalog {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct QueryPackMetadataFile {
     language: Option<String>,
     extensions: Option<Vec<String>>,
@@ -53,17 +53,17 @@ impl QueryPackCatalog {
         let packs = BUILTIN_QUERY_PACKS
             .iter()
             .map(
-                |(pack_id, query_file_name, query_source, injections_source, metadata_source)| {
+                |(pack_id, query_source, injections_source, metadata_source)| {
                     Self::build_definition(
                         pack_id,
-                        query_file_name,
                         query_source.to_string(),
                         injections_source.map(ToString::to_string),
                         metadata_source.map(ToString::to_string),
                     )
                 },
             )
-            .collect();
+            .collect::<Result<Vec<_>>>()
+            .expect("invalid built-in query pack metadata");
         Self { packs }
     }
 
@@ -125,9 +125,10 @@ impl QueryPackCatalog {
     }
 
     fn load_pack_dir(dir: &Path) -> Result<Option<QueryPackDefinition>> {
-        let Some((query_file_name, query_path)) = pack_query_file(dir) else {
+        let query_path = dir.join("tags.scm");
+        if !query_path.is_file() {
             return Ok(None);
-        };
+        }
 
         let query_source = fs::read_to_string(&query_path)
             .with_context(|| format!("read {}", query_path.display()))?;
@@ -158,50 +159,44 @@ impl QueryPackCatalog {
 
         Ok(Some(Self::build_definition(
             pack_id,
-            query_file_name,
             query_source,
             injections_source,
             metadata_source,
-        )))
+        )?))
     }
 
     fn build_definition(
         pack_id: &str,
-        query_file_name: &str,
         query_source: String,
         injections_source: Option<String>,
         metadata_source: Option<String>,
-    ) -> QueryPackDefinition {
+    ) -> Result<QueryPackDefinition> {
         let mut metadata = parse_scm_header(&query_source);
-        if let Some(metadata_source) = metadata_source
-            && let Ok(file_metadata) = toml::from_str::<QueryPackMetadataFile>(&metadata_source)
-        {
+        if let Some(metadata_source) = metadata_source {
+            let file_metadata = toml::from_str::<QueryPackMetadataFile>(&metadata_source)
+                .with_context(|| format!("parse pack.toml for query pack {pack_id}"))?;
             file_metadata.apply_to(&mut metadata);
         }
         if metadata.name.is_empty() {
             metadata.name = pack_id.to_string();
         }
+        validate_pack_metadata(pack_id, &metadata)?;
 
-        QueryPackDefinition {
+        Ok(QueryPackDefinition {
             pack_id: pack_id.to_string(),
-            query_file_name: query_file_name.to_string(),
             query_source,
             injections_source,
             metadata,
-        }
+        })
     }
 }
 
-fn pack_query_file(dir: &Path) -> Option<(&'static str, PathBuf)> {
-    let tags = dir.join("tags.scm");
-    if tags.is_file() {
-        return Some(("tags.scm", tags));
+fn validate_pack_metadata(pack_id: &str, metadata: &ScmMetadata) -> Result<()> {
+    if metadata.extensions.is_empty() {
+        bail!("query pack {pack_id} is missing extensions metadata");
     }
-
-    let symbols = dir.join("symbols.scm");
-    if symbols.is_file() {
-        return Some(("symbols.scm", symbols));
+    if metadata.grammar.is_empty() && metadata.override_extractor.is_none() {
+        bail!("query pack {pack_id} must declare either grammar or override_extractor");
     }
-
-    None
+    Ok(())
 }

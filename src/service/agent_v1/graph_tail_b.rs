@@ -4,23 +4,17 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use crate::fuzzy;
-use crate::model::SearchSymbol;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
-use crate::service::agent_v1::util_graph::{
-    build_call_chain, extract_symbol_names_from_content, graph_ref_symbol_id,
-};
 use crate::service::helpers::ToolError;
-use crate::storage::IndexStore;
 
 impl CodeService {
     pub(in crate::service) fn inspect_graph_tail_b(
         &self,
         args: &InspectGraphArgs,
         mode: &str,
-        limit: usize,
+        _limit: usize,
         warnings: &mut Vec<Value>,
     ) -> anyhow::Result<Value> {
         match mode {
@@ -51,15 +45,15 @@ impl CodeService {
                             if sym.name.eq_ignore_ascii_case(ident) {
                                 continue;
                             }
-                            if ci_word_match(&sym.source, ident) {
-                                if seen_files.insert(sym.file.clone()) {
-                                    file_refs.push(json!({
-                                        "symbol_id": sym.id,
-                                        "name": sym.name,
-                                        "file": sym.file,
-                                        "line": sym.line,
-                                    }));
-                                }
+                            if ci_word_match(&sym.source, ident)
+                                && seen_files.insert(sym.file.clone())
+                            {
+                                file_refs.push(json!({
+                                    "symbol_id": sym.id,
+                                    "name": sym.name,
+                                    "file": sym.file,
+                                    "line": sym.line,
+                                }));
                             }
                         }
                         // Also search file contents for import-level references

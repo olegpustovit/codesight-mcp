@@ -406,7 +406,9 @@ fn max_index_files_non_positive_explicit_rejected() {
 
 #[test]
 fn max_folder_files_default_lower_than_repo_default() {
-    assert!(DEFAULT_MAX_FOLDER_FILES < DEFAULT_MAX_INDEX_FILES);
+    const {
+        assert!(DEFAULT_MAX_FOLDER_FILES < DEFAULT_MAX_INDEX_FILES);
+    }
 }
 
 #[test]

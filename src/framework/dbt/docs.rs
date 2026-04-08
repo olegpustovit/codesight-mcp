@@ -24,10 +24,10 @@ pub fn parse_doc_blocks(dir: &Path) -> HashMap<String, String> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "md") {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    blocks.extend(parse_doc_blocks_from_content(&content));
-                }
+            if path.extension().is_some_and(|e| e == "md")
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                blocks.extend(parse_doc_blocks_from_content(&content));
             }
         }
     }

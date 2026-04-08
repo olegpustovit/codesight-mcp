@@ -40,14 +40,14 @@ pub fn build_cross_repo_map(
     let mut repo_entries: Vec<cross_repo::RepoEntry> = Vec::new();
     for summary in &summaries {
         let db_path = config.repo_db_path(&summary.repo);
-        if db_path.exists() {
-            if let Ok(store) = IndexStore::open(db_path) {
-                let pkg_names = store.get_package_names().unwrap_or_default();
-                repo_entries.push(cross_repo::RepoEntry {
-                    repo_id: summary.repo.clone(),
-                    package_names: pkg_names,
-                });
-            }
+        if db_path.exists()
+            && let Ok(store) = IndexStore::open(db_path)
+        {
+            let pkg_names = store.get_package_names().unwrap_or_default();
+            repo_entries.push(cross_repo::RepoEntry {
+                repo_id: summary.repo.clone(),
+                package_names: pkg_names,
+            });
         }
     }
 
@@ -75,21 +75,21 @@ pub fn build_cross_repo_map(
 
     for entry in &filtered_entries {
         let db_path = config.repo_db_path(&entry.repo_id);
-        if let Ok(store) = IndexStore::open(db_path) {
-            if let Ok(all_contents) = store.all_file_contents() {
-                for (file, content) in &all_contents {
-                    let lang = language_for_path(file);
-                    let edges = extract_imports(content, file, lang);
-                    for (pkg_name, target_repos) in &registry {
-                        if import_edges_reference_package(&edges, pkg_name.as_str()) {
-                            for tr in target_repos {
-                                if tr != &entry.repo_id {
-                                    cross_repo_edges.push(json!({
-                                        "from_repo": entry.repo_id,
-                                        "to_repo": tr,
-                                        "package_name": pkg_name,
-                                    }));
-                                }
+        if let Ok(store) = IndexStore::open(db_path)
+            && let Ok(all_contents) = store.all_file_contents()
+        {
+            for (file, content) in &all_contents {
+                let lang = language_for_path(file);
+                let edges = extract_imports(content, file, lang);
+                for (pkg_name, target_repos) in &registry {
+                    if import_edges_reference_package(&edges, pkg_name.as_str()) {
+                        for tr in target_repos {
+                            if tr != &entry.repo_id {
+                                cross_repo_edges.push(json!({
+                                    "from_repo": entry.repo_id,
+                                    "to_repo": tr,
+                                    "package_name": pkg_name,
+                                }));
                             }
                         }
                     }

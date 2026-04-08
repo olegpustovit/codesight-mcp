@@ -61,19 +61,19 @@ pub(crate) fn extract_imports_python(content: &str) -> Vec<ImportEdge> {
                     });
                 }
             }
-        } else if t.starts_with("import ") {
-            if let Some(rest) = t.strip_prefix("import ") {
-                let module = rest
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or(rest)
-                    .trim_end_matches(',');
-                if !module.is_empty() {
-                    edges.push(ImportEdge {
-                        specifier: module.to_string(),
-                        names: Vec::new(),
-                    });
-                }
+        } else if t.starts_with("import ")
+            && let Some(rest) = t.strip_prefix("import ")
+        {
+            let module = rest
+                .split_whitespace()
+                .next()
+                .unwrap_or(rest)
+                .trim_end_matches(',');
+            if !module.is_empty() {
+                edges.push(ImportEdge {
+                    specifier: module.to_string(),
+                    names: Vec::new(),
+                });
             }
         }
     }
@@ -87,30 +87,30 @@ pub(crate) fn extract_imports_js(content: &str) -> Vec<ImportEdge> {
     for line in content.lines() {
         let t = line.trim();
 
-        if t.starts_with("import ") {
-            if let Some(spec) = extract_js_static_import(t) {
-                if seen_specifiers.insert(spec.specifier.clone()) {
-                    edges.push(spec);
-                }
-                continue;
+        if t.starts_with("import ")
+            && let Some(spec) = extract_js_static_import(t)
+        {
+            if seen_specifiers.insert(spec.specifier.clone()) {
+                edges.push(spec);
             }
+            continue;
         }
 
-        if t.starts_with("export ") && t.contains(" from ") {
-            if let Some(spec) = extract_js_reexport(t) {
-                if seen_specifiers.insert(spec.specifier.clone()) {
-                    edges.push(spec);
-                }
-                continue;
+        if t.starts_with("export ")
+            && t.contains(" from ")
+            && let Some(spec) = extract_js_reexport(t)
+        {
+            if seen_specifiers.insert(spec.specifier.clone()) {
+                edges.push(spec);
             }
+            continue;
         }
 
-        if t.contains("require(") {
-            if let Some(spec) = extract_js_require(t) {
-                if seen_specifiers.insert(spec.specifier.clone()) {
-                    edges.push(spec);
-                }
-            }
+        if t.contains("require(")
+            && let Some(spec) = extract_js_require(t)
+            && seen_specifiers.insert(spec.specifier.clone())
+        {
+            edges.push(spec);
         }
 
         if t.contains("import(") {
@@ -239,7 +239,7 @@ fn extract_js_reexport(line: &str) -> Option<ImportEdge> {
     let inside = &line[brace_start + 1..brace_end];
     let names: Vec<String> = inside
         .split(',')
-        .map(|s| s.trim().split_whitespace().next().unwrap_or("").to_string())
+        .map(|s| s.split_whitespace().next().unwrap_or("").to_string())
         .filter(|s| !s.is_empty())
         .collect();
 
@@ -539,7 +539,7 @@ fn extract_template_components(template: &str) -> Vec<String> {
                     && tag
                         .chars()
                         .next()
-                        .map_or(false, |c| c.is_ascii_uppercase() || tag.contains('-'))
+                        .is_some_and(|c| c.is_ascii_uppercase() || tag.contains('-'))
                 {
                     components.insert(pascal);
                 }
@@ -574,8 +574,7 @@ pub(crate) fn extract_imports_sql(content: &str) -> Vec<ImportEdge> {
                     .trim_end_matches('-')
                     .trim();
 
-                if block_trimmed.starts_with("ref(") {
-                    let after_ref = &block_trimmed[4..];
+                if let Some(after_ref) = block_trimmed.strip_prefix("ref(") {
                     if let Some(name) = extract_quoted_string(after_ref) {
                         let spec = name.to_string();
                         if !spec.is_empty() && seen.insert(spec.clone()) {
@@ -585,18 +584,16 @@ pub(crate) fn extract_imports_sql(content: &str) -> Vec<ImportEdge> {
                             });
                         }
                     }
-                } else if block_trimmed.starts_with("source(") {
-                    let after_source = &block_trimmed[7..];
-                    if let Some((schema, rest)) = extract_quoted_string_with_rest(after_source) {
-                        if let Some(table) = extract_quoted_string(rest) {
-                            let spec = format!("source:{schema}.{table}");
-                            if seen.insert(spec.clone()) {
-                                edges.push(ImportEdge {
-                                    specifier: spec,
-                                    names: Vec::new(),
-                                });
-                            }
-                        }
+                } else if let Some(after_source) = block_trimmed.strip_prefix("source(")
+                    && let Some((schema, rest)) = extract_quoted_string_with_rest(after_source)
+                    && let Some(table) = extract_quoted_string(rest)
+                {
+                    let spec = format!("source:{schema}.{table}");
+                    if seen.insert(spec.clone()) {
+                        edges.push(ImportEdge {
+                            specifier: spec,
+                            names: Vec::new(),
+                        });
                     }
                 }
                 i = block_start + end_offset + 2;
@@ -624,15 +621,15 @@ pub(crate) fn extract_imports_dart(content: &str) -> Vec<ImportEdge> {
                     names: Vec::new(),
                 });
             }
-        } else if t.starts_with("part ") {
-            let after = t[5..].trim().trim_end_matches(';').trim();
-            if !after.starts_with("of ") {
-                if let Some(specifier) = extract_quoted_string(after) {
-                    edges.push(ImportEdge {
-                        specifier: specifier.to_string(),
-                        names: Vec::new(),
-                    });
-                }
+        } else if let Some(after) = t.strip_prefix("part ") {
+            let after = after.trim().trim_end_matches(';').trim();
+            if !after.starts_with("of ")
+                && let Some(specifier) = extract_quoted_string(after)
+            {
+                edges.push(ImportEdge {
+                    specifier: specifier.to_string(),
+                    names: Vec::new(),
+                });
             }
         }
     }

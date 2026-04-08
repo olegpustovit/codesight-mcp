@@ -1,5 +1,5 @@
 //! **Luau** (Roblox dialect): uses the Luau grammar but needs Luau-specific capture/qualification
-//! rules beyond what the generic Lua `symbols.scm` path would express.
+//! rules beyond what the generic Lua query-pack path would express.
 use anyhow::Result;
 use tree_sitter::Node;
 

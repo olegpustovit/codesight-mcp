@@ -36,22 +36,22 @@ pub fn extract_references(text: &str) -> Vec<String> {
     // Reference-style links: [label]: url  (at start of line)
     for line in text.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            if let Some(bracket_end) = trimmed.find("]:") {
-                let url = trimmed[bracket_end + 2..].trim();
-                let url = url.split_whitespace().next().unwrap_or("");
-                if !url.is_empty() {
-                    insert!(url);
-                }
+        if trimmed.starts_with('[')
+            && let Some(bracket_end) = trimmed.find("]:")
+        {
+            let url = trimmed[bracket_end + 2..].trim();
+            let url = url.split_whitespace().next().unwrap_or("");
+            if !url.is_empty() {
+                insert!(url);
             }
         }
         // RST reference: .. _label: url
-        if trimmed.starts_with(".. _") {
-            if let Some(colon) = trimmed[4..].find(':') {
-                let url = trimmed[4 + colon + 1..].trim();
-                if !url.is_empty() {
-                    insert!(url);
-                }
+        if trimmed.starts_with(".. _")
+            && let Some(colon) = trimmed[4..].find(':')
+        {
+            let url = trimmed[4 + colon + 1..].trim();
+            if !url.is_empty() {
+                insert!(url);
             }
         }
     }
@@ -59,8 +59,7 @@ pub fn extract_references(text: &str) -> Vec<String> {
     // Bare URLs: https://... or http://...
     for word in text.split_whitespace() {
         // Strip trailing punctuation
-        let cleaned = word
-            .trim_end_matches(|c: char| c == ')' || c == '>' || c == ',' || c == '.' || c == ';');
+        let cleaned = word.trim_end_matches([')', '>', ',', '.', ';']);
         if cleaned.starts_with("https://") || cleaned.starts_with("http://") {
             insert!(cleaned);
         }
@@ -87,8 +86,7 @@ pub fn extract_tags(text: &str) -> Vec<String> {
     for line in text.lines() {
         let trimmed = line.trim();
         // Skip markdown heading lines
-        if trimmed.starts_with('#') && trimmed.chars().skip_while(|c| *c == '#').next() == Some(' ')
-        {
+        if trimmed.starts_with('#') && trimmed.trim_start_matches('#').starts_with(' ') {
             continue;
         }
         let mut chars = trimmed.char_indices().peekable();
@@ -125,20 +123,20 @@ pub fn extract_tags(text: &str) -> Vec<String> {
     }
 
     // YAML frontmatter tags: [tag1, tag2]
-    if text.starts_with("---") {
-        if let Some(end) = text[3..].find("---") {
-            let frontmatter = &text[3..3 + end];
-            for line in frontmatter.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("tags:") {
-                    let rest = trimmed[5..].trim();
-                    // Parse [tag1, tag2] or tag1, tag2
-                    let rest = rest.trim_start_matches('[').trim_end_matches(']');
-                    for tag in rest.split(',') {
-                        let tag = tag.trim().trim_matches('"').trim_matches('\'');
-                        if !tag.is_empty() && seen.insert(tag.to_string()) {
-                            tags.push(tag.to_string());
-                        }
+    if text.starts_with("---")
+        && let Some(end) = text[3..].find("---")
+    {
+        let frontmatter = &text[3..3 + end];
+        for line in frontmatter.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("tags:") {
+                let rest = rest.trim();
+                // Parse [tag1, tag2] or tag1, tag2
+                let rest = rest.trim_start_matches('[').trim_end_matches(']');
+                for tag in rest.split(',') {
+                    let tag = tag.trim().trim_matches('"').trim_matches('\'');
+                    if !tag.is_empty() && seen.insert(tag.to_string()) {
+                        tags.push(tag.to_string());
                     }
                 }
             }

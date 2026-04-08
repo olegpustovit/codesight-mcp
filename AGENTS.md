@@ -45,6 +45,17 @@ This repository is the `codesight-mcp` Rust crate at repo root.
 
 ## Commands
 
+### Quality gates
+
+Before merging or declaring work complete, both of the following must pass (treat them as non-negotiable CI/agent gates):
+
+1. **Clippy (warnings denied):** `cargo clippy --all-targets -- -D warnings`
+2. **Tests:** `cargo nextest run` (full suite; same tests as nextest-cache, without skipping via cache)
+
+Formatting is expected to be clean: `cargo fmt --all -- --check` (or run `cargo fmt --all` before commit).
+
+### Day-to-day commands
+
 Use **[cargo-nextest](https://nexte.st/)** for all test runs (install: `cargo install cargo-nextest` or your OS package manager).
 
 ```bash
@@ -53,10 +64,10 @@ Use **[cargo-nextest](https://nexte.st/)** for all test runs (install: `cargo in
 cargo nextest run
 cargo nextest run --lib
 cargo fmt --all
-cargo clippy --all-targets
+cargo clippy --all-targets -- -D warnings
 ```
 
-Prefer `./scripts/nextest-cache` for local and agent loops. It still runs `cargo nextest run`, but skips identical successful invocations when the selected test inputs and command-line args have not changed. Use `./scripts/nextest-cache clean` to clear that cache, and call `cargo nextest run` directly for uncached verification or CI-style runs.
+Prefer `./scripts/nextest-cache` for local and agent loops. It still runs `cargo nextest run`, but skips identical successful invocations when the selected test inputs and command-line args have not changed. Use `./scripts/nextest-cache clean` to clear that cache, and call `cargo nextest run` directly for uncached verification or CI-style runs. A clean gate run should still execute **`cargo nextest run`** (not only a cached hit) when verifying a change before merge.
 
 Use plain `cargo test` only when nextest is unavailable in an environment, and prefer restoring nextest there.
 

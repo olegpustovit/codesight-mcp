@@ -2,15 +2,12 @@
 
 use serde_json::{Value, json};
 
-use crate::doc_storage::DocStore;
-use crate::model::SymbolKind;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
-use crate::service::agent_v1::args::{ContentRef, ReadContentArgs};
+use crate::service::agent_v1::args::ReadContentArgs;
 use crate::service::agent_v1::util::err_item;
 use crate::service::args::{FileContentArgs, GetSectionArgs, parse_args};
 use crate::service::helpers::ToolError;
-use crate::storage::IndexStore;
 
 impl CodeService {
     pub(in crate::service) fn read_content(&self, v: Value) -> anyhow::Result<Value> {
@@ -165,10 +162,8 @@ impl CodeService {
                                 err_item(code, msg)
                             } else {
                                 let mut data = v["data"].clone();
-                                if !want_body {
-                                    if let Some(obj) = data.as_object_mut() {
-                                        obj.remove("content");
-                                    }
+                                if !want_body && let Some(obj) = data.as_object_mut() {
+                                    obj.remove("content");
                                 }
                                 json!({ "content": data })
                             }

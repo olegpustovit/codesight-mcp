@@ -203,7 +203,7 @@ fn call_hierarchy_symbol_field_correct() {
     assert_eq!(sym["name"].as_str().unwrap(), "helper");
     let kind = sym["kind"].as_str().unwrap_or("");
     assert!(
-        kind == "function" || kind == "method" || kind == "",
+        kind == "function" || kind == "method" || kind.is_empty(),
         "kind should be function/method/empty, got '{kind}'"
     );
 }

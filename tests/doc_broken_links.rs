@@ -8,10 +8,6 @@ use codesight_mcp::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-fn doc_fixtures_root() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/doc_reference")
-}
-
 fn ingest_docs(svc: &CodeService, root: &Path) -> String {
     let r = svc
         .dispatch(

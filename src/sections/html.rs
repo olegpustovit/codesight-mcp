@@ -185,8 +185,7 @@ fn decode_html_entities(s: &str) -> String {
 
 fn decode_entity(entity: &str) -> Option<char> {
     // Numeric references
-    if entity.starts_with('#') {
-        let num_str = &entity[1..];
+    if let Some(num_str) = entity.strip_prefix('#') {
         if let Some(hex_str) = num_str
             .strip_prefix('x')
             .or_else(|| num_str.strip_prefix('X'))

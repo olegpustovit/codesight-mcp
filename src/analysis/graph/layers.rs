@@ -32,10 +32,10 @@ pub fn file_to_layer(path: &str, layers: &[LayerDef]) -> Option<String> {
             }
             // Also match if the filename itself matches the prefix (for flat repos)
             // e.g., prefix="routes.py" matches file "routes.py"
-            if let Some(file_name) = path.rsplit('/').next() {
-                if file_name == prefix {
-                    return Some(layer.name.clone());
-                }
+            if let Some(file_name) = path.rsplit('/').next()
+                && file_name == prefix
+            {
+                return Some(layer.name.clone());
             }
         }
     }

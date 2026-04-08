@@ -552,10 +552,10 @@ pub fn list_doc_summaries(docs_root: &Path) -> anyhow::Result<Vec<Value>> {
     for entry in fs::read_dir(docs_root)? {
         let entry = entry?;
         let db_path = entry.path().join("doc_index.sqlite3");
-        if let Some(store) = DocStore::open_existing(db_path)? {
-            if let Ok(summary) = store.doc_summary() {
-                repos.push(summary);
-            }
+        if let Some(store) = DocStore::open_existing(db_path)?
+            && let Ok(summary) = store.doc_summary()
+        {
+            repos.push(summary);
         }
     }
     Ok(repos)

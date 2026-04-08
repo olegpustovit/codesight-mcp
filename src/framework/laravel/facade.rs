@@ -42,13 +42,13 @@ pub fn extract_facade_imports(content: &str) -> Vec<ExtraImport> {
             continue;
         }
 
-        if let Some(resolved) = facades.get(facade_name) {
-            if seen.insert(facade_name.to_string()) {
-                imports.push(ExtraImport {
-                    specifier: resolved.to_string(),
-                    names: vec![facade_name.to_string()],
-                });
-            }
+        if let Some(resolved) = facades.get(facade_name)
+            && seen.insert(facade_name.to_string())
+        {
+            imports.push(ExtraImport {
+                specifier: resolved.to_string(),
+                names: vec![facade_name.to_string()],
+            });
         }
     }
 

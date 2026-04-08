@@ -42,6 +42,7 @@ pub fn qualify(scopes: &[String], name: &str) -> String {
     parts.join(".")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn push_symbol(
     symbols: &mut Vec<StoredSymbol>,
     file_path: &str,
@@ -61,6 +62,7 @@ pub fn push_symbol(
 /// Like [`push_symbol`] but accepts a pre-built `qualified_name` instead of
 /// computing it from scopes.  Use this when the language's native separator
 /// (e.g. Lua/Luau `:` for colon-methods) must be preserved verbatim.
+#[allow(clippy::too_many_arguments)]
 pub fn push_symbol_prequalified(
     symbols: &mut Vec<StoredSymbol>,
     file_path: &str,
@@ -97,6 +99,7 @@ pub fn push_symbol_prequalified(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn push_symbol_ex(
     symbols: &mut Vec<StoredSymbol>,
     file_path: &str,

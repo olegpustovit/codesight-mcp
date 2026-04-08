@@ -1,4 +1,4 @@
-//! Microsoft Dynamics 365 **AL** symbols: no dedicated `symbols.scm` pack, so extraction
+//! Microsoft Dynamics 365 **AL** symbols: no dedicated query pack yet, so extraction
 //! follows AL brace/keyword structure with line-oriented rules instead of shared queries.
 use regex::Regex;
 use std::sync::LazyLock;
@@ -312,7 +312,7 @@ impl super::LanguageExtractor for AlExtractor {
                 ));
                 // DataItems create a scope for nested columns
                 parent_stack.push(if let Some(p) = &current_parent {
-                    format!("{p}")
+                    p.to_string()
                 } else {
                     name.clone()
                 });
@@ -395,6 +395,7 @@ fn strip_xml_tags(s: &str) -> String {
     XML_TAG.replace_all(s, "").trim().to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_symbol(
     file_path: &str,
     name: &str,
@@ -440,6 +441,7 @@ fn make_symbol(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_symbol_with_sig(
     file_path: &str,
     name: &str,

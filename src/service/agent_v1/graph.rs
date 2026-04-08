@@ -1,7 +1,5 @@
 //! Dependency / reference graph tools.
 
-use std::collections::HashSet;
-
 use serde_json::{Value, json};
 
 use crate::fuzzy;
@@ -9,12 +7,9 @@ use crate::model::SearchSymbol;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
-use crate::service::agent_v1::util_graph::{
-    build_call_chain, extract_symbol_names_from_content, graph_ref_symbol_id,
-};
+use crate::service::agent_v1::util_graph::graph_ref_symbol_id;
 use crate::service::args::parse_args;
 use crate::service::helpers::ToolError;
-use crate::storage::{IndexStore, list_repo_summaries};
 
 impl CodeService {
     pub(in crate::service) fn inspect_graph(&self, v: Value) -> anyhow::Result<Value> {
@@ -137,7 +132,7 @@ impl CodeService {
                 };
                 let raw_bytes = store.repo_total_bytes()?;
                 let timer = MetaBuilder::new(raw_bytes);
-                let scan_cap = limit.saturating_mul(400).max(2_000).min(12_000);
+                let scan_cap = limit.saturating_mul(400).clamp(2_000, 12_000);
                 let candidates = match store.symbols_light_scan(None, None, scan_cap) {
                     Ok(c) => c,
                     Err(e) => {

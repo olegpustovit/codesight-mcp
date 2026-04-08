@@ -95,7 +95,7 @@ fn test_safe_rename_returns_true() {
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let d = &r["data"];
-    assert_eq!(d["safe"].as_bool().unwrap(), true);
+    assert!(d["safe"].as_bool().unwrap());
     assert!(d["conflicts"].as_array().unwrap().is_empty());
     assert!(d["checked_files"].as_u64().unwrap() >= 1);
 }
@@ -121,7 +121,7 @@ fn test_collision_detected() {
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let d = &r["data"];
-    assert_eq!(d["safe"].as_bool().unwrap(), false);
+    assert!(!d["safe"].as_bool().unwrap());
     let conflicts = d["conflicts"].as_array().unwrap();
     assert!(!conflicts.is_empty());
     let names: Vec<&str> = conflicts

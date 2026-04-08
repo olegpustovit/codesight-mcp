@@ -85,7 +85,7 @@ pub fn is_github_tree_source_blob(path: &str) -> bool {
         return false;
     };
     let ext_lc = ext.to_ascii_lowercase();
-    CODE_EXTENSIONS.iter().any(|e| *e == ext_lc.as_str())
+    CODE_EXTENSIONS.contains(&ext_lc.as_str())
 }
 
 /// How [`discover_github_tree_source_files`] applies file caps (explicit overrides config when both are set).

@@ -6,10 +6,9 @@ use serde_json::{Value, json};
 
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
-use crate::service::agent_v1::args::{ContentRef, EvaluateImpactArgs};
+use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::agent_v1::util_graph::{
-    build_call_chain, extract_symbol_names_from_content, git_head_sha, git_show_file,
-    simple_text_diff,
+    extract_symbol_names_from_content, git_head_sha, git_show_file, simple_text_diff,
 };
 use crate::service::args::parse_args;
 use crate::service::helpers::ToolError;
@@ -45,12 +44,12 @@ impl CodeService {
                 .stable_id
                 .clone()
                 .or(refs[0].id.clone())
-                .filter(|_| refs[0].kind.to_ascii_lowercase() == "symbol");
+                .filter(|_| refs[0].kind.eq_ignore_ascii_case("symbol"));
             let id_b = refs[1]
                 .stable_id
                 .clone()
                 .or(refs[1].id.clone())
-                .filter(|_| refs[1].kind.to_ascii_lowercase() == "symbol");
+                .filter(|_| refs[1].kind.eq_ignore_ascii_case("symbol"));
             let (Some(id_a), Some(id_b)) = (id_a, id_b) else {
                 return self.error_response(
                     &MetaBuilder::new(0),
@@ -346,7 +345,7 @@ impl CodeService {
             .as_ref()
             .map(|refs| {
                 refs.iter()
-                    .filter(|r| r.kind.to_ascii_lowercase() == "commit")
+                    .filter(|r| r.kind.eq_ignore_ascii_case("commit"))
                     .filter_map(|r| r.id.clone().or(r.stable_id.clone()))
                     .collect()
             })

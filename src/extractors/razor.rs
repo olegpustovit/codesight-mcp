@@ -77,7 +77,7 @@ impl super::LanguageExtractor for RazorExtractor {
                     line_end,
                     source,
                     "razor",
-                    &[view_name.clone()],
+                    std::slice::from_ref(&view_name),
                 ));
             }
             // @inject directives (Blazor)
@@ -93,7 +93,7 @@ impl super::LanguageExtractor for RazorExtractor {
                     line_end,
                     source,
                     "razor",
-                    &[view_name.clone()],
+                    std::slice::from_ref(&view_name),
                 ));
             }
 
@@ -110,7 +110,7 @@ impl super::LanguageExtractor for RazorExtractor {
                     line_end,
                     source,
                     "razor",
-                    &[view_name.clone()],
+                    std::slice::from_ref(&view_name),
                 ));
             }
 
@@ -129,7 +129,7 @@ impl super::LanguageExtractor for RazorExtractor {
                     line_end,
                     source,
                     "razor",
-                    &[view_name.clone()],
+                    std::slice::from_ref(&view_name),
                 ));
             }
 
@@ -147,7 +147,7 @@ impl super::LanguageExtractor for RazorExtractor {
                     line_end,
                     source,
                     "razor",
-                    &[view_name.clone()],
+                    std::slice::from_ref(&view_name),
                 ));
             }
 
@@ -610,6 +610,7 @@ fn extract_js_functions_via_ts(
     count > 0
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_js_function_decls(
     node: Node<'_>,
     script_inner: &str,
@@ -711,6 +712,7 @@ fn find_matching_brace(source: &str, open_pos: usize) -> Option<usize> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_sym(
     file_path: &str,
     name: &str,

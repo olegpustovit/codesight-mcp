@@ -223,11 +223,10 @@ pub fn check_trust(config: &AppConfig, resolved_path: &std::path::Path) -> Trust
         // ── Blacklist mode ──
         if folders.is_empty() {
             return TrustCheckResult::Untrusted {
-                error: format!(
-                    "trusted_folders_whitelist_mode is False (blacklist mode) \
+                error: "trusted_folders_whitelist_mode is False (blacklist mode) \
                      but trusted_folders list is empty. \
                      In blacklist mode you must list at least one untrusted path."
-                ),
+                    .to_string(),
             };
         }
 

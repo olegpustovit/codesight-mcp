@@ -25,35 +25,35 @@ pub struct EmbeddingProvider {
 ///
 /// Returns `None` when no provider is fully configured.
 pub fn detect_embedding_provider() -> Option<EmbeddingProvider> {
-    if let Ok(model) = std::env::var("CODESIGHT_EMBED_MODEL") {
-        if !model.is_empty() {
-            return Some(EmbeddingProvider {
-                provider: "sentence_transformers".to_string(),
-                model,
-            });
-        }
+    if let Ok(model) = std::env::var("CODESIGHT_EMBED_MODEL")
+        && !model.is_empty()
+    {
+        return Some(EmbeddingProvider {
+            provider: "sentence_transformers".to_string(),
+            model,
+        });
     }
     if let (Ok(key), Ok(model)) = (
         std::env::var("GOOGLE_API_KEY"),
         std::env::var("GOOGLE_EMBED_MODEL"),
-    ) {
-        if !key.is_empty() && !model.is_empty() {
-            return Some(EmbeddingProvider {
-                provider: "gemini".to_string(),
-                model,
-            });
-        }
+    ) && !key.is_empty()
+        && !model.is_empty()
+    {
+        return Some(EmbeddingProvider {
+            provider: "gemini".to_string(),
+            model,
+        });
     }
     if let (Ok(key), Ok(model)) = (
         std::env::var("OPENAI_API_KEY"),
         std::env::var("OPENAI_EMBED_MODEL"),
-    ) {
-        if !key.is_empty() && !model.is_empty() {
-            return Some(EmbeddingProvider {
-                provider: "openai".to_string(),
-                model,
-            });
-        }
+    ) && !key.is_empty()
+        && !model.is_empty()
+    {
+        return Some(EmbeddingProvider {
+            provider: "openai".to_string(),
+            model,
+        });
     }
     None
 }
@@ -112,14 +112,13 @@ impl EmbeddingStore {
             model: None,
             path: Some(path.clone()),
         };
-        if path.exists() {
-            if let Ok(data) = fs::read_to_string(&path) {
-                if let Ok(stored) = serde_json::from_str::<StoredData>(&data) {
-                    store.embeddings = stored.embeddings;
-                    store.dimension = stored.dimension;
-                    store.model = stored.model;
-                }
-            }
+        if path.exists()
+            && let Ok(data) = fs::read_to_string(&path)
+            && let Ok(stored) = serde_json::from_str::<StoredData>(&data)
+        {
+            store.embeddings = stored.embeddings;
+            store.dimension = stored.dimension;
+            store.model = stored.model;
         }
         store
     }
@@ -198,6 +197,12 @@ impl EmbeddingStore {
                 .ok()
                 .and_then(|json| fs::write(path, json).ok());
         }
+    }
+}
+
+impl Default for EmbeddingStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

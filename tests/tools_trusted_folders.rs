@@ -459,7 +459,7 @@ fn root_gitignore_still_works() {
     fs::create_dir_all(root.join(".git")).unwrap();
     fs::write(root.join(".gitignore"), "*.pyc\n__pycache__/\n").unwrap();
     fs::write(root.join("main.py"), "def main(): pass\n").unwrap();
-    fs::write(root.join("main.pyc"), &[0u8; 10]).unwrap();
+    fs::write(root.join("main.pyc"), [0u8; 10]).unwrap();
 
     let svc = make_service(ws.path());
     let sid = {

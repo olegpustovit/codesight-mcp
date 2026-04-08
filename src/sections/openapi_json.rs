@@ -165,20 +165,20 @@ fn render_operation(out: &mut String, op: &serde_json::Value) {
         out.push_str("\n\n");
     }
     // Parameters
-    if let Some(params) = op.get("parameters").and_then(|v| v.as_array()) {
-        if !params.is_empty() {
-            out.push_str("Parameters:\n\n");
-            for param in params {
-                let name = param.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                let location = param.get("in").and_then(|v| v.as_str()).unwrap_or("?");
-                let desc = param
-                    .get("description")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                out.push_str(&format!("- `{name}` ({location}): {desc}\n"));
-            }
-            out.push('\n');
+    if let Some(params) = op.get("parameters").and_then(|v| v.as_array())
+        && !params.is_empty()
+    {
+        out.push_str("Parameters:\n\n");
+        for param in params {
+            let name = param.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let location = param.get("in").and_then(|v| v.as_str()).unwrap_or("?");
+            let desc = param
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            out.push_str(&format!("- `{name}` ({location}): {desc}\n"));
         }
+        out.push('\n');
     }
     // Request body
     if let Some(rb) = op.get("requestBody") {
@@ -301,7 +301,7 @@ fn render_json_value(value: &serde_json::Value) -> String {
         serde_json::Value::Null => "null".to_string(),
         serde_json::Value::Array(arr) => arr
             .iter()
-            .map(|v| render_json_value(v))
+            .map(render_json_value)
             .collect::<Vec<_>>()
             .join(", "),
         serde_json::Value::Object(map) => map

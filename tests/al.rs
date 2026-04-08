@@ -286,7 +286,7 @@ fn test_al_field_in_extension() {
         })
         .collect();
     assert!(
-        fields.len() >= 1,
+        !fields.is_empty(),
         "expected 'Custom Field' with field( and 50100 in signature"
     );
 }
@@ -483,7 +483,7 @@ fn test_al_fieldgroup_extracted() {
         .iter()
         .filter(|s| s.signature.contains("fieldgroup(") && s.kind == SymbolKind::Constant)
         .collect();
-    assert!(fgs.len() >= 1, "expected >= 1 fieldgroup");
+    assert!(!fgs.is_empty(), "expected >= 1 fieldgroup");
 }
 
 #[test]
@@ -654,7 +654,7 @@ fn test_al_page_layout_field_extracted() {
         })
         .collect();
     assert!(
-        pfields.len() >= 1,
+        !pfields.is_empty(),
         "expected >= 1 page layout field with Rec."
     );
 }
@@ -668,7 +668,7 @@ fn test_al_variable_extracted() {
         .iter()
         .filter(|s| s.name == "LocalVar" && s.kind == SymbolKind::Constant)
         .collect();
-    assert!(vars.len() >= 1, "expected LocalVar constant");
+    assert!(!vars.is_empty(), "expected LocalVar constant");
     assert!(
         vars[0].signature.contains("Record"),
         "LocalVar signature should contain 'Record'"
@@ -682,7 +682,7 @@ fn test_al_variable_in_proc() {
         .iter()
         .filter(|s| s.name == "Total" && s.kind == SymbolKind::Constant)
         .collect();
-    assert!(vars.len() >= 1, "expected Total constant");
+    assert!(!vars.is_empty(), "expected Total constant");
     assert!(
         vars[0].signature.contains("Decimal"),
         "Total signature should contain 'Decimal'"

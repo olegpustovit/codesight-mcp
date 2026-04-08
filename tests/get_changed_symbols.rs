@@ -128,7 +128,7 @@ fn test_changed_symbols_github_repo_returns_not_local() {
 #[test]
 fn test_changed_symbols_no_sha_at_index_time() {
     // If index has no git_head, tool returns error asking for explicit since_sha.
-    let (ws, svc, sid) = make_git_repo(&[("x.py", "x = 1\n")]);
+    let (_ws, svc, sid) = make_git_repo(&[("x.py", "x = 1\n")]);
     let r = svc
         .dispatch(
             "evaluate_impact",
@@ -145,7 +145,7 @@ fn test_changed_symbols_no_sha_at_index_time() {
 
 #[test]
 fn test_changed_symbols_bad_since_sha() {
-    let (ws, svc, sid) = make_git_repo(&[("a.py", "def f(): pass\n")]);
+    let (_ws, svc, sid) = make_git_repo(&[("a.py", "def f(): pass\n")]);
     let r = svc
         .dispatch(
             "evaluate_impact",

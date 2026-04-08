@@ -49,7 +49,7 @@ Primary findings from the current tree:
 - The highest remaining modularity risk is now inside extractor/fallback internals, not in the public `agent-v1` surface.
 - The extractor system is already mostly query-first in spirit, but not yet in shape: 25 built-in query packs exist while ~6.6k LOC of Rust override extractors still carry language or container semantics that should mostly be data-driven.
 - Several grammars are already compiled into the shared SCM engine but still bypass it (`luau`, `scss`, `sql`, `yaml`); these are the highest-confidence migration targets because the missing piece is query-pack coverage, not parser availability.
-- Registration rigidity is easing: **`QUERY_FILES` is now build-generated** from `runtime/queries/*/symbols.scm`; **`builtin_grammar` + `registry_builder`** still require Rust edits for new grammars and overrides.
+- Registration rigidity is easing: **`QUERY_FILES` is now build-generated** from `runtime/queries/*/tags.scm`, and adding a pack for an existing compiled grammar no longer requires touching `registry_builder`; `builtin_grammar` still owns compiled grammar availability.
 - The real blocker for `vue`, `razor`, `blade`, and `ejs` is mixed-language orchestration and profile/alias handling, not an inability to express symbols with queries once the right subtree is isolated.
 - “Works acceptably on any codebase” cannot mean “curate every language by hand.” We need a tiered extractor model: curated query packs first, generic AST fallback second, container/injection runners third, tiny residual overrides last.
 - The highest remaining heuristic risk is now in analysis evidence (`dead_code`, `reference_check`, cross-repo package matching) and mixed-language fallback extractors.
@@ -62,7 +62,7 @@ These are the primary refactor drivers, not a full inventory.
 | Hotspot | Problem | Direction |
 |---|---|---|
 | `src/extractors/engine/mod.rs` + `src/extractors/engine/scm.rs` + `src/extractors/registry_builder.rs` | Grammar lookup, embedded query files, and extractor registration are still compile-time Rust edits. | Split grammar catalog from query-pack/profile catalogs; make pack discovery data-driven and keep Rust registration for grammars only. |
-| `runtime/queries/` | Packs use a crate-local `symbols.scm` convention with no injection story, no local override roots, and no shared metadata beyond comment headers. | Move toward standard pack layout (`tags.scm`, optional `injections.scm`, metadata) with auto-discovered tests and optional project-local roots. |
+| `runtime/queries/` | Pack layout is now standardized, but injections are only catalogued and most built-in metadata still lives in headers rather than richer pack files. | Keep the `tags.scm` / optional `injections.scm` / metadata contract stable and use it as the base for container/injection runner work. |
 | `src/extractors/{luau,scss,yaml}.rs`, `src/extractors/sql/mod.rs` | These overrides already rely on compiled tree-sitter grammars, but still reimplement AST walking in Rust. | Replace with query packs plus shared engine features; keep only tiny post-passes where the query protocol cannot express the output. |
 | `src/extractors/engine/scm.rs` (1667 LOC) | Query header parsing, pattern metadata, query execution, scope inference, doc cleanup, and a heuristic post-pass still live in one file. | Split into engine submodules with `ScmExtractor` as a thin facade and named internal phases. |
 | `src/indexing/imports/line.rs` (675 LOC) | Python, JS/TS, Vue, SQL, Dart, and Go fallbacks all live in one function family; service code duplicates capability knowledge with `LANGUAGES_WITH_IMPORT_EXTRACTION`. | Split fallback extractors by language and expose capability metadata from `indexing::imports`. |
@@ -365,16 +365,18 @@ Outcome:
 ### 6A. Standardize the query-pack protocol and catalogs
 
 Status:
-- [~] in progress (2026-04-08)
+- [x] done (2026-04-08)
 
 Progress:
-- [x] `build.rs` scans `runtime/queries/*/{tags,symbols}.scm` and optional `injections.scm`, and generates `OUT_DIR/builtin_query_packs.rs` with `BUILTIN_QUERY_PACKS` plus compatibility `QUERY_FILES`
+- [x] `build.rs` scans canonical `runtime/queries/*/tags.scm` packs plus optional `injections.scm` / `pack.toml`, and generates `OUT_DIR/builtin_query_packs.rs` with `BUILTIN_QUERY_PACKS` plus compatibility `QUERY_FILES`
 - [x] pack id in `QUERY_FILES` is the directory name (`rust` under `runtime/queries/rust/`, not a separate Rust alias key)
 - [x] `GrammarCatalog` / `QueryPackCatalog` / `LanguageProfileRegistry` split in code
 - [x] workspace `.codesight.toml` can provide `query_pack_roots = ["..."]`; `ExtractorRegistry::for_workspace_root(...)` overlays those packs without editing Rust core
 - [x] lightweight `pack.toml` metadata files are supported for workspace and built-in packs (`language`, `extensions`, `grammar`, `override_extractor`)
-- [~] `tags.scm` + `injections.scm` layout is supported by discovery; most built-in packs still use legacy `symbols.scm`
-- [~] pack compile / discovery tests now enumerate pack directories from disk; the tag/injection protocol still needs dedicated documentation
+- [x] all built-in packs now use canonical `tags.scm`; `symbols.scm` is no longer part of built-in discovery
+- [x] `QueryPackCatalog` validates pack metadata (`extensions`, `grammar` or `override_extractor`) and rejects malformed `pack.toml` input instead of silently ignoring it
+- [x] pack compile / discovery tests enumerate pack directories from disk, enforce canonical `tags.scm` layout, and compile every built-in SCM pack
+- [x] `runtime/queries/README.md` documents the pack layout, metadata precedence, baseline tag vocabulary, and the small query-property extensions still used by the engine
 
 Tasks:
 - replace the hardcoded `QUERY_FILES` list with auto-discovered built-in query-pack directories under `runtime/queries/*`
@@ -391,13 +393,17 @@ Done when:
 ### 6B. Add generic AST fallback and stop treating aliases as extractors
 
 Status:
-- [~] in progress (2026-04-08)
+- [x] done (2026-04-08)
 
 Progress:
 - [x] shared `GenericAstExtractor` added and registered for built-in grammars that do not yet have curated query packs
 - [x] `openapi` / `ansible` path aliases now resolve through `LanguageProfileRegistry` + generic `ProfiledExtractor` wrappers instead of bespoke alias extractor types
 - [x] registry now exposes `curated_languages()` separately from the broader supported language set
 - [x] `ExtractionTier` is stored on `StoredSymbol`, written to SQLite, read back through `SymbolRecord`, and surfaced in file/repo outline rows for downstream consumers
+- [x] registry now has an explicit language-level lookup (`extractor_for_language`) that prefers structural tiers (`curated > generic AST > manual`) without changing path-based override routing
+- [x] built-in grammar coverage is locked by tests: every grammar in `GrammarCatalog` resolves to either a curated pack or the shared generic AST fallback via registry language lookup
+- [x] the leftover dead `OpenApiExtractor` implementation was removed; alias support now lives only in profiles/classifier routing
+- [x] tests now assert that “supported language” and “curated language” are distinct registry concepts, and that profiled aliases rewrite emitted symbol language/tier
 
 Tasks:
 - add a generic AST extractor for grammars with no curated pack yet, using node-kind and `name`-field conventions as a baseline structural fallback

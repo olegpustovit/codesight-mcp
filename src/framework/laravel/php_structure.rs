@@ -125,12 +125,9 @@ pub(super) fn model_from_tree(content: &str) -> Option<ModelInfo> {
 }
 
 fn walk_model_class(node: Node<'_>, source: &str, info: &mut ModelInfo) {
-    match node.kind() {
-        "method_declaration" => {
-            collect_relationships_from_method(node, source, info);
-            collect_scope_from_method(node, source, info);
-        }
-        _ => {}
+    if node.kind() == "method_declaration" {
+        collect_relationships_from_method(node, source, info);
+        collect_scope_from_method(node, source, info);
     }
     let mut c = node.walk();
     for child in node.named_children(&mut c) {

@@ -105,41 +105,32 @@ fn visit_mapping(
 ) -> Result<()> {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        if child.kind() == "block_mapping_pair" {
-            if let Some(key_node) = child.child_by_field_name("key") {
-                let key = extract_scalar_text(key_node, source);
-                if key.is_empty() {
-                    continue;
-                }
+        if child.kind() == "block_mapping_pair"
+            && let Some(key_node) = child.child_by_field_name("key")
+        {
+            let key = extract_scalar_text(key_node, source);
+            if key.is_empty() {
+                continue;
+            }
 
-                let value_node = child.child_by_field_name("value");
-                let has_nested = value_node.map(|v| has_block_mapping(v)).unwrap_or(false);
+            let value_node = child.child_by_field_name("value");
+            let has_nested = value_node.map(|v| has_block_mapping(v)).unwrap_or(false);
 
-                let kind = if has_nested {
-                    SymbolKind::Type
-                } else {
-                    SymbolKind::Constant
-                };
+            let kind = if has_nested {
+                SymbolKind::Type
+            } else {
+                SymbolKind::Constant
+            };
 
-                push_symbol(
-                    symbols, file_path, "yaml", scopes, &key, kind, child, source, None,
-                )?;
+            push_symbol(
+                symbols, file_path, "yaml", scopes, &key, kind, child, source, None,
+            )?;
 
-                // Recurse into nested mappings with scope
-                if has_nested {
-                    if let Some(val) = value_node {
-                        let mut new_scopes = scopes.to_vec();
-                        new_scopes.push(key);
-                        visit_nested_value(
-                            val,
-                            file_path,
-                            source,
-                            is_ansible,
-                            &new_scopes,
-                            symbols,
-                        )?;
-                    }
-                }
+            // Recurse into nested mappings with scope
+            if has_nested && let Some(val) = value_node {
+                let mut new_scopes = scopes.to_vec();
+                new_scopes.push(key);
+                visit_nested_value(val, file_path, source, is_ansible, &new_scopes, symbols)?;
             }
         }
     }
@@ -291,10 +282,10 @@ fn sequence_has_play(node: Node<'_>, source: &str) -> bool {
         if child.kind() == "block_sequence_item" {
             let mut inner_cursor = child.walk();
             for inner in child.named_children(&mut inner_cursor) {
-                if let Some(mapping) = find_block_mapping_in(inner) {
-                    if has_yaml_key(mapping, source, "hosts") {
-                        return true;
-                    }
+                if let Some(mapping) = find_block_mapping_in(inner)
+                    && has_yaml_key(mapping, source, "hosts")
+                {
+                    return true;
                 }
             }
         }
@@ -332,12 +323,12 @@ fn find_module_fqcn(mapping: Node<'_>, source: &str) -> Option<String> {
     ];
     let mut cursor = mapping.walk();
     for child in mapping.named_children(&mut cursor) {
-        if child.kind() == "block_mapping_pair" {
-            if let Some(key) = child.child_by_field_name("key") {
-                let text = extract_scalar_text(key, source);
-                if text.contains('.') && !ANSIBLE_DIRECTIVES.contains(&text.as_str()) {
-                    return Some(text);
-                }
+        if child.kind() == "block_mapping_pair"
+            && let Some(key) = child.child_by_field_name("key")
+        {
+            let text = extract_scalar_text(key, source);
+            if text.contains('.') && !ANSIBLE_DIRECTIVES.contains(&text.as_str()) {
+                return Some(text);
             }
         }
     }
@@ -360,14 +351,14 @@ fn find_block_mapping_in(node: Node<'_>) -> Option<Node<'_>> {
 fn find_yaml_key_value(mapping: Node<'_>, source: &str, key_name: &str) -> Option<String> {
     let mut cursor = mapping.walk();
     for child in mapping.named_children(&mut cursor) {
-        if child.kind() == "block_mapping_pair" {
-            if let Some(key) = child.child_by_field_name("key") {
-                let text = extract_scalar_text(key, source);
-                if text == key_name {
-                    if let Some(val) = child.child_by_field_name("value") {
-                        return Some(extract_scalar_text(val, source));
-                    }
-                }
+        if child.kind() == "block_mapping_pair"
+            && let Some(key) = child.child_by_field_name("key")
+        {
+            let text = extract_scalar_text(key, source);
+            if text == key_name
+                && let Some(val) = child.child_by_field_name("value")
+            {
+                return Some(extract_scalar_text(val, source));
             }
         }
     }
@@ -387,15 +378,15 @@ fn extract_ansible_tasks(
 ) -> Result<()> {
     let mut cursor = play_mapping.walk();
     for child in play_mapping.named_children(&mut cursor) {
-        if child.kind() == "block_mapping_pair" {
-            if let Some(key) = child.child_by_field_name("key") {
-                let text = extract_scalar_text(key, source);
-                if text == "tasks" || text == "handlers" {
-                    if let Some(val) = child.child_by_field_name("value") {
-                        let parent_scope = format!("{play_name}.{text}");
-                        extract_task_list(val, file_path, source, &parent_scope, symbols)?;
-                    }
-                }
+        if child.kind() == "block_mapping_pair"
+            && let Some(key) = child.child_by_field_name("key")
+        {
+            let text = extract_scalar_text(key, source);
+            if (text == "tasks" || text == "handlers")
+                && let Some(val) = child.child_by_field_name("value")
+            {
+                let parent_scope = format!("{play_name}.{text}");
+                extract_task_list(val, file_path, source, &parent_scope, symbols)?;
             }
         }
     }
@@ -456,12 +447,9 @@ mod tests {
         let src = "services:\n  api:\n    image: myapp:latest\n    port: 8080\nfeature_flags:\n  signup: true\n";
         let s = YamlExtractor.extract("config.yaml", src).expect("yaml");
         let names: Vec<&str> = s.iter().map(|x| x.name.as_str()).collect();
+        assert!(names.contains(&"services"), "missing services: {names:?}");
         assert!(
-            names.iter().any(|n| *n == "services"),
-            "missing services: {names:?}"
-        );
-        assert!(
-            names.iter().any(|n| *n == "feature_flags"),
+            names.contains(&"feature_flags"),
             "missing feature_flags: {names:?}"
         );
     }
@@ -477,7 +465,7 @@ mod tests {
         let src = "---\nfoo: bar\n---\nbaz: qux\n";
         let s = YamlExtractor.extract("multi.yaml", src).expect("yaml");
         let names: Vec<&str> = s.iter().map(|x| x.name.as_str()).collect();
-        assert!(names.iter().any(|n| *n == "foo"), "missing foo: {names:?}");
-        assert!(names.iter().any(|n| *n == "baz"), "missing baz: {names:?}");
+        assert!(names.contains(&"foo"), "missing foo: {names:?}");
+        assert!(names.contains(&"baz"), "missing baz: {names:?}");
     }
 }
