@@ -11,11 +11,13 @@
 
 use regex::Regex;
 use std::sync::LazyLock;
-use tree_sitter::Node;
 
 use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
-use super::common::{node_text, parse_tree};
+use super::containers::{
+    RemapOptions, SegmentOrigin, WrappedSegment, extract_host_segment,
+    extract_wrapped_host_segment, find_html_tag_blocks,
+};
 use super::fallback_pipeline::sort_symbols_by_span;
 
 pub struct RazorExtractor;
@@ -227,211 +229,36 @@ fn extract_csharp_block_via_ts(
     body_start_file: usize,
     symbols: &mut Vec<StoredSymbol>,
 ) -> bool {
+    const WRAPPER_NAME: &str = "__CodesightRazorHost";
     const PREFIX: &str = "class __CodesightRazorHost {\n";
     const SUFFIX: &str = "\n}";
-    let wrapped = format!("{PREFIX}{block_content}{SUFFIX}");
-    let Ok(tree) = parse_tree(tree_sitter_c_sharp::LANGUAGE, &wrapped) else {
-        return false;
-    };
-    let inner_base = PREFIX.len();
-    let inner_end = inner_base + block_content.len();
-    let mut count = 0usize;
-    walk_csharp_declarations(
-        tree.root_node(),
-        &wrapped,
+    let Ok(mut delegated) = extract_wrapped_host_segment(
+        "csharp",
         file_path,
         source,
-        view_name,
-        body_start_file,
-        inner_base,
-        inner_end,
-        symbols,
-        &mut count,
-    );
-    count > 0
-}
-
-#[allow(clippy::too_many_arguments)]
-fn walk_csharp_declarations(
-    node: Node<'_>,
-    wrapped: &str,
-    file_path: &str,
-    full_source: &str,
-    view_name: &str,
-    body_start_file: usize,
-    inner_base: usize,
-    inner_end: usize,
-    symbols: &mut Vec<StoredSymbol>,
-    count: &mut usize,
-) {
-    let map_byte = |b: usize| body_start_file + b.saturating_sub(inner_base);
-    let in_block = |n: Node<'_>| n.start_byte() >= inner_base && n.end_byte() <= inner_end;
-
-    match node.kind() {
-        "method_declaration" if in_block(node) => {
-            if let Some(name_node) = node.child_by_field_name("name")
-                && let Ok(name) = node_text(name_node, wrapped)
-                && name != "get"
-                && name != "set"
-                && name != "value"
-            {
-                push_csharp_method_symbol(
-                    file_path,
-                    full_source,
-                    view_name,
-                    name,
-                    node,
-                    map_byte,
-                    symbols,
-                );
-                *count += 1;
-            }
-        }
-        "property_declaration" if in_block(node) => {
-            if let Some(name_node) = node.child_by_field_name("name")
-                && let Ok(name) = node_text(name_node, wrapped)
-            {
-                push_csharp_fieldlike_symbol(
-                    file_path,
-                    full_source,
-                    view_name,
-                    name,
-                    node,
-                    map_byte,
-                    symbols,
-                );
-                *count += 1;
-            }
-        }
-        "field_declaration" if in_block(node) => {
-            let mut c = node.walk();
-            for child in node.named_children(&mut c) {
-                if child.kind() != "variable_declaration" {
-                    continue;
-                }
-                let mut c2 = child.walk();
-                for vd in child.named_children(&mut c2) {
-                    if vd.kind() != "variable_declarator" {
-                        continue;
-                    }
-                    if let Some(id_node) = vd.child_by_field_name("name")
-                        && let Ok(name) = node_text(id_node, wrapped)
-                    {
-                        push_csharp_fieldlike_symbol(
-                            file_path,
-                            full_source,
-                            view_name,
-                            name,
-                            vd,
-                            map_byte,
-                            symbols,
-                        );
-                        *count += 1;
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        walk_csharp_declarations(
-            child,
-            wrapped,
-            file_path,
-            full_source,
-            view_name,
-            body_start_file,
-            inner_base,
-            inner_end,
-            symbols,
-            count,
-        );
-    }
-}
-
-fn push_csharp_method_symbol(
-    file_path: &str,
-    full_source: &str,
-    view_name: &str,
-    name: &str,
-    span: Node<'_>,
-    map_byte: impl Fn(usize) -> usize,
-    symbols: &mut Vec<StoredSymbol>,
-) {
-    let abs_start = map_byte(span.start_byte());
-    let abs_end = map_byte(span.end_byte()).min(full_source.len());
-    let line_num = full_source[..abs_start].lines().count() as u32;
-    let end_line = full_source[..abs_end].lines().count() as u32;
-    let line_text = full_source
-        .lines()
-        .nth(line_num.saturating_sub(1) as usize)
-        .unwrap_or("");
-    let src_text = full_source.get(abs_start..abs_end).unwrap_or("");
-    let name = name.to_string();
-    symbols.push(StoredSymbol {
-        id: format!("{file_path}::{view_name}.{name}#method"),
-        extraction_tier: ExtractionTier::ManualOverride,
-        language: "csharp".to_string(),
-        file_path: file_path.to_string(),
-        qualified_name: format!("{view_name}.{name}"),
-        name,
-        kind: SymbolKind::Method,
-        signature: line_text.trim().to_string(),
-        summary: line_text.trim().to_string(),
-        start_line: line_num,
-        end_line,
-        start_byte: abs_start,
-        end_byte: abs_end,
-        source_hash: blake3::hash(src_text.as_bytes()).to_hex().to_string(),
-        source_text: src_text.to_string(),
-        file_size_bytes: full_source.len() as u64,
+        WrappedSegment {
+            inner_source: block_content,
+            host_start_byte: body_start_file,
+            wrapper_prefix: PREFIX,
+            wrapper_suffix: SUFFIX,
+        },
+        RemapOptions {
+            qualified_name_prefix: Some(view_name),
+            strip_qualified_name_prefix: Some("__CodesightRazorHost."),
+            ..Default::default()
+        },
+    ) else {
+        return false;
+    };
+    delegated.retain(|symbol| {
+        symbol.name != WRAPPER_NAME
+            && symbol.name != "get"
+            && symbol.name != "set"
+            && symbol.name != "value"
     });
-}
-
-fn push_csharp_fieldlike_symbol(
-    file_path: &str,
-    full_source: &str,
-    view_name: &str,
-    name: &str,
-    span: Node<'_>,
-    map_byte: impl Fn(usize) -> usize,
-    symbols: &mut Vec<StoredSymbol>,
-) {
-    if symbols
-        .iter()
-        .any(|s| s.name == name && s.kind == SymbolKind::Method)
-    {
-        return;
-    }
-    let abs_start = map_byte(span.start_byte());
-    let abs_end = map_byte(span.end_byte()).min(full_source.len());
-    let line_num = full_source[..abs_start].lines().count() as u32;
-    let line_text = full_source
-        .lines()
-        .nth(line_num.saturating_sub(1) as usize)
-        .unwrap_or("");
-    let name = name.to_string();
-    let src_text = full_source.get(abs_start..abs_end).unwrap_or("");
-    symbols.push(StoredSymbol {
-        id: format!("{file_path}::{view_name}.{name}#constant"),
-        extraction_tier: ExtractionTier::ManualOverride,
-        language: "csharp".to_string(),
-        file_path: file_path.to_string(),
-        qualified_name: format!("{view_name}.{name}"),
-        name,
-        kind: SymbolKind::Constant,
-        signature: line_text.trim().to_string(),
-        summary: line_text.trim().to_string(),
-        start_line: line_num,
-        end_line: line_num,
-        start_byte: abs_start,
-        end_byte: abs_end,
-        source_hash: blake3::hash(src_text.as_bytes()).to_hex().to_string(),
-        source_text: src_text.to_string(),
-        file_size_bytes: full_source.len() as u64,
-    });
+    let added = delegated.len();
+    symbols.extend(delegated);
+    added > 0
 }
 
 /// Regex fallback for Razor C# fragments tree-sitter rejects or parses with zero declarations.
@@ -529,32 +356,23 @@ fn extract_inline_js(
     view_name: &str,
     symbols: &mut Vec<StoredSymbol>,
 ) {
-    let script_open = Regex::new(r"(?i)<script(?:\s[^>]*)?>").unwrap();
-    let script_close = Regex::new(r"(?i)</script>").unwrap();
-
-    let opens: Vec<_> = script_open.find_iter(source).collect();
-    let closes: Vec<_> = script_close.find_iter(source).collect();
-
-    for (open_match, close_match) in opens.iter().zip(closes.iter()) {
-        let tag = open_match.as_str();
-        if tag.contains("src=") {
+    for block in find_html_tag_blocks(source, "script").unwrap_or_default() {
+        if block.attrs.contains("src=") {
             continue;
         }
-        let content = &source[open_match.end()..close_match.start()];
-        let content_start = open_match.end();
 
         if !extract_js_functions_via_ts(
             file_path,
             source,
             view_name,
-            content,
-            content_start,
+            block.content,
+            block.content_start_byte,
             symbols,
         ) {
-            for caps in RE_JS_FUNCTION.captures_iter(content) {
+            for caps in RE_JS_FUNCTION.captures_iter(block.content) {
                 let name = caps[1].to_string();
                 let match_start = caps.get(0).unwrap().start();
-                let abs_byte = content_start + match_start;
+                let abs_byte = block.content_start_byte + match_start;
                 let line_num = source[..abs_byte].lines().count() as u32;
                 let line_text = source
                     .lines()
@@ -593,86 +411,23 @@ fn extract_js_functions_via_ts(
     script_inner_start_file: usize,
     symbols: &mut Vec<StoredSymbol>,
 ) -> bool {
-    let Ok(tree) = parse_tree(tree_sitter_javascript::LANGUAGE, script_inner) else {
-        return false;
-    };
-    let mut count = 0usize;
-    walk_js_function_decls(
-        tree.root_node(),
-        script_inner,
+    let Ok(mut delegated) = extract_host_segment(
+        "javascript",
         file_path,
         full_source,
-        view_name,
-        script_inner_start_file,
-        symbols,
-        &mut count,
-    );
-    count > 0
-}
-
-#[allow(clippy::too_many_arguments)]
-fn walk_js_function_decls(
-    node: Node<'_>,
-    script_inner: &str,
-    file_path: &str,
-    full_source: &str,
-    view_name: &str,
-    script_inner_start_file: usize,
-    symbols: &mut Vec<StoredSymbol>,
-    count: &mut usize,
-) {
-    if node.kind() == "function_declaration"
-        && let Some(name_node) = node.child_by_field_name("name")
-        && let Ok(name) = node_text(name_node, script_inner)
-    {
-        let abs_start = script_inner_start_file + node.start_byte();
-        let abs_end = script_inner_start_file + node.end_byte();
-        let line_num = full_source[..abs_start].lines().count() as u32;
-        let end_line = full_source[..abs_end.min(full_source.len())]
-            .lines()
-            .count() as u32;
-        let line_text = full_source
-            .lines()
-            .nth(line_num.saturating_sub(1) as usize)
-            .unwrap_or("");
-        let src_text = full_source
-            .get(abs_start..abs_end.min(full_source.len()))
-            .unwrap_or("");
-        let name = name.to_string();
-        symbols.push(StoredSymbol {
-            id: format!("{file_path}::{view_name}.{name}#function"),
-            extraction_tier: ExtractionTier::ManualOverride,
-            language: "javascript".to_string(),
-            file_path: file_path.to_string(),
-            qualified_name: format!("{view_name}.{name}"),
-            name,
-            kind: SymbolKind::Function,
-            signature: line_text.trim().to_string(),
-            summary: line_text.trim().to_string(),
-            start_line: line_num,
-            end_line,
-            start_byte: abs_start,
-            end_byte: abs_end.min(full_source.len()),
-            source_hash: blake3::hash(src_text.as_bytes()).to_hex().to_string(),
-            source_text: src_text.to_string(),
-            file_size_bytes: full_source.len() as u64,
-        });
-        *count += 1;
-    }
-
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        walk_js_function_decls(
-            child,
-            script_inner,
-            file_path,
-            full_source,
-            view_name,
-            script_inner_start_file,
-            symbols,
-            count,
-        );
-    }
+        script_inner,
+        SegmentOrigin::new(full_source, script_inner_start_file),
+        RemapOptions {
+            qualified_name_prefix: Some(view_name),
+            ..Default::default()
+        },
+    ) else {
+        return false;
+    };
+    delegated.retain(|symbol| symbol.kind == SymbolKind::Function);
+    let added = delegated.len();
+    symbols.extend(delegated);
+    added > 0
 }
 
 fn find_matching_brace(source: &str, open_pos: usize) -> Option<usize> {

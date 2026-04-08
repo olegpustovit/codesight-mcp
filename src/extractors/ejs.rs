@@ -6,6 +6,8 @@ use std::sync::LazyLock;
 
 use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
+use super::containers::{RemapOptions, SegmentOrigin, extract_host_segment};
+
 pub struct EjsExtractor;
 
 impl super::LanguageExtractor for EjsExtractor {
@@ -36,31 +38,26 @@ impl super::LanguageExtractor for EjsExtractor {
             source,
         ));
 
-        let lines: Vec<&str> = source.lines().collect();
-        let mut byte_offset = 0usize;
+        let masked_javascript = mask_ejs_scriptlets(source);
+        let mut delegated = extract_host_segment(
+            "javascript",
+            file_path,
+            source,
+            &masked_javascript,
+            SegmentOrigin::new(source, 0),
+            RemapOptions {
+                language_override: Some("ejs"),
+                ..Default::default()
+            },
+        )
+        .unwrap_or_default();
+        delegated.retain(|symbol| symbol.kind == SymbolKind::Function);
+        if delegated.is_empty() {
+            delegated.extend(regex_function_symbols(file_path, source));
+        }
+        symbols.extend(delegated);
 
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = (i + 1) as u32;
-            let line_start = byte_offset;
-            let line_end = byte_offset + line.len();
-
-            // JS function inside scriptlet: <% function name(args) { %>
-            if let Some(caps) = re::FUNCTION.captures(line) {
-                let name = caps.get(1).unwrap().as_str();
-                let sig = caps.get(0).unwrap().as_str().trim();
-                symbols.push(make_symbol_with_sig(
-                    file_path,
-                    name,
-                    SymbolKind::Function,
-                    line_num,
-                    sig,
-                    line_start,
-                    line_end,
-                    source,
-                ));
-            }
-
-            // Include references: <%- include('path') %> or <%- include('path', data) %>
+        for (line_num, line_start, line_end, line) in source_lines(source) {
             if let Some(caps) = re::INCLUDE.captures(line) {
                 let path = caps.get(1).unwrap().as_str();
                 symbols.push(make_symbol(
@@ -74,8 +71,6 @@ impl super::LanguageExtractor for EjsExtractor {
                     source,
                 ));
             }
-
-            byte_offset += line.len() + 1;
         }
 
         symbols.sort_by_key(|s| (s.start_byte, s.end_byte));
@@ -95,6 +90,72 @@ mod re {
     pub static INCLUDE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"<%[-=]?\s*include\s*\(\s*['"]([^'"]+)['"]\s*(?:,[^)]*)?\)"#).unwrap()
     });
+}
+
+fn source_lines(source: &str) -> Vec<(u32, usize, usize, &str)> {
+    let mut lines = Vec::new();
+    let mut byte_offset = 0usize;
+    for (index, line) in source.lines().enumerate() {
+        let start = byte_offset;
+        let end = byte_offset + line.len();
+        lines.push(((index + 1) as u32, start, end, line));
+        byte_offset += line.len() + 1;
+    }
+    lines
+}
+
+fn regex_function_symbols(file_path: &str, source: &str) -> Vec<StoredSymbol> {
+    source_lines(source)
+        .into_iter()
+        .filter_map(|(line_num, line_start, line_end, line)| {
+            let caps = re::FUNCTION.captures(line)?;
+            let name = caps.get(1)?.as_str();
+            let signature = caps.get(0)?.as_str().trim();
+            Some(make_symbol_with_sig(
+                file_path,
+                name,
+                SymbolKind::Function,
+                line_num,
+                signature,
+                line_start,
+                line_end,
+                source,
+            ))
+        })
+        .collect()
+}
+
+fn mask_ejs_scriptlets(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut masked = bytes
+        .iter()
+        .map(|byte| if *byte == b'\n' { b'\n' } else { b' ' })
+        .collect::<Vec<_>>();
+    let mut index = 0usize;
+
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'<' && bytes[index + 1] == b'%' {
+            let open_len = if matches!(bytes.get(index + 2), Some(b'=') | Some(b'-')) {
+                3
+            } else {
+                2
+            };
+            let mut cursor = index + open_len;
+            while cursor + 1 < bytes.len() {
+                if bytes[cursor] == b'%' && bytes[cursor + 1] == b'>' {
+                    masked[(index + open_len)..cursor]
+                        .copy_from_slice(&bytes[(index + open_len)..cursor]);
+                    index = cursor + 2;
+                    break;
+                }
+                cursor += 1;
+            }
+        } else {
+            index += 1;
+        }
+    }
+
+    String::from_utf8(masked).expect("masked EJS buffer should stay utf-8")
 }
 
 #[allow(clippy::too_many_arguments)]

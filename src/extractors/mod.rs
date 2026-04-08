@@ -3,6 +3,7 @@ mod asm;
 mod blade;
 pub(crate) mod classifier;
 pub(crate) mod common;
+pub(crate) mod containers;
 mod ejs;
 pub mod engine;
 pub(crate) mod fallback_pipeline;

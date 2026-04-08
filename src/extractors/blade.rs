@@ -5,6 +5,8 @@ use std::sync::LazyLock;
 
 use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
+use super::containers::{RemapOptions, WrappedSegment, extract_wrapped_host_segment};
+
 pub struct BladeExtractor;
 
 impl super::LanguageExtractor for BladeExtractor {
@@ -99,6 +101,35 @@ impl super::LanguageExtractor for BladeExtractor {
             byte_offset += line.len() + 1;
         }
 
+        for block in blade_php_blocks(source) {
+            let mut delegated = extract_wrapped_host_segment(
+                "php",
+                file_path,
+                source,
+                WrappedSegment {
+                    inner_source: block.content,
+                    host_start_byte: block.content_start,
+                    wrapper_prefix: "<?php\n",
+                    wrapper_suffix: "\n?>",
+                },
+                RemapOptions {
+                    language_override: Some("blade"),
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_default();
+            delegated.retain(|symbol| {
+                matches!(
+                    symbol.kind,
+                    SymbolKind::Class
+                        | SymbolKind::Function
+                        | SymbolKind::Method
+                        | SymbolKind::Constant
+                )
+            });
+            symbols.extend(delegated);
+        }
+
         symbols.sort_by_key(|s| (s.start_byte, s.end_byte));
         Ok(symbols)
     }
@@ -175,4 +206,29 @@ mod re {
     pub fn livewire(s: &str) -> Option<String> {
         LIVEWIRE.captures(s).map(|c| c[1].to_string())
     }
+}
+
+#[derive(Clone, Copy)]
+struct BladePhpBlock<'a> {
+    content: &'a str,
+    content_start: usize,
+}
+
+fn blade_php_blocks(source: &str) -> Vec<BladePhpBlock<'_>> {
+    static AT_PHP: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)@php\s*(.*?)\s*@endphp").unwrap());
+    static PHP_TAG: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)<\?php\s*(.*?)\s*\?>").unwrap());
+
+    AT_PHP
+        .captures_iter(source)
+        .chain(PHP_TAG.captures_iter(source))
+        .filter_map(|captures| {
+            let content = captures.get(1)?;
+            Some(BladePhpBlock {
+                content: content.as_str(),
+                content_start: content.start(),
+            })
+        })
+        .collect()
 }

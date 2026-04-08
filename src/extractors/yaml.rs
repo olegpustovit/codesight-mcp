@@ -1,12 +1,18 @@
-//! Generic YAML symbol extraction plus Ansible task shapes when the path matches
-//! conventional Ansible layout ([`super::classifier::path_suggests_ansible_layout`]).
+//! Generic YAML symbols come from the shared query-pack engine. Ansible keeps a small
+//! path-aware post-pass because plays/tasks are host semantics layered over YAML structure.
+
+use std::path::Path;
+use std::sync::LazyLock;
+
 use anyhow::Result;
 use tree_sitter::Node;
 
-use crate::model::SymbolKind;
+use crate::model::{ExtractionTier, SymbolKind};
 
 use super::classifier::path_suggests_ansible_layout;
 use super::common::{node_text, parse_tree, push_symbol};
+use crate::extractors::engine::catalogs::QueryPackCatalog;
+use crate::extractors::engine::scm::ScmExtractor;
 
 pub struct YamlExtractor;
 
@@ -19,75 +25,55 @@ impl super::LanguageExtractor for YamlExtractor {
         &["yaml", "yml"]
     }
 
+    fn extraction_tier(&self) -> ExtractionTier {
+        ExtractionTier::CuratedQueryPack
+    }
+
     fn extract(
         &self,
         file_path: &str,
         source: &str,
     ) -> anyhow::Result<Vec<crate::model::StoredSymbol>> {
+        if !path_suggests_ansible_layout(Path::new(file_path)) {
+            return yaml_pack().extract(file_path, source);
+        }
+
         let tree = parse_tree(tree_sitter_yaml::LANGUAGE, source)?;
         let mut symbols = Vec::new();
-        let is_ansible = path_suggests_ansible_layout(std::path::Path::new(file_path));
-        visit_stream(
-            tree.root_node(),
-            file_path,
-            source,
-            is_ansible,
-            &[],
-            &mut symbols,
-        )?;
-        symbols.sort_by_key(|s| (s.start_byte, s.end_byte));
+        visit_ansible_nodes(tree.root_node(), file_path, source, &mut symbols)?;
+        if symbols.is_empty() {
+            return yaml_pack().extract(file_path, source);
+        }
+        symbols.sort_by_key(|symbol| (symbol.start_byte, symbol.end_byte));
         Ok(symbols)
     }
 }
 
-fn visit_stream(
-    node: Node<'_>,
-    file_path: &str,
-    source: &str,
-    is_ansible: bool,
-    scopes: &[String],
-    symbols: &mut Vec<crate::model::StoredSymbol>,
-) -> Result<()> {
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        match child.kind() {
-            "document" | "stream" => {
-                visit_stream(child, file_path, source, is_ansible, scopes, symbols)?;
-            }
-            "block_node" => {
-                visit_block_node(child, file_path, source, is_ansible, scopes, symbols)?;
-            }
-            "block_mapping" => {
-                visit_mapping(child, file_path, source, is_ansible, scopes, symbols)?;
-            }
-            "block_sequence" if is_ansible => {
-                visit_ansible_sequence(child, file_path, source, scopes, symbols)?;
-            }
-            _ => {
-                // Recurse for unknown containers
-                visit_stream(child, file_path, source, is_ansible, scopes, symbols)?;
-            }
-        }
-    }
-    Ok(())
+fn yaml_pack() -> &'static ScmExtractor {
+    static YAML_PACK: LazyLock<ScmExtractor> = LazyLock::new(|| {
+        let catalog = QueryPackCatalog::builtin();
+        let pack = catalog
+            .find_by_pack_id("yaml")
+            .expect("missing yaml query pack");
+        ScmExtractor::from_pack(pack).expect("failed to compile yaml query pack")
+    });
+    &YAML_PACK
 }
 
-fn visit_block_node(
+fn visit_ansible_nodes(
     node: Node<'_>,
     file_path: &str,
     source: &str,
-    is_ansible: bool,
-    scopes: &[String],
     symbols: &mut Vec<crate::model::StoredSymbol>,
 ) -> Result<()> {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         match child.kind() {
-            "block_mapping" => {
-                visit_mapping(child, file_path, source, is_ansible, scopes, symbols)?;
+            "stream" | "document" | "block_node" => {
+                visit_ansible_nodes(child, file_path, source, symbols)?;
             }
-            "block_sequence" if is_ansible => {
-                visit_ansible_sequence(child, file_path, source, scopes, symbols)?;
+            "block_sequence" => {
+                visit_ansible_sequence(child, file_path, source, &[], symbols)?;
             }
             _ => {}
         }
@@ -95,86 +81,94 @@ fn visit_block_node(
     Ok(())
 }
 
-fn visit_mapping(
+fn visit_ansible_sequence(
     node: Node<'_>,
     file_path: &str,
     source: &str,
-    is_ansible: bool,
     scopes: &[String],
     symbols: &mut Vec<crate::model::StoredSymbol>,
 ) -> Result<()> {
+    let has_any_play = sequence_has_play(node, source);
+
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        if child.kind() == "block_mapping_pair"
-            && let Some(key_node) = child.child_by_field_name("key")
-        {
-            let key = extract_scalar_text(key_node, source);
-            if key.is_empty() {
-                continue;
-            }
+        if child.kind() != "block_sequence_item" {
+            continue;
+        }
+        let mut inner_cursor = child.walk();
+        for inner in child.named_children(&mut inner_cursor) {
+            if let Some(mapping) = find_block_mapping_in(inner) {
+                let has_hosts = has_yaml_key(mapping, source, "hosts");
 
-            let value_node = child.child_by_field_name("value");
-            let has_nested = value_node.map(|v| has_block_mapping(v)).unwrap_or(false);
-
-            let kind = if has_nested {
-                SymbolKind::Type
-            } else {
-                SymbolKind::Constant
-            };
-
-            push_symbol(
-                symbols, file_path, "yaml", scopes, &key, kind, child, source, None,
-            )?;
-
-            // Recurse into nested mappings with scope
-            if has_nested && let Some(val) = value_node {
-                let mut new_scopes = scopes.to_vec();
-                new_scopes.push(key);
-                visit_nested_value(val, file_path, source, is_ansible, &new_scopes, symbols)?;
+                if has_hosts {
+                    if let Some(name) = find_yaml_key_value(mapping, source, "name") {
+                        push_symbol(
+                            symbols,
+                            file_path,
+                            "ansible",
+                            scopes,
+                            &name,
+                            SymbolKind::Class,
+                            child,
+                            source,
+                            None,
+                        )?;
+                        extract_ansible_tasks(mapping, file_path, source, &name, symbols)?;
+                    }
+                } else if !has_any_play {
+                    let task_name = find_yaml_key_value(mapping, source, "name")
+                        .or_else(|| find_module_fqcn(mapping, source));
+                    if let Some(name) = task_name {
+                        push_symbol(
+                            symbols,
+                            file_path,
+                            "yaml",
+                            &["task.tasks".to_string()],
+                            &name,
+                            SymbolKind::Function,
+                            child,
+                            source,
+                            None,
+                        )?;
+                    }
+                } else if let Some(name) = find_yaml_key_value(mapping, source, "name") {
+                    push_symbol(
+                        symbols,
+                        file_path,
+                        "yaml",
+                        scopes,
+                        &name,
+                        SymbolKind::Function,
+                        child,
+                        source,
+                        None,
+                    )?;
+                }
             }
         }
     }
     Ok(())
 }
 
-fn visit_nested_value(
-    node: Node<'_>,
-    file_path: &str,
-    source: &str,
-    is_ansible: bool,
-    scopes: &[String],
-    symbols: &mut Vec<crate::model::StoredSymbol>,
-) -> Result<()> {
+fn sequence_has_play(node: Node<'_>, source: &str) -> bool {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        match child.kind() {
-            "block_mapping" => {
-                visit_mapping(child, file_path, source, is_ansible, scopes, symbols)?;
-            }
-            "block_node" => {
-                visit_nested_value(child, file_path, source, is_ansible, scopes, symbols)?;
-            }
-            _ => {}
+        if child.kind() != "block_sequence_item" {
+            continue;
         }
-    }
-    Ok(())
-}
-
-fn has_block_mapping(node: Node<'_>) -> bool {
-    if node.kind() == "block_mapping" {
-        return true;
-    }
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        if has_block_mapping(child) {
-            return true;
+        let mut inner_cursor = child.walk();
+        for inner in child.named_children(&mut inner_cursor) {
+            if let Some(mapping) = find_block_mapping_in(inner)
+                && has_yaml_key(mapping, source, "hosts")
+            {
+                return true;
+            }
         }
     }
     false
 }
 
 fn extract_scalar_text(node: Node<'_>, source: &str) -> String {
-    // The key can be a flow_node > plain_scalar > string_scalar, or directly a scalar
     match node.kind() {
         "flow_node" | "block_node" => {
             let mut cursor = node.walk();
@@ -200,101 +194,6 @@ fn extract_scalar_text(node: Node<'_>, source: &str) -> String {
     }
 }
 
-fn visit_ansible_sequence(
-    node: Node<'_>,
-    file_path: &str,
-    source: &str,
-    scopes: &[String],
-    symbols: &mut Vec<crate::model::StoredSymbol>,
-) -> Result<()> {
-    // Check whether any item in the sequence has a `hosts:` key — if so this
-    // is a playbook; otherwise it is a standalone tasks file.
-    let has_any_play = sequence_has_play(node, source);
-
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        if child.kind() == "block_sequence_item" {
-            let mut inner_cursor = child.walk();
-            for inner in child.named_children(&mut inner_cursor) {
-                if let Some(mapping) = find_block_mapping_in(inner) {
-                    let has_hosts = has_yaml_key(mapping, source, "hosts");
-
-                    if has_hosts {
-                        // Play-level item
-                        if let Some(name) = find_yaml_key_value(mapping, source, "name") {
-                            push_symbol(
-                                symbols,
-                                file_path,
-                                "ansible",
-                                scopes,
-                                &name,
-                                SymbolKind::Class,
-                                child,
-                                source,
-                                None,
-                            )?;
-                            extract_ansible_tasks(mapping, file_path, source, &name, symbols)?;
-                        }
-                    } else if !has_any_play {
-                        // Standalone task file — use "task.tasks" as parent scope
-                        let task_name = find_yaml_key_value(mapping, source, "name")
-                            .or_else(|| find_module_fqcn(mapping, source));
-                        if let Some(name) = task_name {
-                            push_symbol(
-                                symbols,
-                                file_path,
-                                "yaml",
-                                &["task.tasks".to_string()],
-                                &name,
-                                SymbolKind::Function,
-                                child,
-                                source,
-                                None,
-                            )?;
-                        }
-                    } else {
-                        // Non-play item inside a playbook sequence (e.g. pre_tasks at top level)
-                        if let Some(name) = find_yaml_key_value(mapping, source, "name") {
-                            push_symbol(
-                                symbols,
-                                file_path,
-                                "yaml",
-                                scopes,
-                                &name,
-                                SymbolKind::Function,
-                                child,
-                                source,
-                                None,
-                            )?;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Returns `true` if any item in the block sequence contains a `hosts:` key.
-fn sequence_has_play(node: Node<'_>, source: &str) -> bool {
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        if child.kind() == "block_sequence_item" {
-            let mut inner_cursor = child.walk();
-            for inner in child.named_children(&mut inner_cursor) {
-                if let Some(mapping) = find_block_mapping_in(inner)
-                    && has_yaml_key(mapping, source, "hosts")
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Find the first mapping key that looks like a module FQCN (contains dots
-/// and is not a well-known Ansible directive).
 fn find_module_fqcn(mapping: Node<'_>, source: &str) -> Option<String> {
     static ANSIBLE_DIRECTIVES: &[&str] = &[
         "name",
@@ -341,8 +240,8 @@ fn find_block_mapping_in(node: Node<'_>) -> Option<Node<'_>> {
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        if let Some(m) = find_block_mapping_in(child) {
-            return Some(m);
+        if let Some(mapping) = find_block_mapping_in(child) {
+            return Some(mapping);
         }
     }
     None
@@ -356,9 +255,9 @@ fn find_yaml_key_value(mapping: Node<'_>, source: &str, key_name: &str) -> Optio
         {
             let text = extract_scalar_text(key, source);
             if text == key_name
-                && let Some(val) = child.child_by_field_name("value")
+                && let Some(value) = child.child_by_field_name("value")
             {
-                return Some(extract_scalar_text(val, source));
+                return Some(extract_scalar_text(value, source));
             }
         }
     }
@@ -383,10 +282,10 @@ fn extract_ansible_tasks(
         {
             let text = extract_scalar_text(key, source);
             if (text == "tasks" || text == "handlers")
-                && let Some(val) = child.child_by_field_name("value")
+                && let Some(value) = child.child_by_field_name("value")
             {
                 let parent_scope = format!("{play_name}.{text}");
-                extract_task_list(val, file_path, source, &parent_scope, symbols)?;
+                extract_task_list(value, file_path, source, &parent_scope, symbols)?;
             }
         }
     }
@@ -403,7 +302,7 @@ fn extract_task_list(
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         match child.kind() {
-            "block_sequence" => {
+            "block_sequence" | "block_node" => {
                 extract_task_list(child, file_path, source, parent, symbols)?;
             }
             "block_sequence_item" => {
@@ -428,9 +327,6 @@ fn extract_task_list(
                     }
                 }
             }
-            "block_node" => {
-                extract_task_list(child, file_path, source, parent, symbols)?;
-            }
             _ => {}
         }
     }
@@ -445,8 +341,8 @@ mod tests {
     #[test]
     fn yaml_extracts_top_level_keys() {
         let src = "services:\n  api:\n    image: myapp:latest\n    port: 8080\nfeature_flags:\n  signup: true\n";
-        let s = YamlExtractor.extract("config.yaml", src).expect("yaml");
-        let names: Vec<&str> = s.iter().map(|x| x.name.as_str()).collect();
+        let symbols = YamlExtractor.extract("config.yaml", src).expect("yaml");
+        let names: Vec<&str> = symbols.iter().map(|symbol| symbol.name.as_str()).collect();
         assert!(names.contains(&"services"), "missing services: {names:?}");
         assert!(
             names.contains(&"feature_flags"),
@@ -456,15 +352,15 @@ mod tests {
 
     #[test]
     fn yaml_empty_file() {
-        let s = YamlExtractor.extract("empty.yaml", "").expect("yaml");
-        assert!(s.is_empty());
+        let symbols = YamlExtractor.extract("empty.yaml", "").expect("yaml");
+        assert!(symbols.is_empty());
     }
 
     #[test]
     fn yaml_multi_document() {
         let src = "---\nfoo: bar\n---\nbaz: qux\n";
-        let s = YamlExtractor.extract("multi.yaml", src).expect("yaml");
-        let names: Vec<&str> = s.iter().map(|x| x.name.as_str()).collect();
+        let symbols = YamlExtractor.extract("multi.yaml", src).expect("yaml");
+        let names: Vec<&str> = symbols.iter().map(|symbol| symbol.name.as_str()).collect();
         assert!(names.contains(&"foo"), "missing foo: {names:?}");
         assert!(names.contains(&"baz"), "missing baz: {names:?}");
     }

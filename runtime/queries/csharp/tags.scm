@@ -15,3 +15,10 @@
 ; ── Methods & Constructors ────────────────────────────────
 (method_declaration name: (identifier) @name) @definition.method
 (constructor_declaration name: (identifier) @name) @definition.method
+
+; ── Properties & fields ───────────────────────────────────
+(property_declaration name: (identifier) @name) @definition.constant
+
+(field_declaration
+  (variable_declaration
+    (variable_declarator name: (identifier) @name))) @definition.constant

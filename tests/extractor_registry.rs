@@ -12,7 +12,7 @@ fn supported_languages_and_curated_languages_are_distinct() {
     let supported: HashSet<&str> = registry.supported_languages().into_iter().collect();
     let curated: HashSet<&str> = registry.curated_languages().into_iter().collect();
 
-    for language in ["yaml", "sql", "ansible", "openapi"] {
+    for language in ["ansible", "openapi"] {
         assert!(
             supported.contains(language),
             "{language} should be a supported language"
@@ -23,7 +23,7 @@ fn supported_languages_and_curated_languages_are_distinct() {
         );
     }
 
-    for language in ["python", "json", "rust", "luau", "scss"] {
+    for language in ["python", "json", "rust", "luau", "scss", "yaml", "sql"] {
         assert!(
             curated.contains(language),
             "{language} should be marked curated"
@@ -55,14 +55,17 @@ fn built_in_grammars_have_structural_language_lookup() {
 }
 
 #[test]
-fn path_routing_can_prefer_override_while_language_lookup_prefers_generic_fallback() {
+fn query_backed_wrappers_expose_curated_tiers_for_path_and_language_lookup() {
     let registry = ExtractorRegistry::default();
 
     let yaml_path = registry
         .extractor_for_path(Path::new("settings.yaml"))
         .expect("yaml path extractor");
     assert_eq!(yaml_path.language_name(), "yaml");
-    assert_eq!(yaml_path.extraction_tier(), ExtractionTier::ManualOverride);
+    assert_eq!(
+        yaml_path.extraction_tier(),
+        ExtractionTier::CuratedQueryPack
+    );
 
     let yaml_language = registry
         .extractor_for_language("yaml")
@@ -70,14 +73,14 @@ fn path_routing_can_prefer_override_while_language_lookup_prefers_generic_fallba
     assert_eq!(yaml_language.language_name(), "yaml");
     assert_eq!(
         yaml_language.extraction_tier(),
-        ExtractionTier::GenericAstFallback
+        ExtractionTier::CuratedQueryPack
     );
 
     let sql_path = registry
         .extractor_for_path(Path::new("schema.sql"))
         .expect("sql path extractor");
     assert_eq!(sql_path.language_name(), "sql");
-    assert_eq!(sql_path.extraction_tier(), ExtractionTier::ManualOverride);
+    assert_eq!(sql_path.extraction_tier(), ExtractionTier::CuratedQueryPack);
 
     let sql_language = registry
         .extractor_for_language("sql")
@@ -85,7 +88,7 @@ fn path_routing_can_prefer_override_while_language_lookup_prefers_generic_fallba
     assert_eq!(sql_language.language_name(), "sql");
     assert_eq!(
         sql_language.extraction_tier(),
-        ExtractionTier::GenericAstFallback
+        ExtractionTier::CuratedQueryPack
     );
 }
 

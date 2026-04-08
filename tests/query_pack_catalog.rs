@@ -56,6 +56,26 @@ fn builtin_query_packs_compile_from_catalog() {
 }
 
 #[test]
+fn override_backed_query_packs_still_compile_for_wrapper_delegation() {
+    let failures: Vec<String> = QueryPackCatalog::builtin()
+        .iter()
+        .filter(|pack| {
+            pack.metadata.override_extractor.is_some() && !pack.metadata.grammar.is_empty()
+        })
+        .filter_map(|pack| {
+            ScmExtractor::from_pack(pack)
+                .err()
+                .map(|error| format!("{}: {error:#}", pack.pack_id))
+        })
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "failed to compile override-backed query packs:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn builtin_query_packs_use_canonical_tags_layout() {
     let queries_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/queries");
     let legacy_paths: Vec<String> = fs::read_dir(queries_root)

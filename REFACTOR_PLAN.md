@@ -47,8 +47,8 @@ Primary findings from the current tree:
 - `service` is no longer the main god-module problem for MCP dispatch, but it still owns ingest orchestration (`code_tools.rs`, `doc_tools.rs`) that belongs in indexing/storage domains.
 - `model.rs`, `doc_storage.rs`, and `cross_repo.rs` are still legacy root-level bags; they blur ownership between core types, persistence rows, package metadata, and analysis logic.
 - The highest remaining modularity risk is now inside extractor/fallback internals, not in the public `agent-v1` surface.
-- The extractor system is already mostly query-first in spirit, but not yet in shape: 25 built-in query packs exist while ~6.6k LOC of Rust override extractors still carry language or container semantics that should mostly be data-driven.
-- Several grammars are already compiled into the shared SCM engine but still bypass it (`luau`, `scss`, `sql`, `yaml`); these are the highest-confidence migration targets because the missing piece is query-pack coverage, not parser availability.
+- The extractor system is already mostly query-first in spirit, but not yet in shape: 29 built-in query packs exist while the remaining Rust override extractors mostly represent container hosts or no-grammar dialects rather than parser gaps.
+- `luau`, `scss`, `sql`, and `yaml` no longer bypass the shared SCM engine wholesale; `sql`/`yaml` now use override-backed query packs with tiny host-specific postpasses instead of bespoke structural walkers.
 - Registration rigidity is easing: **`QUERY_FILES` is now build-generated** from `runtime/queries/*/tags.scm`, and adding a pack for an existing compiled grammar no longer requires touching `registry_builder`; `builtin_grammar` still owns compiled grammar availability.
 - The real blocker for `vue`, `razor`, `blade`, and `ejs` is mixed-language orchestration and profile/alias handling, not an inability to express symbols with queries once the right subtree is isolated.
 - “Works acceptably on any codebase” cannot mean “curate every language by hand.” We need a tiered extractor model: curated query packs first, generic AST fallback second, container/injection runners third, tiny residual overrides last.
@@ -63,7 +63,7 @@ These are the primary refactor drivers, not a full inventory.
 |---|---|---|
 | `src/extractors/engine/mod.rs` + `src/extractors/engine/scm.rs` + `src/extractors/registry_builder.rs` | Grammar lookup, embedded query files, and extractor registration are still compile-time Rust edits. | Split grammar catalog from query-pack/profile catalogs; make pack discovery data-driven and keep Rust registration for grammars only. |
 | `runtime/queries/` | Pack layout is now standardized, but injections are only catalogued and most built-in metadata still lives in headers rather than richer pack files. | Keep the `tags.scm` / optional `injections.scm` / metadata contract stable and use it as the base for container/injection runner work. |
-| `src/extractors/{luau,scss,yaml}.rs`, `src/extractors/sql/mod.rs` | These overrides already rely on compiled tree-sitter grammars, but still reimplement AST walking in Rust. | Replace with query packs plus shared engine features; keep only tiny post-passes where the query protocol cannot express the output. |
+| `src/extractors/{yaml}.rs`, `src/extractors/sql/mod.rs` | These shims now delegate structural extraction to query packs, but still carry host-specific postprocess logic (`ansible`, dbt/Jinja/docstring shaping). | Keep them thin and move any reusable postprocess pieces into shared helpers before adding new host layers. |
 | `src/extractors/engine/scm.rs` (1667 LOC) | Query header parsing, pattern metadata, query execution, scope inference, doc cleanup, and a heuristic post-pass still live in one file. | Split into engine submodules with `ScmExtractor` as a thin facade and named internal phases. |
 | `src/indexing/imports/line.rs` (675 LOC) | Python, JS/TS, Vue, SQL, Dart, and Go fallbacks all live in one function family; service code duplicates capability knowledge with `LANGUAGES_WITH_IMPORT_EXTRACTION`. | Split fallback extractors by language and expose capability metadata from `indexing::imports`. |
 | `src/extractors/vue.rs`, `src/extractors/razor.rs`, `src/extractors/al.rs`, `src/extractors/asm.rs`, `src/extractors/yaml.rs` | Mixed-language / dialect-specific override extractors still bundle block detection, classification, fallback logic, and symbol emission. | Convert each override into a small facade over strategy modules or staged helpers. |
@@ -159,7 +159,7 @@ Current override triage:
 
 | Bucket | Current files | Direction |
 |---|---|---|
-| Query-pack candidates now | `luau`, `scss`, `yaml`, structural `sql` | Add query packs; delete AST walkers once parity tests pass |
+| Query-pack candidates now | none of the previously blocked grammar-backed paths | Keep new grammar-backed support query-first; do not reintroduce structural walkers for compiled grammars |
 | Profile / alias candidates now | `openapi`, `ansible` | Replace with profiles layered over `json` / `yaml` packs |
 | Container / injection targets | `vue`, `razor`, `blade`, `ejs`, dbt/Jinja in `sql` | Move to shared container runner with pack-driven child extraction |
 | Residual manual for now | `asm`, `al`, `verse` | Keep as named residual overrides until grammar quality or dialect support is good enough |
@@ -419,22 +419,21 @@ Done when:
 ### 6C. Add injection/container extraction and migrate query-capable overrides
 
 Status:
-- [~] in progress (2026-04-08)
+- [x] done (2026-04-08)
 
 Progress:
 - [x] `luau` moved onto a curated `runtime/queries/luau/tags.scm` pack; registry dispatch now prefers the SCM path and the language tests exercise the pack via registry/query loading
 - [x] `scss` moved onto a curated `runtime/queries/scss/tags.scm` pack; registry dispatch now prefers the SCM path and the CSS/SCSS tests exercise the pack rather than the old `ScssExtractor`
-- [~] workspace pack roots can now add or override curated packs, which gives the future container runner a stable pack-loading surface
-- [ ] shared container / injection recursion is still missing
-- [ ] `yaml` / structural `sql` remain manual overrides
-- [ ] `vue` / `razor` / `blade` / `ejs` still own their host-language slicing directly
+- [x] workspace pack roots can now add or override curated packs, which gives the shared container runner a stable pack-loading surface
+- [x] `src/extractors/containers.rs` now owns shared delegated-language extraction, host offset remapping, wrapped fragment parsing, and HTML tag block discovery
+- [x] `runtime/queries/yaml/tags.scm` and `runtime/queries/sql/tags.scm` provide structural query-pack coverage; `YamlExtractor` and `SqlExtractor` are now thin wrappers that keep only `ansible` and dbt/Jinja/docstring semantics
+- [x] `vue`, `razor`, `blade`, and `ejs` now delegate embedded JS/TS/C#/PHP through the shared container helper instead of each one reimplementing byte/line remapping
+- [x] override-backed pack compilation is covered in `tests/query_pack_catalog.rs`, and host/container behavior is exercised by the existing language-specific integration suites
 
 Tasks:
-- implement a shared container/injection runner that can recurse into embedded languages using `injections.scm` or declarative segment rules
-- move shared offset mapping, synthetic wrapper parsing, and synthetic-root helpers out of `vue` / `razor`
-- migrate `luau`, `scss`, `yaml`, and the structural SQL path to query packs
-- migrate `vue`, `razor`, `blade`, and `ejs` toward container profiles that delegate inner-language extraction to packs
-- keep dbt/Jinja, Razor markup directives, and similar host-only semantics as tiny named post-passes rather than whole extractors
+- keep evolving the shared container runner toward true recursive `injections.scm` execution where host grammars can support it
+- keep dbt/Jinja, Razor markup directives, Blade directives, and similar host-only semantics as tiny named post-passes rather than whole extractors
+- avoid reintroducing per-language offset/segment remapping once `extractors/containers.rs` exists
 
 Done when:
 - query-capable overrides are deleted or reduced to thin container/postprocess shims
@@ -451,7 +450,7 @@ Progress:
 - [x] `ScmExtractor` remains the public façade in `scm/mod.rs`; `QueryPackCatalog` + `ScmExtractor::from_pack` + `build_scm_extractors_from_catalog` add an explicit pack-loading seam before query execution
 - [x] build-generated pack catalog remains re-exported via `scm::QUERY_FILES` so existing extractor tests keep one lookup surface during the refactor
 - [ ] thin `mod.rs` after moving the large `#[cfg(test)]` suite to `scm/tests.rs` or similar
-- [~] shared coordinator for pack vs generic-AST is partially in place through registry/catalog wiring; container recursion still needs the `6C` runner
+- [~] shared coordinator for pack vs generic-AST is in place through registry/catalog wiring, and `extractors/containers.rs` now provides the first shared host/container delegation seam; pack-driven recursive injections are the next coordinator gap
 
 Tasks:
 - split `src/extractors/engine/scm.rs` into internal modules for query-pack metadata, pattern properties, raw capture collection, scope inference, and doc cleanup
@@ -590,7 +589,7 @@ Done when:
 
 - Start with **WS6A** and **WS7** together. The main blocker is the rigid query-pack protocol plus the monolithic engine file; those seams should move first.
 - Follow with **WS6B** so every built-in grammar has at least a generic structural path and aliases stop inflating extractor count.
-- Land **WS6C** next. Migrating `luau`, `scss`, `yaml`, and structural `sql` gives fast wins, then the shared container runner can absorb `vue`, `razor`, `blade`, and `ejs`.
+- Land **WS7** next. `6C` is now in place, so the remaining extractor-engine win is tightening the SCM/internal coordinator around pack loading, postprocess stages, and future recursive injections.
 - Keep **WS8** and the import work moving in parallel where practical, but do not let import fallback cleanup distract from the extractor architecture reset.
 - Treat **WS9** as the clean-up pass that codifies which Rust overrides are still justified after the pack/profile/container work lands.
 - Do **WS10** and **WS11** together or back-to-back. Moving ingest/storage boundaries without fixing type ownership will just create a new shared bag somewhere else.

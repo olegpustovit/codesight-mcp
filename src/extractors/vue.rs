@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 use super::common::{first_line, node_text, parse_tree, qualify, source_slice};
+use super::containers::{RemapOptions, SegmentOrigin, extract_host_segment, find_html_tag_blocks};
 
 pub struct VueExtractor;
 
@@ -33,7 +34,7 @@ impl super::LanguageExtractor for VueExtractor {
         // Derive component name from filename (e.g. "Counter.vue" -> "Counter")
         let component_name = derive_component_name(file_path);
 
-        let tree = parse_tree(grammar, &block.content)?;
+        let tree = parse_tree(grammar, block.content)?;
         let mut symbols = Vec::new();
 
         // Emit synthetic component class symbol spanning the entire .vue file.
@@ -58,22 +59,30 @@ impl super::LanguageExtractor for VueExtractor {
             });
         }
 
+        let delegate_language = if block.is_typescript {
+            "typescript"
+        } else {
+            "javascript"
+        };
+        let mut delegated = extract_host_segment(
+            delegate_language,
+            file_path,
+            source,
+            block.content,
+            SegmentOrigin::new(source, block.byte_offset),
+            RemapOptions {
+                language_override: Some("vue"),
+                qualified_name_prefix: component_name.as_deref(),
+                ..Default::default()
+            },
+        )?;
+        overlay_script_comments(&mut delegated, &block);
+        symbols.extend(delegated);
+
         // Check if this is an Options API export default object
         let root = tree.root_node();
-        let is_options_api = detect_options_api(root, &block.content);
-
-        if is_options_api {
+        if detect_options_api(root, block.content) {
             extract_options_api(
-                root,
-                file_path,
-                source,
-                &block,
-                component_name.as_deref(),
-                &mut symbols,
-            )?;
-        } else {
-            // Composition API / regular script: extract with standard JS/TS logic
-            extract_composition_api(
                 root,
                 file_path,
                 source,
@@ -84,6 +93,7 @@ impl super::LanguageExtractor for VueExtractor {
         }
 
         symbols.sort_by_key(|s| (s.start_byte, s.end_byte));
+        symbols.dedup_by(|right, left| left.id == right.id);
         Ok(symbols)
     }
 }
@@ -92,41 +102,41 @@ impl super::LanguageExtractor for VueExtractor {
 // Script block extraction
 // ---------------------------------------------------------------------------
 
-struct ScriptBlock {
-    content: String,
+struct ScriptBlock<'a> {
+    content: &'a str,
     /// 0-based line offset of the script content within the .vue file.
-    line_offset: usize,
+    line_offset: u32,
     /// Byte offset of the script content within the .vue file.
     byte_offset: usize,
     is_typescript: bool,
 }
 
-static SCRIPT_OPEN_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)<script\b([^>]*)>"#).unwrap());
-static SCRIPT_CLOSE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)</script\s*>"#).unwrap());
 static LANG_TS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)\blang\s*=\s*["']ts["']"#).unwrap());
 
-fn extract_script_block(source: &str) -> Option<ScriptBlock> {
-    let open_match = SCRIPT_OPEN_RE.find(source)?;
-    let attrs = SCRIPT_OPEN_RE.captures(source)?.get(1)?.as_str();
-    let is_typescript = LANG_TS_RE.is_match(attrs);
-
-    let content_start = open_match.end();
-    let close_match = SCRIPT_CLOSE_RE.find(&source[content_start..])?;
-    let content_end = content_start + close_match.start();
-
-    let content = source[content_start..content_end].to_string();
-    let line_offset = source[..content_start].matches('\n').count();
-    let byte_offset = content_start;
-
+fn extract_script_block(source: &str) -> Option<ScriptBlock<'_>> {
+    let block = find_html_tag_blocks(source, "script")
+        .ok()?
+        .into_iter()
+        .next()?;
+    let (content, content_start_byte) =
+        trim_leading_block_newline(block.content, block.content_start_byte);
     Some(ScriptBlock {
         content,
-        line_offset,
-        byte_offset,
-        is_typescript,
+        line_offset: source[..content_start_byte].lines().count() as u32,
+        byte_offset: content_start_byte,
+        is_typescript: LANG_TS_RE.is_match(block.attrs),
     })
+}
+
+fn trim_leading_block_newline(content: &str, content_start_byte: usize) -> (&str, usize) {
+    if let Some(trimmed) = content.strip_prefix("\r\n") {
+        (trimmed, content_start_byte + 2)
+    } else if let Some(trimmed) = content.strip_prefix('\n') {
+        (trimmed, content_start_byte + 1)
+    } else {
+        (content, content_start_byte)
+    }
 }
 
 fn derive_component_name(file_path: &str) -> Option<String> {
@@ -160,7 +170,7 @@ fn extract_options_api(
     root: tree_sitter::Node<'_>,
     file_path: &str,
     vue_source: &str,
-    block: &ScriptBlock,
+    block: &ScriptBlock<'_>,
     component_name: Option<&str>,
     symbols: &mut Vec<StoredSymbol>,
 ) -> Result<()> {
@@ -175,7 +185,7 @@ fn extract_options_api(
     let mut cursor = obj_node.walk();
     for child in obj_node.named_children(&mut cursor) {
         if child.kind() == "pair" || child.kind() == "method_definition" {
-            let key_name = get_pair_key(&child, &block.content);
+            let key_name = get_pair_key(&child, block.content);
             let Some(key) = key_name else { continue };
 
             match key.as_str() {
@@ -196,7 +206,7 @@ fn extract_options_api(
                         "props",
                         SymbolKind::Constant,
                         child,
-                        &block.content,
+                        block.content,
                         block,
                         vue_source,
                         None,
@@ -245,7 +255,7 @@ fn extract_object_methods(
     obj_node: tree_sitter::Node<'_>,
     file_path: &str,
     vue_source: &str,
-    block: &ScriptBlock,
+    block: &ScriptBlock<'_>,
     scopes: &[String],
     symbols: &mut Vec<StoredSymbol>,
 ) -> Result<()> {
@@ -257,11 +267,11 @@ fn extract_object_methods(
         let name = match child.kind() {
             "method_definition" => child
                 .child_by_field_name("name")
-                .and_then(|n| node_text(n, &block.content).ok())
+                .and_then(|n| node_text(n, block.content).ok())
                 .map(|s| s.to_string()),
             "pair" => {
                 // Shorthand method or arrow in computed
-                get_pair_key(&child, &block.content)
+                get_pair_key(&child, block.content)
             }
             _ => None,
         };
@@ -273,7 +283,7 @@ fn extract_object_methods(
                 &name,
                 SymbolKind::Method,
                 child,
-                &block.content,
+                block.content,
                 block,
                 vue_source,
                 None,
@@ -283,163 +293,35 @@ fn extract_object_methods(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Composition API extraction
-// ---------------------------------------------------------------------------
-
-fn extract_composition_api(
-    root: tree_sitter::Node<'_>,
-    file_path: &str,
-    vue_source: &str,
-    block: &ScriptBlock,
-    component_name: Option<&str>,
-    symbols: &mut Vec<StoredSymbol>,
-) -> Result<()> {
-    let scopes: Vec<String> = component_name.iter().map(|s| s.to_string()).collect();
-
-    visit_composition_node(root, file_path, vue_source, block, &scopes, symbols)?;
-    Ok(())
-}
-
-fn visit_composition_node(
-    node: tree_sitter::Node<'_>,
-    file_path: &str,
-    vue_source: &str,
-    block: &ScriptBlock,
-    scopes: &[String],
-    symbols: &mut Vec<StoredSymbol>,
-) -> Result<()> {
-    match node.kind() {
-        "function_declaration" | "generator_function_declaration" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let name = node_text(name_node, &block.content)?.to_string();
-                let doc = extract_preceding_comment(node, &block.content);
-                push_vue_symbol(
-                    symbols,
-                    file_path,
-                    scopes,
-                    &name,
-                    SymbolKind::Function,
-                    node,
-                    &block.content,
-                    block,
-                    vue_source,
-                    doc,
-                )?;
-            }
-            return Ok(());
+fn overlay_script_comments(symbols: &mut [StoredSymbol], block: &ScriptBlock<'_>) {
+    for symbol in symbols {
+        if symbol.summary != symbol.signature || symbol.start_byte < block.byte_offset {
+            continue;
         }
-        "class_declaration" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let name = node_text(name_node, &block.content)?.to_string();
-                push_vue_symbol(
-                    symbols,
-                    file_path,
-                    scopes,
-                    &name,
-                    SymbolKind::Class,
-                    node,
-                    &block.content,
-                    block,
-                    vue_source,
-                    None,
-                )?;
-            }
-            return Ok(());
+        let local_start = symbol.start_byte - block.byte_offset;
+        if let Some(doc) = extract_preceding_line_comment(block.content, local_start) {
+            symbol.summary = doc;
         }
-        "interface_declaration" | "type_alias_declaration" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let name = node_text(name_node, &block.content)?.to_string();
-                push_vue_symbol(
-                    symbols,
-                    file_path,
-                    scopes,
-                    &name,
-                    SymbolKind::Type,
-                    node,
-                    &block.content,
-                    block,
-                    vue_source,
-                    None,
-                )?;
-            }
-            return Ok(());
-        }
-        "lexical_declaration" => {
-            // Handle const/let declarations
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                if child.kind() == "variable_declarator"
-                    && let Some(name_node) = child.child_by_field_name("name")
-                {
-                    let name = node_text(name_node, &block.content)?.to_string();
-                    let value = child.child_by_field_name("value");
-
-                    let kind = classify_composition_value(&value, &block.content);
-                    let doc = extract_preceding_comment(node, &block.content);
-
-                    push_vue_symbol(
-                        symbols,
-                        file_path,
-                        scopes,
-                        &name,
-                        kind,
-                        node,
-                        &block.content,
-                        block,
-                        vue_source,
-                        doc,
-                    )?;
-                }
-            }
-            return Ok(());
-        }
-        "import_statement" => {
-            // Skip imports
-            return Ok(());
-        }
-        _ => {}
-    }
-
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        visit_composition_node(child, file_path, vue_source, block, scopes, symbols)?;
-    }
-    Ok(())
-}
-
-/// Classify the value of a const declaration in Composition API context.
-/// - `ref(...)`, `computed(...)`, `defineProps(...)`, `defineEmits(...)` → Constant
-/// - arrow functions, function expressions → Function
-/// - everything else → Constant
-fn classify_composition_value(value: &Option<tree_sitter::Node<'_>>, _source: &str) -> SymbolKind {
-    let Some(val) = value else {
-        return SymbolKind::Constant;
-    };
-    match val.kind() {
-        "arrow_function" | "function_expression" | "generator_function" => SymbolKind::Function,
-        _ => SymbolKind::Constant,
     }
 }
 
-/// Extract preceding line comment(s) as a docstring.
-fn extract_preceding_comment(node: tree_sitter::Node<'_>, source: &str) -> Option<String> {
-    let mut prev = node.prev_named_sibling();
+fn extract_preceding_line_comment(script_source: &str, local_start: usize) -> Option<String> {
+    let before = script_source.get(..local_start)?;
+    let lines: Vec<&str> = before.lines().collect();
     let mut comments = Vec::new();
-    while let Some(p) = prev {
-        if p.kind() == "comment" {
-            let text = node_text(p, source).ok()?;
-            // Strip // prefix
-            let cleaned = text
-                .trim_start_matches("//")
-                .trim_start_matches("/*")
-                .trim_end_matches("*/")
-                .trim();
-            comments.push(cleaned.to_string());
-        } else {
+    for line in lines.iter().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if comments.is_empty() {
+                continue;
+            }
             break;
         }
-        prev = p.prev_named_sibling();
+        if let Some(comment) = trimmed.strip_prefix("//") {
+            comments.push(comment.trim().to_string());
+            continue;
+        }
+        break;
     }
     if comments.is_empty() {
         return None;
@@ -461,7 +343,7 @@ fn push_vue_symbol(
     kind: SymbolKind,
     span: tree_sitter::Node<'_>,
     script_source: &str,
-    block: &ScriptBlock,
+    block: &ScriptBlock<'_>,
     vue_source: &str,
     doc: Option<String>,
 ) -> Result<()> {
@@ -473,8 +355,8 @@ fn push_vue_symbol(
 
     // Adjust line numbers: tree-sitter rows are 0-based in the script block,
     // add the line offset to get the correct position in the .vue file.
-    let start_line = (span.start_position().row + 1 + block.line_offset) as u32;
-    let end_line = (span.end_position().row + 1 + block.line_offset) as u32;
+    let start_line = span.start_position().row as u32 + 1 + block.line_offset;
+    let end_line = span.end_position().row as u32 + 1 + block.line_offset;
 
     // Adjust byte offsets to .vue file coordinates.
     let start_byte = span.start_byte() + block.byte_offset;

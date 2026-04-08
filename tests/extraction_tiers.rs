@@ -52,7 +52,7 @@ fn indexed_symbols_persist_extraction_tiers() {
         "missing python curated tier: {tiers:?}"
     );
     assert!(
-        tiers.contains(&("sql".to_string(), "manual_override".to_string())),
-        "missing sql manual tier: {tiers:?}"
+        tiers.contains(&("sql".to_string(), "curated_query_pack".to_string())),
+        "missing sql curated tier: {tiers:?}"
     );
 }
