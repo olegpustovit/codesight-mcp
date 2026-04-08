@@ -33,3 +33,35 @@ pub(super) fn read_pattern_props(query: &Query, pattern_index: usize) -> Pattern
     }
     props
 }
+
+#[cfg(test)]
+mod tests {
+    use tree_sitter::Query;
+
+    use super::*;
+
+    #[test]
+    fn reads_supported_set_properties_from_query_pattern() {
+        let language =
+            crate::extractors::engine::builtin_grammar("python").expect("python grammar");
+        let query = Query::new(
+            &language,
+            r#"
+            (
+              (class_definition name: (identifier) @name) @definition.class
+              (#set! fixed_name "Fixed")
+              (#set! scope_only)
+              (#set! exclude_inside "function")
+              (#set! name_prefix "Prefix::")
+            )
+            "#,
+        )
+        .expect("compile query");
+
+        let props = read_pattern_props(&query, 0);
+        assert_eq!(props.fixed_name.as_deref(), Some("Fixed"));
+        assert_eq!(props.exclude_inside.as_deref(), Some("function"));
+        assert_eq!(props.name_prefix.as_deref(), Some("Prefix::"));
+        assert!(props.scope_only);
+    }
+}

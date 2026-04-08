@@ -443,14 +443,14 @@ Done when:
 ### 7. Decompose the SCM query engine
 
 Status:
-- [~] in progress (2026-04-08)
+- [x] done (2026-04-08)
 
 Progress:
-- [x] `src/extractors/engine/scm/` — `metadata.rs` (headers), `pattern.rs` (`#set!` props), `capture.rs` (raw rows + kind parse), `docs.rs` (docstring cleanup), `extract.rs` (capture → dedupe → standalone docs → scope stack → symbols + cpp header pass); phase ordering documented in `extract.rs`
-- [x] `ScmExtractor` remains the public façade in `scm/mod.rs`; `QueryPackCatalog` + `ScmExtractor::from_pack` + `build_scm_extractors_from_catalog` add an explicit pack-loading seam before query execution
+- [x] `src/extractors/engine/scm/` now splits the engine into named phases: `metadata.rs` (headers), `pattern.rs` (`#set!` props), `capture.rs` (raw capture collection), `scope.rs` (dedupe + standalone docs + scope inference + final symbol build), `docs.rs` (doc cleanup), `load.rs` (pack/injections compile), `postprocess.rs` (cpp-header fallback), and `extract.rs` (phase coordinator); phase ordering is documented in code
+- [x] `ScmExtractor` remains the public façade in `scm/mod.rs`; `QueryPackCatalog` + `ScmExtractor::from_pack` + `build_scm_extractors_from_catalog` now flow through the explicit `load.rs` pack-loading phase before query execution
 - [x] build-generated pack catalog remains re-exported via `scm::QUERY_FILES` so existing extractor tests keep one lookup surface during the refactor
-- [ ] thin `mod.rs` after moving the large `#[cfg(test)]` suite to `scm/tests.rs` or similar
-- [~] shared coordinator for pack vs generic-AST is in place through registry/catalog wiring, and `extractors/containers.rs` now provides the first shared host/container delegation seam; pack-driven recursive injections are the next coordinator gap
+- [x] `scm/mod.rs` is now a thin façade after moving the large `#[cfg(test)]` suite to `scm/tests.rs`
+- [x] optional `injections.scm` files now compile during the load phase, so pack/injection metadata is validated at the same coordinator seam that already feeds registry/catalog selection and container delegation
 
 Tasks:
 - split `src/extractors/engine/scm.rs` into internal modules for query-pack metadata, pattern properties, raw capture collection, scope inference, and doc cleanup
@@ -463,6 +463,12 @@ Done when:
 - `src/extractors/engine/scm.rs` is primarily wiring and public API, not the full implementation dump
 - adding a new `.scm` query pack is data-driven and does not invite new shared-engine conditionals
 - engine tests cover header parsing, pattern props, scope inference, and doc cleanup separately
+
+Outcome:
+- Public façade: `src/extractors/engine/scm/mod.rs`
+- Phase modules: `src/extractors/engine/scm/{load,capture,scope,docs,pattern,metadata,postprocess,extract}.rs`
+- Tests: phase-local unit tests in `metadata.rs`, `pattern.rs`, `docs.rs`, `scope.rs`; high-level SCM coverage moved to `src/extractors/engine/scm/tests.rs`
+- Validation: optional `injections.scm` now compiles during pack load even before recursive execution is wired, keeping the coordinator seam explicit and tested
 
 ### 8. Split import fallback scanners and expose capability metadata
 

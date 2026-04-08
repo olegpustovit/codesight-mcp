@@ -38,3 +38,28 @@ pub fn parse_scm_header(source: &str) -> ScmMetadata {
     }
     meta
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_scm_header_until_first_non_comment_line() {
+        let metadata = parse_scm_header(
+            r#"
+            ; language: rust
+            ; extensions: rs rs.in
+            ; grammar: rust
+            ; override_extractor: demo
+
+            ((function_item name: (identifier) @name) @definition.function)
+            ; language: ignored
+            "#,
+        );
+
+        assert_eq!(metadata.name, "rust");
+        assert_eq!(metadata.extensions, vec!["rs", "rs.in"]);
+        assert_eq!(metadata.grammar, "rust");
+        assert_eq!(metadata.override_extractor.as_deref(), Some("demo"));
+    }
+}
