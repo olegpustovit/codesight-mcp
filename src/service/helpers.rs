@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use serde_json::{Map, Value, json};
@@ -42,12 +41,6 @@ pub fn canonicalize_root(path: &str) -> anyhow::Result<PathBuf> {
         anyhow::bail!("path '{}' is not a directory", canonical.display());
     }
     Ok(canonical)
-}
-
-pub fn modified_ns(time: &SystemTime) -> u64 {
-    time.duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos() as u64)
-        .unwrap_or_default()
 }
 
 pub fn should_descend(entry: &DirEntry) -> bool {

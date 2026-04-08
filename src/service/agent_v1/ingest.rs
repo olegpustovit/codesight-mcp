@@ -4,7 +4,6 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::doc_storage::DocStore;
 use crate::repo_id::normalize_repo_id;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
@@ -12,6 +11,7 @@ use crate::service::agent_v1::args::IngestSourcesArgs;
 use crate::service::agent_v1::util::doc_format_to_type_label;
 use crate::service::args::parse_args;
 use crate::service::helpers::{ToolError, canonicalize_root};
+use crate::storage::doc_index::DocStore;
 
 impl CodeService {
     pub(in crate::service) fn ingest_sources(&self, v: Value) -> anyhow::Result<Value> {

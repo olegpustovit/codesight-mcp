@@ -3,13 +3,13 @@
 use std::collections::HashSet;
 
 use crate::fuzzy;
-use crate::model::SearchSymbol;
 use crate::savings::MetaBuilder;
 use crate::service::agent_v1::args::SearchCatalogArgs;
 use crate::service::agent_v1::util::*;
 use crate::service::args::parse_args;
 use crate::service::helpers::{ToolError, index_error};
 use crate::service::{CodeService, MAX_QUERY_LEN};
+use crate::storage::SearchSymbol;
 use serde_json::{Value, json};
 
 impl CodeService {

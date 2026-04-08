@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 
 use crate::config::BYTES_PER_TOKEN;
-use crate::model::SearchSymbol;
+use crate::storage::SearchSymbol;
 
 /// Count parameters in a function/method signature string.
 ///

@@ -4,7 +4,7 @@ use std::fs;
 use tempfile::tempdir;
 
 use codesight_mcp::config::AppConfig;
-use codesight_mcp::cross_repo::{
+use codesight_mcp::indexing::packages::{
     RepoEntry, build_package_registry, extract_package_names, extract_root_package_from_specifier,
     find_repos_for_package,
 };

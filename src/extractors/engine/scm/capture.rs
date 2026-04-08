@@ -6,7 +6,7 @@ use tree_sitter::{Parser, QueryCursor};
 
 use crate::extractors::common::{first_line, node_text, source_slice};
 
-use crate::model::SymbolKind;
+use crate::core::symbols::SymbolKind;
 
 use super::ScmExtractor;
 use super::pattern::PatternProps;

@@ -45,7 +45,7 @@ Pattern A still fits, but the crate is only halfway to the intended domain shape
 
 Primary findings from the current tree:
 - `service` is no longer the main god-module problem for MCP dispatch, but it still owns ingest orchestration (`code_tools.rs`, `doc_tools.rs`) that belongs in indexing/storage domains.
-- `model.rs`, `doc_storage.rs`, and `cross_repo.rs` are still legacy root-level bags; they blur ownership between core types, persistence rows, package metadata, and analysis logic.
+- **WS11 (2026-04-08):** `model` is a thin test-facing barrel over `core`; doc index types live under `storage::doc_index`; package metadata lives in `indexing::packages`. `model.rs` as a global DTO bag is retired.
 - The highest remaining modularity risk is now inside extractor/fallback internals, not in the public `agent-v1` surface.
 - The extractor system is already mostly query-first in spirit, but not yet in shape: 29 built-in query packs exist while the remaining Rust override extractors mostly represent container hosts or no-grammar dialects rather than parser gaps.
 - `luau`, `scss`, `sql`, and `yaml` no longer bypass the shared SCM engine wholesale; `sql`/`yaml` now use override-backed query packs with tiny host-specific postpasses instead of bespoke structural walkers.
@@ -473,7 +473,7 @@ Outcome:
 ### 8. Split import fallback scanners and expose capability metadata
 
 Status:
-- [ ] proposed
+- [x] implemented (2026-04-08)
 
 Tasks:
 - replace `src/indexing/imports/line.rs` with language-specific fallback modules (`python`, `js_ts`, `vue`, `sql`, `dart`, `go`, plus shared dedupe/helpers)
@@ -486,10 +486,14 @@ Done when:
 - ingest warnings derive from the import subsystem itself instead of stale parallel constants in `service`
 - adding a new import fallback means adding a new module and registering it in one place
 
+Update:
+- `src/indexing/imports/fallback/*` now owns language-specific scanners (`python`, `js_ts`, `vue`, `sql`, `dart`, `go`) plus shared helpers.
+- `src/indexing/imports/mod.rs` exposes `import_extraction_capabilities`, `import_capability_for_language`, and `supports_import_extraction`, and ingest warning computation now queries that metadata instead of a service-local constant.
+
 ### 9. Budget and isolate residual overrides
 
 Status:
-- [ ] proposed
+- [x] implemented (2026-04-08)
 
 Tasks:
 - classify every remaining Rust extractor as one of: `no_grammar`, `multi_dialect`, `container_boundary`, or `host_semantics`
@@ -503,10 +507,15 @@ Done when:
 - new language support normally lands through packs/profiles instead of new Rust extractor files
 - residual extractor tests explain the remaining unsupported grammar or dialect boundary they cover
 
+Update:
+- Residual implementations now live under `src/extractors/residual/{no_grammar,multi_dialect,container_boundary,host_semantics}/...`.
+- Top-level extractor modules are reduced to documented facades with explicit category and exit-criteria notes.
+- Multi-branch families now name their strategy boundary explicitly (for example `AsmDialectStrategy`).
+
 ### 10. Move ingest orchestration out of `service`
 
 Status:
-- [ ] proposed
+- [x] implemented (2026-04-08)
 
 Tasks:
 - create domain-owned indexing entry points for code and docs (`indexing/code_index/*`, `storage/doc_index/*`, or equivalent) and move crawl/delta/store orchestration there
@@ -519,10 +528,23 @@ Done when:
 - code/doc indexing can be unit-tested without going through MCP dispatch
 - the storage layer owns persistence APIs for both code and docs
 
+Update:
+- Code ingest orchestration now lives in `src/indexing/code_index.rs`.
+- Doc ingest orchestration now lives in `src/storage/doc_index/ingest.rs`, and doc persistence moved under `src/storage/doc_index/`.
+- `src/service/code_tools.rs` and `src/service/doc_tools.rs` now delegate indexing work to domain modules and keep response/error policy local.
+
 ### 11. Eliminate root-level bags and align type ownership
 
 Status:
-- [ ] proposed
+- [x] implemented (2026-04-08)
+
+Progress:
+- [x] `src/core/{symbols,pipeline}.rs` holds `SymbolKind`, `ExtractionTier`, `StoredSymbol`, `FileFingerprint`, `IndexedFileUpdate`
+- [x] `src/storage/repo_summary.rs`, `storage/symbol_record.rs`, and extended `storage/types.rs` own `RepoMetadata`, `SymbolRecord` / `SymbolMetadata`, `SearchSymbol` / `RetrievedSymbol`
+- [x] `Meta` lives beside `MetaBuilder` in `src/savings.rs`
+- [x] package manifests / registry / `build_cross_repo_edges` moved to `src/indexing/packages/mod.rs`; root `cross_repo.rs` removed; call sites use `indexing::packages`
+- [x] root `doc_storage.rs` removed; doc APIs consumed via `storage::doc_index`
+- [x] `src/model.rs` is a minimal public barrel (`StoredSymbol`, `SymbolKind`, `ExtractionTier`) for integration tests; internals use `core` / `storage` / `savings`
 
 Tasks:
 - split `src/model.rs` into domain-owned types; keep only truly shared primitives in a small `core` area

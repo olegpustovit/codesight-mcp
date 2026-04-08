@@ -1,9 +1,10 @@
 use anyhow::Result;
 use tree_sitter::Node;
 
+use crate::core::pipeline::StoredSymbol;
+use crate::core::symbols::{ExtractionTier, SymbolKind};
 use crate::extractors::LanguageExtractor;
 use crate::extractors::common::{node_text, parse_tree, push_symbol};
-use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 use super::catalogs::GrammarDefinition;
 

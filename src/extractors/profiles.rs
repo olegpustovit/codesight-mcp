@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::model::{ExtractionTier, StoredSymbol};
+use crate::core::pipeline::StoredSymbol;
+use crate::core::symbols::ExtractionTier;
 
 use super::LanguageExtractor;
 use super::classifier::{SpecialExtractor, classify_special_path};

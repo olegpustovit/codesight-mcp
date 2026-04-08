@@ -13,7 +13,7 @@
 //! `start_byte`, [`dedup_symbols_by_start_byte`] keeps the **first** occurrence,
 //! so structural hits win over regex duplicates.
 
-use crate::model::StoredSymbol;
+use crate::core::pipeline::StoredSymbol;
 
 /// Sort symbols by start byte, then end byte (stable ordering for diagnostics).
 pub fn sort_symbols_by_span(symbols: &mut [StoredSymbol]) {
@@ -33,7 +33,7 @@ pub fn dedup_symbols_by_start_byte(symbols: &mut Vec<StoredSymbol>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ExtractionTier, SymbolKind};
+    use crate::core::symbols::{ExtractionTier, SymbolKind};
 
     fn dummy_sym(start: usize, name: &str) -> StoredSymbol {
         StoredSymbol {

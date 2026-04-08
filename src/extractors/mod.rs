@@ -11,6 +11,7 @@ mod luau;
 pub(crate) mod profiles;
 mod razor;
 mod registry_builder;
+mod residual;
 mod scss;
 mod sql;
 mod verse;
@@ -19,7 +20,8 @@ pub(crate) mod yaml;
 
 use std::{collections::HashMap, path::Path, sync::Arc};
 
-use crate::model::{ExtractionTier, StoredSymbol};
+use crate::core::pipeline::StoredSymbol;
+use crate::core::symbols::ExtractionTier;
 
 pub use al::AlExtractor;
 pub use asm::AsmExtractor;

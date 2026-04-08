@@ -3,13 +3,13 @@
 use serde_json::{Value, json};
 
 use crate::fuzzy;
-use crate::model::SearchSymbol;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::agent_v1::util_graph::graph_ref_symbol_id;
 use crate::service::args::parse_args;
 use crate::service::helpers::ToolError;
+use crate::storage::SearchSymbol;
 
 impl CodeService {
     pub(in crate::service) fn inspect_graph(&self, v: Value) -> anyhow::Result<Value> {

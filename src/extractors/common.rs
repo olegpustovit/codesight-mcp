@@ -3,7 +3,8 @@
 use anyhow::{Context, Result, anyhow};
 use tree_sitter::{Node, Tree};
 
-use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
+use crate::core::pipeline::StoredSymbol;
+use crate::core::symbols::{ExtractionTier, SymbolKind};
 
 pub fn parse_tree(lang: impl Into<tree_sitter::Language>, source: &str) -> Result<Tree> {
     let mut parser = tree_sitter::Parser::new();

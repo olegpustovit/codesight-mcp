@@ -1,113 +1,24 @@
-use std::{collections::HashSet, fs, time::SystemTime};
-
-use serde_json::{Value, json};
-use walkdir::WalkDir;
+use std::fs;
 
 use super::CodeService;
 use super::args::*;
 use super::helpers::*;
 use crate::{
-    doc_storage::{DocFileUpdate, DocStore},
     repo_id::normalize_repo_id,
     savings::MetaBuilder,
-    sections::{extract_sections, is_doc_file},
+    storage::doc_index::{self, DocStore},
 };
+use serde_json::{Value, json};
 
 impl CodeService {
     pub(crate) fn do_index_local(&self, root: &std::path::Path) -> anyhow::Result<DocIndexResult> {
-        let repo = normalize_repo_id(root);
-        let store = DocStore::open(self.config.doc_db_path(&repo))?;
-        let index_version = store.current_index_version()?.saturating_add(1);
-        let existing = store.file_fingerprints()?;
-
-        let mut seen_files = HashSet::new();
-        let mut updated_files = Vec::new();
-
-        for entry in WalkDir::new(root)
-            .into_iter()
-            .filter_entry(should_descend)
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_type().is_file())
-        {
-            let path = entry.path();
-            let relative_path = match to_repo_relative(path, root) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            if !is_doc_file(&relative_path) {
-                continue;
-            }
-            let metadata = match entry.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            seen_files.insert(relative_path.clone());
-
-            let size_bytes = metadata.len();
-            let mns = modified_ns(&metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH));
-            let bytes = match fs::read(path) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            let content_hash = blake3::hash(&bytes).to_hex().to_string();
-
-            if let Some(existing_file) = existing.get(&relative_path)
-                && existing_file.content_hash == content_hash
-            {
-                continue;
-            }
-
-            let source = String::from_utf8_lossy(&bytes).into_owned();
-            let sections = extract_sections(&relative_path, &source);
-
-            let format = if relative_path.ends_with(".md") || relative_path.ends_with(".markdown") {
-                "markdown"
-            } else if relative_path.ends_with(".rst") {
-                "rst"
-            } else if relative_path.ends_with(".adoc") || relative_path.ends_with(".asciidoc") {
-                "asciidoc"
-            } else if relative_path.ends_with(".html") || relative_path.ends_with(".htm") {
-                "html"
-            } else if relative_path.ends_with(".ipynb") {
-                "notebook"
-            } else {
-                "text"
-            };
-
-            updated_files.push(DocFileUpdate {
-                file_path: relative_path,
-                format: format.to_string(),
-                size_bytes,
-                modified_ns: mns,
-                content_hash,
-                sections,
-                source,
-            });
-        }
-
-        let removed_files = existing
-            .keys()
-            .filter(|path| !seen_files.contains(*path))
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let indexed_at = chrono::Utc::now().to_rfc3339();
-        let section_count: usize = updated_files.iter().map(|f| f.sections.len()).sum();
-        let file_count = seen_files.len();
-        store.apply_index(
-            &repo,
-            root,
-            &indexed_at,
-            index_version,
-            &updated_files,
-            &removed_files,
-        )?;
-
+        let summary =
+            doc_index::index_local_docs(self.config.doc_db_path(&normalize_repo_id(root)), root)?;
         Ok(DocIndexResult {
-            repo,
-            indexed_at,
-            file_count,
-            section_count,
+            repo: summary.repo,
+            indexed_at: summary.indexed_at,
+            file_count: summary.file_count,
+            section_count: summary.section_count,
         })
     }
 
@@ -166,7 +77,7 @@ impl CodeService {
         let source_drift = args.verify && current_hash != record.content_hash;
 
         let hash_verified = args.verify.then(|| current_hash == record.content_hash);
-        let result = crate::doc_storage::RetrievedSection {
+        let result = doc_index::RetrievedSection {
             id: record.id,
             heading: record.heading,
             file: record.file_path,

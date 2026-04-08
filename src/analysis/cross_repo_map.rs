@@ -6,8 +6,10 @@ use serde_json::{Value, json};
 
 use crate::{
     config::AppConfig,
-    cross_repo,
-    indexing::imports::{extract_imports, import_edges_reference_package, language_for_path},
+    indexing::{
+        imports::{extract_imports, import_edges_reference_package, language_for_path},
+        packages,
+    },
     storage::{IndexStore, list_repo_summaries},
 };
 
@@ -37,21 +39,21 @@ pub fn build_cross_repo_map(
         }
     }
 
-    let mut repo_entries: Vec<cross_repo::RepoEntry> = Vec::new();
+    let mut repo_entries: Vec<packages::RepoEntry> = Vec::new();
     for summary in &summaries {
         let db_path = config.repo_db_path(&summary.repo);
         if db_path.exists()
             && let Ok(store) = IndexStore::open(db_path)
         {
             let pkg_names = store.get_package_names().unwrap_or_default();
-            repo_entries.push(cross_repo::RepoEntry {
+            repo_entries.push(packages::RepoEntry {
                 repo_id: summary.repo.clone(),
                 package_names: pkg_names,
             });
         }
     }
 
-    let filtered_entries: Vec<&cross_repo::RepoEntry> = if let Some(filter_id) = filter_id {
+    let filtered_entries: Vec<&packages::RepoEntry> = if let Some(filter_id) = filter_id {
         repo_entries
             .iter()
             .filter(|e| e.repo_id == filter_id)
@@ -70,7 +72,7 @@ pub fn build_cross_repo_map(
         })
         .collect();
 
-    let registry = cross_repo::build_package_registry(&repo_entries);
+    let registry = packages::build_package_registry(&repo_entries);
     let mut cross_repo_edges: Vec<Value> = Vec::new();
 
     for entry in &filtered_entries {

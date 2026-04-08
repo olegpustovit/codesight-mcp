@@ -2,19 +2,22 @@
 
 mod analysis_reads;
 mod convert;
+pub mod doc_index;
 mod graph_reads;
 mod index_store;
+mod repo_summary;
 mod schema;
 mod search;
 mod symbol_reads;
+mod symbol_record;
 mod types;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use types::AnalysisSymbol;
-
-use crate::model::RepoMetadata;
+pub use repo_summary::RepoMetadata;
+pub use symbol_record::{SymbolMetadata, SymbolRecord};
+pub use types::{AnalysisSymbol, RetrievedSymbol, SearchSymbol};
 
 #[derive(Debug, Clone)]
 pub struct IndexStore {

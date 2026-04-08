@@ -1,7 +1,7 @@
 //! Code symbol summarization: docstring extraction, signature fallback,
 //! provider detection, circuit breaker, and model override.
 
-use crate::model::SymbolKind;
+use crate::core::symbols::SymbolKind;
 
 // ── Docstring extraction ─────────────────────────────────────────────────────
 

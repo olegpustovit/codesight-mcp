@@ -1,5 +1,7 @@
 //! SQLite storage layer for documentation sections.
 
+mod ingest;
+
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
@@ -13,10 +15,12 @@ use serde_json::Value;
 
 use crate::{
     config::{BYTES_PER_TOKEN, SCHEMA_VERSION},
+    core::pipeline::FileFingerprint,
     db,
-    model::FileFingerprint,
     sections::Section,
 };
+
+pub use ingest::{DocIndexSummary, index_local_docs};
 
 const DOC_STORE_INIT_SQL_TAIL: &str = r#"
 CREATE TABLE IF NOT EXISTS doc_files (

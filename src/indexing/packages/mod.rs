@@ -1,5 +1,5 @@
-//! Cross-repository dependency tracking: package name extraction, root package
-//! parsing, package registry, and cross-repo import map.
+//! Package manifest discovery, registry, and cross-repo edge materialization.
+//! Owned by the indexing domain (index-time package metadata).
 
 use std::collections::HashMap;
 use std::fs;

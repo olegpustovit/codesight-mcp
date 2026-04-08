@@ -5,7 +5,7 @@
 
 mod bundle;
 mod cross_repo;
-mod line;
+mod fallback;
 mod python_stems;
 mod resolve;
 mod tree_sitter;
@@ -20,11 +20,95 @@ pub use resolve::{
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportExtractionMode {
+    TreeSitterFirst,
+    FallbackOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImportExtractionCapability {
+    pub canonical_language: &'static str,
+    pub aliases: &'static [&'static str],
+    pub mode: ImportExtractionMode,
+}
+
+const IMPORT_EXTRACTION_CAPABILITIES: &[ImportExtractionCapability] = &[
+    ImportExtractionCapability {
+        canonical_language: "python",
+        aliases: &["py"],
+        mode: ImportExtractionMode::TreeSitterFirst,
+    },
+    ImportExtractionCapability {
+        canonical_language: "javascript",
+        aliases: &["js"],
+        mode: ImportExtractionMode::TreeSitterFirst,
+    },
+    ImportExtractionCapability {
+        canonical_language: "typescript",
+        aliases: &["ts"],
+        mode: ImportExtractionMode::TreeSitterFirst,
+    },
+    ImportExtractionCapability {
+        canonical_language: "tsx",
+        aliases: &[],
+        mode: ImportExtractionMode::TreeSitterFirst,
+    },
+    ImportExtractionCapability {
+        canonical_language: "jsx",
+        aliases: &[],
+        mode: ImportExtractionMode::TreeSitterFirst,
+    },
+    ImportExtractionCapability {
+        canonical_language: "vue",
+        aliases: &[],
+        mode: ImportExtractionMode::FallbackOnly,
+    },
+    ImportExtractionCapability {
+        canonical_language: "sql",
+        aliases: &[],
+        mode: ImportExtractionMode::FallbackOnly,
+    },
+    ImportExtractionCapability {
+        canonical_language: "dart",
+        aliases: &[],
+        mode: ImportExtractionMode::FallbackOnly,
+    },
+    ImportExtractionCapability {
+        canonical_language: "go",
+        aliases: &["golang"],
+        mode: ImportExtractionMode::TreeSitterFirst,
+    },
+];
+
 /// A structured import edge extracted from source code.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImportEdge {
     pub specifier: String,
     pub names: Vec<String>,
+}
+
+pub fn import_extraction_capabilities() -> &'static [ImportExtractionCapability] {
+    IMPORT_EXTRACTION_CAPABILITIES
+}
+
+pub fn import_capability_for_language(
+    language: &str,
+) -> Option<&'static ImportExtractionCapability> {
+    let language = language.to_ascii_lowercase();
+    import_extraction_capabilities().iter().find(|capability| {
+        capability
+            .canonical_language
+            .eq_ignore_ascii_case(&language)
+            || capability
+                .aliases
+                .iter()
+                .any(|alias| alias.eq_ignore_ascii_case(&language))
+    })
+}
+
+pub fn supports_import_extraction(language: &str) -> bool {
+    import_capability_for_language(language).is_some()
 }
 
 /// Detect language from file path extension.
@@ -60,25 +144,26 @@ pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<Im
     let edges = match effective.as_str() {
         "python" => match tree_sitter::extract_python_imports_ts(content) {
             Some(v) => v,
-            None => line::extract_imports_python(content),
+            None => fallback::python::extract_imports(content),
         },
         "javascript" | "typescript" | "tsx" | "jsx" | "js" | "ts" => {
             match tree_sitter::extract_js_imports_ts(content, &effective) {
                 Some(v) => v,
-                None => line::extract_imports_js(content),
+                None => fallback::js_ts::extract_imports(content),
             }
         }
-        "vue" => line::extract_imports_vue(content),
-        "sql" => line::extract_imports_sql(content),
-        "dart" => line::extract_imports_dart(content),
+        "vue" => fallback::vue::extract_imports(content),
+        "sql" => fallback::sql::extract_imports(content),
+        "dart" => fallback::dart::extract_imports(content),
         "go" | "golang" => match tree_sitter::extract_go_imports_ts(content) {
             Some(v) if !v.is_empty() => v,
-            _ => line::extract_imports_go(content),
+            _ => fallback::go::extract_imports(content),
         },
         _ => Vec::new(),
     };
 
-    line::deduplicate_edges(edges, file_path)
+    let _ = file_path;
+    fallback::helpers::deduplicate_edges(edges)
 }
 
 #[cfg(test)]
@@ -122,5 +207,15 @@ mod tests {
     fn python_top_level_stems_skip_relative() {
         let stems = python_top_level_import_stems("from . import x\n", "pkg/mod.py");
         assert!(stems.is_empty());
+    }
+
+    #[test]
+    fn import_capabilities_cover_dart_and_go() {
+        let dart = import_capability_for_language("dart").expect("dart capability");
+        assert_eq!(dart.mode, ImportExtractionMode::FallbackOnly);
+
+        let go = import_capability_for_language("golang").expect("go capability alias");
+        assert_eq!(go.canonical_language, "go");
+        assert_eq!(go.mode, ImportExtractionMode::TreeSitterFirst);
     }
 }

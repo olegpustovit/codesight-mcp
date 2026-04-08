@@ -43,7 +43,7 @@ def main() -> None:
         "use regex::Regex;\n"
         "use serde_json::{Value, json};\n\n"
         "use crate::config::BYTES_PER_TOKEN;\n"
-        "use crate::model::SearchSymbol;\n\n"
+        "use crate::storage::SearchSymbol;\n\n"
         + "".join(util_parts)
     )
 
@@ -86,8 +86,7 @@ def main() -> None:
             "use chrono::{DateTime, Utc};\n"
             "use walkdir::WalkDir;\n\n"
             "use crate::config::BYTES_PER_TOKEN;\n"
-            "use crate::doc_storage::DocStore;\n"
-            "use crate::doc_storage::list_doc_summaries;\n"
+            "use crate::storage::doc_index::{DocStore, list_doc_summaries};\n"
             "use crate::path_map;\n"
             "use crate::repo_id::normalize_repo_id;\n"
             "use crate::storage::{IndexStore, list_repo_summaries};\n\n"
@@ -104,9 +103,9 @@ def main() -> None:
             "use regex::Regex;\n"
             "use walkdir::WalkDir;\n\n"
             "use crate::config::BYTES_PER_TOKEN;\n"
-            "use crate::doc_storage::DocStore;\n"
+            "use crate::storage::doc_index::DocStore;\n"
             "use crate::fuzzy;\n"
-            "use crate::model::SearchSymbol;\n"
+            "use crate::storage::SearchSymbol;\n"
             "use crate::semantic;\n"
             "use crate::storage::IndexStore;\n\n"
             "use crate::service::helpers::{canonicalize_root, should_descend, to_repo_relative, normalize_search_scope};\n\n"
@@ -116,8 +115,9 @@ def main() -> None:
         "content",
         impl_block(1333, 1508),
         extra_use=(
-            "use crate::doc_storage::DocStore;\n"
-            "use crate::model::{SearchSymbol, SymbolKind};\n"
+            "use crate::storage::doc_index::DocStore;\n"
+            "use crate::core::symbols::SymbolKind;\n"
+            "use crate::storage::SearchSymbol;\n"
             "use crate::repo_id::normalize_repo_id;\n"
             "use crate::sections;\n"
             "use crate::storage::IndexStore;\n\n"
@@ -130,7 +130,7 @@ def main() -> None:
             "use std::collections::BTreeMap;\n\n"
             "use walkdir::WalkDir;\n\n"
             "use crate::class_hierarchy;\n"
-            "use crate::doc_storage::DocStore;\n"
+            "use crate::storage::doc_index::DocStore;\n"
             "use crate::framework;\n"
             "use crate::repo_id::normalize_repo_id;\n"
             "use crate::sections;\n"

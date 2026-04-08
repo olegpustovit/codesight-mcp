@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use crate::model::StoredSymbol;
+use crate::core::pipeline::StoredSymbol;
 
 pub(crate) fn adjust_language_for_cpp_header_if_plain_c(
     symbols: &mut [StoredSymbol],
@@ -61,7 +61,7 @@ pub(crate) fn has_cpp_constructs(source: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::ExtractionTier;
+    use crate::core::symbols::ExtractionTier;
 
     #[test]
     fn has_cpp_detects_namespace() {
@@ -84,7 +84,7 @@ mod tests {
             file_path: "hdr.h".into(),
             qualified_name: "x".into(),
             name: "x".into(),
-            kind: crate::model::SymbolKind::Function,
+            kind: crate::core::symbols::SymbolKind::Function,
             signature: "void x()".into(),
             summary: "".into(),
             start_line: 1,
@@ -108,7 +108,7 @@ mod tests {
             file_path: "hdr.h".into(),
             qualified_name: "x".into(),
             name: "x".into(),
-            kind: crate::model::SymbolKind::Function,
+            kind: crate::core::symbols::SymbolKind::Function,
             signature: "".into(),
             summary: "".into(),
             start_line: 1,

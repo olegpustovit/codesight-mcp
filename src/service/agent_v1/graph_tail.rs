@@ -80,13 +80,13 @@ impl CodeService {
                             && let Ok(s) = IndexStore::open(db_path)
                         {
                             let pkg_names = s.get_package_names().unwrap_or_default();
-                            repo_entries.push(crate::cross_repo::RepoEntry {
+                            repo_entries.push(crate::indexing::packages::RepoEntry {
                                 repo_id: summary.repo.clone(),
                                 package_names: pkg_names,
                             });
                         }
                     }
-                    let registry = crate::cross_repo::build_package_registry(&repo_entries);
+                    let registry = crate::indexing::packages::build_package_registry(&repo_entries);
                     let mut cross_repo_edges: Vec<Value> = Vec::new();
                     // Check this repo's files for references to other repos' packages
                     if let Ok(all_contents) = store.all_file_contents() {
@@ -422,7 +422,7 @@ impl CodeService {
                             && let Ok(s) = IndexStore::open(db_path)
                         {
                             let pkg_names = s.get_package_names().unwrap_or_default();
-                            repo_entries.push(crate::cross_repo::RepoEntry {
+                            repo_entries.push(crate::indexing::packages::RepoEntry {
                                 repo_id: summary.repo.clone(),
                                 package_names: pkg_names,
                             });

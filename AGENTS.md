@@ -50,24 +50,22 @@ This repository is the `codesight-mcp` Rust crate at repo root.
 Before merging or declaring work complete, both of the following must pass (treat them as non-negotiable CI/agent gates):
 
 1. **Clippy (warnings denied):** `cargo clippy --all-targets -- -D warnings`
-2. **Tests:** `cargo nextest run` (full suite; same tests as nextest-cache, without skipping via cache)
+2. **Tests:** `./scripts/nextest-cache` (full suite). For a merge-style check that must not trust a cache skip, run `./scripts/nextest-cache --no-cache` once after meaningful changes (or `./scripts/nextest-cache clean` then `./scripts/nextest-cache`).
 
 Formatting is expected to be clean: `cargo fmt --all -- --check` (or run `cargo fmt --all` before commit).
 
 ### Day-to-day commands
 
-Use **[cargo-nextest](https://nexte.st/)** for all test runs (install: `cargo install cargo-nextest` or your OS package manager).
+Use **`./scripts/nextest-cache`** for all test runs. It wraps **[cargo-nextest](https://nexte.st/)** (`cargo install cargo-nextest` or your OS package manager) and skips repeated work when inputs and args match a prior successful run—**do not** invoke `cargo nextest run` directly from agents or local loops; it is unnecessarily slow compared to the wrapper.
 
 ```bash
 ./scripts/nextest-cache
 ./scripts/nextest-cache --lib
-cargo nextest run
-cargo nextest run --lib
+./scripts/nextest-cache --no-cache          # force a real nextest run (same as uncached)
+./scripts/nextest-cache clean               # clear wrapper cache
 cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 ```
-
-Prefer `./scripts/nextest-cache` for local and agent loops. It still runs `cargo nextest run`, but skips identical successful invocations when the selected test inputs and command-line args have not changed. Use `./scripts/nextest-cache clean` to clear that cache, and call `cargo nextest run` directly for uncached verification or CI-style runs. A clean gate run should still execute **`cargo nextest run`** (not only a cached hit) when verifying a change before merge.
 
 Use plain `cargo test` only when nextest is unavailable in an environment, and prefer restoring nextest there.
 

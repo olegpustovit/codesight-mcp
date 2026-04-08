@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 
-use crate::model::StoredSymbol;
+use crate::core::pipeline::StoredSymbol;
 
 use super::ScmExtractor;
 use super::capture::collect_raw_captures;

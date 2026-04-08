@@ -4,8 +4,8 @@ use std::fs;
 
 use serde_json::{Value, json};
 
+use crate::core::symbols::SymbolKind;
 use crate::indexing::imports::context_bundle_import_lines;
-use crate::model::SymbolKind;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::{AssembleContextArgs, ContentRef};

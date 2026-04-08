@@ -4,8 +4,9 @@ use std::collections::HashSet;
 
 use rusqlite::named_params;
 
+use crate::core::symbols::SymbolKind;
 use crate::db;
-use crate::model::{SearchSymbol, SymbolKind};
+use crate::storage::SearchSymbol;
 
 use super::IndexStore;
 use super::types::SearchCandidate;

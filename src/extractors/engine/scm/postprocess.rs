@@ -1,6 +1,6 @@
 //! Postprocess phase for query-pack extraction.
 
-use crate::model::StoredSymbol;
+use crate::core::pipeline::StoredSymbol;
 
 use super::{ScmExtractor, ScmMetadata};
 

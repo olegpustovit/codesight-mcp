@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::model::SymbolKind;
+use crate::core::symbols::SymbolKind;
 
 fn make_extractor(key: &str) -> ScmExtractor {
     let source = QUERY_FILES

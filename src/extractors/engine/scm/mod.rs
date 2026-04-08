@@ -28,8 +28,9 @@ pub use metadata::{ScmMetadata, parse_scm_header};
 use anyhow::Result;
 
 use super::catalogs::{QueryPackCatalog, QueryPackDefinition};
+use crate::core::pipeline::StoredSymbol;
+use crate::core::symbols::ExtractionTier;
 use crate::extractors::LanguageExtractor;
-use crate::model::{ExtractionTier, StoredSymbol};
 use load::CompiledQueryPack;
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,8 @@ use serde_json::Value;
 
 use crate::class_hierarchy::ClassIndexRow;
 use crate::config::BYTES_PER_TOKEN;
-use crate::model::{ExtractionTier, SymbolKind, SymbolMetadata, SymbolRecord};
+use crate::core::symbols::{ExtractionTier, SymbolKind};
+use crate::storage::{SymbolMetadata, SymbolRecord};
 
 use super::IndexStore;
 

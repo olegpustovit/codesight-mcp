@@ -7,10 +7,11 @@ use std::path::PathBuf;
 use anyhow::Context;
 use rusqlite::{Connection, Transaction, params};
 
+use super::RepoMetadata;
 use crate::{
     config::SCHEMA_VERSION,
+    core::pipeline::{FileFingerprint, IndexedFileUpdate, StoredSymbol},
     db,
-    model::{FileFingerprint, IndexedFileUpdate, RepoMetadata, StoredSymbol},
 };
 use std::collections::HashMap;
 

@@ -8,7 +8,8 @@
 use anyhow::Result;
 use regex::Regex;
 
-use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
+use crate::core::pipeline::StoredSymbol;
+use crate::core::symbols::{ExtractionTier, SymbolKind};
 
 pub(super) fn extract_ctes(
     file_path: &str,

@@ -1,7 +1,8 @@
 //! Scope inference and symbol finalization after raw capture collection.
 
+use crate::core::pipeline::StoredSymbol;
+use crate::core::symbols::ExtractionTier;
 use crate::extractors::common::qualify;
-use crate::model::{ExtractionTier, StoredSymbol};
 
 use super::ScmExtractor;
 use super::capture::{OwnedCapture, StandaloneDocCapture};

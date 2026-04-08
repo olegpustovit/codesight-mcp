@@ -2,10 +2,21 @@ use std::{collections::HashMap, fs, io, path::PathBuf, time::Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    config::{BYTES_PER_TOKEN, RETRIEVAL_ENGINE, RETRIEVAL_VERSION},
-    model::Meta,
-};
+use crate::config::{BYTES_PER_TOKEN, RETRIEVAL_ENGINE, RETRIEVAL_VERSION};
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Meta {
+    pub tokens_saved: u64,
+    pub total_tokens_saved: u64,
+    pub response_tokens: u64,
+    pub naive_tokens: u64,
+    pub cost_avoided: HashMap<String, f64>,
+    pub total_cost_avoided: HashMap<String, f64>,
+    pub retrieval_engine: String,
+    pub retrieval_version: String,
+    pub timing_ms: f64,
+    pub powered_by: String,
+}
 
 // Per-million-token input pricing (USD)
 const MODEL_PRICING: &[(&str, f64)] = &[

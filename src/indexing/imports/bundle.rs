@@ -1,7 +1,7 @@
 //! `context_bundle` import display strings (API output parity, not graph semantics).
 
 use super::ImportEdge;
-use super::line;
+use super::fallback;
 use super::tree_sitter;
 
 /// Lines shown in `assemble_context` / `context_bundle` responses.
@@ -57,7 +57,7 @@ fn go_import_block_lines(content: &str) -> Vec<String> {
         return out;
     }
     // Single-line imports: one line per edge
-    for e in line::extract_imports_go(content) {
+    for e in fallback::go::extract_imports(content) {
         out.push(format!("import \"{}\"", e.specifier));
     }
     out

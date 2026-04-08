@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use anyhow::{Result, anyhow};
 use regex::Regex;
 
-use crate::model::StoredSymbol;
+use crate::core::pipeline::StoredSymbol;
 
 static BUILTIN_REGISTRY: LazyLock<super::ExtractorRegistry> =
     LazyLock::new(super::ExtractorRegistry::default);

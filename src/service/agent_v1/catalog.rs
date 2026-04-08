@@ -3,13 +3,12 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
-use crate::doc_storage::DocStore;
-use crate::doc_storage::list_doc_summaries;
 use crate::path_map;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::CatalogSourcesArgs;
 use crate::service::args::parse_args;
+use crate::storage::doc_index::{DocStore, list_doc_summaries};
 use crate::storage::{IndexStore, list_repo_summaries};
 
 fn index_metadata_staleness_warning(indexed_at: &str) -> Option<String> {
