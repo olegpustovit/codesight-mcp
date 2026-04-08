@@ -13,7 +13,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 use tree_sitter::Node;
 
-use crate::model::{StoredSymbol, SymbolKind};
+use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 use super::common::{node_text, parse_tree};
 use super::fallback_pipeline::sort_symbols_by_span;
@@ -372,6 +372,7 @@ fn push_csharp_method_symbol(
     let name = name.to_string();
     symbols.push(StoredSymbol {
         id: format!("{file_path}::{view_name}.{name}#method"),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: "csharp".to_string(),
         file_path: file_path.to_string(),
         qualified_name: format!("{view_name}.{name}"),
@@ -415,6 +416,7 @@ fn push_csharp_fieldlike_symbol(
     let src_text = full_source.get(abs_start..abs_end).unwrap_or("");
     symbols.push(StoredSymbol {
         id: format!("{file_path}::{view_name}.{name}#constant"),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: "csharp".to_string(),
         file_path: file_path.to_string(),
         qualified_name: format!("{view_name}.{name}"),
@@ -466,6 +468,7 @@ fn extract_csharp_block_via_regex(
 
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{view_name}.{name}#method"),
+            extraction_tier: ExtractionTier::ManualOverride,
             language: "csharp".to_string(),
             file_path: file_path.to_string(),
             qualified_name: format!("{view_name}.{name}"),
@@ -501,6 +504,7 @@ fn extract_csharp_block_via_regex(
 
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{view_name}.{name}#constant"),
+            extraction_tier: ExtractionTier::ManualOverride,
             language: "csharp".to_string(),
             file_path: file_path.to_string(),
             qualified_name: format!("{view_name}.{name}"),
@@ -559,6 +563,7 @@ fn extract_inline_js(
 
                 symbols.push(StoredSymbol {
                     id: format!("{file_path}::{view_name}.{name}#function"),
+                    extraction_tier: ExtractionTier::ManualOverride,
                     language: "javascript".to_string(),
                     file_path: file_path.to_string(),
                     qualified_name: format!("{view_name}.{name}"),
@@ -635,6 +640,7 @@ fn walk_js_function_decls(
         let name = name.to_string();
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{view_name}.{name}#function"),
+            extraction_tier: ExtractionTier::ManualOverride,
             language: "javascript".to_string(),
             file_path: file_path.to_string(),
             qualified_name: format!("{view_name}.{name}"),
@@ -729,6 +735,7 @@ fn make_sym(
     let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
     StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: language.to_string(),
         file_path: file_path.to_string(),
         qualified_name,

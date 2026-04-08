@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS symbols (
     id TEXT NOT NULL UNIQUE,
     file_path TEXT NOT NULL,
     language TEXT NOT NULL,
+    extraction_tier TEXT NOT NULL,
     kind TEXT NOT NULL,
     qualified_name TEXT NOT NULL,
     name TEXT NOT NULL,

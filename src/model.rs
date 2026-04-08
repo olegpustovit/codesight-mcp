@@ -28,6 +28,28 @@ impl SymbolKind {
     }
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ExtractionTier {
+    CuratedQueryPack,
+    GenericAstFallback,
+    ManualOverride,
+    Profiled,
+}
+
+impl ExtractionTier {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+
+    pub fn from_db(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Meta {
     pub tokens_saved: u64,
@@ -107,6 +129,7 @@ pub struct RetrievedSymbol {
 #[derive(Debug, Clone)]
 pub struct StoredSymbol {
     pub id: String,
+    pub extraction_tier: ExtractionTier,
     pub language: String,
     pub file_path: String,
     pub qualified_name: String,
@@ -146,6 +169,7 @@ pub struct IndexedFileUpdate {
 pub struct SymbolRecord {
     pub id: String,
     pub kind: SymbolKind,
+    pub extraction_tier: ExtractionTier,
     pub file_path: String,
     pub start_line: u32,
     pub end_line: u32,

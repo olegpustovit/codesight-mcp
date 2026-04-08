@@ -50,27 +50,6 @@ fn backdate_index(cfg: &AppConfig, source_id: &str, days: i64) {
         .unwrap();
 }
 
-/// Suite driver: runs all `run_*` retrieval scenarios sequentially.
-#[test]
-fn retrieval_tools_suite() {
-    run_all_retrieval_tool_cases();
-}
-
-/// Plain function so the suite and `#[test]` cases share logic without nested `#[test]` invocation.
-fn run_all_retrieval_tool_cases() {
-    run_demo_file_outline_language_no_symbols();
-    run_demo_repository_rollup_counts();
-    run_catalog_staleness_after_backdate();
-    run_catalog_fresh_no_staleness_warning();
-    run_search_todo_context_and_ordering();
-    run_search_todo_truncated_meta();
-    run_search_respects_scope_pattern();
-    run_search_context_clamped();
-    run_search_skips_unreadable_file();
-    run_read_file_slices_and_missing();
-    run_file_outline_batch_empty_and_conflict();
-}
-
 fn run_demo_file_outline_language_no_symbols() {
     let workspace = tempdir().unwrap();
     let root = setup_demo_repo(workspace.path());

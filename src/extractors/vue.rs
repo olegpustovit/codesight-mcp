@@ -4,7 +4,7 @@ use anyhow::Result;
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::model::{StoredSymbol, SymbolKind};
+use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 use super::common::{first_line, node_text, parse_tree, qualify, source_slice};
 
@@ -40,6 +40,7 @@ impl super::LanguageExtractor for VueExtractor {
         if let Some(ref comp_name) = component_name {
             symbols.push(StoredSymbol {
                 id: format!("{file_path}::{comp_name}#class"),
+                extraction_tier: ExtractionTier::ManualOverride,
                 language: "vue".to_string(),
                 file_path: file_path.to_string(),
                 qualified_name: comp_name.clone(),
@@ -480,6 +481,7 @@ fn push_vue_symbol(
 
     symbols.push(StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: "vue".to_string(),
         file_path: file_path.to_string(),
         qualified_name,

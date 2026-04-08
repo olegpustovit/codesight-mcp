@@ -8,7 +8,7 @@
 use anyhow::Result;
 use regex::Regex;
 
-use crate::model::{StoredSymbol, SymbolKind};
+use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 pub(super) fn extract_ctes(
     file_path: &str,
@@ -35,6 +35,7 @@ pub(super) fn extract_ctes(
         let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{name}#function"),
+            extraction_tier: ExtractionTier::ManualOverride,
             language: "sql".to_string(),
             file_path: file_path.to_string(),
             qualified_name: name.to_string(),
@@ -76,6 +77,7 @@ pub(super) fn extract_dbt_macros(
         let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{name}#function"),
+            extraction_tier: ExtractionTier::ManualOverride,
             language: "sql".to_string(),
             file_path: file_path.to_string(),
             qualified_name: name.to_string(),
@@ -107,6 +109,7 @@ pub(super) fn extract_dbt_macros(
         let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{name}#function"),
+            extraction_tier: ExtractionTier::ManualOverride,
             language: "sql".to_string(),
             file_path: file_path.to_string(),
             qualified_name: name.to_string(),
@@ -138,6 +141,7 @@ pub(super) fn extract_dbt_macros(
         let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{name}#type"),
+            extraction_tier: ExtractionTier::ManualOverride,
             language: "sql".to_string(),
             file_path: file_path.to_string(),
             qualified_name: name.to_string(),
@@ -170,6 +174,7 @@ pub(super) fn extract_dbt_macros(
         let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{name}#function"),
+            extraction_tier: ExtractionTier::ManualOverride,
             language: "sql".to_string(),
             file_path: file_path.to_string(),
             qualified_name: name.to_string(),

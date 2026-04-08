@@ -5,7 +5,7 @@ use crate::path_map::PathPair;
 pub const BYTES_PER_TOKEN: u64 = 4;
 pub const RETRIEVAL_VERSION: &str = "agent-v1";
 pub const RETRIEVAL_ENGINE: &str = "codesight";
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Threshold for emitting a "No .gitignore" warning during ingest.
 pub const GITIGNORE_WARNING_FILE_THRESHOLD: usize = 500;

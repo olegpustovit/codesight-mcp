@@ -21,30 +21,39 @@ const SMALL_UTILS: &str =
 
 const SMALL_MAIN: &str = "from engine import Engine\nfrom utils import format_date\n\ndef main():\n    e = Engine()\n    e.run()\n";
 
-#[test]
-fn token_budget_context_suite() {
-    run_all();
+struct SmallRepoFixture {
+    _workspace: tempfile::TempDir,
+    svc: CodeService,
+    source_id: String,
+    engine_id: String,
+    format_date_id: String,
 }
 
-fn run_all() {
-    case_bundle_budget_none_full_source();
-    case_bundle_compact_multi_empty_source();
-    case_bundle_compact_single_keeps_signature();
-    case_bundle_tiny_budget_report_or_ok();
-    case_bundle_no_report_by_default();
-    case_bundle_report_fields();
-    case_bundle_used_tokens_le_budget();
-    case_bundle_invalid_strategy_error();
-    case_bundle_flat_envelope();
-    case_ranked_context_items();
-    case_ranked_total_tokens_under_budget();
-    case_ranked_items_have_source_and_scores();
-    case_ranked_bm25_strategy();
-    case_ranked_zero_budget_error();
-    case_ranked_include_kinds_class();
+#[test]
+fn token_budget_context_suite() {
+    let fixture = setup_small_repo_fixture();
+    run_all(&fixture);
+}
+
+fn run_all(fixture: &SmallRepoFixture) {
+    case_bundle_budget_none_full_source(fixture);
+    case_bundle_compact_multi_empty_source(fixture);
+    case_bundle_compact_single_keeps_signature(fixture);
+    case_bundle_tiny_budget_report_or_ok(fixture);
+    case_bundle_no_report_by_default(fixture);
+    case_bundle_report_fields(fixture);
+    case_bundle_used_tokens_le_budget(fixture);
+    case_bundle_invalid_strategy_error(fixture);
+    case_bundle_flat_envelope(fixture);
+    case_ranked_context_items(fixture);
+    case_ranked_total_tokens_under_budget(fixture);
+    case_ranked_items_have_source_and_scores(fixture);
+    case_ranked_bm25_strategy(fixture);
+    case_ranked_zero_budget_error(fixture);
+    case_ranked_include_kinds_class(fixture);
     case_ranked_unknown_repo();
-    case_ranked_query_too_long();
-    case_ranked_meta_envelope();
+    case_ranked_query_too_long(fixture);
+    case_ranked_meta_envelope(fixture);
 }
 
 fn write_small_repo(root: &std::path::Path) {
@@ -109,20 +118,32 @@ fn format_date_id(svc: &CodeService, sid: &str) -> String {
         .to_string()
 }
 
-fn case_bundle_budget_none_full_source() {
+fn setup_small_repo_fixture() -> SmallRepoFixture {
     let workspace = tempdir().unwrap();
     let root = workspace.path();
     write_small_repo(root);
     let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let eid = engine_class_id(&svc, &sid);
-    let out = svc
+    let source_id = ingest(&svc, root);
+    let engine_id = engine_class_id(&svc, &source_id);
+    let format_date_id = format_date_id(&svc, &source_id);
+    SmallRepoFixture {
+        _workspace: workspace,
+        svc,
+        source_id,
+        engine_id,
+        format_date_id,
+    }
+}
+
+fn case_bundle_budget_none_full_source(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "context_bundle",
-                "refs": [{ "kind": "symbol", "stable_id": eid }],
+                "refs": [{ "kind": "symbol", "stable_id": fixture.engine_id }],
             }),
         )
         .unwrap();
@@ -130,23 +151,17 @@ fn case_bundle_budget_none_full_source() {
     assert!(!out["data"]["source"].as_str().unwrap().is_empty());
 }
 
-fn case_bundle_compact_multi_empty_source() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let eid = engine_class_id(&svc, &sid);
-    let fid = format_date_id(&svc, &sid);
-    let out = svc
+fn case_bundle_compact_multi_empty_source(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "context_bundle",
                 "refs": [
-                    { "kind": "symbol", "stable_id": eid },
-                    { "kind": "symbol", "stable_id": fid }
+                    { "kind": "symbol", "stable_id": fixture.engine_id },
+                    { "kind": "symbol", "stable_id": fixture.format_date_id }
                 ],
                 "token_budget": 10000,
                 "budget_strategy": "compact",
@@ -159,20 +174,15 @@ fn case_bundle_compact_multi_empty_source() {
     }
 }
 
-fn case_bundle_compact_single_keeps_signature() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let eid = engine_class_id(&svc, &sid);
-    let out = svc
+fn case_bundle_compact_single_keeps_signature(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "context_bundle",
-                "refs": [{ "kind": "symbol", "stable_id": eid }],
+                "refs": [{ "kind": "symbol", "stable_id": fixture.engine_id }],
                 "token_budget": 10000,
                 "budget_strategy": "compact",
             }),
@@ -183,23 +193,17 @@ fn case_bundle_compact_single_keeps_signature() {
     assert!(!sig.is_empty(), "{sig:?}");
 }
 
-fn case_bundle_tiny_budget_report_or_ok() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let eid = engine_class_id(&svc, &sid);
-    let fid = format_date_id(&svc, &sid);
-    let out = svc
+fn case_bundle_tiny_budget_report_or_ok(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "context_bundle",
                 "refs": [
-                    { "kind": "symbol", "stable_id": eid },
-                    { "kind": "symbol", "stable_id": fid }
+                    { "kind": "symbol", "stable_id": fixture.engine_id },
+                    { "kind": "symbol", "stable_id": fixture.format_date_id }
                 ],
                 "token_budget": 1,
                 "budget_strategy": "most_relevant",
@@ -218,20 +222,15 @@ fn case_bundle_tiny_budget_report_or_ok() {
     }
 }
 
-fn case_bundle_no_report_by_default() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let eid = engine_class_id(&svc, &sid);
-    let out = svc
+fn case_bundle_no_report_by_default(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "context_bundle",
-                "refs": [{ "kind": "symbol", "stable_id": eid }],
+                "refs": [{ "kind": "symbol", "stable_id": fixture.engine_id }],
                 "max_tokens": 10000,
             }),
         )
@@ -245,23 +244,17 @@ fn case_bundle_no_report_by_default() {
     );
 }
 
-fn case_bundle_report_fields() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let eid = engine_class_id(&svc, &sid);
-    let fid = format_date_id(&svc, &sid);
-    let out = svc
+fn case_bundle_report_fields(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "context_bundle",
                 "refs": [
-                    { "kind": "symbol", "stable_id": eid },
-                    { "kind": "symbol", "stable_id": fid }
+                    { "kind": "symbol", "stable_id": fixture.engine_id },
+                    { "kind": "symbol", "stable_id": fixture.format_date_id }
                 ],
                 "token_budget": 10000,
                 "include_budget_report": true,
@@ -281,23 +274,17 @@ fn case_bundle_report_fields() {
     }
 }
 
-fn case_bundle_used_tokens_le_budget() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let eid = engine_class_id(&svc, &sid);
-    let fid = format_date_id(&svc, &sid);
-    let out = svc
+fn case_bundle_used_tokens_le_budget(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "context_bundle",
                 "refs": [
-                    { "kind": "symbol", "stable_id": eid },
-                    { "kind": "symbol", "stable_id": fid }
+                    { "kind": "symbol", "stable_id": fixture.engine_id },
+                    { "kind": "symbol", "stable_id": fixture.format_date_id }
                 ],
                 "token_budget": 200,
                 "include_budget_report": true,
@@ -311,20 +298,15 @@ fn case_bundle_used_tokens_le_budget() {
     assert!(used <= cap);
 }
 
-fn case_bundle_invalid_strategy_error() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let eid = engine_class_id(&svc, &sid);
-    let out = svc
+fn case_bundle_invalid_strategy_error(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "context_bundle",
-                "refs": [{ "kind": "symbol", "stable_id": eid }],
+                "refs": [{ "kind": "symbol", "stable_id": fixture.engine_id }],
                 "token_budget": 1000,
                 "budget_strategy": "magic",
             }),
@@ -335,20 +317,15 @@ fn case_bundle_invalid_strategy_error() {
     assert!(detail.contains("budget_strategy"), "detail={detail}");
 }
 
-fn case_bundle_flat_envelope() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let fid = format_date_id(&svc, &sid);
-    let out = svc
+fn case_bundle_flat_envelope(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "context_bundle",
-                "refs": [{ "kind": "symbol", "stable_id": fid }],
+                "refs": [{ "kind": "symbol", "stable_id": fixture.format_date_id }],
             }),
         )
         .unwrap();
@@ -359,17 +336,13 @@ fn case_bundle_flat_envelope() {
     assert!(!d.contains_key("budget_report"));
 }
 
-fn case_ranked_context_items() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let out = svc
+fn case_ranked_context_items(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "ranked",
                 "query": "engine run",
             }),
@@ -379,17 +352,13 @@ fn case_ranked_context_items() {
     assert!(out["data"]["context_items"].is_array());
 }
 
-fn case_ranked_total_tokens_under_budget() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let out = svc
+fn case_ranked_total_tokens_under_budget(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "ranked",
                 "query": "engine",
                 "token_budget": 100,
@@ -400,17 +369,13 @@ fn case_ranked_total_tokens_under_budget() {
     assert!(out["data"]["total_tokens"].as_u64().unwrap() <= 100);
 }
 
-fn case_ranked_items_have_source_and_scores() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let out = svc
+fn case_ranked_items_have_source_and_scores(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "ranked",
                 "query": "Engine",
                 "token_budget": 4000,
@@ -427,17 +392,13 @@ fn case_ranked_items_have_source_and_scores() {
     }
 }
 
-fn case_ranked_bm25_strategy() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let out = svc
+fn case_ranked_bm25_strategy(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "ranked",
                 "query": "format date",
                 "strategy": "bm25",
@@ -448,17 +409,13 @@ fn case_ranked_bm25_strategy() {
     assert!(out["data"]["context_items"].is_array());
 }
 
-fn case_ranked_zero_budget_error() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let out = svc
+fn case_ranked_zero_budget_error(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "ranked",
                 "query": "engine",
                 "token_budget": 0,
@@ -468,17 +425,13 @@ fn case_ranked_zero_budget_error() {
     assert!(!out["ok"].as_bool().unwrap(), "{out:?}");
 }
 
-fn case_ranked_include_kinds_class() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let out = svc
+fn case_ranked_include_kinds_class(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "ranked",
                 "query": "engine",
                 "token_budget": 4000,
@@ -512,18 +465,14 @@ fn case_ranked_unknown_repo() {
     assert!(!out["ok"].as_bool().unwrap(), "{out:?}");
 }
 
-fn case_ranked_query_too_long() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
+fn case_ranked_query_too_long(fixture: &SmallRepoFixture) {
     let q = "x".repeat(501);
-    let out = svc
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "ranked",
                 "query": q,
             }),
@@ -532,17 +481,13 @@ fn case_ranked_query_too_long() {
     assert!(!out["ok"].as_bool().unwrap(), "{out:?}");
 }
 
-fn case_ranked_meta_envelope() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    write_small_repo(root);
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, root);
-    let out = svc
+fn case_ranked_meta_envelope(fixture: &SmallRepoFixture) {
+    let out = fixture
+        .svc
         .dispatch(
             "assemble_context",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "mode": "ranked",
                 "query": "Engine",
             }),

@@ -40,30 +40,6 @@ impl super::LanguageExtractor for YamlExtractor {
     }
 }
 
-/// Wraps `YamlExtractor` but reports `language_name() == "ansible"` when
-/// [`super::classifier::classify_special_path`] selects Ansible (path layout + `.yml`/`.yaml`).
-pub struct AnsibleExtractor;
-
-impl super::LanguageExtractor for AnsibleExtractor {
-    fn language_name(&self) -> &'static str {
-        "ansible"
-    }
-
-    fn supported_extensions(&self) -> &'static [&'static str] {
-        // Never matched by extension — only by path heuristic in the registry.
-        &[]
-    }
-
-    fn extract(
-        &self,
-        file_path: &str,
-        source: &str,
-    ) -> anyhow::Result<Vec<crate::model::StoredSymbol>> {
-        // Delegate to YAML extraction; Ansible shaping follows `path_suggests_ansible_layout`.
-        YamlExtractor.extract(file_path, source)
-    }
-}
-
 fn visit_stream(
     node: Node<'_>,
     file_path: &str,

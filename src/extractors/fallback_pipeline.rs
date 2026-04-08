@@ -33,11 +33,12 @@ pub fn dedup_symbols_by_start_byte(symbols: &mut Vec<StoredSymbol>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::SymbolKind;
+    use crate::model::{ExtractionTier, SymbolKind};
 
     fn dummy_sym(start: usize, name: &str) -> StoredSymbol {
         StoredSymbol {
             id: format!("f::{name}"),
+            extraction_tier: ExtractionTier::ManualOverride,
             language: "x".into(),
             file_path: "f".into(),
             qualified_name: name.into(),

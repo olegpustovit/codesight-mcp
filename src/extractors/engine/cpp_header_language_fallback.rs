@@ -61,6 +61,7 @@ pub(crate) fn has_cpp_constructs(source: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::ExtractionTier;
 
     #[test]
     fn has_cpp_detects_namespace() {
@@ -78,6 +79,7 @@ mod tests {
     fn adjust_relabels_symbols() {
         let mut syms = vec![StoredSymbol {
             id: "t::x#function".into(),
+            extraction_tier: ExtractionTier::CuratedQueryPack,
             language: "cpp".into(),
             file_path: "hdr.h".into(),
             qualified_name: "x".into(),
@@ -101,6 +103,7 @@ mod tests {
     fn adjust_skips_when_cpp_construct_present() {
         let mut syms = vec![StoredSymbol {
             id: "t::x#function".into(),
+            extraction_tier: ExtractionTier::CuratedQueryPack,
             language: "cpp".into(),
             file_path: "hdr.h".into(),
             qualified_name: "x".into(),

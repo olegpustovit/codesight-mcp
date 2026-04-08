@@ -118,8 +118,9 @@ impl CodeService {
                 };
                 let mut meta = store.repo_metadata()?;
                 if let Ok(root) = store.root_path() {
+                    let extractors = self.extractors_for_root(&root);
                     meta.is_stale = store
-                        .is_stale(&root, |p| self.extractors.extractor_for_path(p).is_some())
+                        .is_stale(&root, |p| extractors.extractor_for_path(p).is_some())
                         .ok();
                 }
                 let raw_bytes = meta.estimated_naive_tokens.saturating_mul(4);

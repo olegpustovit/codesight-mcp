@@ -48,11 +48,15 @@ This repository is the `codesight-mcp` Rust crate at repo root.
 Use **[cargo-nextest](https://nexte.st/)** for all test runs (install: `cargo install cargo-nextest` or your OS package manager).
 
 ```bash
+./scripts/nextest-cache
+./scripts/nextest-cache --lib
 cargo nextest run
 cargo nextest run --lib
 cargo fmt --all
 cargo clippy --all-targets
 ```
+
+Prefer `./scripts/nextest-cache` for local and agent loops. It still runs `cargo nextest run`, but skips identical successful invocations when the selected test inputs and command-line args have not changed. Use `./scripts/nextest-cache clean` to clear that cache, and call `cargo nextest run` directly for uncached verification or CI-style runs.
 
 Use plain `cargo test` only when nextest is unavailable in an environment, and prefer restoring nextest there.
 

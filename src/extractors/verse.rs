@@ -4,7 +4,7 @@ use anyhow::Result;
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::model::{StoredSymbol, SymbolKind};
+use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 pub struct VerseExtractor;
 
@@ -235,6 +235,7 @@ fn make_symbol(
     let summary = docstring.unwrap_or_else(|| signature.clone());
     StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: "verse".to_string(),
         file_path: file_path.to_string(),
         qualified_name,

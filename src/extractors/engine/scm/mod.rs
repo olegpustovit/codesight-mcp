@@ -1,141 +1,39 @@
 //! SCM query-based extractor engine.
 //!
-//! Each language is defined by a single `.scm` file containing tree-sitter queries.
-//! The engine compiles the query, runs it via `QueryCursor`, and builds `StoredSymbol`
-//! records from captures using containment-based scope inference.
+//! Built-in packs live under `runtime/queries/<pack_id>/{tags,symbols}.scm`. The pack catalog is
+//! generated at build time by `build.rs`; [`super::catalogs::QueryPackCatalog`] loads those
+//! sources and hands them to [`ScmExtractor`]. Submodules hold header parsing, pattern metadata,
+//! capture types, doc cleanup, and the extract phases; [`ScmExtractor`] is the public façade over
+//! tree-sitter queries.
 //!
-//! Language knowledge for symbol capture lives in `.scm` files. A small post-pass
-//! for C/C++ headers lives in [`super::cpp_header_language_fallback`].
+//! Language knowledge for symbol capture lives in `.scm` files. A small post-pass for C/C++
+//! headers lives in [`super::cpp_header_language_fallback`].
+
+mod capture;
+mod docs;
+mod extract;
+mod metadata;
+mod pattern;
+
+pub use super::catalogs::QUERY_FILES;
+pub use metadata::{ScmMetadata, parse_scm_header};
 
 use anyhow::{Result, anyhow};
-use streaming_iterator::StreamingIterator;
-use tree_sitter::{Query, QueryCursor};
+use tree_sitter::Query;
 
-use crate::model::{StoredSymbol, SymbolKind};
-
+use super::catalogs::{QueryPackCatalog, QueryPackDefinition};
 use crate::extractors::LanguageExtractor;
-use crate::extractors::common::{first_line, node_text, qualify, source_slice};
+use crate::model::{ExtractionTier, StoredSymbol};
 
 // ---------------------------------------------------------------------------
-// Metadata parsed from header comments in .scm files
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Default)]
-pub struct ScmMetadata {
-    pub name: String,
-    pub extensions: Vec<String>,
-    pub grammar: String,
-    pub override_extractor: Option<String>,
-}
-
-/// Parse `; key: value` header lines from the top of a .scm file.
-pub fn parse_scm_header(source: &str) -> ScmMetadata {
-    let mut meta = ScmMetadata::default();
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with(';') {
-            if !trimmed.is_empty() {
-                break; // end of header
-            }
-            continue;
-        }
-        let comment = trimmed.trim_start_matches(';').trim();
-        if let Some((key, value)) = comment.split_once(':') {
-            let key = key.trim();
-            let value = value.trim();
-            match key {
-                "language" => meta.name = value.to_string(),
-                "extensions" => {
-                    meta.extensions = value.split_whitespace().map(String::from).collect()
-                }
-                "grammar" => meta.grammar = value.to_string(),
-                "override" => meta.override_extractor = Some(value.to_string()),
-                _ => {}
-            }
-        }
-    }
-    meta
-}
-
-// ---------------------------------------------------------------------------
-// Per-pattern metadata from #set! directives
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Default)]
-struct PatternProps {
-    /// Skip this symbol if contained within a definition of this kind.
-    exclude_inside: Option<String>,
-    /// Create a scope entry but don't emit a StoredSymbol.
-    scope_only: bool,
-    /// Use this literal string as the name (e.g. "init" for Swift).
-    fixed_name: Option<String>,
-    /// Prepend this string to the captured @name text (e.g. "@keyframes ").
-    name_prefix: Option<String>,
-}
-
-fn read_pattern_props(query: &Query, pattern_index: usize) -> PatternProps {
-    let mut props = PatternProps::default();
-    for p in query.property_settings(pattern_index) {
-        match p.key.as_ref() {
-            "exclude_inside" => {
-                props.exclude_inside = p.value.as_ref().map(|v| v.to_string());
-            }
-            "scope_only" => props.scope_only = true,
-            "fixed_name" => {
-                props.fixed_name = p.value.as_ref().map(|v| v.to_string());
-            }
-            "name_prefix" => {
-                props.name_prefix = p.value.as_ref().map(|v| v.to_string());
-            }
-            _ => {}
-        }
-    }
-    props
-}
-
-// ---------------------------------------------------------------------------
-// Raw captured symbol (before dedup + scope inference)
-// ---------------------------------------------------------------------------
-
-struct OwnedCapture {
-    kind: SymbolKind,
-    kind_str: String,
-    name: String,
-    name_start_byte: usize,
-    def_start: usize,
-    def_end: usize,
-    def_start_row: usize,
-    def_end_row: usize,
-    def_signature: String,
-    def_source_text: String,
-    doc: Option<String>,
-    scope_label: Option<String>,
-    qualified_name_override: Option<String>,
-    pattern_index: usize,
-    props: PatternProps,
-}
-
-fn parse_symbol_kind(kind_str: &str) -> Option<SymbolKind> {
-    Some(match kind_str {
-        "function" => SymbolKind::Function,
-        "class" => SymbolKind::Class,
-        "method" => SymbolKind::Method,
-        "constant" => SymbolKind::Constant,
-        "type" => SymbolKind::Type,
-        "module" | "namespace" => SymbolKind::Type,
-        _ => return None,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// ScmExtractor
+// ScmExtractor (facade)
 // ---------------------------------------------------------------------------
 
 pub struct ScmExtractor {
-    language_name: &'static str,
-    extensions: &'static [&'static str],
-    grammar: tree_sitter::Language,
-    query: Query,
+    pub(super) language_name: &'static str,
+    pub(super) extensions: &'static [&'static str],
+    pub(super) grammar: tree_sitter::Language,
+    pub(super) query: Query,
 }
 
 impl ScmExtractor {
@@ -162,6 +60,10 @@ impl ScmExtractor {
             query,
         })
     }
+
+    pub fn from_pack(pack: &QueryPackDefinition) -> Result<Self> {
+        Self::new(&pack.metadata, &pack.query_source)
+    }
 }
 
 impl LanguageExtractor for ScmExtractor {
@@ -173,431 +75,38 @@ impl LanguageExtractor for ScmExtractor {
         self.extensions
     }
 
+    fn extraction_tier(&self) -> ExtractionTier {
+        ExtractionTier::CuratedQueryPack
+    }
+
     fn extract(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&self.grammar)
-            .map_err(|e| anyhow!("set_language: {e}"))?;
-        let tree = parser
-            .parse(source, None)
-            .ok_or_else(|| anyhow!("parse returned no tree"))?;
-        let mut cursor = QueryCursor::new();
-
-        let capture_names = self.query.capture_names();
-
-        // --- Phase 1: Collect raw captures ---
-        // QueryMatches is a StreamingIterator — text predicates (#match?, #eq?) are
-        // checked automatically. We extract owned data from each match before advancing.
-        let mut raws: Vec<OwnedCapture> = Vec::new();
-        let mut standalone_docs: Vec<(usize, String)> = Vec::new(); // (byte_offset, cleaned_doc)
-
-        let mut matches = cursor.matches(&self.query, tree.root_node(), source.as_bytes());
-        while let Some(m) = matches.next() {
-            let mut props = read_pattern_props(&self.query, m.pattern_index);
-
-            let mut def_start = 0usize;
-            let mut def_end = 0usize;
-            let mut def_start_row = 0usize;
-            let mut def_end_row = 0usize;
-            let mut def_kind_str: Option<String> = None;
-            let mut def_signature = String::new();
-            let mut def_source_text = String::new();
-            let mut name_text: Option<String> = None;
-            let mut name_start_byte = 0usize;
-            let mut doc_text: Option<String> = None;
-            let mut scope_text: Option<String> = None;
-            let mut qname_text: Option<String> = None;
-            let mut has_def = false;
-
-            let mut capture_props = PatternProps::default();
-
-            for cap in m.captures {
-                let cap_name = capture_names[cap.index as usize];
-                if let Some(rest) = cap_name.strip_prefix("definition.") {
-                    has_def = true;
-                    def_start = cap.node.start_byte();
-                    def_end = cap.node.end_byte();
-                    def_start_row = cap.node.start_position().row;
-                    def_end_row = cap.node.end_position().row;
-                    // Parse suffixes: "constant.nofunc" → kind="constant", exclude_inside="function"
-                    // "namespace.scope_only" → kind="namespace", scope_only=true
-                    let mut kind_part = rest;
-                    if let Some(base) = rest.strip_suffix(".nofunc") {
-                        kind_part = base;
-                        capture_props.exclude_inside = Some("function".to_string());
-                    } else if let Some(base) = rest.strip_suffix(".scope_only") {
-                        kind_part = base;
-                        capture_props.scope_only = true;
-                    }
-                    def_kind_str = Some(kind_part.to_string());
-                    def_signature = first_line(cap.node, source).unwrap_or_default();
-                    def_source_text = source_slice(cap.node, source).unwrap_or("").to_string();
-                } else {
-                    match cap_name {
-                        "name" => {
-                            name_text = node_text(cap.node, source).ok().map(|s| s.to_string());
-                            name_start_byte = cap.node.start_byte();
-                        }
-                        "doc" => {
-                            doc_text = node_text(cap.node, source).ok().map(|s| clean_docstring(s));
-                        }
-                        "scope" => {
-                            scope_text = node_text(cap.node, source)
-                                .ok()
-                                .map(|t| t.trim_start_matches('*').to_string());
-                        }
-                        "qualified_name" => {
-                            qname_text = node_text(cap.node, source).ok().map(|s| s.to_string());
-                        }
-                        _ => {} // internal captures (_key, etc.)
-                    }
-                }
-            }
-
-            // Standalone @doc captures (no @definition.* in same match):
-            // collect with the byte position from the match for containment lookup.
-            if !has_def {
-                if let Some(doc) = doc_text {
-                    // Use the first capture's start byte as location hint.
-                    let byte_pos = m.captures.first().map_or(0, |c| c.node.start_byte());
-                    standalone_docs.push((byte_pos, doc));
-                }
-                continue;
-            }
-            let Some(kind_str) = def_kind_str else {
-                continue;
-            };
-
-            // Resolve name: fixed_name > @name capture (with optional prefix)
-            let name = if let Some(fixed) = &props.fixed_name {
-                fixed.clone()
-            } else if let Some(n) = name_text {
-                if let Some(ref prefix) = props.name_prefix {
-                    format!("{prefix}{n}")
-                } else {
-                    n
-                }
-            } else {
-                continue;
-            };
-
-            let Some(kind) = parse_symbol_kind(&kind_str) else {
-                continue;
-            };
-
-            // Merge capture-name props with #set! props (capture-name takes precedence).
-            if capture_props.exclude_inside.is_some() {
-                props.exclude_inside = capture_props.exclude_inside;
-            }
-            if capture_props.scope_only {
-                props.scope_only = true;
-            }
-            if capture_props.fixed_name.is_some() {
-                props.fixed_name = capture_props.fixed_name;
-            }
-
-            raws.push(OwnedCapture {
-                kind,
-                kind_str,
-                name,
-                name_start_byte,
-                def_start,
-                def_end,
-                def_start_row,
-                def_end_row,
-                def_signature,
-                def_source_text,
-                doc: doc_text,
-                scope_label: scope_text,
-                qualified_name_override: qname_text,
-                pattern_index: m.pattern_index,
-                props,
-            });
-        }
-
-        // --- Phase 2: Dedup by name position (lowest pattern_index wins) ---
-        raws.sort_by_key(|r| (r.name_start_byte, r.pattern_index));
-        raws.dedup_by(|b, a| a.name_start_byte == b.name_start_byte && a.name == b.name);
-
-        // --- Phase 2b: Associate standalone @doc captures with symbols ---
-        // A standalone doc at byte offset N belongs to the symbol whose span contains N
-        // (tightest containing symbol). If no containing symbol is found, associate
-        // with the *next* symbol after the doc (preceding-doc-comment pattern, e.g.
-        // Lua `---` comments that sit above a function).
-        if !standalone_docs.is_empty() {
-            for (doc_byte, doc_text) in &standalone_docs {
-                // First try: tightest containing symbol.
-                let best = raws
-                    .iter_mut()
-                    .filter(|r| {
-                        r.def_start <= *doc_byte && *doc_byte < r.def_end && r.doc.is_none()
-                    })
-                    .min_by_key(|r| r.def_end - r.def_start);
-                if let Some(sym) = best {
-                    sym.doc = Some(doc_text.clone());
-                    continue;
-                }
-                // Fallback: next symbol whose def_start is after (or at) doc_byte.
-                let next = raws
-                    .iter_mut()
-                    .filter(|r| r.def_start >= *doc_byte && r.doc.is_none())
-                    .min_by_key(|r| r.def_start);
-                if let Some(sym) = next {
-                    sym.doc = Some(doc_text.clone());
-                }
-            }
-        }
-
-        // --- Phase 3: Sort by span for containment scoping ---
-        raws.sort_by_key(|r| (r.def_start, std::cmp::Reverse(r.def_end)));
-
-        // --- Phase 4: Containment-based scope inference + build StoredSymbols ---
-        struct ScopeEntry {
-            span_end: usize,
-            name: String,
-            kind_str: String,
-        }
-        let mut scope_stack: Vec<ScopeEntry> = Vec::new();
-        let mut symbols = Vec::new();
-
-        for raw in &raws {
-            // Pop scopes that don't contain this symbol.
-            while let Some(top) = scope_stack.last() {
-                if top.span_end <= raw.def_start {
-                    scope_stack.pop();
-                } else {
-                    break;
-                }
-            }
-
-            // Check exclude_inside.
-            if let Some(exclude) = &raw.props.exclude_inside {
-                if scope_stack.iter().any(|s| s.kind_str == *exclude) {
-                    scope_stack.push(ScopeEntry {
-                        span_end: raw.def_end,
-                        name: raw.name.clone(),
-                        kind_str: raw.kind_str.clone(),
-                    });
-                    continue;
-                }
-            }
-
-            // Build qualified name.
-            let qualified_name = if let Some(qn) = &raw.qualified_name_override {
-                qn.clone()
-            } else {
-                let scope_names: Vec<String> = scope_stack
-                    .iter()
-                    .map(|s| s.name.clone())
-                    .chain(raw.scope_label.iter().cloned())
-                    .collect();
-                qualify(&scope_names, &raw.name)
-            };
-
-            // Push as scope for containment.
-            scope_stack.push(ScopeEntry {
-                span_end: raw.def_end,
-                name: raw.name.clone(),
-                kind_str: raw.kind_str.clone(),
-            });
-
-            if raw.props.scope_only {
-                continue;
-            }
-
-            let summary = raw.doc.clone().unwrap_or_else(|| raw.def_signature.clone());
-            let source_hash = blake3::hash(raw.def_source_text.as_bytes())
-                .to_hex()
-                .to_string();
-
-            symbols.push(StoredSymbol {
-                id: format!("{}::{}#{}", file_path, qualified_name, raw.kind.as_str()),
-                language: self.language_name.to_string(),
-                file_path: file_path.to_string(),
-                qualified_name,
-                name: raw.name.clone(),
-                kind: raw.kind,
-                signature: raw.def_signature.clone(),
-                summary,
-                start_line: (raw.def_start_row + 1) as u32,
-                end_line: (raw.def_end_row + 1) as u32,
-                start_byte: raw.def_start,
-                end_byte: raw.def_end,
-                source_hash,
-                source_text: raw.def_source_text.clone(),
-                file_size_bytes: source.len() as u64,
-            });
-        }
-
-        super::cpp_header_language_fallback::adjust_language_for_cpp_header_if_plain_c(
-            &mut symbols,
-            self.language_name,
-            file_path,
-            source,
-        );
-
-        symbols.sort_by_key(|s| (s.start_byte, s.end_byte));
-        Ok(symbols)
+        extract::extract_symbols(self, file_path, source)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Docstring cleaning (universal, not language-specific)
-// ---------------------------------------------------------------------------
-
-fn clean_docstring(raw: &str) -> String {
-    let trimmed = raw.trim();
-    // Strip string delimiters (triple quotes, single quotes, etc.)
-    let stripped = trimmed
-        .strip_prefix("\"\"\"")
-        .and_then(|s| s.strip_suffix("\"\"\""))
-        .or_else(|| {
-            trimmed
-                .strip_prefix("'''")
-                .and_then(|s| s.strip_suffix("'''"))
-        })
-        .or_else(|| trimmed.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-        .or_else(|| {
-            trimmed
-                .strip_prefix('\'')
-                .and_then(|s| s.strip_suffix('\''))
-        })
-        .unwrap_or(trimmed);
-
-    // Also strip leading string prefix chars (r, u, f, b)
-    let stripped = stripped.trim_start_matches(['r', 'R', 'u', 'U', 'f', 'F', 'b', 'B']);
-
-    stripped
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
+pub fn build_scm_extractors() -> Result<Vec<Box<dyn LanguageExtractor>>> {
+    build_scm_extractors_from_catalog(&QueryPackCatalog::builtin())
 }
 
-// ---------------------------------------------------------------------------
-// Load all .scm extractors from embedded query files
-// ---------------------------------------------------------------------------
-
-/// Built-in query files, embedded at compile time.
-pub const QUERY_FILES: &[(&str, &str)] = &[
-    (
-        "python",
-        include_str!("../../../runtime/queries/python/symbols.scm"),
-    ),
-    (
-        "bash",
-        include_str!("../../../runtime/queries/bash/symbols.scm"),
-    ),
-    (
-        "java",
-        include_str!("../../../runtime/queries/java/symbols.scm"),
-    ),
-    (
-        "go",
-        include_str!("../../../runtime/queries/go/symbols.scm"),
-    ),
-    (
-        "php",
-        include_str!("../../../runtime/queries/php/symbols.scm"),
-    ),
-    (
-        "javascript",
-        include_str!("../../../runtime/queries/javascript/symbols.scm"),
-    ),
-    (
-        "typescript",
-        include_str!("../../../runtime/queries/typescript/symbols.scm"),
-    ),
-    (
-        "tsx",
-        include_str!("../../../runtime/queries/tsx/symbols.scm"),
-    ),
-    (
-        "json",
-        include_str!("../../../runtime/queries/json/symbols.scm"),
-    ),
-    (
-        "css",
-        include_str!("../../../runtime/queries/css/symbols.scm"),
-    ),
-    (
-        "ruby",
-        include_str!("../../../runtime/queries/ruby/symbols.scm"),
-    ),
-    (
-        "lua",
-        include_str!("../../../runtime/queries/lua/symbols.scm"),
-    ),
-    (
-        "swift",
-        include_str!("../../../runtime/queries/swift/symbols.scm"),
-    ),
-    (
-        "rust_lang",
-        include_str!("../../../runtime/queries/rust/symbols.scm"),
-    ),
-    (
-        "cpp",
-        include_str!("../../../runtime/queries/cpp/symbols.scm"),
-    ),
-    (
-        "csharp",
-        include_str!("../../../runtime/queries/csharp/symbols.scm"),
-    ),
-    (
-        "kotlin",
-        include_str!("../../../runtime/queries/kotlin/symbols.scm"),
-    ),
-    (
-        "perl",
-        include_str!("../../../runtime/queries/perl/symbols.scm"),
-    ),
-    (
-        "elixir",
-        include_str!("../../../runtime/queries/elixir/symbols.scm"),
-    ),
-    (
-        "erlang",
-        include_str!("../../../runtime/queries/erlang/symbols.scm"),
-    ),
-    (
-        "dart",
-        include_str!("../../../runtime/queries/dart/symbols.scm"),
-    ),
-    (
-        "xml",
-        include_str!("../../../runtime/queries/xml/symbols.scm"),
-    ),
-    (
-        "nix",
-        include_str!("../../../runtime/queries/nix/symbols.scm"),
-    ),
-    (
-        "fortran",
-        include_str!("../../../runtime/queries/fortran/symbols.scm"),
-    ),
-    (
-        "gleam",
-        include_str!("../../../runtime/queries/gleam/symbols.scm"),
-    ),
-];
-
-pub fn build_scm_extractors() -> Result<Vec<Box<dyn LanguageExtractor>>> {
+pub fn build_scm_extractors_from_catalog(
+    catalog: &QueryPackCatalog,
+) -> Result<Vec<Box<dyn LanguageExtractor>>> {
     let mut extractors: Vec<Box<dyn LanguageExtractor>> = Vec::new();
 
-    for (_key, source) in QUERY_FILES {
-        let meta = parse_scm_header(source);
-        if meta.override_extractor.is_some() {
+    for pack in catalog.iter() {
+        if pack.metadata.override_extractor.is_some() {
             continue; // handled by override registry
         }
-        if meta.grammar.is_empty() {
+        if pack.metadata.grammar.is_empty() {
             continue;
         }
-        match ScmExtractor::new(&meta, source) {
+        match ScmExtractor::from_pack(pack) {
             Ok(ext) => extractors.push(Box::new(ext)),
             Err(e) => {
-                eprintln!("warning: failed to compile query for {}: {e}", meta.name);
+                eprintln!(
+                    "warning: failed to compile query pack {} ({}): {e}",
+                    pack.pack_id, pack.query_file_name
+                );
             }
         }
     }
@@ -605,14 +114,11 @@ pub fn build_scm_extractors() -> Result<Vec<Box<dyn LanguageExtractor>>> {
     Ok(extractors)
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use crate::model::SymbolKind;
     fn make_extractor(key: &str) -> ScmExtractor {
         let source = QUERY_FILES
             .iter()
@@ -805,7 +311,7 @@ func main() {}
 
     #[test]
     fn scm_rust_query_compiles() {
-        make_extractor("rust_lang");
+        make_extractor("rust");
     }
 
     #[test]
@@ -1084,7 +590,7 @@ impl Foo { fn new() -> Self { Foo } }
 fn free() {}
 const C: i32 = 1;
 "#;
-        let scm = make_extractor("rust_lang").extract("l.rs", src).unwrap();
+        let scm = make_extractor("rust").extract("l.rs", src).unwrap();
         let names: Vec<(&str, &str)> = scm
             .iter()
             .map(|s| (s.name.as_str(), s.kind.as_str()))

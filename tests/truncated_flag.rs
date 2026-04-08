@@ -8,17 +8,24 @@ use codesight_mcp::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
 
-#[test]
-fn truncated_flag_suite() {
-    run_all();
+struct FuncsRepoFixture {
+    _workspace: tempfile::TempDir,
+    svc: CodeService,
+    source_id: String,
 }
 
-fn run_all() {
-    run_no_budget_truncated_meta_false();
-    run_tiny_budget_truncated_meta_true();
-    run_huge_budget_truncated_meta_false();
-    run_fuzzy_with_tiny_budget_truncated_meta_true();
-    run_token_budget_alias_deserializes();
+#[test]
+fn truncated_flag_suite() {
+    let fixture = setup_funcs_repo_fixture();
+    run_all(&fixture);
+}
+
+fn run_all(fixture: &FuncsRepoFixture) {
+    run_no_budget_truncated_meta_false(fixture);
+    run_tiny_budget_truncated_meta_true(fixture);
+    run_huge_budget_truncated_meta_false(fixture);
+    run_fuzzy_with_tiny_budget_truncated_meta_true(fixture);
+    run_token_budget_alias_deserializes(fixture);
 }
 
 fn make_funcs_repo(parent: &Path) -> std::path::PathBuf {
@@ -47,6 +54,18 @@ fn ingest(svc: &CodeService, root: &Path) -> String {
     r["data"]["source_id"].as_str().unwrap().to_string()
 }
 
+fn setup_funcs_repo_fixture() -> FuncsRepoFixture {
+    let workspace = tempdir().unwrap();
+    let root = make_funcs_repo(workspace.path());
+    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let source_id = ingest(&svc, &root);
+    FuncsRepoFixture {
+        _workspace: workspace,
+        svc,
+        source_id,
+    }
+}
+
 fn search_symbols(
     svc: &CodeService,
     sid: &str,
@@ -66,65 +85,70 @@ fn search_symbols(
     svc.dispatch("search_catalog", json!(args)).unwrap()
 }
 
-fn run_no_budget_truncated_meta_false() {
-    let workspace = tempdir().unwrap();
-    let root = make_funcs_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-    let res = search_symbols(&svc, &sid, "budget_test_func", 50, serde_json::Map::new());
+fn run_no_budget_truncated_meta_false(fixture: &FuncsRepoFixture) {
+    let res = search_symbols(
+        &fixture.svc,
+        &fixture.source_id,
+        "budget_test_func",
+        50,
+        serde_json::Map::new(),
+    );
     assert!(res["ok"].as_bool().unwrap(), "{res:?}");
     assert_eq!(res["_meta"]["truncated"], json!(false));
     let n = res["data"]["items"].as_array().unwrap().len();
     assert!(n >= 10, "expected many symbol hits, got {n}");
 }
 
-fn run_tiny_budget_truncated_meta_true() {
-    let workspace = tempdir().unwrap();
-    let root = make_funcs_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
+fn run_tiny_budget_truncated_meta_true(fixture: &FuncsRepoFixture) {
     let mut extra = serde_json::Map::new();
     extra.insert("max_tokens".to_string(), json!(1_u32));
-    let res = search_symbols(&svc, &sid, "budget_test_func", 50, extra);
+    let res = search_symbols(
+        &fixture.svc,
+        &fixture.source_id,
+        "budget_test_func",
+        50,
+        extra,
+    );
     assert!(res["ok"].as_bool().unwrap(), "{res:?}");
     assert_eq!(res["_meta"]["truncated"], json!(true));
 }
 
-fn run_huge_budget_truncated_meta_false() {
-    let workspace = tempdir().unwrap();
-    let root = make_funcs_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
+fn run_huge_budget_truncated_meta_false(fixture: &FuncsRepoFixture) {
     let mut extra = serde_json::Map::new();
     extra.insert("max_tokens".to_string(), json!(100_000_u32));
-    let res = search_symbols(&svc, &sid, "budget_test_func", 50, extra);
+    let res = search_symbols(
+        &fixture.svc,
+        &fixture.source_id,
+        "budget_test_func",
+        50,
+        extra,
+    );
     assert!(res["ok"].as_bool().unwrap(), "{res:?}");
     assert_eq!(res["_meta"]["truncated"], json!(false));
 }
 
-fn run_fuzzy_with_tiny_budget_truncated_meta_true() {
-    let workspace = tempdir().unwrap();
-    let root = make_funcs_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
+fn run_fuzzy_with_tiny_budget_truncated_meta_true(fixture: &FuncsRepoFixture) {
     let mut extra = serde_json::Map::new();
     extra.insert("max_tokens".to_string(), json!(1_u32));
     extra.insert("fuzzy".to_string(), json!(true));
-    let res = search_symbols(&svc, &sid, "budget_test_func", 50, extra);
+    let res = search_symbols(
+        &fixture.svc,
+        &fixture.source_id,
+        "budget_test_func",
+        50,
+        extra,
+    );
     assert!(res["ok"].as_bool().unwrap(), "{res:?}");
     assert_eq!(res["_meta"]["truncated"], json!(true));
 }
 
-fn run_token_budget_alias_deserializes() {
-    let workspace = tempdir().unwrap();
-    let root = make_funcs_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-    let res = svc
+fn run_token_budget_alias_deserializes(fixture: &FuncsRepoFixture) {
+    let res = fixture
+        .svc
         .dispatch(
             "search_catalog",
             json!({
-                "source_id": sid,
+                "source_id": fixture.source_id,
                 "query": "budget_test_func",
                 "domain": "code",
                 "unit_kinds": ["symbol"],

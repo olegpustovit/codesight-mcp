@@ -106,6 +106,7 @@ fn symbol_names(data: &Value) -> Vec<String> {
 
 struct PerfRepo {
     _ws: tempfile::TempDir,
+    idx_root: std::path::PathBuf,
     svc: CodeService,
     source_id: String,
 }
@@ -113,12 +114,20 @@ struct PerfRepo {
 fn setup_perf_repo() -> PerfRepo {
     let ws = tempdir().unwrap();
     let root = build_search_perf_repo(ws.path());
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let idx_root = ws.path().join("idx");
+    let svc = CodeService::new(AppConfig::new(idx_root.clone())).unwrap();
     let source_id = ingest(&svc, &root);
     PerfRepo {
         _ws: ws,
+        idx_root,
         svc,
         source_id,
+    }
+}
+
+impl PerfRepo {
+    fn fresh_service(&self) -> CodeService {
+        CodeService::new(AppConfig::new(self.idx_root.clone())).unwrap()
     }
 }
 
@@ -130,22 +139,22 @@ const QUERIES: &[&str] = &["parse", "search", "index", "token", "server", "load"
 
 #[test]
 fn search_perf_suite() {
-    run_all();
+    let repo = setup_perf_repo();
+    run_all(&repo);
 }
 
-fn run_all() {
-    case_results_stable_across_two_calls();
-    case_relevant_symbol_appears_in_results();
-    case_query_returns_nonempty_results();
-    case_cold_search_within_budget();
-    case_warm_search_within_budget();
-    case_warm_faster_than_cold();
-    case_timing_meta_reported();
+fn run_all(repo: &PerfRepo) {
+    case_results_stable_across_two_calls(repo);
+    case_relevant_symbol_appears_in_results(repo);
+    case_query_returns_nonempty_results(repo);
+    case_cold_search_within_budget(repo);
+    case_warm_search_within_budget(repo);
+    case_warm_faster_than_cold(repo);
+    case_timing_meta_reported(repo);
 }
 
 /// BM25 results must be deterministic: identical on repeated calls.
-fn case_results_stable_across_two_calls() {
-    let p = setup_perf_repo();
+fn case_results_stable_across_two_calls(p: &PerfRepo) {
     for q in QUERIES {
         let r1 = search(&p.svc, &p.source_id, q, 10);
         let r2 = search(&p.svc, &p.source_id, q, 10);
@@ -160,8 +169,7 @@ fn case_results_stable_across_two_calls() {
 }
 
 /// Querying "parse" should surface parse_file / parse_tokens / parse_imports.
-fn case_relevant_symbol_appears_in_results() {
-    let p = setup_perf_repo();
+fn case_relevant_symbol_appears_in_results(p: &PerfRepo) {
     let r = search(&p.svc, &p.source_id, "parse", 5);
     assert!(r["ok"].as_bool().unwrap());
     let names = symbol_names(&r);
@@ -177,8 +185,7 @@ fn case_relevant_symbol_appears_in_results() {
 }
 
 /// All test queries should return at least one result.
-fn case_query_returns_nonempty_results() {
-    let p = setup_perf_repo();
+fn case_query_returns_nonempty_results(p: &PerfRepo) {
     for q in QUERIES {
         let r = search(&p.svc, &p.source_id, q, 10);
         assert!(r["ok"].as_bool().unwrap(), "Query '{q}' errored: {r:?}");
@@ -192,17 +199,10 @@ fn case_query_returns_nonempty_results() {
 // ---------------------------------------------------------------------------
 
 /// Cold search (fresh service, no cached state) must complete within 2000 ms.
-fn case_cold_search_within_budget() {
-    // Fresh service each time to simulate cold cache.
-    let ws = tempdir().unwrap();
-    let root = build_search_perf_repo(ws.path());
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-
-    // Drop and recreate to clear any in-memory caches.
-    let svc2 = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+fn case_cold_search_within_budget(p: &PerfRepo) {
+    let svc2 = p.fresh_service();
     let start = Instant::now();
-    let r = search(&svc2, &sid, "parse", 10);
+    let r = search(&svc2, &p.source_id, "parse", 10);
     let elapsed_ms = start.elapsed().as_millis();
 
     assert!(r["ok"].as_bool().unwrap());
@@ -213,8 +213,7 @@ fn case_cold_search_within_budget() {
 }
 
 /// Warm search (cache populated) must complete within 500 ms.
-fn case_warm_search_within_budget() {
-    let p = setup_perf_repo();
+fn case_warm_search_within_budget(p: &PerfRepo) {
     // Warm up
     let _ = search(&p.svc, &p.source_id, "parse", 10);
 
@@ -230,20 +229,14 @@ fn case_warm_search_within_budget() {
 }
 
 /// Warm search should not be significantly slower than cold search.
-fn case_warm_faster_than_cold() {
-    let ws = tempdir().unwrap();
-    let root = build_search_perf_repo(ws.path());
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-
-    // Recreate for cold measurement
-    let svc2 = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+fn case_warm_faster_than_cold(p: &PerfRepo) {
+    let svc2 = p.fresh_service();
     let start = Instant::now();
-    let _ = search(&svc2, &sid, "search", 10);
+    let _ = search(&svc2, &p.source_id, "search", 10);
     let cold_ms = start.elapsed().as_millis();
 
     let start = Instant::now();
-    let _ = search(&svc2, &sid, "search", 10);
+    let _ = search(&svc2, &p.source_id, "search", 10);
     let warm_ms = start.elapsed().as_millis();
 
     // On very fast machines cold/warm may be within noise -- only enforce
@@ -255,8 +248,7 @@ fn case_warm_faster_than_cold() {
 }
 
 /// search_catalog _meta must include timing_ms.
-fn case_timing_meta_reported() {
-    let p = setup_perf_repo();
+fn case_timing_meta_reported(p: &PerfRepo) {
     let r = search(&p.svc, &p.source_id, "token", 5);
     assert!(r["ok"].as_bool().unwrap());
     assert!(r["_meta"].is_object(), "_meta missing from response");

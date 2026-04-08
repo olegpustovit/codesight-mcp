@@ -3,7 +3,7 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::model::{StoredSymbol, SymbolKind};
+use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 pub struct BladeExtractor;
 
@@ -122,6 +122,7 @@ fn make_symbol(
     let signature = line_text.trim().to_string();
     StoredSymbol {
         id: format!("{file_path}::{name}#{}", kind.as_str()),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: "blade".to_string(),
         file_path: file_path.to_string(),
         qualified_name: name.to_string(),

@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use codesight_mcp::extractors::{ExtractorRegistry, LanguageExtractor, LuauExtractor};
+use codesight_mcp::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_mcp::extractors::{ExtractorRegistry, LanguageExtractor};
 use codesight_mcp::model::SymbolKind;
 
 const LUAU_SERVICE: &str = "\
@@ -39,15 +40,25 @@ local function helperFunction(x: number, y: number): number
 end
 ";
 
+fn luau_extractor() -> ScmExtractor {
+    let source = QUERY_FILES
+        .iter()
+        .find(|(key, _)| *key == "luau")
+        .unwrap_or_else(|| panic!("no query pack for luau"))
+        .1;
+    let meta = parse_scm_header(source);
+    ScmExtractor::new(&meta, source).expect("luau extractor")
+}
+
 fn luau_symbols() -> Vec<codesight_mcp::model::StoredSymbol> {
-    LuauExtractor
+    luau_extractor()
         .extract("RaidService.luau", LUAU_SERVICE)
         .expect("luau extraction failed")
 }
 /// Smoke test: the Luau grammar must load without panicking.
 #[test]
 fn test_luau_parser_available() {
-    let result = LuauExtractor.extract("smoke.luau", "local x = 1\n");
+    let result = luau_extractor().extract("smoke.luau", "local x = 1\n");
     assert!(
         result.is_ok(),
         "luau grammar must load: {}",

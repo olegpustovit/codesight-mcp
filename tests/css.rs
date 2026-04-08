@@ -5,8 +5,7 @@ use std::path::Path;
 
 use codesight_mcp::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
 use codesight_mcp::extractors::{
-    ExtractorRegistry, LanguageExtractor, LessExtractor, SassExtractor, ScssExtractor,
-    StylExtractor,
+    ExtractorRegistry, LanguageExtractor, LessExtractor, SassExtractor, StylExtractor,
 };
 use codesight_mcp::model::SymbolKind;
 
@@ -117,8 +116,12 @@ fn css_syms() -> Vec<codesight_mcp::model::StoredSymbol> {
         .expect("CSS extraction should not fail")
 }
 
+fn scss_extractor() -> ScmExtractor {
+    scm_extractor("scss")
+}
+
 fn scss_syms() -> Vec<codesight_mcp::model::StoredSymbol> {
-    ScssExtractor
+    scss_extractor()
         .extract("styles/main.scss", SCSS_SRC)
         .expect("SCSS extraction should not fail")
 }
@@ -390,8 +393,8 @@ fn test_styl_extension_detected() {
 #[test]
 fn test_scss_extension_in_registry() {
     assert!(
-        ScssExtractor.supported_extensions().contains(&"scss"),
-        "ScssExtractor must support .scss"
+        scss_extractor().supported_extensions().contains(&"scss"),
+        "SCSS query pack must support .scss"
     );
 }
 
@@ -616,7 +619,7 @@ fn test_scss_via_parse_file() {
 /// Ref: test_scss_empty_file
 #[test]
 fn test_scss_empty_file() {
-    let syms = ScssExtractor
+    let syms = scss_extractor()
         .extract("empty.scss", "")
         .expect("extract empty SCSS");
     assert!(syms.is_empty(), "empty SCSS should yield no symbols");

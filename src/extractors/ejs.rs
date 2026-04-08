@@ -4,7 +4,7 @@ use anyhow::Result;
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::model::{StoredSymbol, SymbolKind};
+use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 pub struct EjsExtractor;
 
@@ -115,6 +115,7 @@ fn make_symbol(
     let signature = line_text.trim().to_string();
     StoredSymbol {
         id: format!("{file_path}::{name}#{}", kind.as_str()),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: "ejs".to_string(),
         file_path: file_path.to_string(),
         qualified_name: name.to_string(),
@@ -149,6 +150,7 @@ fn make_symbol_with_sig(
     let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
     StoredSymbol {
         id: format!("{file_path}::{name}#{}", kind.as_str()),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: "ejs".to_string(),
         file_path: file_path.to_string(),
         qualified_name: name.to_string(),

@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::class_hierarchy::ClassIndexRow;
 use crate::config::BYTES_PER_TOKEN;
-use crate::model::{SymbolKind, SymbolMetadata, SymbolRecord};
+use crate::model::{ExtractionTier, SymbolKind, SymbolMetadata, SymbolRecord};
 
 use super::IndexStore;
 
@@ -40,7 +40,7 @@ impl IndexStore {
         let root_path = self.root_path()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, kind, file_path, start_line, end_line, start_byte, end_byte, source_hash, source_text, file_size_bytes
+            SELECT id, kind, extraction_tier, file_path, start_line, end_line, start_byte, end_byte, source_hash, source_text, file_size_bytes
             FROM symbols
             WHERE id = ?1
         "#,
@@ -59,17 +59,29 @@ impl IndexStore {
                     )
                 })?;
 
+                let tier_str: String = row.get(2)?;
+                let extraction_tier = ExtractionTier::from_db(&tier_str).ok_or_else(|| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        2,
+                        rusqlite::types::Type::Text,
+                        Box::new(std::io::Error::other(format!(
+                            "unknown extraction tier {tier_str}"
+                        ))),
+                    )
+                })?;
+
                 Ok(SymbolRecord {
                     id: row.get(0)?,
                     kind,
-                    file_path: row.get(2)?,
-                    start_line: row.get::<_, u32>(3)?,
-                    end_line: row.get::<_, u32>(4)?,
-                    start_byte: row.get::<_, i64>(5)? as usize,
-                    end_byte: row.get::<_, i64>(6)? as usize,
-                    source_hash: row.get(7)?,
-                    stored_source: row.get(8)?,
-                    file_size_bytes: row.get::<_, i64>(9)? as u64,
+                    extraction_tier,
+                    file_path: row.get(3)?,
+                    start_line: row.get::<_, u32>(4)?,
+                    end_line: row.get::<_, u32>(5)?,
+                    start_byte: row.get::<_, i64>(6)? as usize,
+                    end_byte: row.get::<_, i64>(7)? as usize,
+                    source_hash: row.get(8)?,
+                    stored_source: row.get(9)?,
+                    file_size_bytes: row.get::<_, i64>(10)? as u64,
                     root_path,
                 })
             })
@@ -156,16 +168,17 @@ impl IndexStore {
     pub fn repo_outline(&self) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare(
-            "SELECT file_path, id, kind, name, signature, start_line FROM symbols ORDER BY file_path, start_line",
+            "SELECT file_path, id, kind, extraction_tier, name, signature, start_line FROM symbols ORDER BY file_path, start_line",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(serde_json::json!({
                 "file": row.get::<_, String>(0)?,
                 "id": row.get::<_, String>(1)?,
                 "kind": row.get::<_, String>(2)?,
-                "name": row.get::<_, String>(3)?,
-                "signature": row.get::<_, String>(4)?,
-                "line": row.get::<_, u32>(5)?,
+                "extraction_tier": row.get::<_, String>(3)?,
+                "name": row.get::<_, String>(4)?,
+                "signature": row.get::<_, String>(5)?,
+                "line": row.get::<_, u32>(6)?,
             }))
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -174,16 +187,17 @@ impl IndexStore {
     pub fn file_outline(&self, file_path: &str) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare(
-            "SELECT id, kind, name, signature, start_line, end_line FROM symbols WHERE file_path = ?1 ORDER BY start_line",
+            "SELECT id, kind, extraction_tier, name, signature, start_line, end_line FROM symbols WHERE file_path = ?1 ORDER BY start_line",
         )?;
         let rows = stmt.query_map([file_path], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, String>(0)?,
                 "kind": row.get::<_, String>(1)?,
-                "name": row.get::<_, String>(2)?,
-                "signature": row.get::<_, String>(3)?,
-                "line": row.get::<_, u32>(4)?,
-                "end_line": row.get::<_, u32>(5)?,
+                "extraction_tier": row.get::<_, String>(2)?,
+                "name": row.get::<_, String>(3)?,
+                "signature": row.get::<_, String>(4)?,
+                "line": row.get::<_, u32>(5)?,
+                "end_line": row.get::<_, u32>(6)?,
             }))
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

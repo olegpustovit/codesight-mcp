@@ -9,19 +9,29 @@ use codesight_mcp::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-#[test]
-fn get_file_tree_suite() {
-    run_all();
+struct TreeFixture {
+    _workspace: tempfile::TempDir,
+    svc: CodeService,
+    source_id: String,
 }
 
-fn run_all() {
-    run_falls_back_cpp_header_no_symbols();
-    run_no_truncation_when_under_limit();
-    run_truncation_at_default_cap();
-    run_truncation_hint_mentions_path_prefix();
-    run_custom_max_files();
-    run_hint_includes_total_count();
-    run_path_prefix_scoping();
+#[test]
+fn get_file_tree_suite() {
+    let header = setup_header_fixture();
+    let small = setup_small_tree_fixture();
+    let large = setup_large_tree_fixture();
+    let custom = setup_custom_cap_fixture();
+    run_all(&header, &small, &large, &custom);
+}
+
+fn run_all(header: &TreeFixture, small: &TreeFixture, large: &TreeFixture, custom: &TreeFixture) {
+    run_falls_back_cpp_header_no_symbols(header);
+    run_no_truncation_when_under_limit(small);
+    run_truncation_at_default_cap(large);
+    run_truncation_hint_mentions_path_prefix(large);
+    run_custom_max_files(custom);
+    run_hint_includes_total_count(large);
+    run_path_prefix_scoping(large);
     // run_prefers_symbol_language_over_extension — see standalone #[ignore] test below
 }
 
@@ -77,7 +87,7 @@ fn flatten_files(nodes: &[Value]) -> HashMap<String, Value> {
     out
 }
 
-fn run_falls_back_cpp_header_no_symbols() {
+fn setup_header_fixture() -> TreeFixture {
     let workspace = tempdir().unwrap();
     let root = workspace.path().join("tree_demo");
     fs::create_dir_all(root.join("src")).unwrap();
@@ -91,20 +101,15 @@ fn run_falls_back_cpp_header_no_symbols() {
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
     let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
-    let r = inspect_file_tree(&svc, &sid, json!({}));
-    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let items = r["data"]["items"].as_array().unwrap();
-    let files = flatten_files(items);
-    let h = files
-        .get("include/no_symbols.h")
-        .expect("expected include/no_symbols.h");
-    assert_eq!(h["language"], json!("cpp"));
-    assert_eq!(h["symbol_count"], json!(0));
+    let source_id = ingest_code(&svc, &root);
+    TreeFixture {
+        _workspace: workspace,
+        svc,
+        source_id,
+    }
 }
 
-fn run_no_truncation_when_under_limit() {
+fn setup_small_tree_fixture() -> TreeFixture {
     let workspace = tempdir().unwrap();
     let root = workspace.path().join("small_tree");
     fs::create_dir_all(root.join("src")).unwrap();
@@ -118,20 +123,17 @@ fn run_no_truncation_when_under_limit() {
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
     let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
-    let r = inspect_file_tree(&svc, &sid, json!({}));
-    assert!(r["ok"].as_bool().unwrap());
-    assert!(r["data"].get("truncated").is_none());
-    assert_eq!(r["_meta"]["file_count"], json!(10));
-
-    let items = r["data"]["items"].as_array().unwrap();
-    assert_eq!(flatten_files(items).len(), 10);
+    let source_id = ingest_code(&svc, &root);
+    TreeFixture {
+        _workspace: workspace,
+        svc,
+        source_id,
+    }
 }
 
-fn run_truncation_at_default_cap() {
+fn setup_large_tree_fixture() -> TreeFixture {
     let workspace = tempdir().unwrap();
-    let root = workspace.path().join("big_tree");
+    let root = workspace.path().join("large_tree");
     fs::create_dir_all(root.join("src")).unwrap();
     for i in 0..510 {
         fs::write(
@@ -151,51 +153,15 @@ fn run_truncation_at_default_cap() {
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
     let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
-    let r = inspect_file_tree(&svc, &sid, json!({}));
-    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    assert_eq!(r["data"]["truncated"], json!(true));
-    assert_eq!(r["data"]["total_file_count"], json!(518));
-    assert_eq!(r["_meta"]["file_count"], json!(500));
-    let items = r["data"]["items"].as_array().unwrap();
-    assert_eq!(flatten_files(items).len(), 500);
+    let source_id = ingest_code(&svc, &root);
+    TreeFixture {
+        _workspace: workspace,
+        svc,
+        source_id,
+    }
 }
 
-fn run_truncation_hint_mentions_path_prefix() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("hint_tree");
-    fs::create_dir_all(root.join("src")).unwrap();
-    for i in 0..510 {
-        fs::write(
-            root.join("src").join(format!("file_{i}.py")),
-            format!("# {i}\n"),
-        )
-        .unwrap();
-    }
-    fs::create_dir_all(root.join("lib")).unwrap();
-    for i in 0..8 {
-        fs::write(
-            root.join("lib").join(format!("util_{i}.py")),
-            format!("# u{i}\n"),
-        )
-        .unwrap();
-    }
-
-    let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
-    let r = inspect_file_tree(&svc, &sid, json!({}));
-    assert!(r["ok"].as_bool().unwrap());
-    let hint = r["data"]["hint"].as_str().unwrap();
-    assert!(
-        hint.contains("path_prefix"),
-        "hint should mention path_prefix: {hint}"
-    );
-}
-
-fn run_custom_max_files() {
+fn setup_custom_cap_fixture() -> TreeFixture {
     let workspace = tempdir().unwrap();
     let root = workspace.path().join("custom_cap");
     fs::create_dir_all(root.join("src")).unwrap();
@@ -209,40 +175,66 @@ fn run_custom_max_files() {
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
     let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
+    let source_id = ingest_code(&svc, &root);
+    TreeFixture {
+        _workspace: workspace,
+        svc,
+        source_id,
+    }
+}
 
-    let r = inspect_file_tree(&svc, &sid, json!({ "max_files": 50 }));
+fn run_falls_back_cpp_header_no_symbols(fixture: &TreeFixture) {
+    let r = inspect_file_tree(&fixture.svc, &fixture.source_id, json!({}));
+    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
+    let items = r["data"]["items"].as_array().unwrap();
+    let files = flatten_files(items);
+    let h = files
+        .get("include/no_symbols.h")
+        .expect("expected include/no_symbols.h");
+    assert_eq!(h["language"], json!("cpp"));
+    assert_eq!(h["symbol_count"], json!(0));
+}
+
+fn run_no_truncation_when_under_limit(fixture: &TreeFixture) {
+    let r = inspect_file_tree(&fixture.svc, &fixture.source_id, json!({}));
+    assert!(r["ok"].as_bool().unwrap());
+    assert!(r["data"].get("truncated").is_none());
+    assert_eq!(r["_meta"]["file_count"], json!(10));
+
+    let items = r["data"]["items"].as_array().unwrap();
+    assert_eq!(flatten_files(items).len(), 10);
+}
+
+fn run_truncation_at_default_cap(fixture: &TreeFixture) {
+    let r = inspect_file_tree(&fixture.svc, &fixture.source_id, json!({}));
+    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
+    assert_eq!(r["data"]["truncated"], json!(true));
+    assert_eq!(r["data"]["total_file_count"], json!(518));
+    assert_eq!(r["_meta"]["file_count"], json!(500));
+    let items = r["data"]["items"].as_array().unwrap();
+    assert_eq!(flatten_files(items).len(), 500);
+}
+
+fn run_truncation_hint_mentions_path_prefix(fixture: &TreeFixture) {
+    let r = inspect_file_tree(&fixture.svc, &fixture.source_id, json!({}));
+    assert!(r["ok"].as_bool().unwrap());
+    let hint = r["data"]["hint"].as_str().unwrap();
+    assert!(
+        hint.contains("path_prefix"),
+        "hint should mention path_prefix: {hint}"
+    );
+}
+
+fn run_custom_max_files(fixture: &TreeFixture) {
+    let r = inspect_file_tree(&fixture.svc, &fixture.source_id, json!({ "max_files": 50 }));
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     assert_eq!(r["data"]["truncated"], json!(true));
     assert_eq!(r["_meta"]["file_count"], json!(50));
     assert_eq!(r["data"]["total_file_count"], json!(100));
 }
 
-fn run_hint_includes_total_count() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("total_hint");
-    fs::create_dir_all(root.join("src")).unwrap();
-    for i in 0..510 {
-        fs::write(
-            root.join("src").join(format!("file_{i}.py")),
-            format!("# {i}\n"),
-        )
-        .unwrap();
-    }
-    fs::create_dir_all(root.join("lib")).unwrap();
-    for i in 0..8 {
-        fs::write(
-            root.join("lib").join(format!("util_{i}.py")),
-            format!("# u{i}\n"),
-        )
-        .unwrap();
-    }
-
-    let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
-    let r = inspect_file_tree(&svc, &sid, json!({}));
+fn run_hint_includes_total_count(fixture: &TreeFixture) {
+    let r = inspect_file_tree(&fixture.svc, &fixture.source_id, json!({}));
     assert!(r["ok"].as_bool().unwrap());
     let total = r["data"]["total_file_count"].as_u64().unwrap();
     let hint = r["data"]["hint"].as_str().unwrap();
@@ -252,31 +244,8 @@ fn run_hint_includes_total_count() {
     );
 }
 
-fn run_path_prefix_scoping() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("scoped_tree");
-    fs::create_dir_all(root.join("src")).unwrap();
-    for i in 0..502 {
-        fs::write(
-            root.join("src").join(format!("file_{i}.py")),
-            format!("# {i}\n"),
-        )
-        .unwrap();
-    }
-    fs::create_dir_all(root.join("lib")).unwrap();
-    for i in 0..8 {
-        fs::write(
-            root.join("lib").join(format!("util_{i}.py")),
-            format!("# u{i}\n"),
-        )
-        .unwrap();
-    }
-
-    let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
-    let r = inspect_file_tree(&svc, &sid, json!({ "path": "lib/" }));
+fn run_path_prefix_scoping(fixture: &TreeFixture) {
+    let r = inspect_file_tree(&fixture.svc, &fixture.source_id, json!({ "path": "lib/" }));
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     assert!(r["data"].get("truncated").is_none());
     assert_eq!(r["_meta"]["file_count"], json!(8));

@@ -404,6 +404,7 @@ impl CodeService {
         };
 
         let changed_files: Vec<&str> = diff_output.lines().filter(|l| !l.is_empty()).collect();
+        let extractors = self.extractors_for_root(&root);
 
         // For each changed file, extract symbols at both SHAs and compare
         let mut added_symbols = Vec::new();
@@ -417,12 +418,12 @@ impl CodeService {
             let old_syms = extract_symbol_names_from_content(
                 old_content.as_deref().unwrap_or(""),
                 file,
-                &self.extractors,
+                &extractors,
             );
             let new_syms = extract_symbol_names_from_content(
                 new_content.as_deref().unwrap_or(""),
                 file,
-                &self.extractors,
+                &extractors,
             );
 
             // Build maps: name -> source text

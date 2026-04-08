@@ -7,7 +7,7 @@ mod ejs;
 pub mod engine;
 pub(crate) mod fallback_pipeline;
 mod luau;
-mod openapi;
+pub(crate) mod profiles;
 mod razor;
 mod registry_builder;
 mod scss;
@@ -16,40 +16,40 @@ mod verse;
 mod vue;
 pub(crate) mod yaml;
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::{collections::HashMap, path::Path, sync::Arc};
 
-use crate::model::StoredSymbol;
+use crate::model::{ExtractionTier, StoredSymbol};
 
 pub use al::AlExtractor;
 pub use asm::AsmExtractor;
 pub use blade::BladeExtractor;
 pub use ejs::EjsExtractor;
 pub use luau::LuauExtractor;
-pub use openapi::OpenApiExtractor;
 pub use razor::RazorExtractor;
 pub use scss::{LessExtractor, SassExtractor, ScssExtractor, StylExtractor};
 pub use sql::SqlExtractor;
 pub use verse::VerseExtractor;
 pub use vue::VueExtractor;
-pub use yaml::{AnsibleExtractor, YamlExtractor};
+pub use yaml::YamlExtractor;
 
 /// Strategy pattern: each `LanguageExtractor` extracts symbols from source files.
 ///
 /// Most languages are handled by `.scm` query files via [`engine::scm::ScmExtractor`].
 /// Override extractors in this module handle languages without tree-sitter grammars
-/// (assembly), domain-specific extraction (SQL dbt, YAML/Ansible), or delegation (OpenAPI).
+/// (assembly), container semantics, or domain-specific shaping.
 pub trait LanguageExtractor: Send + Sync {
     fn language_name(&self) -> &'static str;
     fn supported_extensions(&self) -> &'static [&'static str];
+    fn extraction_tier(&self) -> ExtractionTier {
+        ExtractionTier::ManualOverride
+    }
     fn extract(&self, file_path: &str, source: &str) -> anyhow::Result<Vec<StoredSymbol>>;
 }
 
 pub struct ExtractorRegistry {
-    extractors: Vec<Box<dyn LanguageExtractor>>,
-    /// Special-purpose extractors matched by path heuristics, not extensions.
-    ansible_extractor: Box<dyn LanguageExtractor>,
-    openapi_extractor: Box<dyn LanguageExtractor>,
+    extractors: Vec<Arc<dyn LanguageExtractor>>,
+    profile_extractors: Vec<profiles::ProfiledExtractor>,
+    profiles: profiles::LanguageProfileRegistry,
     /// Runtime extension overrides: maps lowercase extension (without dot) to
     /// the language name of an already-registered extractor.
     extra_extensions: HashMap<String, String>,
@@ -57,14 +57,14 @@ pub struct ExtractorRegistry {
 
 impl ExtractorRegistry {
     pub(crate) fn new_with_extractors(
-        extractors: Vec<Box<dyn LanguageExtractor>>,
-        ansible_extractor: Box<dyn LanguageExtractor>,
-        openapi_extractor: Box<dyn LanguageExtractor>,
+        extractors: Vec<Arc<dyn LanguageExtractor>>,
+        profile_extractors: Vec<profiles::ProfiledExtractor>,
+        profiles: profiles::LanguageProfileRegistry,
     ) -> Self {
         Self {
             extractors,
-            ansible_extractor,
-            openapi_extractor,
+            profile_extractors,
+            profiles,
             extra_extensions: HashMap::new(),
         }
     }
@@ -77,11 +77,26 @@ impl Default for ExtractorRegistry {
 }
 
 impl ExtractorRegistry {
+    pub fn for_workspace_root(root: &Path) -> Self {
+        registry_builder::build_registry(Some(root))
+    }
+
     /// Returns the set of all language names known to this registry.
     pub fn known_languages(&self) -> Vec<&str> {
         let mut langs: Vec<&str> = self.extractors.iter().map(|e| e.language_name()).collect();
-        langs.push(self.ansible_extractor.language_name());
-        langs.push(self.openapi_extractor.language_name());
+        langs.extend(self.profiles.language_names());
+        langs.sort();
+        langs.dedup();
+        langs
+    }
+
+    pub fn curated_languages(&self) -> Vec<&str> {
+        let mut langs: Vec<&str> = self
+            .extractors
+            .iter()
+            .filter(|extractor| extractor.extraction_tier() == ExtractionTier::CuratedQueryPack)
+            .map(|extractor| extractor.language_name())
+            .collect();
         langs.sort();
         langs.dedup();
         langs
@@ -133,14 +148,12 @@ impl ExtractorRegistry {
     }
 
     pub fn extractor_for_path(&self, path: &Path) -> Option<&dyn LanguageExtractor> {
-        match classifier::classify_special_path(path) {
-            Some(classifier::SpecialExtractor::OpenApi) => {
-                return Some(self.openapi_extractor.as_ref());
-            }
-            Some(classifier::SpecialExtractor::Ansible) => {
-                return Some(self.ansible_extractor.as_ref());
-            }
-            None => {}
+        if let Some(resolved) = self.profiles.resolve_for_path(path) {
+            return self
+                .profile_extractors
+                .iter()
+                .find(|extractor| extractor.matches(resolved))
+                .map(|extractor| extractor as &dyn LanguageExtractor);
         }
 
         // --- Compound extension check (e.g. .blade.php before .php) ---
@@ -162,11 +175,7 @@ impl ExtractorRegistry {
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             let ext_lower = ext.to_ascii_lowercase();
             if let Some(lang) = self.extra_extensions.get(&ext_lower) {
-                return self
-                    .extractors
-                    .iter()
-                    .find(|e| e.language_name().eq_ignore_ascii_case(lang))
-                    .map(Box::as_ref);
+                return self.find_extractor_by_language_name(lang);
             }
         }
 
@@ -179,6 +188,30 @@ impl ExtractorRegistry {
                     !candidate.contains('.') && candidate.eq_ignore_ascii_case(extension.as_str())
                 })
             })
-            .map(Box::as_ref)
+            .map(Arc::as_ref)
+    }
+
+    fn find_extractor_by_language_name(
+        &self,
+        language_name: &str,
+    ) -> Option<&dyn LanguageExtractor> {
+        self.profile_extractors
+            .iter()
+            .find(|extractor| {
+                extractor
+                    .language_name()
+                    .eq_ignore_ascii_case(language_name)
+            })
+            .map(|extractor| extractor as &dyn LanguageExtractor)
+            .or_else(|| {
+                self.extractors
+                    .iter()
+                    .find(|extractor| {
+                        extractor
+                            .language_name()
+                            .eq_ignore_ascii_case(language_name)
+                    })
+                    .map(Arc::as_ref)
+            })
     }
 }

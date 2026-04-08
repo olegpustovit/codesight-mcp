@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, anyhow};
 use tree_sitter::{Node, Tree};
 
-use crate::model::{StoredSymbol, SymbolKind};
+use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 pub fn parse_tree(lang: impl Into<tree_sitter::Language>, source: &str) -> Result<Tree> {
     let mut parser = tree_sitter::Parser::new();
@@ -78,6 +78,7 @@ pub fn push_symbol_prequalified(
     let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
     symbols.push(StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: language.to_string(),
         file_path: file_path.to_string(),
         qualified_name,
@@ -118,6 +119,7 @@ pub fn push_symbol_ex(
     let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
     symbols.push(StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: language.to_string(),
         file_path: file_path.to_string(),
         qualified_name,

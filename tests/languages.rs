@@ -118,7 +118,7 @@ fn case_go_rust_java() {
             .any(|s| s.name == "Greet" && s.kind == SymbolKind::Method)
     );
 
-    let rust = scm_extractor("rust_lang")
+    let rust = scm_extractor("rust")
         .extract(concat!("user", ".", "rs"), RUST_SOURCE)
         .unwrap();
     assert!(

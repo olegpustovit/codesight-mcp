@@ -17,7 +17,6 @@ const MAX_QUERY_LEN: usize = 1000;
 
 pub struct CodeService {
     config: AppConfig,
-    extractors: ExtractorRegistry,
     ledger: SavingsLedger,
 }
 
@@ -25,15 +24,15 @@ impl CodeService {
     pub fn new(config: AppConfig) -> anyhow::Result<Self> {
         config.ensure_layout()?;
         let ledger = SavingsLedger::new(config.savings_file());
-        Ok(Self {
-            config,
-            extractors: ExtractorRegistry::default(),
-            ledger,
-        })
+        Ok(Self { config, ledger })
     }
 
     pub fn dispatch(&self, tool_name: &str, arguments: Value) -> anyhow::Result<Value> {
         agent_v1::dispatch(self, tool_name, arguments)
+    }
+
+    pub(super) fn extractors_for_root(&self, root: &std::path::Path) -> ExtractorRegistry {
+        ExtractorRegistry::for_workspace_root(root)
     }
 
     pub(super) fn success_response(

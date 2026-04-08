@@ -70,7 +70,39 @@ pub fn config_cache_contains(project_root: &str) -> (bool, bool) {
 pub struct CodesightProjectConfig {
     #[serde(default)]
     pub languages_adaptive: bool,
+    #[serde(default)]
     pub languages: Option<Vec<String>>,
+    #[serde(default)]
+    pub extra_extensions: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub query_pack_roots: Option<Vec<String>>,
+}
+
+pub fn read_project_config(project_root: &Path) -> Option<CodesightProjectConfig> {
+    let content = std::fs::read_to_string(project_root.join(PROJECT_CONFIG_FILE)).ok()?;
+    toml::from_str(&content).ok()
+}
+
+pub fn project_extra_extensions(project_root: &Path) -> HashMap<String, String> {
+    read_project_config(project_root)
+        .and_then(|cfg| cfg.extra_extensions)
+        .unwrap_or_default()
+}
+
+pub fn project_query_pack_roots(project_root: &Path) -> Vec<PathBuf> {
+    read_project_config(project_root)
+        .and_then(|cfg| cfg.query_pack_roots)
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                project_root.join(path)
+            }
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

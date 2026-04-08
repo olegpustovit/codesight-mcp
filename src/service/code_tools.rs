@@ -48,6 +48,7 @@ impl CodeService {
         let mut updated_files = Vec::new();
         let mut warnings: Vec<Value> = Vec::new();
         let mut indexed_languages: BTreeSet<String> = BTreeSet::new();
+        let extractors = self.extractors_for_root(root);
 
         // Use the `ignore` crate's WalkBuilder which natively handles nested
         // .gitignore files, root .gitignore, and .git/info/exclude.
@@ -82,7 +83,7 @@ impl CodeService {
             }
 
             let path = entry.path();
-            let Some(extractor) = self.extractors.extractor_for_path(path) else {
+            let Some(extractor) = extractors.extractor_for_path(path) else {
                 continue;
             };
 
@@ -410,10 +411,9 @@ impl CodeService {
                 if self.config.auto_reindex {
                     if let Ok(root) = store.root_path() {
                         if root.is_dir() {
+                            let extractors = self.extractors_for_root(&root);
                             if store
-                                .is_stale(&root, |p| {
-                                    self.extractors.extractor_for_path(p).is_some()
-                                })
+                                .is_stale(&root, |p| extractors.extractor_for_path(p).is_some())
                                 .unwrap_or(false)
                             {
                                 eprintln!("codesight-mcp: auto-reindexing stale repo '{repo}'");

@@ -4,7 +4,7 @@ use anyhow::Result;
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::model::{StoredSymbol, SymbolKind};
+use crate::model::{ExtractionTier, StoredSymbol, SymbolKind};
 
 pub struct AsmExtractor;
 
@@ -93,6 +93,7 @@ fn make_symbol(
     let summary = docstring.unwrap_or_else(|| line_text.trim().to_string());
     StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
+        extraction_tier: ExtractionTier::ManualOverride,
         language: "asm".to_string(),
         file_path: file_path.to_string(),
         qualified_name,

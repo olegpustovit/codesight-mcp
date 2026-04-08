@@ -10,14 +10,23 @@ use codesight_mcp::test_support;
 use serde_json::json;
 use tempfile::tempdir;
 
+struct RepoFixture {
+    _workspace: tempfile::TempDir,
+    svc: CodeService,
+    source_id: String,
+}
+
 #[test]
 fn related_symbols_suite() {
+    let small = setup_small_fixture();
+    let medium = setup_medium_fixture();
+    let name_token = setup_name_token_fixture();
     case_tokenize_name_unit();
-    case_repo_and_symbol_errors();
-    case_small_index_related();
-    case_name_token_repo();
-    case_medium_cap();
-    case_meta_and_fields();
+    case_repo_and_symbol_errors(&small);
+    case_small_index_related(&small);
+    case_name_token_repo(&name_token);
+    case_medium_cap(&medium);
+    case_meta_and_fields(&small);
 }
 
 fn case_tokenize_name_unit() {
@@ -73,10 +82,58 @@ fn find_symbol_id(svc: &CodeService, source_id: &str, name: &str) -> String {
     panic!("symbol {name} not found");
 }
 
-fn case_repo_and_symbol_errors() {
+fn setup_small_fixture() -> RepoFixture {
     let workspace = tempdir().unwrap();
+    let root = workspace.path().join("r");
+    let src = root.join("src");
+    test_support::write_small_repo(&src).unwrap();
     let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let res = svc
+    let source_id = ingest(&svc, &root);
+    RepoFixture {
+        _workspace: workspace,
+        svc,
+        source_id,
+    }
+}
+
+fn setup_medium_fixture() -> RepoFixture {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().join("r");
+    let src = root.join("src");
+    test_support::write_medium_repo(&src).unwrap();
+    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let source_id = ingest(&svc, &root);
+    RepoFixture {
+        _workspace: workspace,
+        svc,
+        source_id,
+    }
+}
+
+fn setup_name_token_fixture() -> RepoFixture {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().join("r");
+    let src = root.join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        src.join("users.py"),
+        "def get_user(uid):\n    return uid\n\n\
+         def get_user_profile(uid):\n    return {}\n\n\
+         def delete_order(oid):\n    return True\n",
+    )
+    .unwrap();
+    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let source_id = ingest(&svc, &root);
+    RepoFixture {
+        _workspace: workspace,
+        svc,
+        source_id,
+    }
+}
+
+fn case_repo_and_symbol_errors(small: &RepoFixture) {
+    let res = small
+        .svc
         .dispatch(
             "inspect_graph",
             json!({
@@ -88,16 +145,12 @@ fn case_repo_and_symbol_errors() {
         .unwrap();
     assert!(!res["ok"].as_bool().unwrap());
 
-    let root = workspace.path().join("r");
-    let src = root.join("src");
-    test_support::write_small_repo(&src).unwrap();
-    let sid = ingest(&svc, &root);
-
-    let res = svc
+    let res = small
+        .svc
         .dispatch(
             "inspect_graph",
             json!({
-                "source_id": sid,
+                "source_id": small.source_id,
                 "graph": "related",
                 "ref": { "kind": "symbol", "stable_id": "nonexistent.py::ghost#function" },
             }),
@@ -111,20 +164,15 @@ fn case_repo_and_symbol_errors() {
     assert!(msg.contains("not found"));
 }
 
-fn case_small_index_related() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("r");
-    let src = root.join("src");
-    test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-    let sym_id = find_symbol_id(&svc, &sid, "add");
+fn case_small_index_related(small: &RepoFixture) {
+    let sym_id = find_symbol_id(&small.svc, &small.source_id, "add");
 
-    let res = svc
+    let res = small
+        .svc
         .dispatch(
             "inspect_graph",
             json!({
-                "source_id": sid,
+                "source_id": small.source_id,
                 "graph": "related",
                 "ref": { "kind": "symbol", "stable_id": sym_id },
             }),
@@ -141,26 +189,14 @@ fn case_small_index_related() {
     }
 }
 
-fn case_name_token_repo() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("r");
-    let src = root.join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(
-        src.join("users.py"),
-        "def get_user(uid):\n    return uid\n\n\
-         def get_user_profile(uid):\n    return {}\n\n\
-         def delete_order(oid):\n    return True\n",
-    )
-    .unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-    let sym_id = find_symbol_id(&svc, &sid, "get_user");
-    let res = svc
+fn case_name_token_repo(name_token: &RepoFixture) {
+    let sym_id = find_symbol_id(&name_token.svc, &name_token.source_id, "get_user");
+    let res = name_token
+        .svc
         .dispatch(
             "inspect_graph",
             json!({
-                "source_id": sid,
+                "source_id": name_token.source_id,
                 "graph": "related",
                 "ref": { "kind": "symbol", "stable_id": sym_id },
                 "limit": 25,
@@ -176,19 +212,14 @@ fn case_name_token_repo() {
     assert!(names.contains(&"get_user_profile"));
 }
 
-fn case_medium_cap() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("r");
-    let src = root.join("src");
-    test_support::write_medium_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-    let any_id = find_symbol_id(&svc, &sid, "User");
-    let res = svc
+fn case_medium_cap(medium: &RepoFixture) {
+    let any_id = find_symbol_id(&medium.svc, &medium.source_id, "User");
+    let res = medium
+        .svc
         .dispatch(
             "inspect_graph",
             json!({
-                "source_id": sid,
+                "source_id": medium.source_id,
                 "graph": "related",
                 "ref": { "kind": "symbol", "stable_id": any_id },
                 "limit": 2,
@@ -198,19 +229,14 @@ fn case_medium_cap() {
     assert!(res["data"]["related"].as_array().unwrap().len() <= 2);
 }
 
-fn case_meta_and_fields() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("r");
-    let src = root.join("src");
-    test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-    let sym_id = find_symbol_id(&svc, &sid, "add");
-    let res = svc
+fn case_meta_and_fields(small: &RepoFixture) {
+    let sym_id = find_symbol_id(&small.svc, &small.source_id, "add");
+    let res = small
+        .svc
         .dispatch(
             "inspect_graph",
             json!({
-                "source_id": sid,
+                "source_id": small.source_id,
                 "graph": "related",
                 "ref": { "kind": "symbol", "stable_id": sym_id },
             }),

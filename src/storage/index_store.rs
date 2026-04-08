@@ -262,14 +262,16 @@ impl IndexStore {
         tx.execute(
             r#"
             INSERT INTO symbols (
-                id, file_path, language, kind, qualified_name, name, signature, summary,
-                source_text, start_line, end_line, start_byte, end_byte, source_hash, file_size_bytes
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                id, file_path, language, extraction_tier, kind, qualified_name, name, signature,
+                summary, source_text, start_line, end_line, start_byte, end_byte, source_hash,
+                file_size_bytes
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
         "#,
             params![
                 symbol.id,
                 symbol.file_path,
                 symbol.language,
+                symbol.extraction_tier.as_str(),
                 symbol.kind.as_str(),
                 symbol.qualified_name,
                 symbol.name,
