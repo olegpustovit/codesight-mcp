@@ -1,4 +1,4 @@
-use super::symbols::{ExtractionTier, SymbolKind};
+use super::symbols::{ExtractionTier, FactQuality, SymbolKind};
 
 #[derive(Debug, Clone)]
 pub struct StoredSymbol {
@@ -18,6 +18,13 @@ pub struct StoredSymbol {
     pub source_hash: String,
     pub source_text: String,
     pub file_size_bytes: u64,
+}
+
+impl StoredSymbol {
+    #[must_use]
+    pub fn fact_quality(&self) -> FactQuality {
+        self.extraction_tier.fact_quality()
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -2,12 +2,10 @@
 
 use serde_json::{Value, json};
 
-use crate::analysis::dead_code;
-use crate::complexity::{complexity_assessment, cyclomatic_complexity};
+use crate::analysis::{dead_code, quality};
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
-use crate::service::agent_v1::util::*;
 use crate::service::args::parse_args;
 use crate::service::helpers::ToolError;
 
@@ -49,8 +47,8 @@ impl CodeService {
                     Ok(s) => s,
                     Err(e) => return self.error_response(&timer, e),
                 };
-                let rec = match store.symbol_record(&id)? {
-                    Some(r) => r,
+                let data = match quality::complexity_payload(&store, &id)? {
+                    Some(data) => data,
                     None => {
                         return self.error_response(
                             &timer,
@@ -62,44 +60,9 @@ impl CodeService {
                         );
                     }
                 };
-                let lines = rec
-                    .end_line
-                    .saturating_sub(rec.start_line)
-                    .saturating_add(1);
-                let cyclomatic = cyclomatic_complexity(&rec.stored_source);
-                let branch_hints = cyclomatic.saturating_sub(1);
-                // Extract signature from the first line of the stored source.
-                let first_line = rec.stored_source.lines().next().unwrap_or("");
-                let param_count = count_params(first_line);
-                let max_nesting = max_nesting_depth(&rec.stored_source);
-                let assessment = complexity_assessment(cyclomatic);
-                let repo_path = rec.root_path.to_string_lossy().to_string();
-                let raw_bytes = rec.file_size_bytes;
+                let raw_bytes = store.repo_total_bytes()?;
                 let timer = MetaBuilder::new(raw_bytes);
-                self.success_response(
-                    &timer,
-                    json!({
-                        "analysis": "complexity",
-                        "repo": repo_path,
-                        "file": rec.file_path,
-                        "line": rec.start_line,
-                        "findings": [{
-                            "finding_id": format!("complexity:{id}"),
-                            "analysis": "complexity",
-                            "severity": assessment,
-                            "confidence": 0.5,
-                            "summary": format!("cyclomatic {cyclomatic}, nesting {max_nesting}, {lines} lines"),
-                            "evidence": json!({
-                                "lines": lines,
-                                "branch_token_hints": branch_hints,
-                                "param_count": param_count,
-                                "max_nesting": max_nesting,
-                                "cyclomatic": cyclomatic,
-                            }),
-                            "related_refs": [id],
-                        }],
-                    }),
-                )
+                self.success_response(&timer, data)
             }
             "repo_health" => {
                 let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref())

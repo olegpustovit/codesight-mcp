@@ -47,7 +47,8 @@ impl CodeService {
         }
 
         if let Some(ref identifiers) = args.identifiers {
-            let data = reference_check::check_identifiers_batch(&store, identifiers)?;
+            let data =
+                reference_check::check_identifiers_batch(&store, identifiers, args.search_content)?;
             return self.success_response(&timer, data);
         }
 

@@ -94,7 +94,7 @@ declare -a INPUT_PATHS=(
   "runtime/queries"
 )
 
-for optional_path in build.rs .codesight.toml .cargo/config.toml .config/nextest.toml; do
+for optional_path in build.rs .codesight.toml .cargo/config.toml .config/nextest.toml scripts/time-uncached-suite; do
   if [[ -e "$ROOT_DIR/$optional_path" ]]; then
     INPUT_PATHS+=("$optional_path")
   fi

@@ -4,11 +4,11 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
+use crate::analysis::quality;
 use crate::complexity::cyclomatic_complexity;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
-use crate::service::agent_v1::util_graph::extract_symbol_name_from_id;
 use crate::service::helpers::ToolError;
 
 impl CodeService {
@@ -30,94 +30,11 @@ impl CodeService {
 
                 let raw_bytes = store.repo_total_bytes()?;
                 let timer = MetaBuilder::new(raw_bytes);
-
-                let all_symbols = store.all_symbols_for_analysis()?;
-
-                // Try to detect git availability
-                let root_path = store.root_path().ok();
-                let git_available = root_path
-                    .as_ref()
-                    .map(|r| r.join(".git").exists())
-                    .unwrap_or(false);
-
-                // Compute git churn per file (number of commits touching the file)
-                let mut file_churn: std::collections::HashMap<String, u64> =
-                    std::collections::HashMap::new();
-                if git_available
-                    && let Some(ref root) = root_path
-                    && let Ok(output) = std::process::Command::new("git")
-                        .args(["log", "--format=", "--name-only"])
-                        .current_dir(root)
-                        .output()
-                    && output.status.success()
-                {
-                    let text = String::from_utf8_lossy(&output.stdout);
-                    for line in text.lines() {
-                        let trimmed = line.trim();
-                        if !trimmed.is_empty() {
-                            *file_churn.entry(trimmed.to_string()).or_default() += 1;
-                        }
-                    }
-                }
-
-                let mut hotspots: Vec<Value> = Vec::new();
-
-                for sym in &all_symbols {
-                    // Only consider functions and methods
-                    let kind_lower = sym.kind.to_ascii_lowercase();
-                    if kind_lower != "function" && kind_lower != "method" {
-                        continue;
-                    }
-
-                    let cyclomatic = cyclomatic_complexity(&sym.source_text) as u64;
-
-                    if cyclomatic < min_complexity {
-                        continue;
-                    }
-
-                    let churn = file_churn.get(&sym.file_path).copied().unwrap_or(0);
-
-                    // Hotspot score: cyclomatic * ln(1 + churn)
-                    let hotspot_score = cyclomatic as f64 * (1.0 + churn as f64).ln();
-
-                    let assessment = if !git_available || churn == 0 {
-                        "low"
-                    } else if hotspot_score > 50.0 {
-                        "high"
-                    } else if hotspot_score > 20.0 {
-                        "medium"
-                    } else {
-                        "low"
-                    };
-
-                    hotspots.push(json!({
-                        "symbol_id": sym.id,
-                        "name": sym.name,
-                        "file": sym.file_path,
-                        "line": sym.start_line,
-                        "cyclomatic": cyclomatic,
-                        "churn": churn,
-                        "hotspot_score": hotspot_score,
-                        "assessment": assessment,
-                    }));
-                }
-
-                // Sort by hotspot_score descending
-                hotspots.sort_by(|a, b| {
-                    let sa = a["hotspot_score"].as_f64().unwrap_or(0.0);
-                    let sb = b["hotspot_score"].as_f64().unwrap_or(0.0);
-                    sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
-                });
-
-                hotspots.truncate(top_n);
+                let data = quality::hotspots_payload(&store, min_complexity, top_n)?;
 
                 self.success_response_with_meta_extra(
                     &timer,
-                    json!({
-                        "analysis": "hotspots",
-                        "hotspots": hotspots,
-                        "git_available": git_available,
-                    }),
+                    data,
                     Vec::new(),
                     [
                         ("methodology".to_string(), json!("cyclomatic_plus_churn")),
@@ -365,78 +282,8 @@ impl CodeService {
                     })
                     .unwrap_or_default();
                 symbol_ids.truncate(200);
-
-                if symbol_ids.is_empty() {
-                    return self.success_response(
-                        timer,
-                        json!({
-                            "analysis": "doc_coverage",
-                            "symbols_checked": 0,
-                            "documented_count": 0,
-                            "undocumented_count": 0,
-                            "coverage_pct": 0.0,
-                            "documented": [],
-                            "undocumented": [],
-                        }),
-                    );
-                }
-
-                let all_sections = doc_store.all_sections()?;
-                // Build a map: heading_lower -> list of section details
-                let mut heading_sections: std::collections::HashMap<String, Vec<Value>> =
-                    std::collections::HashMap::new();
-                for sec in &all_sections {
-                    heading_sections
-                        .entry(sec.heading.to_lowercase())
-                        .or_default()
-                        .push(json!({
-                            "section_id": sec.id,
-                            "section_title": sec.heading,
-                            "doc_path": sec.file_path,
-                        }));
-                }
-
-                let mut documented = Vec::new();
-                let mut undocumented = Vec::new();
-
-                for id in &symbol_ids {
-                    let name = extract_symbol_name_from_id(id);
-                    let name_lower = name.to_lowercase();
-                    if let Some(sec_details) = heading_sections.get(&name_lower) {
-                        documented.push(json!({
-                            "symbol_id": id,
-                            "symbol_name": name,
-                            "matching_sections": sec_details,
-                        }));
-                    } else {
-                        undocumented.push(json!({
-                            "symbol_id": id,
-                            "symbol_name": name,
-                        }));
-                    }
-                }
-
-                let total = symbol_ids.len();
-                let doc_count = documented.len();
-                let coverage_pct = if total > 0 {
-                    doc_count as f64 / total as f64 * 100.0
-                } else {
-                    0.0
-                };
-
-                self.success_response(
-                    timer,
-                    json!({
-                        "analysis": "doc_coverage",
-                        "repo": args.source_id,
-                        "symbols_checked": total,
-                        "documented_count": doc_count,
-                        "undocumented_count": undocumented.len(),
-                        "coverage_pct": coverage_pct,
-                        "documented": documented,
-                        "undocumented": undocumented,
-                    }),
-                )
+                let data = quality::doc_coverage_payload(&doc_store, &symbol_ids)?;
+                self.success_response(timer, data)
             }
             _ => {
                 let warnings = vec![json!({

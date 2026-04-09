@@ -259,6 +259,31 @@ fn laravel_load_route_enriches_controller() {
         .unwrap();
     assert!(ctx.tags.contains(&"controller".to_string()));
 }
+
+#[test]
+fn laravel_snapshot_exposes_context_and_imports_without_provider() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    make_laravel_project(root);
+    std::fs::create_dir_all(root.join("routes")).unwrap();
+    std::fs::create_dir_all(root.join("app/Http/Controllers")).unwrap();
+    std::fs::write(root.join("routes/web.php"), sample_routes()).unwrap();
+    std::fs::write(
+        root.join("app/Http/Controllers/UserController.php"),
+        "<?php",
+    )
+    .unwrap();
+
+    let snapshot = LaravelSnapshot::load(root);
+    let ctx = snapshot
+        .file_context("app/Http/Controllers/UserController.php")
+        .expect("controller context");
+    assert!(ctx.tags.contains(&"controller".to_string()));
+    let imports = snapshot.extra_imports();
+    assert!(imports.contains_key("routes/web.php"));
+    assert_eq!(snapshot.stats().routes, 3);
+}
+
 #[test]
 fn laravel_stats() {
     let tmp = tempfile::tempdir().unwrap();

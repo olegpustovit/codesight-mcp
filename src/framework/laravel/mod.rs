@@ -7,12 +7,15 @@
 mod api_client;
 mod blade;
 mod facade;
+mod imports;
 mod inertia;
 mod migrations;
 mod models;
 mod php_structure;
 mod provider;
+mod render;
 mod routes;
+mod snapshot;
 mod types;
 
 pub use api_client::extract_api_calls;
@@ -23,4 +26,5 @@ pub use migrations::parse_migration;
 pub use models::{guess_table, parse_model};
 pub use provider::{LaravelProvider, LaravelStats};
 pub use routes::{match_route, parse_routes, parse_routes_dir};
+pub use snapshot::LaravelSnapshot;
 pub use types::{MigrationInfo, ModelInfo, Relationship, RouteInfo};

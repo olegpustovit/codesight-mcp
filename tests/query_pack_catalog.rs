@@ -94,6 +94,33 @@ fn builtin_query_packs_use_canonical_tags_layout() {
 }
 
 #[test]
+fn codesight_queries_convention_loads_packs_without_toml_config() {
+    let workspace = tempfile::tempdir().unwrap();
+    let pack_dir = workspace.path().join(".codesight/queries/toyjson");
+    fs::create_dir_all(&pack_dir).unwrap();
+    fs::write(
+        pack_dir.join("tags.scm"),
+        "(document (object (pair key: (string (string_content) @name)) @definition.constant))\n",
+    )
+    .unwrap();
+    fs::write(
+        pack_dir.join("pack.toml"),
+        "language = \"toyjson\"\nextensions = [\"toyjson\"]\ngrammar = \"json\"\n",
+    )
+    .unwrap();
+
+    let catalog = QueryPackCatalog::for_workspace_root(workspace.path()).unwrap();
+    let pack = catalog.find_by_pack_id("toyjson").expect("toyjson pack");
+    assert_eq!(pack.metadata.name, "toyjson");
+
+    let registry = ExtractorRegistry::for_workspace_root(workspace.path());
+    let extractor = registry
+        .extractor_for_path(Path::new("example.toyjson"))
+        .expect("workspace extractor");
+    assert_eq!(extractor.language_name(), "toyjson");
+}
+
+#[test]
 fn workspace_query_pack_root_supports_pack_toml_metadata() {
     let workspace = tempfile::tempdir().unwrap();
     fs::write(

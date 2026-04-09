@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use crate::{
     config::AppConfig,
     indexing::{
-        imports::{extract_imports, import_edges_reference_package, language_for_path},
+        imports::{extract_imports, language_for_path, package_reference_evidence},
         packages,
     },
     storage::{IndexStore, list_repo_summaries},
@@ -84,13 +84,14 @@ pub fn build_cross_repo_map(
                 let lang = language_for_path(file);
                 let edges = extract_imports(content, file, lang);
                 for (pkg_name, target_repos) in &registry {
-                    if import_edges_reference_package(&edges, pkg_name.as_str()) {
+                    if let Some(evidence) = package_reference_evidence(&edges, lang, pkg_name) {
                         for tr in target_repos {
                             if tr != &entry.repo_id {
                                 cross_repo_edges.push(json!({
                                     "from_repo": entry.repo_id,
                                     "to_repo": tr,
                                     "package_name": pkg_name,
+                                    "evidence": evidence,
                                 }));
                             }
                         }

@@ -7,7 +7,9 @@
 mod docs;
 mod project;
 mod provider;
+mod render;
 mod schema;
+mod snapshot;
 
 pub use docs::{
     parse_doc_blocks, parse_doc_blocks_from_content, parse_doc_blocks_multi, resolve_description,
@@ -15,3 +17,4 @@ pub use docs::{
 pub use project::detect_dbt_project;
 pub use provider::{DbtContextProvider, DbtStats};
 pub use schema::{DbtModelMetadata, parse_yml_content, parse_yml_files};
+pub use snapshot::DbtSnapshot;

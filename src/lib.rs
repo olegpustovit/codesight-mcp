@@ -5,11 +5,9 @@ pub mod bm25_reference;
 pub mod class_hierarchy;
 pub mod complexity;
 pub mod config;
-pub mod core;
 pub mod db;
 pub mod dep_graph;
 pub mod doc_summarizer;
-pub mod extractors;
 pub mod framework;
 pub mod fuzzy;
 pub mod github_index;
@@ -30,3 +28,6 @@ pub mod storage;
 pub mod summarizer;
 /// Synthetic repos and checked-in fixture paths for integration tests.
 pub mod test_support;
+
+pub use codesight_core as core;
+pub use codesight_extractors::extractors;

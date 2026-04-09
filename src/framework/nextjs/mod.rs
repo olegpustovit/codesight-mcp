@@ -6,7 +6,10 @@
 
 mod middleware;
 mod provider;
+mod render;
 mod routing;
+mod snapshot;
 
 pub use provider::{NextjsProvider, NextjsStats};
 pub use routing::{next_api_methods_from_content, next_route_from_path};
+pub use snapshot::NextjsSnapshot;

@@ -2,5 +2,8 @@
 
 pub mod cross_repo_map;
 pub mod dead_code;
+pub mod evidence;
 pub mod graph;
+pub mod impact;
+pub mod quality;
 pub mod reference_check;

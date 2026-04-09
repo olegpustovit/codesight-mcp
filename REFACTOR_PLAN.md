@@ -10,12 +10,14 @@ Purpose:
 
 ## Working stance
 
-- This crate stays a single crate for now.
+- This repo stays one product, but single-crate is not a permanent goal. Stay single-crate while boundaries are moving; split into workspace crates once low-level domains have narrow dependencies and the split materially reduces compile/test blast radius.
 - We are not preserving internal backwards compatibility.
+- Simple and universal beats clever and repo-specific. A mechanism is only a win if it generalizes across arbitrary codebases instead of encoding one framework or one repository's quirks in shared paths.
 - Public MCP behavior changes only when explicitly called out and then updated in tests and `src/tools.json`.
 - File-system conventions are acceptable when the framework itself defines semantics by path or filename.
 - Content-derived semantics should come from tree-sitter ASTs, `.scm` queries, or explicit structural adapters before we reach for string scanning.
 - Extensibility should prefer query packs, language profiles, and generic structural runners over adding new Rust extractor types.
+- Test wall-clock time is a first-class architecture signal. Prefer proving internal behavior in domain tests over adding another full service/index integration case.
 - If a heuristic fallback remains, it must be isolated, documented, and covered by tests.
 
 ## Architecture choice
@@ -27,6 +29,7 @@ Decision tree:
 
 Decision:
 - Use `rust-modularity` Pattern A: domain components, with internal layering where needed.
+- Plan a guarded Pattern C follow-on only for stable low-level domains if it reduces compile/test cost without creating a shared “types” dumping ground.
 
 Why this fits:
 - `service` is a boundary/facade domain.
@@ -37,7 +40,7 @@ Why this fits:
 
 Implication:
 - `lib.rs` can stay skeletal, but the flat top-level module list should converge toward grouped domains instead of more root files.
-- We should not split into workspace crates until a domain becomes independently reusable and stops sharing half the crate's types.
+- We should not split into workspace crates by theme alone. Split only when a domain has clear ownership, limited shared types, and a measurable blast-radius win for compile/test loops.
 
 ## Audit update (2026-04-08)
 
@@ -54,6 +57,23 @@ Primary findings from the current tree:
 - “Works acceptably on any codebase” cannot mean “curate every language by hand.” We need a tiered extractor model: curated query packs first, generic AST fallback second, container/injection runners third, tiny residual overrides last.
 - The highest remaining heuristic risk is now in analysis evidence (`dead_code`, `reference_check`, cross-repo package matching) and mixed-language fallback extractors.
 - `lib.rs` is skeletal, but the export surface still reflects historical root modules more than stable domain facades.
+
+## Test-throughput audit (2026-04-09)
+
+Primary findings from the current tree:
+- The suite currently has 85 integration-test files, 233 `CodeService::new(...)` call sites, and 391 `tempdir()` allocations.
+- Many tests validate extractor, indexing, framework, or analysis behavior by creating a fresh temp repo, building a fresh SQLite index, and crossing the full service/MCP boundary.
+- `./scripts/nextest-cache` helps repeated local loops, but it does not improve first-run latency or CI wall clock when the suite is structurally dominated by end-to-end setup.
+- There is no checked-in `.config/nextest.toml`, so the suite currently has no explicit heavy-test grouping or profile-specific scheduling rules.
+
+Interpretation:
+- Test cost is coupled too tightly to product breadth. That slows refactors and nudges new behavior toward “just add another end-to-end fixture” instead of adding a smaller domain test.
+- A universal architecture needs universal tests: extractor logic, framework snapshots, import facts, storage reads/writes, and evidence stages should mostly prove themselves below `CodeService`.
+
+Direction:
+- Keep a small contract suite for `agent-v1` and full ingest flows.
+- Shift most coverage toward extractor, indexing, framework snapshot, analysis, and storage slice tests.
+- Treat crate splitting as a consequence of clean test layers, not a substitute for them.
 
 ## Current hotspots
 
@@ -74,6 +94,7 @@ These are the primary refactor drivers, not a full inventory.
 | `src/cross_repo.rs` | Root-level package registry and manifest parsing remain detached from both indexing and analysis domains. | Move into an explicit package metadata domain (`indexing/packages` or `analysis/cross_repo`) with manifest adapters. |
 | `src/framework/laravel/provider.rs` (542 LOC) | The provider split helped, but project detection/load, context rendering, and extra-import assembly still accumulate in one facade. | Move toward typed framework snapshots plus smaller render/import stages. |
 | `src/security.rs` (510 LOC) | Path validation, binary detection, secret detection, and file-policy rules remain packed together. | Split into focused policy modules once extractor/indexing boundaries settle. |
+| `tests/*.rs` + `src/test_support.rs` | Hundreds of temp-repo/service setups make first-run latency scale with product breadth instead of changed behavior. | Introduce layered test harnesses, indexed fixtures, and a bounded contract suite before or alongside crate splitting. |
 
 ## Design-pattern issues
 
@@ -230,6 +251,69 @@ Rules for the target shape:
 - `storage` owns persistence and I/O, not business rules
 - `core` stays small and focused on truly shared types/utilities
 
+## Candidate crate split (after test layering)
+
+This repo is still one product. Workspace crates are justified only when they reduce blast radius without recreating a shared `types`/`utils` monolith.
+
+Phase 1 candidates:
+- `codesight-core`: stable shared primitives such as symbol kinds, extraction tiers, fingerprints, IDs, and small config-free helpers
+- `codesight-extractors`: extractor engine, query-pack catalogs/loaders, containers, profiles, residual overrides, and the build-generated query metadata path
+- `codesight-storage`: SQLite schema, index/doc storage APIs, reads, writes, and conversion helpers
+- root `codesight-mcp`: `mcp`, `service`, and the still-moving `indexing` / `analysis` / `framework` orchestration
+
+Phase 2 candidates once facts stabilize:
+- `codesight-indexing`: crawl, import extraction, package metadata, and ingest coordinators
+- `codesight-analysis`: graph/evidence/dead-code/reference analysis once it stops sharing half its types with indexing/storage
+
+Rules:
+- no generic shared `types` crate
+- dependencies point inward only (`service` -> indexing/analysis/storage/extractors/core; never reverse)
+- each split must come with tests that run without the root service crate where possible
+- if a candidate crate still needs broad re-export bags or half the repo's internal types, it is not ready to split
+
+## Resolved design decisions (2026-04-09)
+
+These replace the previous open questions. Research is still required for implementation details, but the strategic direction is no longer open.
+
+1. Project-local query packs:
+   - Built-in packs remain the default and primary path.
+   - Do not expand arbitrary repo-configured query-pack roots as a strategic feature.
+   - If repo-local packs are kept, standardize on a fixed `.codesight/queries/` convention instead of per-repo TOML wiring.
+   - Existing `.codesight.toml` root support may remain temporarily, but no new design work should depend on it.
+
+2. Confidence metadata for generic AST / structural fallback:
+   - Downstream consumers should use a small typed quality model, not numeric confidence scores.
+   - Introduce a coarse fact-quality classification:
+     - `trusted_structural`: curated query pack or grammar-backed delegated child extraction with no heuristic merge
+     - `baseline_structural`: generic AST or grammar-backed residual logic that is still structurally derived
+     - `heuristic`: regex/text/manual fallback contributions
+   - Search, outline, and exploratory retrieval may consume all three.
+   - Graph, dead-code, and quality analysis should default to `trusted_structural` and `baseline_structural`; `heuristic` facts must be labeled and used only as secondary evidence.
+
+3. Container-language direction:
+   - `injections.scm` is the canonical long-term mechanism.
+   - Do not introduce a generic Rust container DSL as a product direction.
+   - Rust segment extraction is acceptable only as a temporary bridge where a usable grammar/injection path does not yet exist, and each bridge must carry explicit exit criteria.
+
+4. Shared type policy:
+   - Share only stable, reusable primitives that are needed across multiple domains or crates.
+   - `core` is allowed to own IDs, symbol kinds, extraction tiers, fingerprints, and similarly stable primitives.
+   - `core` must not become a home for response DTOs, database rows, framework snapshots, manifest structs, or service-facing bags.
+
+5. Package / manifest ownership:
+   - `indexing/packages` owns manifest parsing, normalization, and persisted package facts.
+   - `analysis/cross_repo` consumes those facts and owns matching/evidence algorithms only.
+
+6. Smallest worthwhile crate split:
+   - The first meaningful pilot split is `codesight-core` plus `codesight-extractors`.
+   - `codesight-storage` follows once the extractor split is stable.
+   - Do not split `indexing` or `analysis` until test layering is in place and shared fact types have settled.
+
+7. Test speed targets:
+   - Target uncached focused local loops at <= 30 seconds.
+   - Target uncached full-suite runs at <= 3 minutes on a standard multi-core dev/CI runner.
+   - Any test binary or suite that is consistently > 5 seconds belongs in an explicit heavy bucket with an owner and reason.
+
 ## Workstreams
 
 ### 1. Split `agent-v1` handlers
@@ -372,6 +456,7 @@ Progress:
 - [x] pack id in `QUERY_FILES` is the directory name (`rust` under `runtime/queries/rust/`, not a separate Rust alias key)
 - [x] `GrammarCatalog` / `QueryPackCatalog` / `LanguageProfileRegistry` split in code
 - [x] workspace `.codesight.toml` can provide `query_pack_roots = ["..."]`; `ExtractorRegistry::for_workspace_root(...)` overlays those packs without editing Rust core
+- [x] follow-on direction is fixed: do not expand arbitrary root configuration further; if repo-local packs remain supported, standardize future work on `.codesight/queries/`
 - [x] lightweight `pack.toml` metadata files are supported for workspace and built-in packs (`language`, `extensions`, `grammar`, `override_extractor`)
 - [x] all built-in packs now use canonical `tags.scm`; `symbols.scm` is no longer part of built-in discovery
 - [x] `QueryPackCatalog` validates pack metadata (`extensions`, `grammar` or `override_extractor`) and rejects malformed `pack.toml` input instead of silently ignoring it
@@ -560,7 +645,7 @@ Done when:
 ### 12. Replace heuristic quality and cross-repo analysis with typed evidence providers
 
 Status:
-- [ ] proposed
+- [x] implemented (2026-04-08)
 
 Tasks:
 - split dead-code analysis into explicit evidence modules such as entrypoint detection, live-root seeding, symbol reachability, and confidence scoring
@@ -573,10 +658,16 @@ Done when:
 - `check_references` no longer scans raw `import` / `from` lines as its primary path
 - cross-repo package detection prefers exact/scoped/module-aware matches before any fallback substring rule
 
+Outcome:
+- Shared evidence types now live in `src/analysis/evidence.rs`, and quality outputs surface `evidence_notes` plus per-tool evidence breakdowns instead of burying confidence in one heuristic path.
+- Dead-code analysis now lives under `src/analysis/dead_code/{entrypoints,reachability}.rs`; entrypoint detection, live-root seeding, main-guard detection, and reachability are explicit stages with named evidence on files and symbols.
+- Reference checking now uses `src/analysis/reference_check/evidence.rs` to precompute import-edge, symbol-reference, and labeled fallback-content evidence; `check_references` returns `evidence_notes` / `evidence_breakdown`, and fallback scans are explicitly marked as heuristic.
+- Cross-repo matching now flows through `src/indexing/imports/cross_repo.rs` with `PackageReferenceMatcher` / `PackageReferenceEvidence`; evidence distinguishes `exact_specifier`, `root_specifier`, and `normalized_alias`, and the old raw substring fallback is gone.
+
 ### 13. Make framework providers snapshot-based
 
 Status:
-- [ ] proposed
+- [x] implemented (2026-04-08)
 
 Tasks:
 - keep `FrameworkProvider` as the public strategy boundary, but split each concrete provider into project snapshot loading, context rendering, metadata emission, and extra-import emission
@@ -588,10 +679,15 @@ Done when:
 - adding a new framework metadata field does not require editing detection, rendering, and import code in one place
 - framework context/import generation is testable from a typed snapshot without rescanning the filesystem
 
+Outcome:
+- `FrameworkProvider` remains the boundary, but `nextjs`, `nuxt`, `dbt`, and `laravel` providers are now facades over typed snapshot structs instead of multi-phase filesystem walkers.
+- Each framework now has dedicated `snapshot.rs` plus focused render/import helpers (`render.rs`, and `imports.rs` where needed), so detection/load, rendering, metadata, and extra-import assembly no longer accumulate in `provider.rs`.
+- Snapshot-level tests now cover context and extra-import generation directly for every converted framework, proving those paths without re-running full provider discovery.
+
 ### 14. Split security/file policy into focused modules
 
 Status:
-- [ ] backlog
+- [x] implemented (2026-04-08)
 
 Tasks:
 - split `security.rs` into path validation, secret-file policy, binary-file policy, and encoding safety modules
@@ -603,6 +699,77 @@ Done when:
 - indexing code can depend on narrowly scoped security/file-policy helpers
 - policy changes update focused tests instead of one broad test surface
 
+Outcome:
+- `src/security.rs` is replaced by `src/security/{config,path_validation,secret_policy,binary_policy,encoding,discovery}.rs`, with `src/security/mod.rs` as the public facade.
+- Filename-based secret and binary checks are now documented in the owning policy modules as intentional file-policy heuristics, instead of being hidden inside one mixed utility file.
+- Focused helpers are re-exported through `security::mod`, so indexing and callers can depend on narrow modules while existing tests continue to validate the policy surface.
+
+### 15. Layer the test architecture and make runtime budgets explicit
+
+Status:
+- [ ] in progress (2026-04-09)
+
+Progress:
+- [x] Node **A0** (initial): checked-in `.config/nextest.toml` with `heavy` test-group (max 4 threads), extended `slow-timeout` defaults, `ci` fail-fast policy, and an explicit heavy-binary filter set; `scripts/time-uncached-suite` for uncached wall-clock timing; fast-loop hint documented in nextest.toml comments (`-E 'not binary(...)'`)
+- [x] Node **A1** (initial): `src/test_support/` split into `fixtures.rs` + `repos.rs` + `mod.rs` for shared harness building blocks
+- [x] Node **A1** (expanded): `src/test_support/indexed.rs` adds direct indexing/store helpers (`index_code_fixture`, `open_code_store`, `index_doc_fixture`, `open_doc_store`, `write_files`, `copy_fixture_tree`, `find_symbol_id`) so slice tests can bypass `CodeService`
+- [x] Node **A2** (partial): repetitive code-analysis integration tests now use shared harnesses or direct domain payloads in `tests/find_dead_code.rs`, `tests/dead_code_v2.rs`, `tests/hotspots.rs`, `tests/symbol_complexity.rs`, and `tests/check_rename_safe.rs`
+- [x] Node **A3** (partial): doc/retrieval coverage in `tests/document_coverage.rs` now uses indexed fixture helpers instead of open-coded tempdir + ingest setup
+- [x] Node **A6** (initial): `.codesight/queries/` merged into `project_query_pack_roots` (after legacy TOML roots; wins on duplicate pack ids); integration test `codesight_queries_convention_loads_packs_without_toml_config`; `runtime/queries/README.md` repo-local section
+- [x] Node **A5** (call graph + reference evidence): `FactQuality` + tier on `dep_graph::SymbolInfo`; `build_call_edges` uses strict analysis by default; `build_call_edges_including_heuristic` for exploratory parity (`src/analysis/graph/calls.rs`); reference-check symbol-body evidence skips heuristic-tier rows (prefers fallback scan / imports). File-level `dependency_graph` / import-edge quality still future work.
+- [ ] Runtime-budget follow-up: splitting several monolithic integration binaries into many nextest cases increased uncached full-suite wall time from 287.874s to 310-359s, so that experiment was reverted. The remaining WS15 work is reducing per-suite setup cost below `CodeService`, not increasing nextest process fan-out.
+
+Tasks:
+- classify tests as `unit`, `slice`, `contract`, or `heavy`, and default new coverage to the smallest layer that proves the behavior
+- add shared harnesses/builders for synthetic repos, checked-in fixtures, indexed fixtures, and domain coordinators so tests stop open-coding `tempdir` + `CodeService::new` + ingest flow
+- move extractor, framework snapshot, indexing, analysis, and storage behavior checks out of service-level integration tests unless the MCP contract itself is the subject
+- add checked-in nextest configuration/profile rules for heavy suites without hiding failures or using `#[ignore]` as a throughput escape hatch
+- define an explicit wall-clock budget for the default local loop and CI full suite, and track the slowest buckets
+
+Done when:
+- most internal behavior tests can run without `CodeService` or fresh full-repo indexing
+- end-to-end `agent-v1` tests are a bounded contract suite rather than the default place all coverage lives
+- slow tests belong to an explicit heavy bucket with a reason and owner
+
+### 16. Pilot a workspace-crate split at low-level stable seams
+
+Status:
+- [x] implemented (2026-04-09)
+
+Tasks:
+- extract `core` into a small foundational crate with stable shared types only
+- extract `extractors` into its own crate, including pack/catalog loading and build-generated query data
+- extract `storage` into its own crate around SQLite schema, reads, and writes
+- keep `service`, `mcp`, and the still-moving `indexing` / `analysis` orchestration in the root product crate until the first split proves out
+- reject any split that requires a catch-all shared `types` / `utils` crate or a cross-crate re-export maze
+
+Done when:
+- low-level crates compile and test independently
+- the root crate mostly composes domains instead of owning all implementations
+- compile/test blast radius is measurably smaller for extractor/storage changes
+
+Outcome:
+- Workspace crates `crates/codesight-core`, `crates/codesight-extractors`, and `crates/codesight-storage` now build under a shared workspace root; the product crate depends on them via path dependencies and keeps `service`, `indexing`, and `analysis` orchestration at the root.
+- `codesight-core` owns the shared `core::{pipeline,symbols}` surface; `codesight-extractors` owns the build-generated query-pack and extractor engine path; `codesight-storage` owns SQLite-backed code/doc storage, indexing reads/writes, imports helpers, and class-hierarchy persistence APIs.
+- The root crate now composes those crates instead of owning duplicate low-level implementations directly, with composition facades such as `pub use codesight_core as core;`, `pub use codesight_extractors::extractors;`, and re-export-based storage/class-hierarchy facades where the product surface still expects root paths.
+- The split is verified by independent crate checks: `./scripts/nextest-cache --no-cache -p codesight-core -p codesight-extractors -p codesight-storage --lib` passes 92 tests, and `cargo clippy --all-targets -- -D warnings` passes across the workspace.
+
+### 17. Collapse the remaining root surface into product composition only
+
+Status:
+- [ ] proposed
+
+Tasks:
+- move remaining legacy root modules/barrels behind owning domains or root composition facades
+- retire compatibility re-exports such as legacy root analysis/storage entry points once internal call sites stop depending on them
+- group retrieval/search/summarization code under a named domain instead of leaving root-level drift
+- keep `lib.rs` as module declarations only and reduce the number of historical top-level escape hatches
+
+Done when:
+- the root mostly contains domain dirs plus product entry points
+- a new feature usually means editing one domain plus the product composition root, not sprinkling new root modules
+- workspace crates, if introduced, map onto the same domain picture instead of freezing legacy drift
+
 ## Guardrails for every refactor patch
 
 - Do not delete tests to make refactors easier.
@@ -612,6 +779,34 @@ Done when:
 - Keep `lib.rs` skeletal.
 - Do not add a new Rust extractor until query-pack, generic-AST fallback, and container/profile options have been considered and rejected explicitly.
 - If a new heuristic is unavoidable, note it here and in code with the reason the structural path is insufficient.
+
+## Remaining implementation DAG (parallel-agent friendly)
+
+This DAG is intentionally concrete so smaller/weaker agents can execute bounded tasks without inventing architecture. Each node should land as a reviewable patch with tests.
+
+| Node | Depends on | Can run in parallel with | Touch | Deliverable |
+|---|---|---|---|---|
+| `A0` Measure and classify suite cost | none | `A1`, `A5`, `A6` | `.config/nextest.toml`, `scripts/*`, `REFACTOR_PLAN.md` | **Partial (2026-04-09):** nextest `heavy` group + filter list + `scripts/time-uncached-suite`; explicit `unit`/`slice`/`contract` buckets still TODO |
+| `A1` Split test support into reusable harness modules | none | `A0`, `A5`, `A6` | `src/test_support.rs` -> `src/test_support/*` | **Initial (2026-04-09):** `fixtures` + `repos` modules; service/indexed-repo harness builders still TODO |
+| `A2` Migrate repetitive code-analysis tests to shared harnesses | `A1` | `A3`, `A4`, `A5`, `A6` | `tests/find_dead_code.rs`, `tests/dead_code_v2.rs`, `tests/hotspots.rs`, `tests/symbol_complexity.rs`, `tests/check_rename_safe.rs`, similar builder-heavy files | **Partial (2026-04-09):** shared builders/domain payload helpers adopted in the listed code-analysis tests; remaining monolithic contract suites still need lower-level coverage before WS15 can close |
+| `A3` Migrate doc/retrieval tests to indexed fixtures and slice helpers | `A1` | `A2`, `A4`, `A5`, `A6` | `tests/document_coverage.rs`, `tests/get_doc_coverage.rs`, `tests/doc_broken_links.rs`, `tests/doc_parser*.rs`, `tests/retrieval_tools.rs`, `tests/get_context_bundle.rs` | **Partial (2026-04-09):** `tests/document_coverage.rs` now uses indexed fixtures directly; broader doc/retrieval suite migration is still pending |
+| `A4` Push framework/provider behavior below service where possible | `A1` | `A2`, `A3`, `A5`, `A6` | `tests/agent_v1_framework_*.rs`, `src/framework/*/snapshot.rs`, `src/framework/*/render.rs`, `src/framework/*/imports.rs` | Framework snapshot/render/import behavior primarily covered by slice tests; service/MCP tests remain contract-focused |
+| `A5` Introduce coarse `FactQuality` metadata and downstream gating | none | `A0`, `A1`, `A6` | `src/core/*`, `src/storage/*`, `src/analysis/*`, `src/indexing/*` | **Partial (2026-04-09):** strict call-graph + reference symbol-body gating on tier; stored file dependency adjacency not yet tier-aware |
+| `A6` Standardize repo-local query pack convention | none | `A0`, `A1`, `A5` | query-pack catalog/loading docs and workspace loader code | **Initial (2026-04-09):** `.codesight/queries/` wired + documented; legacy `query_pack_roots` retained for compatibility |
+| `A7` Make `injections.scm` the canonical container path | `A6` | `A2`, `A3`, `A4`, `A5` | `src/extractors/containers.rs`, `src/extractors/engine/scm/*`, `runtime/queries/*/injections.scm`, docs | Container hosts prefer grammar-backed injections; remaining Rust segment shims are temporary, small, and documented |
+| `B0` Extract `codesight-core` | `A5` | `C0` | workspace `Cargo.toml`, new `crates/codesight-core/*`, root imports | **Done (2026-04-09):** `codesight-core` owns the shared `core` primitives and compiles/tests independently |
+| `B1` Extract `codesight-extractors` | `B0`, `A6`, `A7` | `B2`, `C0` | new `crates/codesight-extractors/*`, build/query-pack wiring, root imports | **Done (2026-04-09):** extractor engine/build wiring lives under `codesight-extractors` and compiles/tests independently |
+| `B2` Extract `codesight-storage` | `B0` | `B1`, `C0` | new `crates/codesight-storage/*`, SQLite/schema/read-write code, root imports | **Done (2026-04-09):** storage/index persistence moved under `codesight-storage` and compiles/tests independently |
+| `B3` Rewire the root crate to compose extracted crates and retarget tests downward | `B1`, `B2`, `A2`, `A3`, `A4` | `C0` | root `Cargo.toml`, `src/lib.rs`, `src/service/*`, `src/indexing/*`, tests | **Initial (2026-04-09):** root crate composes extracted crates via path dependencies and facades; remaining downward test retargeting is tracked under WS15/WS17 rather than blocking the crate split pilot |
+| `C0` Finalize manifest/package ownership under `indexing/packages` | `A5` | `B0`, `B1`, `B2`, `B3` | `src/indexing/packages/*`, `src/analysis/cross_repo*`, docs/tests | Manifest parsing and normalized package facts clearly owned by indexing; analysis only consumes them |
+| `C1` Collapse the remaining root surface | `B3`, `C0` | none | root module tree, re-exports, retrieval grouping | Root contains product entry points and domain composition, not legacy convenience bags |
+
+Execution notes:
+- `A0`, `A1`, `A5`, and `A6` are the first wave. They establish measurement, harness reuse, confidence policy, and query-pack direction.
+- `A2`, `A3`, `A4`, and `A7` are the main parallel wave once `A1` and `A6` exist.
+- `B0`, `B1`, and `B2` should not start until the first wave is stable; otherwise the split will freeze bad test seams.
+- `B3` is the integration/reconciliation node and should be owned by a stronger agent than the leaf nodes.
+- `C1` is the final cleanup pass after the extracted crates and ownership lines are already proven.
 
 ## Recommended execution order
 
@@ -624,11 +819,19 @@ Done when:
 - Land **WS12** after import/package/entrypoint facts are stronger; its goal is to consume better facts, not invent another round of heuristics.
 - Treat **WS13** as the next framework-focused pass after the extractor/import/storage boundaries are stable.
 - Keep **WS14** behind the above work unless security policy changes are actively blocking indexing work.
+- Land **WS15** before or alongside any crate split. Faster, layered tests are a prerequisite for the rest of the refactor, not a postscript.
+- Use `A0` / `A1` / `A5` / `A6` as the first concrete wave, then run `A2` / `A3` / `A4` / `A7` in parallel.
+- Land **WS16** as `B0` then `B1`, with `B2` in parallel once `B0` is in place. Do not split `indexing` or `analysis` until test layers and shared fact types stabilize.
+- Treat `B3` as the merge/reconciliation point for the crate split pilot; do not fragment it across many agents.
+- Use **WS17** as the finishing pass that removes leftover root drift after the test and crate boundaries are proven.
 
-## Open questions for the next iteration
+## Decision summary for agents
 
-- Should project-local query packs live under a fixed convention (for example `.codesight/queries/`) or only through explicit `.codesight.toml` roots?
-- How much confidence metadata do downstream tools need from the generic AST fallback before they can safely use it for graph/quality analysis?
-- For container languages, do we want one generic segment DSL in Rust, or should every serious host language move to grammar-backed `injections.scm` as soon as a stable grammar exists?
-- Which types truly need to remain shared after WS10/WS11? The default assumption should be “fewer than we think.”
-- Do we want `indexing/packages` or `analysis/cross_repo` to own manifest/package metadata long-term? The answer should follow who mutates and persists that data, not who reads it most often.
+When implementing the remaining work, assume the following unless a later plan update says otherwise:
+- repo-local query packs, if supported, live under `.codesight/queries/`
+- confidence is coarse and typed, not numeric
+- `injections.scm` is the long-term container mechanism; no Rust DSL
+- `indexing/packages` owns package facts
+- only genuinely reusable primitives belong in `core`
+- first meaningful crate split is `core` + `extractors`, then `storage`
+- test speed targets are <= 30 seconds for focused uncached local loops and <= 3 minutes for uncached full-suite runs

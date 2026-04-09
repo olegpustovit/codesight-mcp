@@ -14,7 +14,10 @@ pub use crate::indexing::imports::{
     resolve_import_edge_for_graph, resolve_imports_to_files, resolve_specifier,
 };
 
-pub use calls::{CallEdge, SymbolInfo, build_call_edges, find_callees, find_callers, word_match};
+pub use calls::{
+    CallEdge, SymbolInfo, build_call_edges, build_call_edges_including_heuristic, find_callees,
+    find_callers, word_match,
+};
 pub use coupling::{CouplingMetrics, compute_coupling};
 pub use cycles::find_cycles;
 pub use import_graph::{build_dependency_graph, build_dependency_graph_with_aliases};

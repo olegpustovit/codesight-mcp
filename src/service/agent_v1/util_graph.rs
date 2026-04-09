@@ -72,15 +72,6 @@ pub(in crate::service) fn extract_symbol_names_from_content(
     }
 }
 
-/// Extract the symbol name from a stable_id like "path::Name#kind" or "path::Class.method#kind".
-pub(in crate::service) fn extract_symbol_name_from_id(id: &str) -> String {
-    // Take everything after the last `::`
-    let after_colons = id.rsplit("::").next().unwrap_or(id);
-    // Remove the #kind suffix
-    let name = after_colons.split('#').next().unwrap_or(after_colons);
-    name.to_string()
-}
-
 /// Build a call chain from target_id to caller_id using BFS on call edges.
 pub(in crate::service) fn build_call_chain(
     target_id: &str,

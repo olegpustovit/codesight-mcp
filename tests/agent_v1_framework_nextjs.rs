@@ -248,6 +248,21 @@ fn nextjs_stats() {
     assert!(stats.page_routes >= 1);
     assert!(stats.api_routes >= 1);
 }
+
+#[test]
+fn nextjs_snapshot_exposes_file_context_without_provider() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("next.config.js"), "").unwrap();
+    std::fs::create_dir_all(root.join("app")).unwrap();
+    std::fs::write(root.join("app/page.tsx"), "<Home />").unwrap();
+
+    let snapshot = NextjsSnapshot::load(root);
+    let ctx = snapshot.file_context("app/page.tsx").expect("page context");
+    assert!(ctx.tags.contains(&"nextjs-page".to_string()));
+    assert_eq!(snapshot.stats().page_routes, 1);
+}
+
 #[test]
 fn nextjs_no_app_dir_is_safe() {
     let tmp = tempfile::tempdir().unwrap();

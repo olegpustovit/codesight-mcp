@@ -11,7 +11,9 @@ mod resolve;
 mod tree_sitter;
 
 pub use bundle::context_bundle_import_lines;
-pub use cross_repo::import_edges_reference_package;
+pub use cross_repo::{
+    PackageMatchKind, PackageReferenceEvidence, PackageReferenceMatcher, package_reference_evidence,
+};
 pub use python_stems::python_top_level_import_stems;
 pub use resolve::{
     load_tsconfig_aliases, parse_tsconfig_paths, resolve_import_edge_for_graph,

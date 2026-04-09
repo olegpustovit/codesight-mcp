@@ -44,17 +44,21 @@ impl IndexStore {
     pub fn all_symbols_with_source(&self) -> anyhow::Result<Vec<crate::dep_graph::SymbolInfo>> {
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare(
-            "SELECT id, kind, name, file_path, start_line, end_line, source_text FROM symbols ORDER BY file_path, start_line",
+            "SELECT id, kind, extraction_tier, name, file_path, start_line, end_line, source_text FROM symbols ORDER BY file_path, start_line",
         )?;
         let rows = stmt.query_map([], |row| {
+            let tier_str: String = row.get(2)?;
+            let extraction_tier = crate::core::symbols::ExtractionTier::from_db(&tier_str)
+                .unwrap_or(crate::core::symbols::ExtractionTier::ManualOverride);
             Ok(crate::dep_graph::SymbolInfo {
                 id: row.get(0)?,
                 kind: row.get(1)?,
-                name: row.get(2)?,
-                file: row.get(3)?,
-                line: row.get::<_, u32>(4)?,
-                end_line: row.get::<_, u32>(5)?,
-                source: row.get(6)?,
+                name: row.get(3)?,
+                file: row.get(4)?,
+                line: row.get::<_, u32>(5)?,
+                end_line: row.get::<_, u32>(6)?,
+                source: row.get(7)?,
+                extraction_tier,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

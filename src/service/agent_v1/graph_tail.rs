@@ -4,9 +4,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use crate::indexing::imports::{
-    extract_imports, import_edges_reference_package, language_for_path,
-};
+use crate::indexing::imports::{extract_imports, language_for_path, package_reference_evidence};
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
@@ -94,13 +92,16 @@ impl CodeService {
                             let lang = language_for_path(file);
                             let edges = extract_imports(content, file, lang);
                             for (pkg_name, target_repos) in &registry {
-                                if import_edges_reference_package(&edges, pkg_name.as_str()) {
+                                if let Some(evidence) =
+                                    package_reference_evidence(&edges, lang, pkg_name)
+                                {
                                     for tr in target_repos {
                                         if tr != &args.source_id {
                                             cross_repo_edges.push(json!({
                                                 "from_repo": args.source_id,
                                                 "to_repo": tr,
                                                 "package_name": pkg_name,
+                                                "evidence": evidence,
                                             }));
                                         }
                                     }
@@ -444,12 +445,17 @@ impl CodeService {
                             for file in &files {
                                 let full_path = root.join(file);
                                 if let Ok(content) = std::fs::read_to_string(&full_path) {
+                                    let language = language_for_path(file);
+                                    let edges = extract_imports(&content, file, language);
                                     for pkg in &my_pkg_names {
-                                        if content.contains(pkg) {
+                                        if let Some(evidence) =
+                                            package_reference_evidence(&edges, language, pkg)
+                                        {
                                             cross_importers.push(json!({
                                                 "from_repo": entry.repo_id,
                                                 "to_repo": args.source_id,
                                                 "package_name": pkg,
+                                                "evidence": evidence,
                                             }));
                                             break;
                                         }

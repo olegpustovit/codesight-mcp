@@ -1,15 +1,21 @@
+[workspace]
+members = [".", "crates/codesight-core", "crates/codesight-extractors", "crates/codesight-storage"]
+resolver = "2"
+
 [package]
 name = "codesight-mcp"
 version = "0.1.0"
 edition = "2024"
 description = "Token-efficient code & documentation retrieval MCP server with AST-based symbol extraction"
 license = "Apache-2.0"
-build = "build.rs"
 
 [dependencies]
 anyhow = "1"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
+codesight-core = { path = "crates/codesight-core" }
+codesight-extractors = { path = "crates/codesight-extractors" }
+codesight-storage = { path = "crates/codesight-storage" }
 dirs = "6.0.0"
 rusqlite = { version = "0.39.0", features = ["bundled", "chrono"] }
 serde = { version = "1", features = ["derive"] }

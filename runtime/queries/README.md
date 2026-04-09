@@ -72,6 +72,14 @@ Current `@definition.<kind>` values recognized by the engine:
 
 `module` and `namespace` currently map to `SymbolKind::Type` in stored output, with scope behavior handled by the query engine.
 
+## Repo-local packs (workspace)
+
+The supported layout for extra packs checked into a user repository is:
+
+`<repo>/.codesight/queries/<pack_id>/` with the same `tags.scm` / optional `injections.scm` / `pack.toml` layout as built-in packs.
+
+Legacy `query_pack_roots` in `.codesight.toml` is still merged first for compatibility; the `.codesight/queries/` tree is appended and overrides on duplicate pack ids.
+
 ## Adding a built-in pack
 
 1. Create `runtime/queries/<pack_id>/tags.scm`.

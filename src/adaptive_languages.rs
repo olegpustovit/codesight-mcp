@@ -89,20 +89,45 @@ pub fn project_extra_extensions(project_root: &Path) -> HashMap<String, String> 
         .unwrap_or_default()
 }
 
+/// Query-pack directories merged into the built-in catalog for this workspace.
+///
+/// Order:
+/// 1. Legacy `query_pack_roots` entries from `.codesight.toml` (relative paths resolve under `project_root`).
+/// 2. `<project_root>/.codesight/queries/` when that directory exists (forward-looking convention; wins on duplicate pack ids).
 pub fn project_query_pack_roots(project_root: &Path) -> Vec<PathBuf> {
-    read_project_config(project_root)
+    let toml_roots: Vec<PathBuf> = read_project_config(project_root)
         .and_then(|cfg| cfg.query_pack_roots)
         .unwrap_or_default()
         .into_iter()
-        .map(PathBuf::from)
         .map(|path| {
+            let path = PathBuf::from(path);
             if path.is_absolute() {
                 path
             } else {
                 project_root.join(path)
             }
         })
-        .collect()
+        .collect();
+
+    let mut combined = toml_roots;
+    let convention = project_root.join(".codesight/queries");
+    if convention.is_dir() {
+        combined.push(convention);
+    }
+
+    dedupe_query_pack_roots(combined)
+}
+
+fn dedupe_query_pack_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut out = Vec::with_capacity(roots.len());
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    for root in roots {
+        let key = root.canonicalize().unwrap_or_else(|_| root.clone());
+        if seen.insert(key) {
+            out.push(root);
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------

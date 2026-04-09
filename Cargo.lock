@@ -111,12 +111,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "codesight-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "strum",
+]
+
+[[package]]
+name = "codesight-extractors"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "codesight-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "streaming-iterator",
+ "toml",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-c-sharp",
+ "tree-sitter-cpp",
+ "tree-sitter-css",
+ "tree-sitter-dart",
+ "tree-sitter-elixir",
+ "tree-sitter-erlang",
+ "tree-sitter-fortran",
+ "tree-sitter-gleam",
+ "tree-sitter-go",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-kotlin-ng",
+ "tree-sitter-lua",
+ "tree-sitter-luau",
+ "tree-sitter-nix",
+ "tree-sitter-perl",
+ "tree-sitter-php",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
+ "tree-sitter-rust",
+ "tree-sitter-scss",
+ "tree-sitter-sequel",
+ "tree-sitter-swift",
+ "tree-sitter-typescript",
+ "tree-sitter-xml",
+ "tree-sitter-yaml",
+]
+
+[[package]]
 name = "codesight-mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
  "chrono",
+ "codesight-core",
+ "codesight-extractors",
+ "codesight-storage",
  "dirs",
  "ignore",
  "log",
@@ -159,6 +213,20 @@ dependencies = [
  "tree-sitter-typescript",
  "tree-sitter-xml",
  "tree-sitter-yaml",
+ "walkdir",
+]
+
+[[package]]
+name = "codesight-storage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "codesight-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-python",
  "walkdir",
 ]
 

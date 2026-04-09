@@ -1,8 +1,14 @@
 //! Heuristic call graph from symbol bodies (whole-word name matches).
+//!
+//! By default, edges are built only between symbols whose extraction tier maps to
+//! [`crate::core::symbols::FactQuality::suitable_for_strict_analysis`]. Heuristic-tier
+//! symbols remain available for exploratory graphs via [`build_call_edges_including_heuristic`].
 
 use std::collections::HashSet;
 
 use serde::Serialize;
+
+use crate::{core::symbols::ExtractionTier, storage::SymbolSourceRecord};
 
 /// Check if `body` contains `name` as a whole-word match (not a partial match).
 /// Uses simple word-boundary heuristic: the character before and after `name`
@@ -52,29 +58,38 @@ pub struct CallEdge {
     pub callee_kind: String,
 }
 
-/// Symbol info for call graph building.
-#[derive(Debug, Clone)]
-pub struct SymbolInfo {
-    pub id: String,
-    pub name: String,
-    pub kind: String,
-    pub file: String,
-    pub line: u32,
-    pub end_line: u32,
-    pub source: String,
+pub type SymbolInfo = SymbolSourceRecord;
+
+#[derive(Clone, Copy)]
+enum CallEdgePolicy {
+    /// Exclude edges where either endpoint is [`FactQuality::Heuristic`].
+    StrictAnalysis,
+    /// Include all resolvable symbol pairs (legacy / exploratory).
+    Exploratory,
 }
 
-/// Build call edges from a list of symbols by checking if a symbol's body
-/// text contains another symbol's name as a whole-word match.
-pub fn build_call_edges(symbols: &[SymbolInfo]) -> Vec<CallEdge> {
+fn symbol_ok_for_policy(tier: ExtractionTier, policy: CallEdgePolicy) -> bool {
+    match policy {
+        CallEdgePolicy::Exploratory => true,
+        CallEdgePolicy::StrictAnalysis => tier.fact_quality().suitable_for_strict_analysis(),
+    }
+}
+
+fn build_call_edges_with_policy(symbols: &[SymbolInfo], policy: CallEdgePolicy) -> Vec<CallEdge> {
     let mut edges = Vec::new();
 
     for caller in symbols {
         if caller.source.is_empty() {
             continue;
         }
+        if !symbol_ok_for_policy(caller.extraction_tier, policy) {
+            continue;
+        }
         for callee in symbols {
             if caller.id == callee.id {
+                continue;
+            }
+            if !symbol_ok_for_policy(callee.extraction_tier, policy) {
                 continue;
             }
             // Skip very short names to avoid false positives
@@ -99,6 +114,23 @@ pub fn build_call_edges(symbols: &[SymbolInfo]) -> Vec<CallEdge> {
     }
 
     edges
+}
+
+/// Build call edges from a list of symbols by checking if a symbol's body
+/// text contains another symbol's name as a whole-word match.
+///
+/// Only symbols whose tier maps to [`crate::core::symbols::FactQuality::suitable_for_strict_analysis`]
+/// participate as callers or callees (REFACTOR_PLAN: graph analysis defaults to trusted/baseline structural).
+#[must_use]
+pub fn build_call_edges(symbols: &[SymbolInfo]) -> Vec<CallEdge> {
+    build_call_edges_with_policy(symbols, CallEdgePolicy::StrictAnalysis)
+}
+
+/// Same as [`build_call_edges`], but allows [`crate::core::symbols::FactQuality::Heuristic`]
+/// symbols as edge endpoints (exploratory / legacy behavior).
+#[must_use]
+pub fn build_call_edges_including_heuristic(symbols: &[SymbolInfo]) -> Vec<CallEdge> {
+    build_call_edges_with_policy(symbols, CallEdgePolicy::Exploratory)
 }
 
 /// Find all callers (direct and transitive up to `max_depth`) for a given symbol.
@@ -168,4 +200,67 @@ pub fn find_callees(
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::core::symbols::ExtractionTier;
+
+    use super::{SymbolInfo, build_call_edges, build_call_edges_including_heuristic};
+
+    fn sym(id: &str, name: &str, source: &str, tier: ExtractionTier) -> SymbolInfo {
+        SymbolInfo {
+            id: id.to_string(),
+            name: name.to_string(),
+            kind: "function".to_string(),
+            file: "a.ts".to_string(),
+            line: 1,
+            end_line: 2,
+            source: source.to_string(),
+            extraction_tier: tier,
+        }
+    }
+
+    #[test]
+    fn strict_call_graph_drops_edges_involving_heuristic_tier() {
+        let symbols = vec![
+            sym("1", "caller", "foo()", ExtractionTier::CuratedQueryPack),
+            sym("2", "foo", "// body", ExtractionTier::ManualOverride),
+        ];
+        assert!(
+            build_call_edges(&symbols).is_empty(),
+            "callee is heuristic-only"
+        );
+
+        let symbols2 = vec![
+            sym("1", "caller", "foo()", ExtractionTier::ManualOverride),
+            sym("2", "foo", "// body", ExtractionTier::CuratedQueryPack),
+        ];
+        assert!(
+            build_call_edges(&symbols2).is_empty(),
+            "caller is heuristic-only"
+        );
+    }
+
+    #[test]
+    fn strict_call_graph_keeps_baseline_structural_endpoints() {
+        let symbols = vec![
+            sym("1", "caller", "foo()", ExtractionTier::GenericAstFallback),
+            sym("2", "foo", "// body", ExtractionTier::Profiled),
+        ];
+        let edges = build_call_edges(&symbols);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].caller_id, "1");
+        assert_eq!(edges[0].callee_id, "2");
+    }
+
+    #[test]
+    fn exploratory_includes_heuristic_endpoints() {
+        let symbols = vec![
+            sym("1", "caller", "foo()", ExtractionTier::CuratedQueryPack),
+            sym("2", "foo", "// body", ExtractionTier::ManualOverride),
+        ];
+        let edges = build_call_edges_including_heuristic(&symbols);
+        assert_eq!(edges.len(), 1);
+    }
 }

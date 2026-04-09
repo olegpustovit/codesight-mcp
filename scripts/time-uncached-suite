@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Wall-clock helper for a full uncached nextest run (REFACTOR_PLAN node A0).
+# Usage: ./scripts/time-uncached-suite [extra args passed to nextest-cache]
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+export TIMEFORMAT='uncached full suite wall time: %R seconds'
+time ./scripts/nextest-cache --no-cache "$@"

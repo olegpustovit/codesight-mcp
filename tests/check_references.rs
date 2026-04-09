@@ -74,6 +74,14 @@ fn test_finds_import_reference() {
             || data["content_count"].as_u64().unwrap_or(0) >= 1,
         "expected import_count >= 1 or content_count >= 1: {data:?}"
     );
+    assert!(
+        data["evidence_notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|note| note["signal"] == "import_edges" && note["source"] == "structural"),
+        "expected structural import evidence notes: {data:?}"
+    );
 }
 
 // ── test_finds_content_reference ─────────────────────────────────────────────
@@ -287,6 +295,22 @@ fn test_no_import_data_searches_content() {
     assert!(
         data["content_count"].as_u64().unwrap() >= 1,
         "expected content_count >= 1: {data:?}"
+    );
+    assert!(
+        data["evidence_breakdown"]["fallback_content_files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|file| file.as_str() == Some("src/app.py")),
+        "expected src/app.py in fallback content evidence: {data:?}"
+    );
+    assert!(
+        data["evidence_notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|note| note["signal"] == "fallback_file_scan" && note["source"] == "heuristic"),
+        "expected fallback content evidence note: {data:?}"
     );
 }
 

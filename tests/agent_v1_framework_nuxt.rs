@@ -279,6 +279,36 @@ fn nuxt_stats() {
     assert!(stats.api_routes >= 1);
     assert!(stats.auto_import_symbols >= 1);
 }
+
+#[test]
+fn nuxt_snapshot_exposes_extra_imports_without_provider() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("nuxt.config.ts"), "").unwrap();
+    std::fs::create_dir_all(root.join("pages")).unwrap();
+    std::fs::create_dir_all(root.join("composables")).unwrap();
+    std::fs::write(
+        root.join("pages/index.vue"),
+        "<script setup>\nconst auth = useAuth();\n</script>",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("composables/useAuth.ts"),
+        "export function useAuth() {}",
+    )
+    .unwrap();
+
+    let snapshot = NuxtSnapshot::load(root);
+    let imports = snapshot.extra_imports();
+    let page_imports = imports.get("pages/index.vue").expect("page imports");
+    assert!(
+        page_imports
+            .iter()
+            .any(|import| import.specifier == "composables/useAuth.ts")
+    );
+    assert_eq!(snapshot.stats().auto_import_symbols, 1);
+}
+
 #[test]
 fn nuxt_no_pages_is_safe() {
     let tmp = tempfile::tempdir().unwrap();

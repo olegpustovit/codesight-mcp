@@ -1,5 +1,4 @@
-//! Synthetic workspaces and checked-in fixture paths for integration tests.
-//! Used by integration tests; not part of the MCP runtime.
+//! Tiny on-disk repos for tests that need a few Python files.
 
 use std::fs;
 use std::path::Path;
@@ -81,16 +80,4 @@ pub fn write_hierarchy_repo(src: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(src)?;
     fs::write(src.join("animals.py"), HIERARCHY_ANIMALS_PY.trim_start())?;
     Ok(())
-}
-
-/// Root of the checked-in documentation fixture tree under `tests/fixtures/doc_reference/`.
-pub fn doc_reference_fixtures_dir() -> std::path::PathBuf {
-    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest.join("tests/fixtures/doc_reference")
-}
-
-/// Root of the checked-in code fixture tree under `tests/fixtures/code_reference/`.
-pub fn code_reference_fixtures_dir() -> std::path::PathBuf {
-    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest.join("tests/fixtures/code_reference")
 }

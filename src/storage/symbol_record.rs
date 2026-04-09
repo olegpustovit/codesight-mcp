@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::core::symbols::{ExtractionTier, SymbolKind};
+use crate::core::symbols::{ExtractionTier, FactQuality, SymbolKind};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SymbolMetadata {
@@ -29,4 +29,11 @@ pub struct SymbolRecord {
     pub stored_source: String,
     pub file_size_bytes: u64,
     pub root_path: PathBuf,
+}
+
+impl SymbolRecord {
+    #[must_use]
+    pub fn fact_quality(&self) -> FactQuality {
+        self.extraction_tier.fact_quality()
+    }
 }

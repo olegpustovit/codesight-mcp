@@ -5,7 +5,10 @@
 //! symbols from `composables/` and `utils/` directories.
 
 mod provider;
+mod render;
 mod routing;
+mod snapshot;
 
 pub use provider::{NuxtProvider, NuxtStats};
 pub use routing::{NuxtApiRoute, nuxt_api_route_from_path, nuxt_route_from_path};
+pub use snapshot::NuxtSnapshot;

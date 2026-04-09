@@ -2,4 +2,4 @@
 //! Internal code should use `crate::core::...`, `crate::storage::...`, and `crate::savings::...`.
 
 pub use crate::core::pipeline::StoredSymbol;
-pub use crate::core::symbols::{ExtractionTier, SymbolKind};
+pub use crate::core::symbols::{ExtractionTier, FactQuality, SymbolKind};

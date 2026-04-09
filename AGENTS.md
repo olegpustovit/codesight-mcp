@@ -18,14 +18,16 @@ This repository is the `codesight-mcp` Rust crate at repo root.
 - **Do not lose tests.** Refactors and simplifications must keep the suite meaningful: no deleting tests to silence failures, no broad `#[ignore]` to hide breakage, no shrinking fixtures or assertions without an intentional contract change.
 - When behavior changes on purpose, update tests and docs together so they still encode the product contract.
 - New work adds or extends tests when it adds behavior; “cleanup” is not an excuse to drop coverage.
+- Treat test wall-clock time as a product constraint. Default new coverage to the smallest layer that proves the behavior; end-to-end `agent-v1` and full-ingest tests should guard contracts, not absorb every internal case.
 
 ## Strategic focus (refactor and direction)
 
-- **Goal:** A **versatile, modular, high-performance** codebase that is **extensible and as universal as practical** across codebases—not a pile of one-off branches for specific repos.
+- **Goal:** A **simple, versatile, modular, high-performance** codebase that is **extensible and universal across arbitrary codebases**—not a pile of one-off branches for specific repos, frameworks, or fixtures.
 - The active structural refactor program is tracked in [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md). Treat it as the current working document for modularity, heuristic removal, and sequencing.
 - If a change materially affects module boundaries, fallback heuristics, or refactor sequencing, update [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md) in the same patch.
 - Prefer **general mechanisms** (clear extension points, composable pipelines, structural parsing) over **edge-case coupling** in core paths. Special cases belong at the edges (language-specific extractors, query packs), not scattered through shared logic.
 - Keep hot paths **allocation-conscious and predictable**; avoid accidental O(n²) or repeated I/O when designing abstractions.
+- Keep the test loop practical. Prefer layered unit/slice tests for domain behavior and reserve full service/MCP indexing tests for public-contract coverage.
 - **`agent-v1` and [`src/tools.json`](src/tools.json) remain the contract:** extensibility must not fragment the public MCP surface.
 
 ## Working rules
@@ -41,7 +43,8 @@ This repository is the `codesight-mcp` Rust crate at repo root.
 - Organize by domain at the top level: extractor engine, framework detection, graph/impact analysis, retrieval/service wiring.
 - Keep `lib.rs` skeletal and push logic into named modules with **clear dependency direction** (core types inward, adapters at the boundary).
 - When a behavior family is open-ended, prefer **traits and small registries** over growing central `match` trees.
-- Add new language support through `runtime/queries/{lang}/symbols.scm` when possible. Reach for Rust extractor overrides only when the grammar or semantics require it.
+- Add new language support through `runtime/queries/{lang}/tags.scm` when possible. Reach for Rust extractor overrides only when the grammar or semantics require it.
+- Workspace crates are allowed once a boundary is stable and the split reduces compile/test blast radius without creating a catch-all shared `types` crate.
 
 ## Commands
 
@@ -58,9 +61,12 @@ Formatting is expected to be clean: `cargo fmt --all -- --check` (or run `cargo 
 
 Use **`./scripts/nextest-cache`** for all test runs. It wraps **[cargo-nextest](https://nexte.st/)** (`cargo install cargo-nextest` or your OS package manager) and skips repeated work when inputs and args match a prior successful run—**do not** invoke `cargo nextest run` directly from agents or local loops; it is unnecessarily slow compared to the wrapper.
 
+For local refactor loops, use focused runs through the wrapper where practical, then finish with the full suite.
+
 ```bash
 ./scripts/nextest-cache
 ./scripts/nextest-cache --lib
+./scripts/nextest-cache --test <name>
 ./scripts/nextest-cache --no-cache          # force a real nextest run (same as uncached)
 ./scripts/nextest-cache clean               # clear wrapper cache
 cargo fmt --all

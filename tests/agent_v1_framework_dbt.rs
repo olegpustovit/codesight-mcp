@@ -417,6 +417,27 @@ fn dbt_get_file_context_no_match() {
 
     assert!(provider.get_file_context("models/unknown.sql").is_none());
 }
+
+#[test]
+fn dbt_snapshot_exposes_model_context_without_provider() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("dbt_project.yml"), "name: sample\n").unwrap();
+    std::fs::create_dir_all(root.join("models")).unwrap();
+    std::fs::write(
+        root.join("models/schema.yml"),
+        "models:\n  - name: my_model\n    description: Example model\n",
+    )
+    .unwrap();
+
+    let snapshot = DbtSnapshot::load(root).expect("dbt snapshot");
+    let ctx = snapshot
+        .file_context("models/my_model.sql")
+        .expect("model context");
+    assert!(ctx.description.contains("Example model"));
+    assert_eq!(snapshot.stats().models_with_metadata, 1);
+}
+
 #[test]
 fn dbt_stats() {
     let tmp = tempfile::tempdir().unwrap();

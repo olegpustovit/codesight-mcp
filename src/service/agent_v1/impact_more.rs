@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
+use crate::analysis::impact;
 use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
@@ -362,98 +363,21 @@ impl CodeService {
                 },
             );
         }
-
-        // Look up the symbol
-        let rec = store.symbol_record(sym_id)?;
-        let Some(rec) = rec else {
-            return self.error_response(
-                &timer,
-                ToolError {
-                    code: "NOT_FOUND",
-                    message: format!("Symbol '{sym_id}' not found in index."),
-                    detail: json!({ "stable_id": sym_id }),
-                },
-            );
+        let data = match impact::rename_safety_payload(&store, sym_id, new_name)? {
+            Some(data) => data,
+            None => {
+                return self.error_response(
+                    &timer,
+                    ToolError {
+                        code: "NOT_FOUND",
+                        message: format!("Symbol '{sym_id}' not found in index."),
+                        detail: json!({ "stable_id": sym_id }),
+                    },
+                );
+            }
         };
-
-        let sym_name = rec
-            .id
-            .rsplit("::")
-            .next()
-            .unwrap_or("")
-            .split('#')
-            .next()
-            .unwrap_or("")
-            .to_string();
-
-        // Check for name collisions in the same file and in files that import this symbol
-        let file_path = &rec.file_path;
-        let outline = store.file_outline(file_path)?;
-        let mut conflicts = Vec::new();
-
-        for sym in &outline {
-            if sym["name"].as_str() == Some(new_name) && sym["id"].as_str() != Some(sym_id) {
-                conflicts.push(json!({
-                    "existing_name": new_name,
-                    "file": file_path,
-                    "kind": sym["kind"],
-                    "id": sym["id"],
-                }));
-            }
-        }
-
-        // Also check files that import the original symbol's file
-        let adj = store.dependency_graph()?;
-        let mut checked_files = HashSet::new();
-        checked_files.insert(file_path.clone());
-
-        // Build reverse graph
-        let mut reverse_adj: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
-        for (src, targets) in &adj {
-            for tgt in targets {
-                reverse_adj
-                    .entry(tgt.clone())
-                    .or_default()
-                    .push(src.clone());
-            }
-        }
-
-        if let Some(importers) = reverse_adj.get(file_path) {
-            for imp_file in importers {
-                checked_files.insert(imp_file.clone());
-                let imp_outline = store.file_outline(imp_file)?;
-                for sym in &imp_outline {
-                    if sym["name"].as_str() == Some(new_name) {
-                        conflicts.push(json!({
-                            "existing_name": new_name,
-                            "file": imp_file,
-                            "kind": sym["kind"],
-                            "id": sym["id"],
-                        }));
-                    }
-                }
-            }
-        }
-
-        let safe = conflicts.is_empty();
         let raw_bytes = store.repo_total_bytes().unwrap_or(0);
         let timer = MetaBuilder::new(raw_bytes);
-
-        self.success_response(
-            &timer,
-            json!({
-                "analysis": "rename_safety",
-                "safe": safe,
-                "conflicts": conflicts,
-                "checked_files": checked_files.len(),
-                "symbol": {
-                    "name": sym_name,
-                    "id": sym_id,
-                    "file": file_path,
-                },
-                "new_name": new_name,
-            }),
-        )
+        self.success_response(&timer, data)
     }
 }

@@ -800,7 +800,33 @@ fn case_dependency_graph_cross_repo_true_returns_dict() {
             edge.get("package_name").is_some(),
             "missing package_name: {edge:?}"
         );
+        assert!(edge.get("evidence").is_some(), "missing evidence: {edge:?}");
     }
+}
+
+#[test]
+fn case_get_cross_repo_map_avoids_unrelated_substring_matches() {
+    let tmp = tempdir().unwrap();
+    let provider = tmp.path().join("provider");
+    let consumer = tmp.path().join("consumer");
+    fs::create_dir_all(&provider).unwrap();
+    fs::create_dir_all(&consumer).unwrap();
+
+    _write(&provider, "pyproject.toml", "[project]\nname = \"lib\"\n");
+    _write(&provider, "__init__.py", "");
+    _write(&consumer, "app.py", "import my_library\nmy_library.run()\n");
+
+    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let _provider_id = ingest(&svc, &provider);
+    let _consumer_id = ingest(&svc, &consumer);
+
+    let r = svc.dispatch("get_cross_repo_map", json!({})).unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
+    let edges = r["data"]["cross_repo_edges"].as_array().unwrap();
+    assert!(
+        edges.iter().all(|edge| edge["package_name"] != "lib"),
+        "unexpected substring-based package match: {edges:?}"
+    );
 }
 
 // ============================================================
