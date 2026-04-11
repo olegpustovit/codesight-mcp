@@ -154,13 +154,27 @@ impl DocStore {
     }
 
     pub fn repo_total_bytes(&self) -> anyhow::Result<u64> {
+        if let Some(&bytes) = self.cached_total_bytes.get() {
+            return Ok(bytes);
+        }
         let conn = self.open_read_only()?;
+        self.repo_total_bytes_with(&conn)
+    }
+
+    pub(super) fn repo_total_bytes_with(
+        &self,
+        conn: &rusqlite::Connection,
+    ) -> anyhow::Result<u64> {
+        if let Some(&bytes) = self.cached_total_bytes.get() {
+            return Ok(bytes);
+        }
         let bytes = conn.query_row(
             "SELECT COALESCE(SUM(size_bytes), 0) FROM doc_files",
             [],
             |row| row.get::<_, i64>(0),
-        )?;
-        Ok(bytes as u64)
+        )? as u64;
+        let _ = self.cached_total_bytes.set(bytes);
+        Ok(bytes)
     }
 
     pub fn doc_summary(&self) -> anyhow::Result<Value> {
@@ -176,7 +190,7 @@ impl DocStore {
         let section_count = conn.query_row("SELECT COUNT(*) FROM sections", [], |row| {
             row.get::<_, i64>(0)
         })? as usize;
-        let total_bytes = self.repo_total_bytes()?;
+        let total_bytes = self.repo_total_bytes_with(&conn)?;
 
         let mut formats: BTreeMap<String, usize> = BTreeMap::new();
         let mut stmt = conn.prepare("SELECT format, COUNT(*) FROM doc_files GROUP BY format")?;

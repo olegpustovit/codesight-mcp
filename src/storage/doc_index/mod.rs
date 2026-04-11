@@ -33,6 +33,7 @@ pub struct DocFileUpdate {
 #[derive(Debug, Clone)]
 pub struct DocStore {
     pub(super) db_path: PathBuf,
+    pub(super) cached_total_bytes: std::sync::Arc<std::sync::OnceLock<u64>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -87,7 +88,10 @@ impl DocStore {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let store = Self { db_path };
+        let store = Self {
+            db_path,
+            cached_total_bytes: Default::default(),
+        };
         let conn = store.open_connection()?;
         apply_doc_index_migrations(&conn)?;
         Ok(store)
@@ -97,7 +101,10 @@ impl DocStore {
         if !db_path.exists() {
             return Ok(None);
         }
-        let store = Self { db_path };
+        let store = Self {
+            db_path,
+            cached_total_bytes: Default::default(),
+        };
         let conn = store.open_read_only()?;
         conn.query_row("SELECT COUNT(*) FROM repo_info", [], |_| Ok(()))
             .context("repo_info missing from existing doc index")?;

@@ -24,16 +24,16 @@ fn scm_extractor(lang_key: &str) -> ScmExtractor {
     ScmExtractor::new(&meta, source).unwrap()
 }
 
-const JAVASCRIPT_SOURCE: &str = include_str!("fixtures/lang_samples/javascript.js");
-const TYPESCRIPT_SOURCE: &str = include_str!("fixtures/lang_samples/typescript.ts");
-const TSX_SOURCE: &str = include_str!("fixtures/lang_samples/tsx.tsx");
-const GO_SOURCE: &str = include_str!("fixtures/lang_samples/go.go");
-const RUST_SOURCE: &str = include_str!("fixtures/lang_samples/user.rs");
-const JAVA_SOURCE: &str = include_str!("fixtures/lang_samples/Calculator.java");
-const C_SOURCE: &str = include_str!("fixtures/lang_samples/sample.c");
-const CPP_SOURCE: &str = include_str!("fixtures/lang_samples/sample.cpp");
-const CSHARP_SOURCE: &str = include_str!("fixtures/lang_samples/Sample.cs");
-const RUBY_SOURCE: &str = include_str!("fixtures/lang_samples/sample.rb");
+const JAVASCRIPT_SOURCE: &str = include_str!("../fixtures/lang_samples/javascript.js");
+const TYPESCRIPT_SOURCE: &str = include_str!("../fixtures/lang_samples/typescript.ts");
+const TSX_SOURCE: &str = include_str!("../fixtures/lang_samples/tsx.tsx");
+const GO_SOURCE: &str = include_str!("../fixtures/lang_samples/go.go");
+const RUST_SOURCE: &str = include_str!("../fixtures/lang_samples/user.rs");
+const JAVA_SOURCE: &str = include_str!("../fixtures/lang_samples/Calculator.java");
+const C_SOURCE: &str = include_str!("../fixtures/lang_samples/sample.c");
+const CPP_SOURCE: &str = include_str!("../fixtures/lang_samples/sample.cpp");
+const CSHARP_SOURCE: &str = include_str!("../fixtures/lang_samples/Sample.cs");
+const RUBY_SOURCE: &str = include_str!("../fixtures/lang_samples/sample.rb");
 
 #[test]
 fn case_js_ts_tsx() {

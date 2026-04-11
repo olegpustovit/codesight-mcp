@@ -27,7 +27,10 @@ impl IndexStore {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let store = Self { db_path };
+        let store = Self {
+            db_path,
+            cached_total_bytes: Default::default(),
+        };
         let conn = db::open_rw(&store.db_path)?;
         migrations::apply_code_index_migrations(&conn)?;
         Ok(store)
@@ -37,7 +40,10 @@ impl IndexStore {
         if !db_path.exists() {
             return Ok(None);
         }
-        let store = Self { db_path };
+        let store = Self {
+            db_path,
+            cached_total_bytes: Default::default(),
+        };
         let conn = store.open_read_only()?;
         conn.query_row("SELECT COUNT(*) FROM repo_info", [], |_| Ok(()))
             .context("repo_info missing from existing index")?;
@@ -177,6 +183,7 @@ impl IndexStore {
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
+        let total_bytes = self.repo_total_bytes_with(&conn)?;
         Ok(RepoMetadata {
             repo,
             indexed_at,
@@ -184,7 +191,7 @@ impl IndexStore {
             file_count: self.file_count_with(&conn)?,
             languages: self.languages_with(&conn)?,
             index_version,
-            estimated_naive_tokens: 0,
+            estimated_naive_tokens: total_bytes / crate::config::BYTES_PER_TOKEN,
             index_size_bytes: 0,
             is_stale: None,
         })
@@ -192,7 +199,6 @@ impl IndexStore {
 
     pub fn repo_metadata(&self) -> anyhow::Result<RepoMetadata> {
         let mut meta = self.repo_summary()?;
-        meta.estimated_naive_tokens = self.repo_total_bytes()? / crate::config::BYTES_PER_TOKEN;
         meta.index_size_bytes = fs::metadata(&self.db_path)
             .map(|m| m.len())
             .unwrap_or_default();
@@ -200,13 +206,24 @@ impl IndexStore {
     }
 
     pub fn repo_total_bytes(&self) -> anyhow::Result<u64> {
+        if let Some(&bytes) = self.cached_total_bytes.get() {
+            return Ok(bytes);
+        }
         let conn = self.open_read_only()?;
+        self.repo_total_bytes_with(&conn)
+    }
+
+    pub(crate) fn repo_total_bytes_with(&self, conn: &Connection) -> anyhow::Result<u64> {
+        if let Some(&bytes) = self.cached_total_bytes.get() {
+            return Ok(bytes);
+        }
         let bytes = conn.query_row(
             "SELECT COALESCE(SUM(size_bytes), 0) FROM files",
             [],
             |row| row.get::<_, i64>(0),
-        )?;
-        Ok(bytes as u64)
+        )? as u64;
+        let _ = self.cached_total_bytes.set(bytes);
+        Ok(bytes)
     }
 
     pub fn root_path(&self) -> anyhow::Result<PathBuf> {

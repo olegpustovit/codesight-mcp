@@ -24,6 +24,7 @@ pub use types::{AnalysisSymbol, RetrievedSymbol, SearchSymbol, SymbolSourceRecor
 #[derive(Debug, Clone)]
 pub struct IndexStore {
     pub(crate) db_path: PathBuf,
+    pub(crate) cached_total_bytes: std::sync::Arc<std::sync::OnceLock<u64>>,
 }
 
 pub fn list_repo_summaries(index_root: &Path) -> anyhow::Result<Vec<RepoMetadata>> {

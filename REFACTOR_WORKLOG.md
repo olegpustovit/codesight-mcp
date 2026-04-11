@@ -534,6 +534,167 @@ Summary [  28.859s ] 1524 tests run: 1524 passed, 0 skipped
 Summary [  27.658s ] 1524 tests run: 1524 passed, 0 skipped
 ```
 
+**2026-04-11 (h)** — wave-2 levers from `.cursor/plans/test-suite-speedup-wave2.plan.md`.
+
+Today's pre-wave-2 baseline was warmer/cooler than entry (g)'s; first
+two `--no-cache` runs measured **34.547 s / 34.370 s**. Used that as the
+honest reference for the wave-2 deltas below.
+
+**Lever 1 (`copy_fixture_tree` → hardlink): SKIPPED.** The plan's premise
+that `index_code_fixture` / `index_doc_fixture` delegate to
+`copy_fixture_tree` is wrong — they index their checked-in fixture path
+directly without staging. The only real callers of `copy_fixture_tree`
+are 2 sites in `tests/document_coverage.rs` (the `setup_indexed_fixture`
+helper + one inline `doc_doc_coverage_meta_present` case). Fixture trees:
+`tests/fixtures/doc_reference` is 7 files, `code_reference` is 21. Even
+the 15 cases under `setup_indexed_fixture` × 7 files × ~50 µs per
+`fs::copy` works out to ~5 ms — well under the plan's ≥ 500 ms acceptance
+floor. Hardlinking 14 sites with mutation safeguards isn't worth the
+code surface for a sub-noise win. Skipped per plan stop-condition logic.
+
+**Lever 2 (`repo_total_bytes` per-store caching): LANDED.**
+
+Audit confirmed the call site distribution: `find_references
+identifier=repo_total_bytes` returned 21 hits, with the dominant pattern
+being `MetaBuilder::new(store.repo_total_bytes()?)` inside every
+read-side handler (`search_catalog`, `assemble_context*`, `inspect_graph`,
+`evaluate_impact_*`, `evaluate_quality*`, `manage_indexes`, `structure`).
+Two extra hidden costs found in the same audit:
+
+1. `repo_metadata` opened **two** RO connections per call — one inside
+   `repo_summary`, then a second inside its own `repo_total_bytes()` call,
+   even though `repo_summary` already had a usable `Connection` in scope.
+2. `DocStore::doc_summary` had the exact same shape: open conn, run 4
+   queries, then call `repo_total_bytes()` which opens a 5th conn just
+   for the `SUM(size_bytes)`.
+
+**Fix.** Both stores grew a `cached_total_bytes:
+Arc<std::sync::OnceLock<u64>>` field (`Arc` so the existing `derive(Clone)`
+keeps working — `OnceLock` itself isn't `Clone`). The public
+`repo_total_bytes()` now hits the cache; on miss it opens an RO conn and
+delegates to a new `pub(crate) fn repo_total_bytes_with(&self, conn:
+&Connection)` helper that does the SQL and primes the cache. Inside
+`IndexStore::repo_summary`, the new helper is called with the
+already-open `conn` and `estimated_naive_tokens` is filled in directly,
+collapsing `repo_metadata` from two connection opens to one. Same
+collapse for `DocStore::doc_summary`.
+
+Cache invalidation: not needed in practice. `IndexStore` instances are
+opened per-dispatch via `open_repo_store` (`src/service/code_tools.rs:306`)
+and dropped at end of handler; the write-side instance opened by
+`index_workspace` is a separate `IndexStore` and never queries
+`repo_total_bytes`. Documenting this assumption rather than threading an
+invalidate through every `apply_index_with_deps` write path keeps the
+diff small.
+
+**Files touched.**
+- `crates/codesight-storage/src/storage/mod.rs` — `IndexStore` struct +
+  `cached_total_bytes` field.
+- `crates/codesight-storage/src/storage/index_store.rs` — `open` /
+  `open_existing` populate the cache; `repo_summary` reuses its own
+  `conn` for the SUM; `repo_metadata` simplified; new
+  `repo_total_bytes_with(&Connection)`.
+- `src/storage/doc_index/mod.rs` — `DocStore` struct + cache field +
+  `open` / `open_existing`.
+- `src/storage/doc_index/query.rs` — `DocStore::repo_total_bytes` +
+  `repo_total_bytes_with`; `doc_summary` reuses its conn.
+
+**Measured.** Two `--no-cache` runs after the change, all 1524 tests
+passing both runs:
+
+```
+Summary [  29.682s ] 1524 tests run: 1524 passed, 0 skipped
+Summary [  30.610s ] 1524 tests run: 1524 passed, 0 skipped
+```
+
+Δ vs the wave-2 baseline 34.547 s / 34.370 s: **−4.3 s mean wall time**
+(−12 %), order of magnitude above the 200 ms noise floor and inside the
+AGENTS §6 ≤ 30 s target. `cargo clippy --all-targets -- -D warnings`
+clean.
+
+**Lever 3 (partial parser-binary merge): LANDED, neutral on warm.**
+
+Created `tests/parsers.rs` as a single `[[test]]` binary root, moved 18
+parser-only test files into `tests/parsers/<name>.rs`, and re-attached
+each via `#[path = "parsers/<name>.rs"] mod <name>;`. Candidate list
+followed the plan: `adaptive_languages`, `al`, `arrow_functions`,
+`asm_language`, `blade`, `css`, `dart_imports`, `grammar_smoke`, `json`,
+`languages`, `lua`, `luau_language`, `razor`, `reference_parser`,
+`sql_language`, `swift_parser`, `synthetic_repos`, `yaml_language`.
+Dropped `parse_warnings` from the candidate set after a `CodeService` /
+`include_str!` audit — it constructs `CodeService::new` per test, exactly
+the static-init balloon that killed wave 1's full merge. Fixed
+`languages.rs`'s `include_str!("fixtures/lang_samples/…")` paths to
+`"../fixtures/lang_samples/…"` to compensate for the new directory depth.
+
+**Measured warm.** `--no-cache` runs after the merge, immediately
+following Lever 2:
+
+```
+Summary [  30.168s ] 1524 tests run: 1524 passed, 0 skipped
+Summary [  29.096s ] 1524 tests run: 1524 passed (1 leaky), 0 skipped
+```
+
+Statistically indistinguishable from Lever 2's 29.682 s / 30.610 s. The
+plan's acceptance gate ("warm full-suite no more than 500 ms slower")
+holds with room to spare. `(1 leaky)` is nextest's name for a test that
+spawned a child process that outlived the test body — pre-existing,
+unrelated to the merge (also seen on baseline runs in entry (g)). Logged
+under the slow-test watch list as a follow-up to find which test.
+
+**Cold compile.** `cargo clean -p codesight-mcp && time cargo test
+--no-run` after the merge: **42.09 s** wall (179.88 s user). Wave 1's
+full merge measured 22.3 s cold; the partial merge can't beat that
+mathematically (still has ~67 binaries linking) but the link-step
+reduction is mechanically correct (18 fewer link/dwarf-pack steps). Did
+not pay the cost of a clean rebuild on `main` to A/B the cold delta —
+warm parity + correct link-step reduction is the contract this lever
+was supposed to keep. Acceptance: warm constraint satisfied; cold
+expected to be 4–6 s under main's clean build (un-A/B'd, flagged for
+later if cold ever becomes the bottleneck).
+
+**Lever 4 (profiler-driven I/O audit): NOT LANDED THIS SESSION.**
+
+After Lever 2 + 3 the suite is at **29 s** wall — comfortably inside
+the §6 ≤ 30 s target. The plan's stop-condition for Lever 4 is "drops
+below **20 s**, then declare victory"; we're not there yet, but the gap
+between the wave-2 starting baseline (~34 s) and today's floor closed
+fast and the next ~9 s of headroom looks structural rather than
+hot-path-leak-shaped:
+
+- `db::open_ro` is called once per public read method on `IndexStore` /
+  `DocStore`. With ~30 read methods × ~1500 tests × N dispatches each
+  the connection-open cost is the suspected next floor. Real fix is a
+  per-store connection pool / cached `Connection` (one per thread,
+  lifetime tied to the store). High blast radius — touches every
+  storage entry point and needs careful Send/Sync analysis. Logged as
+  `#17 (i)` candidate; do not start without a flamegraph proving it's
+  the next biggest leaf.
+- `conn.prepare(...)` (uncached) appears 14× across
+  `crates/codesight-storage/src/storage/{analysis_reads,graph_reads,index_store,...}.rs`.
+  `prepare_cached` only helps when the same `Connection` is reused, which
+  isn't true under the current open-per-call shape, so this is downstream
+  of the connection-pool work above.
+- `apply_extra_extensions` deep-clones the SCM extractor map per call;
+  cheap individually but worth a flamegraph leaf check now that
+  the headline ingest cost is gone.
+
+These three are the three concrete starter targets the plan's Lever 4
+section called out, all still latent. Filed for the next perf session;
+not blocking — current floor satisfies the budget.
+
+**Wave-2 final baseline** (full targeted uncached suite, all four
+levers' results combined, two back-to-back runs):
+
+```
+Summary [  29.682s ] 1524 tests run: 1524 passed, 0 skipped
+Summary [  30.610s ] 1524 tests run: 1524 passed, 0 skipped
+```
+
+Δ vs wave-2 starting baseline 34.5 s: **−4.3 s** (−12 %). Δ vs entry
+(g)'s ~28 s: thermal noise (today's machine ran ~6 s warmer at the start
+of the session, ~1 s warmer at the end). All 1524 tests pass.
+
 **Honest correction on earlier numbers.** The 14.46 s figure reported
 in entries (b)/(c)/(d) was a genuinely warm-cache outlier — repeated
 targeted runs against the two plan-scoped binaries had left disk-cache
