@@ -102,7 +102,6 @@ pub fn index_local_docs(db_path: PathBuf, root: &Path) -> anyhow::Result<DocInde
         .collect::<Vec<_>>();
 
     let indexed_at = chrono::Utc::now().to_rfc3339();
-    let section_count: usize = updated_files.iter().map(|file| file.sections.len()).sum();
     let file_count = seen_files.len();
     store.apply_index(
         &repo,
@@ -112,6 +111,11 @@ pub fn index_local_docs(db_path: PathBuf, root: &Path) -> anyhow::Result<DocInde
         &updated_files,
         &removed_files,
     )?;
+    // Report the total section count in the docs index after apply_index,
+    // not just the sections touched by this run. The previous behavior
+    // returned 0 on incremental runs where no files changed, misleading
+    // callers that inspected the response body.
+    let section_count = store.section_count()?;
 
     Ok(DocIndexSummary {
         repo,

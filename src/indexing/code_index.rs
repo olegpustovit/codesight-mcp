@@ -52,7 +52,19 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
     let repo = normalize_repo_id(root);
     let store = IndexStore::open(config.repo_db_path(&repo))?;
     let index_version = store.current_index_version()?.saturating_add(1);
-    let existing = store.file_fingerprints()?;
+    let extractor_version =
+        codesight_extractors::extractors::engine::catalogs::builtin_extractor_version_stamp();
+    // If the extractor/query-pack stamp changed since the last ingest,
+    // drop cached file fingerprints so every matching file gets re-extracted
+    // even when its content hash hasn't changed. Without this, edits to
+    // `runtime/queries/**/tags.scm` or the Rust extractor pipeline would
+    // leave stale symbol ids in the index until a full rebuild.
+    let stored_stamp = store.stored_extractor_version().unwrap_or_default();
+    let existing = if stored_stamp == extractor_version {
+        store.file_fingerprints()?
+    } else {
+        std::collections::HashMap::new()
+    };
     let extractors = ExtractorRegistry::for_workspace_root(root);
 
     let mut seen_files = HashSet::new();
@@ -199,6 +211,7 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
         &updated_files,
         &removed_files,
         &dep_edges,
+        extractor_version,
     )?;
 
     let package_names = packages::extract_package_names(&root.to_string_lossy());

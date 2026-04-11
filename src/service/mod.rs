@@ -1,4 +1,4 @@
-mod agent_v1;
+pub(crate) mod agent_v1;
 mod args;
 mod code_tools;
 pub mod dispatch_timeout;
@@ -285,9 +285,7 @@ class SessionManager:
             )
             .expect("retrieving");
         assert!(retrieved["ok"].as_bool().unwrap());
-        let src = retrieved["data"]["items"][0]["content"]["source"]
-            .as_str()
-            .unwrap();
+        let src = retrieved["data"]["items"][0]["source"].as_str().unwrap();
         assert!(src.contains("Dependency injection database session."));
     }
 

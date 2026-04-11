@@ -84,21 +84,26 @@ impl CodeService {
 
         let mut rows: Vec<BundleRow> = Vec::new();
         for pref in &sym_refs {
-            let Some(sym_id) = pref
-                .stable_id
-                .clone()
-                .or(pref.id.clone())
-                .filter(|s| !s.is_empty())
-            else {
-                return self.error_response(
-                    timer,
-                    ToolError {
-                        category: ToolErrorCategory::InvalidArgument,
-                        code: "INVALID_REQUEST",
-                        message: "symbol ref needs id or stable_id.".to_string(),
-                        detail: json!({}),
-                    },
-                );
+            let sym_id = match resolve_symbol_id(
+                &store,
+                pref.stable_id.as_deref(),
+                pref.id.as_deref(),
+                pref.path.as_deref(),
+                pref.start_line,
+            ) {
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    return self.error_response(
+                        timer,
+                        ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
+                            code: "INVALID_REQUEST",
+                            message: "symbol ref needs id/stable_id, or path + start_line.".to_string(),
+                            detail: json!({}),
+                        },
+                    );
+                }
+                Err(e) => return self.error_response(timer, index_error(e)),
             };
 
             let sym = match self.retrieve_symbol(&store, &sym_id, false, 0) {
@@ -222,21 +227,26 @@ impl CodeService {
                 });
                 return self.success_response(&timer, body);
             }
-            let Some(fid) = sym_refs[0]
-                .stable_id
-                .clone()
-                .or(sym_refs[0].id.clone())
-                .filter(|s| !s.is_empty())
-            else {
-                return self.error_response(
-                    &timer,
-                    ToolError {
-                        category: ToolErrorCategory::InvalidArgument,
-                        code: "INVALID_REQUEST",
-                        message: "symbol ref needs id or stable_id.".to_string(),
-                        detail: json!({}),
-                    },
-                );
+            let fid = match resolve_symbol_id(
+                &store,
+                sym_refs[0].stable_id.as_deref(),
+                sym_refs[0].id.as_deref(),
+                sym_refs[0].path.as_deref(),
+                sym_refs[0].start_line,
+            ) {
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    return self.error_response(
+                        &timer,
+                        ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
+                            code: "INVALID_REQUEST",
+                            message: "symbol ref needs id/stable_id, or path + start_line.".to_string(),
+                            detail: json!({}),
+                        },
+                    );
+                }
+                Err(e) => return self.error_response(&timer, index_error(e)),
             };
             let body = json!({
                 "mode": "context_bundle",

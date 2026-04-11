@@ -246,9 +246,8 @@ mod tests {
 
     #[test]
     fn non_import_lines_ignored() {
-        let edges = extract_imports(
-            "fn main() {\n    let x = 1;\n    println!(\"use not real\");\n}\n",
-        );
+        let edges =
+            extract_imports("fn main() {\n    let x = 1;\n    println!(\"use not real\");\n}\n");
         assert!(edges.is_empty(), "got {edges:?}");
     }
 

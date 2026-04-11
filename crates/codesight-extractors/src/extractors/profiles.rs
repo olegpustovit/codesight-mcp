@@ -25,7 +25,7 @@ impl ResolvedProfile {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct LanguageProfileRegistry;
 
 impl LanguageProfileRegistry {

@@ -2,8 +2,8 @@
 
 A running map of how `codesight-mcp` is put together. Read this before touching
 crate boundaries, data flow, or the MCP surface. For configuration knobs, see
-[`CONFIGURATION.md`](CONFIGURATION.md). For the active refactor program see
-[`REFACTOR_PLAN.md`](REFACTOR_PLAN.md).
+[`CONFIGURATION.md`](CONFIGURATION.md). For active work and open issues see
+[`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md).
 
 ## Crate layout
 
@@ -49,8 +49,8 @@ Rules enforced by this table:
   (no horizontal edges between the two middle crates).
 - `codesight-mcp` is the only consumer that pulls in all three inner crates.
 - Any new crate member or new edge requires updating this table **and** the
-  S2 workstream entry in [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md) in the same
-  patch (freeze guard, not just documentation).
+  S2 workstream entry in [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md) in the
+  same patch (freeze guard, not just documentation).
 
 
 ### Why this split
@@ -63,8 +63,7 @@ Rules enforced by this table:
   It is deliberately small so it stays stable.
 - Everything else — ingest orchestration, MCP dispatch, framework detection,
   retrieval, analysis — lives in the product crate. A Phase-2 split (`indexing`
-  / `analysis` crates) is deferred until shared fact types settle; see
-  `REFACTOR_PLAN.md` "Intentionally out of scope".
+  / `analysis` crates) is deferred until shared fact types settle.
 
 ## Data flow: `ingest_sources` → retrieval
 
@@ -129,7 +128,7 @@ Extraction and analysis both tag facts with a coarse `FactQuality` value:
 
 Downstream graph and quality analysis default to the structural tiers;
 heuristic evidence is labeled and treated as secondary. See
-`src/analysis/evidence.rs` and `REFACTOR_PLAN.md` WS12.
+`src/analysis/evidence.rs`.
 
 ## Known heuristic islands
 

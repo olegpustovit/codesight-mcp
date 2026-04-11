@@ -57,6 +57,7 @@ impl CodeService {
                             }
                         }
                         // Also search file contents for import-level references
+                        // not attributable to any indexed symbol body.
                         for (file, content) in &all_contents {
                             if seen_files.contains(file) {
                                 continue;
@@ -65,7 +66,9 @@ impl CodeService {
                                 seen_files.insert(file.clone());
                                 file_refs.push(json!({
                                     "file": file,
+                                    "name": ident,
                                     "line": 0,
+                                    "kind": "text_match",
                                 }));
                             }
                         }
@@ -123,7 +126,10 @@ impl CodeService {
                     }
                 }
 
-                // Also search full file contents for references not captured by symbol source
+                // Also search full file contents for references not captured by symbol source.
+                // These are text-level matches (imports, comments, strings) without an
+                // owning symbol; emit them with the same match row shape as symbol hits
+                // so clients can consume a single homogeneous list.
                 for (file, content) in &all_contents {
                     if seen_files.contains(file) {
                         continue;
@@ -131,8 +137,9 @@ impl CodeService {
                     if ci_word_match(content, identifier) {
                         seen_files.insert(file.clone());
                         file_map.entry(file.clone()).or_default().push(json!({
-                            "file": file,
+                            "name": identifier,
                             "line": 0,
+                            "kind": "text_match",
                         }));
                     }
                 }

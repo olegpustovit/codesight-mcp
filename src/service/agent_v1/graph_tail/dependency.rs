@@ -62,21 +62,25 @@ impl CodeService {
             .collect();
         let total_edges = all_edges.len();
 
-        // Apply token budget first (more user-facing than raw count), then
-        // fall back to edge-count limit if no budget was specified. This
-        // prevents unbounded 100k+ responses on large repos.
-        let budgeted = args.max_tokens.is_some();
-        let (edges, truncated) = if let Some(budget) = args.max_tokens {
+        // Always apply a token budget (default 8k) plus an optional edge-count
+        // cap. Without a default budget, large repos dumped the full `nodes`
+        // array (hundreds of file paths) regardless of `limit`, which only
+        // capped edges — a 400-file repo burned ~4k tokens on node lists.
+        const DEFAULT_DEPENDENCIES_TOKEN_BUDGET: u32 = 8000;
+        let mut capped_edges = all_edges;
+        let mut edge_cap_truncated = false;
+        if args.limit > 0 && capped_edges.len() > args.limit {
+            capped_edges.truncate(args.limit);
+            edge_cap_truncated = true;
+        }
+        let budget = args.max_tokens.unwrap_or(DEFAULT_DEPENDENCIES_TOKEN_BUDGET);
+        let budgeted = true;
+        let (edges, budget_truncated) =
             crate::service::agent_v1::util::pack_catalog_items_to_token_budget(
-                all_edges, budget,
-            )
-        } else {
-            let cap = if args.limit == 0 { 200 } else { args.limit };
-            let trunc = all_edges.len() > cap;
-            let mut kept = all_edges;
-            kept.truncate(cap);
-            (kept, trunc)
-        };
+                capped_edges,
+                budget,
+            );
+        let truncated = edge_cap_truncated || budget_truncated;
 
         let nodes: Vec<&String> = adj.keys().collect();
         let node_count = nodes.len();

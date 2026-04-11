@@ -154,7 +154,7 @@ fn test_empty_symbol_ids() {
         .unwrap();
     assert!(
         !r["ok"].as_bool().unwrap(),
-        "empty refs must error, not silently return 0% (see CODESIGHT_TESTDRIVE_ISSUES_v3.md #14)"
+        "empty refs must error, not silently return 0%"
     );
     assert_eq!(r["error"]["category"].as_str().unwrap(), "invalid_argument");
 }

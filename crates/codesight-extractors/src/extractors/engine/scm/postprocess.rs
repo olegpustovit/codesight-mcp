@@ -21,12 +21,12 @@ pub(super) fn run_postprocesses(
     source: &str,
     symbols: &mut [StoredSymbol],
 ) {
-    for step in extractor.compiled.postprocess_steps {
+    for step in extractor.postprocess_steps {
         match step {
             PostprocessStep::CppHeaderLanguageFallback => {
                 crate::extractors::engine::cpp_header_language_fallback::adjust_language_for_cpp_header_if_plain_c(
                     symbols,
-                    extractor.compiled.language_name,
+                    extractor.language_name,
                     file_path,
                     source,
                 );

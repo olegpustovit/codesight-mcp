@@ -12,7 +12,7 @@ use crate::{
     storage::{AnalysisSymbol, IndexStore},
 };
 
-use self::entrypoints::is_test_file;
+use self::entrypoints::{is_test_file, is_test_fixture};
 use self::reachability::build_repo_reachability;
 
 /// Build the `data` object for `evaluate_quality` with `analysis: "dead_code"`.
@@ -63,6 +63,9 @@ pub fn dead_code_payload(
 
     let mut dead_files: Vec<Value> = Vec::new();
     for file in &all_files {
+        if is_test_fixture(file) {
+            continue;
+        }
         if !include_tests && is_test_file(file) {
             continue;
         }
@@ -99,6 +102,9 @@ pub fn dead_code_payload(
             .filter_map(|dead_file| dead_file["file"].as_str())
             .collect();
         for symbol in &all_symbols {
+            if is_test_fixture(&symbol.file_path) {
+                continue;
+            }
             if !include_tests && is_test_file(&symbol.file_path) {
                 continue;
             }
@@ -165,7 +171,7 @@ pub fn dead_code_v2_payload(store: &IndexStore, min_confidence: f64) -> anyhow::
 
     let mut dead_symbols: Vec<Value> = Vec::new();
     for symbol in &all_symbols {
-        if is_test_file(&symbol.file_path) {
+        if is_test_fixture(&symbol.file_path) || is_test_file(&symbol.file_path) {
             continue;
         }
         if reachability.explicit_live_roots.contains(&symbol.file_path) {
@@ -223,7 +229,7 @@ pub fn dead_code_v2_payload(store: &IndexStore, min_confidence: f64) -> anyhow::
 
     let total_analysed = all_symbols
         .iter()
-        .filter(|symbol| !is_test_file(&symbol.file_path))
+        .filter(|symbol| !is_test_file(&symbol.file_path) && !is_test_fixture(&symbol.file_path))
         .count();
     let dead_symbol_count = dead_symbols.len();
 

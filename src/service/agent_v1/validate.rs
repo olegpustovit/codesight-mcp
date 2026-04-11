@@ -71,34 +71,49 @@ struct ToolSchema {
     validator: Validator,
 }
 
-static SCHEMAS: OnceLock<Result<HashMap<String, ToolSchema>, String>> = OnceLock::new();
+struct ToolRegistry {
+    schemas: HashMap<String, ToolSchema>,
+    definitions: Vec<Value>,
+}
 
-fn schemas_result() -> &'static Result<HashMap<String, ToolSchema>, String> {
-    SCHEMAS.get_or_init(build_schemas)
+static REGISTRY: OnceLock<Result<ToolRegistry, String>> = OnceLock::new();
+
+fn registry() -> &'static Result<ToolRegistry, String> {
+    REGISTRY.get_or_init(build_registry)
 }
 
 fn schemas() -> Option<&'static HashMap<String, ToolSchema>> {
-    schemas_result().as_ref().ok()
+    registry().as_ref().ok().map(|r| &r.schemas)
 }
 
 /// Force schema initialization and surface any load error as a fatal startup
 /// error. Called from `CodeService::new`; a corrupt or reshaped `tools.json`
 /// aborts startup cleanly instead of panicking on first validated call.
 pub fn init_schemas() -> anyhow::Result<()> {
-    match schemas_result() {
+    match registry() {
         Ok(_) => Ok(()),
         Err(err) => Err(anyhow::anyhow!("{err}")),
     }
 }
 
-fn build_schemas() -> Result<HashMap<String, ToolSchema>, String> {
+/// Parsed `tools.json` array, ready to hand to `tools/list`. Empty slice if
+/// [`init_schemas`] has not run or failed — the MCP entry point guarantees
+/// init runs first, so production callers see the full list.
+pub fn tool_definitions() -> &'static [Value] {
+    registry()
+        .as_ref()
+        .map(|r| r.definitions.as_slice())
+        .unwrap_or(&[])
+}
+
+fn build_registry() -> Result<ToolRegistry, String> {
     let parsed: Value = serde_json::from_str(TOOLS_JSON)
         .map_err(|e| format!("src/tools.json failed to parse: {e}"))?;
     let Value::Array(tools) = parsed else {
         return Err("src/tools.json root must be a JSON array".to_string());
     };
-    let mut out = HashMap::with_capacity(tools.len());
-    for tool in tools {
+    let mut schemas = HashMap::with_capacity(tools.len());
+    for tool in &tools {
         let Some(name) = tool.get("name").and_then(Value::as_str) else {
             continue;
         };
@@ -107,7 +122,7 @@ fn build_schemas() -> Result<HashMap<String, ToolSchema>, String> {
         };
         match jsonschema::validator_for(&schema) {
             Ok(validator) => {
-                out.insert(name.to_string(), ToolSchema { schema, validator });
+                schemas.insert(name.to_string(), ToolSchema { schema, validator });
             }
             Err(error) => {
                 tracing::warn!(
@@ -118,7 +133,10 @@ fn build_schemas() -> Result<HashMap<String, ToolSchema>, String> {
             }
         }
     }
-    Ok(out)
+    Ok(ToolRegistry {
+        schemas,
+        definitions: tools,
+    })
 }
 
 /// Coerce and validate `arguments` against the registered schema for `tool`.

@@ -211,13 +211,13 @@ fn importance_most_imported_symbol_ranks_first() {
     let (_ws, svc, sid) = build_centrality_repo();
     let r = inspect_centrality(&svc, &sid, Some("pagerank"), Some(10));
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let ranked = r["data"]["ranked_symbols"].as_array().unwrap();
-    assert!(!ranked.is_empty(), "should have ranked symbols");
+    let ranked = r["data"]["ranked_files"].as_array().unwrap();
+    assert!(!ranked.is_empty(), "should have ranked files");
     // core.py is imported by 2 files, so it should rank first
-    let top_id = ranked[0]["symbol_id"].as_str().unwrap();
+    let top_path = ranked[0]["path"].as_str().unwrap();
     assert!(
-        top_id.contains("core.py"),
-        "top ranked should be core.py, got '{top_id}'"
+        top_path.contains("core.py"),
+        "top ranked should be core.py, got '{top_path}'"
     );
 }
 
@@ -227,12 +227,12 @@ fn importance_response_shape() {
     let r = inspect_centrality(&svc, &sid, Some("pagerank"), Some(10));
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let data = &r["data"];
-    assert!(data["ranked_symbols"].is_array());
+    assert!(data["ranked_files"].is_array());
     assert_eq!(data["algorithm"].as_str().unwrap(), "pagerank");
     assert!(data["iterations_to_converge"].is_number());
 
-    let first = &data["ranked_symbols"][0];
-    assert!(first["symbol_id"].is_string(), "should have symbol_id");
+    let first = &data["ranked_files"][0];
+    assert!(first["path"].is_string(), "should have path");
     assert!(first["rank"].is_number(), "should have rank");
     assert!(first["score"].is_number(), "should have score");
     assert!(first["in_degree"].is_number(), "should have in_degree");
@@ -247,7 +247,7 @@ fn importance_degree_algorithm() {
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let data = &r["data"];
     assert_eq!(data["iterations_to_converge"].as_u64().unwrap(), 0);
-    let ranked = data["ranked_symbols"].as_array().unwrap();
+    let ranked = data["ranked_files"].as_array().unwrap();
     assert!(!ranked.is_empty());
 }
 
@@ -259,10 +259,10 @@ fn importance_degree_same_top_as_pagerank() {
     assert!(pr_result["ok"].as_bool().unwrap());
     assert!(deg_result["ok"].as_bool().unwrap());
 
-    let pr_top = pr_result["data"]["ranked_symbols"][0]["symbol_id"]
+    let pr_top = pr_result["data"]["ranked_files"][0]["path"]
         .as_str()
         .unwrap();
-    let deg_top = deg_result["data"]["ranked_symbols"][0]["symbol_id"]
+    let deg_top = deg_result["data"]["ranked_files"][0]["path"]
         .as_str()
         .unwrap();
     assert_eq!(
@@ -286,7 +286,7 @@ fn importance_top_n_respected() {
     let (_ws, svc, sid) = build_centrality_repo();
     let r = inspect_centrality(&svc, &sid, Some("pagerank"), Some(1));
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let ranked = r["data"]["ranked_symbols"].as_array().unwrap();
+    let ranked = r["data"]["ranked_files"].as_array().unwrap();
     assert!(ranked.len() <= 1, "top_n=1 should return at most 1");
 }
 

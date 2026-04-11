@@ -32,7 +32,11 @@ fn package_json(name: &str) -> String {
 fn virtual_cargo_workspace_yields_member_crates() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    write(root, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n");
+    write(
+        root,
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"crates/*\"]\n",
+    );
     write(root, "crates/alpha/Cargo.toml", &cargo_toml("alpha"));
     write(root, "crates/beta/Cargo.toml", &cargo_toml("beta"));
 
@@ -140,7 +144,11 @@ fn dotnet_solution_with_multiple_csproj_depths() {
 fn mixed_ecosystems_in_one_monorepo() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    write(root, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n");
+    write(
+        root,
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"crates/*\"]\n",
+    );
     write(root, "crates/core/Cargo.toml", &cargo_toml("core"));
     write(root, "web/package.json", &package_json("@org/web"));
     write(

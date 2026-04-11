@@ -1,1 +1,0 @@
-const DEFAULT_FILE_TREE_MAX_FILES: usize = 500;

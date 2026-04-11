@@ -1,11 +1,12 @@
 //! Integration tests: extraction candidates.
 
 use std::fs;
+use std::sync::OnceLock;
 
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::service::CodeService;
 use serde_json::{Value, json};
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,18 @@ fn ingest(svc: &CodeService, root: &std::path::Path) -> String {
     r["data"]["source_id"].as_str().unwrap().to_string()
 }
 
-fn build_repo() -> (tempfile::TempDir, CodeService, String) {
+/// Process-lifetime shared indexed fixture. Every read-only test against
+/// the same Python fixture should reuse this instead of re-ingesting. The
+/// handler logic is identical across tests; only the cold ingest
+/// (tree-sitter init + walk + parse + insert) dominates runtime. Tests
+/// that intentionally need an empty or alternate index build their own.
+fn shared_repo() -> (&'static CodeService, &'static str) {
+    static SHARED: OnceLock<(TempDir, CodeService, String)> = OnceLock::new();
+    let (_ws, svc, sid) = SHARED.get_or_init(build_repo);
+    (svc, sid.as_str())
+}
+
+fn build_repo() -> (TempDir, CodeService, String) {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
@@ -91,8 +103,8 @@ fn extraction_candidates(svc: &CodeService, sid: &str, file_path: &str, extra: V
 
 #[test]
 fn extraction_returns_candidates_structure() {
-    let (_ws, svc, sid) = build_repo();
-    let r = extraction_candidates(&svc, &sid, "utils.py", json!({}));
+    let (svc, sid) = shared_repo();
+    let r = extraction_candidates(svc, sid, "utils.py", json!({}));
     assert!(r["ok"].as_bool().unwrap_or(false), "{r:?}");
     assert!(r["data"]["candidates"].is_array());
     assert!(r["data"]["file"].is_string());
@@ -100,10 +112,10 @@ fn extraction_returns_candidates_structure() {
 
 #[test]
 fn extraction_candidate_has_required_fields() {
-    let (_ws, svc, sid) = build_repo();
+    let (svc, sid) = shared_repo();
     let r = extraction_candidates(
-        &svc,
-        &sid,
+        svc,
+        sid,
         "utils.py",
         json!({ "min_complexity": 1, "min_callers": 1 }),
     );
@@ -121,16 +133,16 @@ fn extraction_candidate_has_required_fields() {
 
 #[test]
 fn extraction_min_complexity_filters() {
-    let (_ws, svc, sid) = build_repo();
+    let (svc, sid) = shared_repo();
     let r_low = extraction_candidates(
-        &svc,
-        &sid,
+        svc,
+        sid,
         "utils.py",
         json!({ "min_complexity": 1, "min_callers": 1 }),
     );
     let r_high = extraction_candidates(
-        &svc,
-        &sid,
+        svc,
+        sid,
         "utils.py",
         json!({ "min_complexity": 100, "min_callers": 1 }),
     );
@@ -142,16 +154,16 @@ fn extraction_min_complexity_filters() {
 
 #[test]
 fn extraction_min_callers_filters() {
-    let (_ws, svc, sid) = build_repo();
+    let (svc, sid) = shared_repo();
     let r_low = extraction_candidates(
-        &svc,
-        &sid,
+        svc,
+        sid,
         "utils.py",
         json!({ "min_complexity": 1, "min_callers": 1 }),
     );
     let r_high = extraction_candidates(
-        &svc,
-        &sid,
+        svc,
+        sid,
         "utils.py",
         json!({ "min_complexity": 1, "min_callers": 100 }),
     );
@@ -163,10 +175,10 @@ fn extraction_min_callers_filters() {
 
 #[test]
 fn extraction_results_sorted_by_score() {
-    let (_ws, svc, sid) = build_repo();
+    let (svc, sid) = shared_repo();
     let r = extraction_candidates(
-        &svc,
-        &sid,
+        svc,
+        sid,
         "utils.py",
         json!({ "min_complexity": 1, "min_callers": 1 }),
     );
@@ -201,15 +213,15 @@ fn extraction_missing_repo_returns_error() {
 
 #[test]
 fn extraction_missing_file_returns_error() {
-    let (_ws, svc, sid) = build_repo();
-    let r = extraction_candidates(&svc, &sid, "nonexistent_xyz.py", json!({}));
+    let (svc, sid) = shared_repo();
+    let r = extraction_candidates(svc, sid, "nonexistent_xyz.py", json!({}));
     assert!(!r["ok"].as_bool().unwrap_or(true), "expected error: {r:?}");
 }
 
 #[test]
 fn extraction_timing_present() {
-    let (_ws, svc, sid) = build_repo();
-    let r = extraction_candidates(&svc, &sid, "utils.py", json!({}));
+    let (svc, sid) = shared_repo();
+    let r = extraction_candidates(svc, sid, "utils.py", json!({}));
     assert!(r["_meta"].is_object());
     assert!(r["_meta"]["timing_ms"].is_number());
 }

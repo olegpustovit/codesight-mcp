@@ -9,10 +9,7 @@ use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
-    pub(super) fn evaluate_impact_diff(
-        &self,
-        args: &EvaluateImpactArgs,
-    ) -> anyhow::Result<Value> {
+    pub(super) fn evaluate_impact_diff(&self, args: &EvaluateImpactArgs) -> anyhow::Result<Value> {
         let timer = MetaBuilder::new(0);
 
         let Some(refs) = args.refs.as_ref() else {

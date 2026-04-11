@@ -14,6 +14,9 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 
 const BASELINE_META_KEYS: &[&str] = &[
+    "build_sha",
+    "build_time",
+    "build_version",
     "cost_avoided",
     "naive_tokens",
     "powered_by",
@@ -128,8 +131,7 @@ fn error_response_carries_error_category_in_meta() {
     );
     assert_has_baseline_keys(&keys, "search_catalog (error path)");
     assert_eq!(
-        r["error"]["category"],
-        r["_meta"]["error_category"],
+        r["error"]["category"], r["_meta"]["error_category"],
         "category on error vs _meta diverged: {r:?}"
     );
 }

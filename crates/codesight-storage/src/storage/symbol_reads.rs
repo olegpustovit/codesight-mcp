@@ -27,11 +27,7 @@ pub fn is_outline_noise(path: &str) -> bool {
     // "symbols" are JSON keys, not code. Noise in a repo outline.
     if matches!(
         path,
-        ".mcp.json"
-            | "package.json"
-            | "package-lock.json"
-            | "tsconfig.json"
-            | ".codesight.toml"
+        ".mcp.json" | "package.json" | "package-lock.json" | "tsconfig.json" | ".codesight.toml"
     ) {
         return true;
     }
@@ -116,6 +112,42 @@ impl IndexStore {
             })
             .optional()?;
         Ok(record)
+    }
+
+    /// Resolve a `(file_path, start_line)` pair to the indexed symbol id.
+    ///
+    /// Ranks exact `start_line` hits first, then the innermost enclosing
+    /// symbol (most recent start_line ≤ request, smallest span). Used by
+    /// `read_content` so callers that only know `path:line` can avoid the
+    /// stable_id lookup step.
+    pub fn symbol_id_at_location(
+        &self,
+        file_path: &str,
+        start_line: u32,
+    ) -> anyhow::Result<Option<String>> {
+        let conn = self.open_read_only()?;
+        let exact: Option<String> = conn
+            .query_row(
+                "SELECT id FROM symbols
+                 WHERE file_path = ?1 AND start_line = ?2
+                 ORDER BY (end_line - start_line) ASC LIMIT 1",
+                params![file_path, start_line],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if exact.is_some() {
+            return Ok(exact);
+        }
+        let enclosing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM symbols
+                 WHERE file_path = ?1 AND start_line <= ?2 AND end_line >= ?2
+                 ORDER BY (end_line - start_line) ASC LIMIT 1",
+                params![file_path, start_line],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(enclosing)
     }
 
     pub fn symbol_metadata(&self, id: &str) -> anyhow::Result<Option<SymbolMetadata>> {

@@ -5,6 +5,18 @@ use serde_json::{Value, json};
 use crate::config::BYTES_PER_TOKEN;
 use crate::storage::SearchSymbol;
 
+/// Round a ranker score to 3 decimal places for JSON serialization so f64
+/// round-trip artifacts (e.g. `0.5299999999999999`) don't leak into the
+/// response envelope. Internal comparisons stay exact — truncation happens
+/// only at the JSON boundary.
+pub(in crate::service) fn round_score(score: f64) -> f64 {
+    if score.is_finite() {
+        (score * 1000.0).round() / 1000.0
+    } else {
+        score
+    }
+}
+
 pub(in crate::service) fn search_hit_symbol(source_id: &str, s: &SearchSymbol) -> Value {
     let mut hit = serde_json::Map::new();
     hit.insert(
@@ -21,7 +33,7 @@ pub(in crate::service) fn search_hit_symbol(source_id: &str, s: &SearchSymbol) -
         }),
     );
     hit.insert("snippet".to_string(), json!(s.signature));
-    hit.insert("score".to_string(), json!(s.score));
+    hit.insert("score".to_string(), json!(round_score(s.score)));
     hit.insert("line".to_string(), json!(s.line));
     if let Some(ref m) = s.match_type {
         hit.insert("match_type".to_string(), json!(m));
@@ -70,6 +82,33 @@ pub(in crate::service) fn pack_catalog_items_to_token_budget(
     }
     let truncated = kept.len() < total;
     (kept, truncated)
+}
+
+/// Resolve an agent-v1 symbol `PrefRef` (from `read_content`, `context_bundle`,
+/// `evaluate_impact`, etc.) to its indexed stable id.
+///
+/// Order: explicit `stable_id` → explicit `id` → `path` + `start_line` lookup
+/// against the symbol index. Returns `None` when none of the above produce a
+/// usable id (callers turn that into a `MISSING_REF` error).
+pub(in crate::service) fn resolve_symbol_id(
+    store: &crate::storage::IndexStore,
+    stable_id: Option<&str>,
+    id: Option<&str>,
+    path: Option<&str>,
+    start_line: Option<u32>,
+) -> anyhow::Result<Option<String>> {
+    if let Some(s) = stable_id.filter(|s| !s.is_empty()) {
+        return Ok(Some(s.to_string()));
+    }
+    if let Some(s) = id.filter(|s| !s.is_empty()) {
+        return Ok(Some(s.to_string()));
+    }
+    if let (Some(p), Some(line)) = (path, start_line)
+        && line > 0
+    {
+        return store.symbol_id_at_location(p, line);
+    }
+    Ok(None)
 }
 
 pub(in crate::service) fn err_item(code: &str, message: &str) -> Value {

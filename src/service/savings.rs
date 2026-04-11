@@ -2,7 +2,9 @@ use std::{collections::HashMap, fs, io, path::PathBuf, time::Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{BYTES_PER_TOKEN, RETRIEVAL_ENGINE, RETRIEVAL_VERSION};
+use crate::config::{
+    BUILD_SHA, BUILD_TIME, BUILD_VERSION, BYTES_PER_TOKEN, RETRIEVAL_ENGINE, RETRIEVAL_VERSION,
+};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Meta {
@@ -14,6 +16,14 @@ pub struct Meta {
     pub total_cost_avoided: HashMap<String, f64>,
     pub retrieval_engine: String,
     pub retrieval_version: String,
+    /// Semver of the running codesight-mcp binary (`CARGO_PKG_VERSION`).
+    pub build_version: String,
+    /// Short git SHA of the commit this binary was built from, or
+    /// `"unknown"` when the build ran outside a git checkout.
+    pub build_sha: String,
+    /// Build timestamp in Unix epoch seconds (stringified). Lets clients
+    /// spot a long-running MCP server that predates a fix landing on disk.
+    pub build_time: String,
     pub timing_ms: f64,
     pub powered_by: String,
 }
@@ -160,6 +170,9 @@ impl MetaBuilder {
             total_cost_avoided,
             retrieval_engine: RETRIEVAL_ENGINE.to_string(),
             retrieval_version: RETRIEVAL_VERSION.to_string(),
+            build_version: BUILD_VERSION.to_string(),
+            build_sha: BUILD_SHA.to_string(),
+            build_time: BUILD_TIME.to_string(),
             timing_ms: self.started_at.elapsed().as_secs_f64() * 1000.0,
             powered_by: "codesight-mcp — token-efficient code & doc retrieval".to_string(),
         }

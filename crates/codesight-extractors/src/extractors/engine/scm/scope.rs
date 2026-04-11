@@ -117,7 +117,7 @@ pub(super) fn infer_scopes_and_finalize_symbols(
         symbols.push(StoredSymbol {
             id: format!("{}::{}#{}", file_path, qualified_name, raw.kind.as_str()),
             extraction_tier: ExtractionTier::CuratedQueryPack,
-            language: extractor.compiled.language_name.to_string(),
+            language: extractor.language_name.to_string(),
             file_path: file_path.to_string(),
             qualified_name,
             name: raw.name.clone(),

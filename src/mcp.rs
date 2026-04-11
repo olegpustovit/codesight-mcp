@@ -198,7 +198,7 @@ where
                 RpcResponse {
                     jsonrpc: "2.0",
                     id: request.id.unwrap_or_else(|| json!(0)),
-                    result: json!({ "tools": tool_definitions() }),
+                    result: json!({ "tools": crate::service::agent_v1::validate::tool_definitions() }),
                 },
             )
             .await?;
@@ -264,11 +264,6 @@ async fn shutdown_signal() {
 #[cfg(not(unix))]
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
-}
-
-fn tool_definitions() -> Vec<Value> {
-    // Infallible: `tools.json` is bundled at compile time and must parse.
-    serde_json::from_str(include_str!("tools.json")).expect("tools.json must be valid JSON")
 }
 
 #[cfg(test)]

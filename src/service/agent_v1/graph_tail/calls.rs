@@ -75,7 +75,33 @@ impl CodeService {
             .max()
             .unwrap_or(0);
 
-        self.success_response(
+        // Token budget (default 8k). Without this, high-fan-in symbols
+        // returned 200k+ char responses that blew past the harness cap.
+        const DEFAULT_CALLS_TOKEN_BUDGET: u32 = 8000;
+        let budget = args.max_tokens.unwrap_or(DEFAULT_CALLS_TOKEN_BUDGET);
+        let (callers_json, callers_truncated) =
+            crate::service::agent_v1::util::pack_catalog_items_to_token_budget(
+                callers_json,
+                budget / 2,
+            );
+        let (callees_json, callees_truncated) =
+            crate::service::agent_v1::util::pack_catalog_items_to_token_budget(
+                callees_json,
+                budget / 2,
+            );
+        let truncated = callers_truncated || callees_truncated;
+
+        // `build_call_edges` is a whole-word name match over every symbol
+        // body in the index. For short/common names (`new`, `get`, `as_str`,
+        // `take`) the edge set is near-random, so every response must carry a
+        // prominent warning — `_meta.source: "text_heuristic"` alone is too
+        // easy for clients to miss.
+        let warnings = vec![json!({
+            "code": "CALL_GRAPH_HEURISTIC",
+            "message": "graph=calls uses a text-based whole-word heuristic over symbol bodies; edges may include unrelated symbols that share a common method name (e.g. `new`, `get`, `take`). Use this for exploration only — not for rename_safety or blast_radius decisions.",
+        })];
+
+        self.success_response_with_warnings(
             &MetaBuilder::new(0),
             json!({
                 "graph": "calls",
@@ -88,11 +114,13 @@ impl CodeService {
                 },
                 "callers": callers_json,
                 "callees": callees_json,
-                "caller_count": callers_json.len(),
-                "callee_count": callees_json.len(),
+                "caller_count": caller_tuples.len(),
+                "callee_count": callee_tuples.len(),
                 "depth_reached": max_depth,
+                "truncated": truncated,
                 "_meta": { "source": "text_heuristic" },
             }),
+            warnings,
         )
     }
 }

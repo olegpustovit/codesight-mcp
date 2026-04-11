@@ -1,206 +1,218 @@
 # AGENTS.md
 
-This repository is the `codesight-mcp` Rust crate at repo root.
+`codesight-mcp` — a local MCP server that gives coding agents structural,
+token-efficient access to any codebase. Rust workspace at the repo root.
+For onboarding see [`README.md`](README.md). For active work see
+[`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md).
+
+---
+
+## Non-negotiable policies
+
+These override everything else. Every patch is measured against them.
+
+### 1. Shrink the code. Always.
+
+- **Target metric:** total LoC and per-module cyclomatic complexity only go
+  down or stay flat. Track the baseline in [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md);
+  update it when you land a reduction.
+- Reach for `simplify`, `rust-modularity`, and `rust-design-patterns` **before**
+  writing a new helper. One shared helper beats three copies; a trait + small
+  registry beats a growing `match`; a maintained crate beats a hand-rolled util.
+- Oversized modules (> 400 LoC, or cyclomatic > 20) get split, not paved over.
+- Refactor freely — **features and behavior stay, regressions don't.** No
+  deletion of functionality under the guise of simplification.
+- Delete useless features aggressively. If a surface is a placeholder, an
+  alias of another tool, or nobody would miss it, cut it and update tests +
+  `src/tools.json` in the same patch.
+
+### 2. Dogfood `codesight-mcp` for every lookup.
+
+We're building a retrieval engine — if we don't use it on ourselves we won't
+notice when it's broken.
+
+**Default → codesight mapping.** Every row is a *reach*: if you catch yourself
+typing the left column for a lookup, stop and use the right column instead.
+
+| Default tool (don't) | Codesight tool (do) | Args |
+|---|---|---|
+| `Grep` for a symbol/function/type name | `search_catalog` | `query_mode=keyword`, `unit_kinds=["symbol"]`, optional `kind=function\|class\|...` |
+| `Grep` for a substring across files | `search_catalog` | `query_mode=keyword`, `unit_kinds=["file"]`, optional `file_pattern` / `scope` |
+| `Grep -E` raw regex over files | `search_catalog` | `query_mode=regex`, `unit_kinds=["file"]`, `context_lines=N` |
+| Fuzzy / "I'm not sure of the name" | `search_catalog` | `fuzzy=true` or `fuzzy_threshold=0.3` |
+| "What's this about?" / natural question | `search_catalog` | `query_mode=natural_language`, `domain=hybrid` (hits symbols + docs) |
+| `Glob` / `find` / `ls -R` tree walks | `inspect_structure` | `view=file_tree` (optional `path=` subtree) |
+| Project-level "what's in this repo" | `inspect_structure` | `view=repo_outline` / `view=repository_rollup` |
+| `Read` of a known file range | `read_content` | `refs=[{kind:"file", path, start_line, end_line}]` |
+| `Read` to see a function/class body | `read_content` | `refs=[{kind:"symbol", path, start_line}]` (or `stable_id`) |
+| Batch read N files/symbols | `read_content` | pass N items in `refs` — **one call, not N** |
+| File's top-level outline | `inspect_structure` | `view=file_outline`, `file_path=...` (or batch `file_paths`) |
+| "Where is X imported?" | `inspect_graph` | `graph=importers`, `file_path=...` |
+| "Where is symbol X referenced?" | `inspect_graph` | `graph=references`, `ref={...}` — or `find_references` with `identifier` |
+| "What does this function call?" | `inspect_graph` | `graph=calls`, `symbol_id=...` |
+| Cross-module deps / cycles | `inspect_graph` | `graph=dependencies` / `dependency_cycles` / `layer_violations` |
+| Pre-refactor: who breaks? | `evaluate_impact` | `analysis=blast_radius`, `refs=[...]` |
+| Rename safety check | `evaluate_impact` | `analysis=rename_safety`, `refs[0].new_name="..."` |
+| Diff two symbol versions | `evaluate_impact` | `analysis=diff`, 2 refs in same file |
+| Hotspots / complexity | `evaluate_quality` | `analysis=hotspots`, `min_complexity=20`, `top_n=20` |
+| Dead code | `evaluate_quality` | `analysis=dead_code`, `granularity=symbol` |
+| Repo health / doc coverage | `evaluate_quality` | `analysis=repo_health` / `doc_coverage` |
+| Ticket kickoff context bundle | `assemble_context` | `mode=context_bundle`, `refs=[...]`, `max_tokens=N` |
+| "Summarize this section" | `assemble_context` | `mode=section_context`, `refs=[{kind:"section",...}]` |
+| Ranked suggestions from a query | `assemble_context` | `mode=ranked` or `query_suggestions` |
+| Freshness / stale index | `manage_indexes` → `ingest_sources` | `action=status`; then `ingest_sources incremental=true` |
+| List sources / source_id lookup | `catalog_sources` | (no args) |
+
+### Effective use guidelines
+
+- **Always start a session with `catalog_sources`.** It gives you the
+  `source_id` every other tool needs, plus freshness/indexed_at. If stale,
+  `ingest_sources path=. incremental=true` first.
+- **Pick the right `query_mode`.** `keyword` for identifiers and BM25 —
+  fastest, most precise. `regex` only when you truly need a pattern
+  (auto-routes to file text, *ignores* `unit_kinds`). `natural_language`
+  when asking a question, not naming a thing.
+- **Narrow with `unit_kinds` + `scope`/`file_pattern`.** Default is
+  "symbols in code". Pass `unit_kinds=["file"]` to grep file text,
+  `["section"]` to hit docs, `["symbol","section"]` for hybrid.
+  `scope="src/service/"` is a cheap LoC-token saver.
+- **Batch reads.** `read_content` takes an array of `refs` — never make N
+  sequential calls when one array call does it.
+- **Prefer `inspect_graph` over manual reasoning.** If your next thought
+  is "let me grep for every usage of X and see what imports it", that's
+  `graph=references` or `graph=importers`. Don't simulate the graph by
+  hand.
+- **Token budget everything.** `max_tokens` / `token_budget` on
+  `search_catalog`, `read_content`, `assemble_context`, `inspect_structure
+  view=repo_outline`, and `evaluate_quality analysis=dead_code`. Default
+  to `max_tokens=4000` for browsing, `8000` for deep context.
+- **`_meta.tokens_saved`** is the session's scoreboard. If a call returns
+  zero or negative savings, you picked the wrong tool or the wrong
+  `unit_kinds`. Re-shape the query.
+- **Fallback only when the tool is actually broken.** Default filesystem
+  tools (`Grep`, `Read`, `Edit`, `Write`, `Bash`) remain the right choice
+  for **writing** changes, running tests, and editing — not for
+  read/search. Fall back to `Grep`/`Read` **only when** codesight can't
+  answer (missing grammar, tool itself under repair) or you've already
+  tried the codesight path and captured the gap. Every retrieval-path
+  fallback is logged in [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md) and
+  fixed in the same session wherever practical.
+- **Self-check trigger.** Before every `Grep`/`Glob`/`Read` call, ask:
+  *"Which row of the table above covers this?"* If any row does, use that
+  tool. If none do, log a new fallback entry in the worklog with the
+  reason — that's a product bug.
+
+### 3. Worklog-driven, test-drive-first workflow.
+
+- [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md) is the **single living state**
+  file. Open items, current metrics, next-session backlog. Update it in the
+  same patch as the change it describes.
+- Every session starts with a test-drive against `codesight-mcp` running on
+  this repo. Find bugs; fix or document them in the worklog.
+- Closed items move out of the worklog (history lives in git).
+
+### 4. Proactive improvement every session.
+
+After the test-drive, ask: **"codesight-mcp is great, but what's *my* feature
+request, and what should improve?"** Add the answer to the worklog's
+improvement backlog. Key metric: **tokens saved per query** (from
+`$storage_dir/_savings.json` via `check --savings`). Every change must make
+the interface better — add/remove/reshape features to hyperoptimize for
+token elimination, agentic-coding visibility, and speed. **Bloat is the
+enemy.** Big backlog changes are welcome if they simplify or clarify.
+
+### 5. Performance is paramount — bun-fast or bust.
+
+Everything is local, on SSD, through SQLite. There is **no excuse** for
+slow. Targets:
+
+- Dispatch → handler response: **< 50 ms** for cached reads, **< 200 ms** for
+  cold reads on a medium repo.
+- Incremental reindex after a single-file edit: **< 100 ms**.
+- Cold full ingest of this repo: **< 5 s**.
+
+When you touch a hot path, verify with a targeted bench or timing print.
+Regressions get rolled back the same session. Track the current numbers in
+the worklog's performance section.
+
+### 6. Tests are instant and targeted, or they're tech debt.
+
+Tests are our **biggest technical debt** right now. Rules:
+
+- **Targeted by default.** Run the smallest scope that proves your change —
+  one test, one binary, one crate lib — via `./scripts/nextest-cache`.
+- **Never** run the full suite unless the user asks or you're preparing an
+  explicit merge gate.
+- **Evaluate every run.** If a test takes > 1 s, note it in the worklog's
+  slow-test watch list and plan a fix. We have thousands of tests; each one
+  must be instant.
+- Never delete or `#[ignore]` a test to silence failure. Root-cause it.
+- If you discover a pre-existing failing test or clippy error, fix it in
+  the same session — noticing a broken thing and walking past it is how
+  this codebase rots.
+
+---
 
 ## Layout
 
 | Path | Purpose |
-|------|---------|
-| [`Cargo.toml`](Cargo.toml) | Product crate manifest. |
-| [`agentpack.toml`](agentpack.toml) | Agentpack manifest pointing at this crate. |
-| [`src/`](src/) | Runtime, indexing, retrieval, MCP handlers, operator CLI. |
-| [`src/cli/`](src/cli/) | Operator subcommands that do not speak MCP (e.g. `check`). |
-| [`src/config/`](src/config/) | Layered `AppConfig`: env vars, global TOML, defaults, trust policy. |
-| [`src/service/agent_v1/validate.rs`](src/service/agent_v1/validate.rs) | Coerce-then-validate MCP args against `tools.json`. |
-| [`crates/codesight-core`](crates/codesight-core) | Shared primitives (symbols, FactQuality). |
-| [`crates/codesight-extractors`](crates/codesight-extractors) | SCM engine + curated query packs. |
-| [`crates/codesight-storage`](crates/codesight-storage) | WAL-configured SQLite + forward-only migrations (code index *and* doc index DDL via `storage::doc_schema`). |
-| [`runtime/queries/`](runtime/queries/) | Tree-sitter `.scm` symbol queries. |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Crate split, data flow, FactQuality taxonomy. |
-| [`CONFIGURATION.md`](CONFIGURATION.md) | Env vars, precedence chain, `check` subcommand. |
-| Workspace config | Optional repo-root `.codesight.toml` (TOML) for per-workspace adaptive languages, extra extensions, query-pack roots. |
-| [`tests/`](tests/) | Integration tests. Checked-in fixtures: [`tests/fixtures/doc_reference/`](tests/fixtures/doc_reference/), [`tests/fixtures/code_reference/`](tests/fixtures/code_reference/), [`tests/fixtures/lang_samples/`](tests/fixtures/lang_samples/). |
+|---|---|
+| [`src/`](src/) | Product crate: runtime, indexing, retrieval, MCP handlers, CLI. |
+| [`src/cli/`](src/cli/) | Operator subcommands (`check`, `init`). |
+| [`src/config/`](src/config/) | Layered `AppConfig` — env, TOML, defaults, trust. All `CODESIGHT_*` env names live in `src/config/env.rs`. |
+| [`src/service/agent_v1/`](src/service/agent_v1/) | MCP dispatch. `validate.rs` coerces-then-validates against `tools.json`. Handlers consume `ValidatedArgs<T>`. `freshness.rs` gates read tools. |
+| [`src/tools.json`](src/tools.json) | **Frozen MCP contract.** Schema changes ship with the handler change. |
+| [`crates/codesight-core/`](crates/codesight-core) | Shared primitives (symbols, `FactQuality`). |
+| [`crates/codesight-extractors/`](crates/codesight-extractors) | SCM engine + curated query packs. |
+| [`crates/codesight-storage/`](crates/codesight-storage) | WAL-configured SQLite + forward-only migrations. |
+| [`runtime/queries/`](runtime/queries) | Tree-sitter `.scm` symbol queries (30 langs). |
+| [`tests/`](tests) | Integration tests. Fixtures under `tests/fixtures/`. |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Crate split, data flow, FactQuality, SQLite config. |
+| [`CONFIGURATION.md`](CONFIGURATION.md) | Env vars, precedence, per-workspace `.codesight.toml`. |
+| [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md) | **Current state, open work, metrics, next-session backlog.** |
 
-## Dogfooding (non-negotiable)
-
-**Drive test-drive and self-fix work through `codesight-mcp` itself.** We are
-building a retrieval engine — if we don't use it on ourselves we won't notice
-when it's broken. Exploration must go through the MCP tools before reaching
-for default filesystem tools.
-
-### Tool replacement map
-
-| Default tool | Use instead | Notes |
-|--------------|-------------|-------|
-| `Grep` / `rg` for symbols, imports, references | `mcp__codesight__search_catalog` (`query_mode=keyword`) | symbol-aware scoring, cross-file |
-| `Grep` / `rg` for raw regex over file text | `mcp__codesight__search_catalog` (`query_mode=regex`) | routes to file-text search automatically |
-| `Glob` / `find` for tree walks | `mcp__codesight__inspect_structure` (`view=file_tree` or `repo_outline`) | respects index, skips `.codesight-index/**` |
-| `Read` of a known file/range | `mcp__codesight__read_content` (`kind=file` + `start_line`/`end_line`) | carries `language`, clamp warnings, `_meta` token savings |
-| `Read` of a symbol body | `mcp__codesight__read_content` (`kind=symbol`) | hashes, context_lines, drift detection |
-| manual import chasing | `mcp__codesight__inspect_graph` (`graph=importers` / `references` / `calls`) | real graph edges, cross-repo-aware |
-| manual impact review before a rename/refactor | `mcp__codesight__evaluate_impact` (`analysis=blast_radius` / `rename_safety` / `impact_preview`) | structured findings |
-| ad-hoc hotspot / dead-code spotting | `mcp__codesight__evaluate_quality` (`analysis=repo_health` / `dead_code` / `hotspots` / `doc_coverage`) | operator-facing metric schema |
-| digest/packing work for a ticket | `mcp__codesight__assemble_context` (`mode=bundle` / `context_bundle` / `ranked` / `query_suggestions`) | token-budgeted output |
-| checking whether an index is fresh | `mcp__codesight__manage_indexes` (`action=status`) → `mcp__codesight__ingest_sources` | never assume staleness by hand |
-
-### Fallback rules
-
-- Default filesystem tools (`Grep`, `Glob`, `Read`, `Edit`, `Write`, `Bash`)
-  remain the right choice for **writing** changes, running tests, and
-  editing files — you can't commit through an MCP tool.
-- Fall back to `Grep` / `Read` for retrieval **only when**:
-  1. codesight can't answer the question (e.g. the file isn't indexed, the
-     grammar is missing, the tool itself is the thing under repair); or
-  2. you've already tried the codesight path once and captured the gap.
-- Every retrieval-path fallback must be logged as a test-drive issue in
-  `CODESIGHT_TESTDRIVE_ISSUES_v*.md` — that's how gaps convert into
-  product fixes.
-- Issues found during a test-drive land in the same file and get fixed in
-  the same working session wherever practical — don't let it rot into a
-  backlog.
-
-## Tests (non-negotiable)
-
-- **Never leave a broken test or failing lint in place.** If you discover a pre-existing failing test, clippy error, or broken implementation while working on something else, **fix it in the same session** — even if it's not part of your original task. Do not:
-  - Skip it with a comment like "pre-existing, not my regression."
-  - Mark it `#[ignore]` to get CI green.
-  - Quietly scope your runs to avoid hitting it.
-  - Defer it to "a later cleanup pass."
-  Root-cause it and restore the contract the test was enforcing, or (if the test is genuinely stale) update it to the new contract in the same patch. Noticing a broken thing and walking past it is how this codebase rots.
-- **Do not lose tests.** Refactors and simplifications must keep the suite meaningful: no deleting tests to silence failures, no broad `#[ignore]` to hide breakage, no shrinking fixtures or assertions without an intentional contract change.
-- When behavior changes on purpose, update tests and docs together so they still encode the product contract.
-- New work adds or extends tests when it adds behavior; “cleanup” is not an excuse to drop coverage.
-- Treat test wall-clock time as a product constraint. Default new coverage to the smallest layer that proves the behavior; end-to-end `agent-v1` and full-ingest tests should guard contracts, not absorb every internal case.
-- **Targeted tests by default.** Run the smallest scope that proves your change; do not run the full suite unless the user asks for it or you are preparing an explicit merge/release gate. See `Day-to-day commands` below.
-
-## Strategic focus (refactor and direction)
-
-Every patch is measured against four non-negotiable principles. These are the
-load-bearing axes of [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md); keep both in sync.
-
-1. **Code reduction and dedup.** Shrink the product. Reach for `rust-modularity`,
-   `rust-design-patterns`, and the `simplify` skill before hand-rolling utilities
-   or growing central `match` trees. One shared helper beats three copies; a
-   well-maintained crate beats a bespoke implementation; a trait with a small
-   registry beats a growing `match`. Oversized modules (> 400 LoC) are split,
-   not paved over.
-2. **Crate-level modularity.** The workspace split `codesight-core` →
-   (`codesight-extractors` | `codesight-storage`) → root `codesight-mcp` is the
-   backbone. Dependencies point inward, never sideways. No catch-all
-   `types`/`utils` crate. Product-only logic (MCP handlers, framework detection,
-   CLI subcommands) stays in the root crate; don't smuggle it into the middle
-   crates. The crate graph is frozen at four members until shared fact types
-   stabilize.
-3. **Real-use onboarding.** An operator who has never seen this repo must be
-   able to install `codesight-mcp`, wire it into Claude Code, and start saving
-   tokens in five minutes, following only the repo root documentation. This is
-   currently the largest gap to shipping — treat `README.md`, the
-   Claude Code MCP snippet, and the self-host smoke script as first-class
-   deliverables. See workstream **S3** in [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md).
-4. **Real-use reliability and parity with `../prior-art-mcp`.** The server
-   must work on *any* codebase (not just fixture repos or this one), must be
-   performant and correct under concurrent dispatch, and must reach feature
-   parity with the prior-art patterns that matter in practice: rich `_meta`
-   response envelope with `timing_ms` / `tokens_saved` / `truncated`, session
-   awareness (journal + negative evidence + search cache), batch array
-   parameters on high-call tools, watch-mode incremental reindex, pluggable
-   context providers, security hardening follow-through. See workstream
-   **S4** in [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md).
-
-Contract-level constraints that override everything else:
-
-- The active structural refactor program is tracked in
-  [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md). Treat it as the current working
-  document for modularity, heuristic removal, and sequencing. If a change
-  materially affects module boundaries, fallback heuristics, or sequencing,
-  update it in the same patch.
-- Prefer **general mechanisms** (clear extension points, composable pipelines,
-  structural parsing) over **edge-case coupling** in core paths. Special cases
-  belong at the edges (language-specific extractors, query packs), not
-  scattered through shared logic.
-- Keep hot paths **allocation-conscious and predictable**; avoid accidental
-  O(n²) or repeated I/O when designing abstractions.
-- Keep the test loop practical. Prefer layered unit/slice tests for domain
-  behavior and reserve full service/MCP indexing tests for public-contract
-  coverage.
-- **`agent-v1` and [`src/tools.json`](src/tools.json) remain the contract:**
-  extensibility must not fragment the public MCP surface. Widen `view` /
-  `analysis` enums; never add parallel tool names.
+**Crate graph is frozen** at four members until shared fact types stabilize.
+Dependencies point inward: `codesight-core` ← `codesight-extractors` /
+`codesight-storage` ← root `codesight-mcp`. The two middle crates don't
+depend on each other. Product-only logic (MCP handlers, framework detection,
+CLI) stays in the root crate — don't smuggle it into middle crates.
 
 ## Working rules
 
-1. Keep the public MCP surface coherent. The live contract is defined by [`src/tools.json`](src/tools.json) and enforced by the Rust tests.
-2. Prefer structural parsers and reusable abstractions over ad-hoc glue.
-3. Do not add duplicate tool names, hidden routes, or parallel public MCP surfaces. `agent-v1` is the only supported API.
-4. Keep tests self-owned inside this crate. New fixtures belong under [`tests/fixtures/`](tests/fixtures/), not in external oracle trees.
-5. **No backwards compatibility.** Do not add shims, aliases, feature flags, or dual code paths to keep obsolete clients working. When behavior changes, update [`src/tools.json`](src/tools.json) and tests to the new contract—never paper over breaks in core or the MCP surface.
-
-## Modularity guidance
-
-- **Prefer crate-focused architecture.** New code that is legitimately shared
-  belongs in a workspace crate (`codesight-core`, `codesight-extractors`,
-  `codesight-storage`). Product-only logic (MCP handlers, framework detection,
-  CLI subcommands) stays in the root `codesight-mcp` crate. Don't mix
-  extractor internals or storage plumbing into the product layer.
-- Organize by domain at the top level: extractor engine, framework detection, graph/impact analysis, retrieval/service wiring, operator CLI.
-- Keep `lib.rs` skeletal and push logic into named modules with **clear dependency direction** (core types inward, adapters at the boundary).
-- When a behavior family is open-ended, prefer **traits and small registries** over growing central `match` trees.
-- Add new language support through `runtime/queries/{lang}/tags.scm` when possible. Reach for Rust extractor overrides only when the grammar or semantics require it.
-- Workspace crates are allowed once a boundary is stable and the split reduces compile/test blast radius without creating a catch-all shared `types` crate.
-- **All `CODESIGHT_*` env var names live in `src/config/env.rs`.** Do not
-  sprinkle raw `std::env::var("CODESIGHT_*")` calls in new code — look up the
-  const and add one if you need a new knob. See [`CONFIGURATION.md`](CONFIGURATION.md).
-- **MCP arguments are coerce-then-validated before handlers see them**
-  (`src/service/agent_v1/validate.rs`). Handlers consume args via the
-  `ValidatedArgs<T>` newtype (`ValidatedArgs::<T>::from_validated(v)?.into_inner()`),
-  not raw `serde_json::from_value` — that path is gone, and typed-deser failures
-  surface as `ToolError::InvalidArgument` instead of leaking as `Internal`.
-  Schema changes land in the same patch as the handler change.
-- **Read-path freshness gating** lives in `src/service/agent_v1/freshness.rs`.
-  Add new MCP tool names there if they observe indexed state — write/utility
-  tools (those that drive reindexing) stay off the list. The dispatcher
-  blocks in strict mode and post-annotates `STALE_DATA_WARNING` in relaxed
-  mode automatically; handlers do not need to know about freshness.
+1. `agent-v1` + `src/tools.json` is the only public MCP surface. Extensibility
+   goes through `view`/`analysis` enums — never parallel tool names.
+2. **No backwards compatibility.** No shims, no aliases, no dual code paths.
+   When behavior changes, `tools.json` + tests move in the same patch.
+3. Structural parsers (tree-sitter, `.scm` queries, injections) before string
+   scanning. Heuristics live at the edges.
+4. New languages land as `runtime/queries/<lang>/tags.scm`. Reach for a Rust
+   extractor override only when grammar or semantics require it.
+5. Keep `lib.rs` skeletal — pure module declarations and re-exports.
+6. All SQLite connections go through `codesight_storage::db::open_rw`/`open_ro`.
+7. All logs go through `tracing` — no bare `eprintln!`/`println!` in libraries.
+   Subscriber writes to stderr only; stdout is reserved for JSON-RPC.
+8. Typed errors inside crates (`thiserror`); `ToolError` at the MCP boundary.
+   Handlers consume `ValidatedArgs<T>::from_validated(v)?.into_inner()`.
 
 ## Commands
 
-### Quality gates
-
-These gates apply only at merge/release time, or when the user explicitly asks for them. During day-to-day work, prefer targeted runs (see `Day-to-day commands`).
-
-1. **Clippy (warnings denied):** `cargo clippy --all-targets -- -D warnings`
-2. **Tests (merge gate only):** `./scripts/nextest-cache` (full suite). For a merge-style check that must not trust a cache skip, run `./scripts/nextest-cache --no-cache` once after meaningful changes (or `./scripts/nextest-cache clean` then `./scripts/nextest-cache`).
-
-Formatting is expected to be clean: `cargo fmt --all -- --check` (or run `cargo fmt --all` before commit).
-
-### Day-to-day commands
-
-**Default: targeted tests only.** Run the smallest scope that proves the behavior you changed — a single test, a single binary, or a crate lib scope. Do **not** run the full suite unless the user explicitly asks for it, you are landing a cross-cutting refactor that genuinely needs the whole thing, or you are preparing an explicit merge/release gate check. The full suite is slow and obscures which change caused a failure; targeted runs tell you faster.
-
-Use **`./scripts/nextest-cache`** for all test runs. It wraps **[cargo-nextest](https://nexte.st/)** (`cargo install cargo-nextest` or your OS package manager) and skips repeated work when inputs and args match a prior successful run — **do not** invoke `cargo nextest run` directly from agents or local loops; it is unnecessarily slow compared to the wrapper.
-
-Targeted runs (the default):
+**Day-to-day (targeted, always):**
 
 ```bash
-./scripts/nextest-cache --lib                              # crate lib unit tests
-./scripts/nextest-cache --test <name>                      # one integration binary
-./scripts/nextest-cache -p codesight-storage --lib         # one workspace crate
-./scripts/nextest-cache -p codesight-extractors --lib
-./scripts/nextest-cache -E 'test(my_specific_case)'        # filter expression
-cargo fmt --all
+./scripts/nextest-cache --lib                    # crate lib unit tests
+./scripts/nextest-cache --test <name>            # one integration binary
+./scripts/nextest-cache -p codesight-storage --lib
+./scripts/nextest-cache -E 'test(my_case)'
 cargo clippy --all-targets -- -D warnings
+cargo fmt --all
 ```
 
-Full-suite runs are reserved for explicit merge/release checks or when the user asks for them:
+Use `./scripts/nextest-cache` — not `cargo nextest run` directly. The
+wrapper skips repeated work when inputs are unchanged.
+
+**Merge/release gate only (when the user asks):**
 
 ```bash
-./scripts/nextest-cache                                    # cached full suite (only when asked)
-./scripts/nextest-cache --no-cache                         # authoritative full run (only when asked)
-./scripts/nextest-cache clean                              # clear wrapper cache
+./scripts/nextest-cache                          # cached full suite
+./scripts/nextest-cache --no-cache               # authoritative run
 ```
-
-Use plain `cargo test` only when nextest is unavailable in an environment, and prefer restoring nextest there.
-
-## Cleanup standard
-
-Delete documents that only narrate obsolete workflows. Keep the repo focused on code, tests, and the minimum docs needed to ship and maintain the product.

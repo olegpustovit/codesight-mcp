@@ -186,7 +186,11 @@
             "calls",
             "dependencies",
             "dependency_cycles",
-            "centrality"
+            "centrality",
+            "coupling_metrics",
+            "layer_violations",
+            "find_references",
+            "resolve_fqn"
           ]
         },
         "ref": {
@@ -200,6 +204,31 @@
         "file_path": {
           "type": "string",
           "description": "importers: required — file path whose importers to enumerate."
+        },
+        "identifier": {
+          "type": "string",
+          "description": "find_references: required — identifier to search for."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "find_references: batch form — multiple identifiers to search for in a single call."
+        },
+        "include_call_chain": {
+          "type": "boolean",
+          "description": "find_references: include calling-symbol chain info on each hit."
+        },
+        "fqn": {
+          "type": "string",
+          "description": "resolve_fqn: required — fully-qualified name to resolve."
+        },
+        "algorithm": {
+          "type": "string",
+          "description": "centrality: ranking algorithm (e.g. pagerank, degree)."
+        },
+        "top_n": {
+          "type": "integer",
+          "description": "centrality: cap returned ranked entries."
         },
         "cross_repo": {
           "type": "boolean",
@@ -260,7 +289,7 @@
   },
   {
     "name": "evaluate_quality",
-    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage.",
+    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
@@ -273,7 +302,9 @@
             "repo_health",
             "dead_code",
             "hotspots",
-            "doc_coverage"
+            "doc_coverage",
+            "broken_links",
+            "extraction_candidates"
           ]
         },
         "refs": {

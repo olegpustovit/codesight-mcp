@@ -121,7 +121,10 @@ fn case_languages_without_import_extractor_is_sorted_list() {
         .collect();
     let mut sorted = extractors.clone();
     sorted.sort();
-    assert_eq!(extractors, sorted, "languages_without_import_extractor must be sorted");
+    assert_eq!(
+        extractors, sorted,
+        "languages_without_import_extractor must be sorted"
+    );
 }
 
 // ============================================================

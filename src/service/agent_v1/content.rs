@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::agent_v1::args::ReadContentArgs;
-use crate::service::agent_v1::util::err_item;
+use crate::service::agent_v1::util::{err_item, resolve_symbol_id};
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::args::{FileContentArgs, GetSectionArgs};
 use crate::service::savings::MetaBuilder;
@@ -31,16 +31,26 @@ impl CodeService {
 
             let item = match kind.as_str() {
                 "symbol" => {
-                    let Some(ref sym_id) = id else {
-                        items.push(err_item("MISSING_REF", "symbol ref needs id/stable_id"));
-                        continue;
-                    };
                     let store = match self.ensure_repo_store(sid, args.repo_path.as_deref()) {
                         Ok(s) => s,
                         Err(e) => {
                             items.push(err_item(e.code, &e.message));
                             continue;
                         }
+                    };
+                    let resolved_id = resolve_symbol_id(
+                        &store,
+                        pref.stable_id.as_deref(),
+                        pref.id.as_deref(),
+                        pref.path.as_deref(),
+                        pref.start_line,
+                    )?;
+                    let Some(ref sym_id) = resolved_id else {
+                        items.push(err_item(
+                            "MISSING_REF",
+                            "symbol ref needs id/stable_id, or path + start_line that resolves to an indexed symbol",
+                        ));
+                        continue;
                     };
                     raw_bytes_total += store
                         .symbol_metadata(sym_id)?

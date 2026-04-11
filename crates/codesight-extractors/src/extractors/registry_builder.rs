@@ -13,7 +13,33 @@ use super::{
     VerseExtractor, VueExtractor, YamlExtractor, engine, profiles,
 };
 
+/// Process-wide cache of the overlay-free, extra-extension-free extractor
+/// registry. Building this registry compiles ~30 SCM query packs (one
+/// `Query::new` per grammar), which costs ~1.2s on a warm machine. Any call
+/// to [`build_registry`] whose project root has no `.codesight/queries/`
+/// overlay and no custom `extra_extensions` reuses this clone instead of
+/// rebuilding from scratch. Workspaces with overlays fall through to an
+/// uncached build — they change the extractor set, so caching by path alone
+/// would be unsafe, and such workspaces are rare on the hot test path.
+static CACHED_BASE: std::sync::LazyLock<ExtractorRegistry> =
+    std::sync::LazyLock::new(|| build_registry_uncached(None));
+
 pub(crate) fn build_registry(project_root: Option<&Path>) -> ExtractorRegistry {
+    match project_root {
+        None => CACHED_BASE.clone(),
+        Some(root) => {
+            let overlay_roots = crate::adaptive_languages::project_query_pack_roots(root);
+            let has_overlay = overlay_roots.iter().any(|p| p.is_dir());
+            let extras = crate::adaptive_languages::project_extra_extensions(root);
+            if !has_overlay && extras.is_empty() {
+                return CACHED_BASE.clone();
+            }
+            build_registry_uncached(project_root)
+        }
+    }
+}
+
+fn build_registry_uncached(project_root: Option<&Path>) -> ExtractorRegistry {
     let pack_catalog = match project_root {
         Some(root) => {
             engine::catalogs::QueryPackCatalog::for_workspace_root(root).unwrap_or_else(|error| {

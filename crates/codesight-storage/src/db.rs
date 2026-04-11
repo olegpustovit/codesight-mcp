@@ -12,7 +12,8 @@ pub const REPO_INFO_DDL: &str = r#"CREATE TABLE IF NOT EXISTS repo_info (
     root_path TEXT NOT NULL,
     indexed_at TEXT NOT NULL,
     index_version INTEGER NOT NULL,
-    schema_version INTEGER NOT NULL
+    schema_version INTEGER NOT NULL,
+    extractor_version TEXT NOT NULL DEFAULT ''
 );
 
 "#;
@@ -115,7 +116,9 @@ pub fn check_staleness(
 
     let skip_set: HashSet<&str> = SKIP_DIRS.iter().copied().collect();
     let path_in_skipped_dir = |rel: &str| -> bool {
-        rel.split('/').next().is_some_and(|seg| skip_set.contains(seg))
+        rel.split('/')
+            .next()
+            .is_some_and(|seg| skip_set.contains(seg))
     };
 
     for row in rows {

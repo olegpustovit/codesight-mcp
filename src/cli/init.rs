@@ -90,9 +90,8 @@ pub fn run(global: bool, workspace: bool, claude_code: bool, force: bool) -> any
     }
 
     let (path, template) = if global {
-        let path = global_config_path().context(
-            "could not resolve a global config directory (set CODESIGHT_GLOBAL_CONFIG)",
-        )?;
+        let path = global_config_path()
+            .context("could not resolve a global config directory (set CODESIGHT_GLOBAL_CONFIG)")?;
         (path, GLOBAL_TEMPLATE)
     } else {
         let cwd = std::env::current_dir().context("failed to resolve current directory")?;
@@ -265,7 +264,13 @@ mod tests {
 
         let body = fs::read_to_string(&mcp_path).unwrap();
         let v: Value = serde_json::from_str(&body).unwrap();
-        assert!(v["mcpServers"]["other"].is_object(), "merge dropped 'other' entry: {body}");
-        assert!(v["mcpServers"]["codesight"].is_object(), "merge missing 'codesight': {body}");
+        assert!(
+            v["mcpServers"]["other"].is_object(),
+            "merge dropped 'other' entry: {body}"
+        );
+        assert!(
+            v["mcpServers"]["codesight"].is_object(),
+            "merge missing 'codesight': {body}"
+        );
     }
 }

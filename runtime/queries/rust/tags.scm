@@ -16,7 +16,12 @@
 (type_item name: (type_identifier) @name) @definition.type
 
 ; ── Impl blocks (scope only — scope label from type) ──────
+; Plain `impl Foo { … }` and `impl Trait for Foo { … }`.
 (impl_item type: (type_identifier) @name) @definition.class.scope_only
+; Generic `impl<T> Foo<T> { … }` / `impl<T> Trait for Foo<T> { … }`.
+; Without this, methods inside generic impls lose their receiver prefix and
+; collide with same-named methods from other impls in the same file.
+(impl_item type: (generic_type type: (type_identifier) @name)) @definition.class.scope_only
 
 ; ── Functions & Methods ───────────────────────────────────
 (function_item name: (identifier) @name) @definition.function

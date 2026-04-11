@@ -53,6 +53,21 @@ impl IndexStore {
             .unwrap_or(0))
     }
 
+    /// Returns the extractor-version stamp stored in `repo_info`, or an
+    /// empty string if the index has not been written yet or predates the
+    /// column. Callers compare this against the current build stamp to
+    /// decide whether to invalidate cached file fingerprints.
+    pub fn stored_extractor_version(&self) -> anyhow::Result<String> {
+        let conn = self.open_connection()?;
+        Ok(conn
+            .query_row(
+                "SELECT extractor_version FROM repo_info LIMIT 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap_or_default())
+    }
+
     pub fn file_fingerprints(
         &self,
     ) -> anyhow::Result<std::collections::HashMap<String, FileFingerprint>> {
@@ -98,6 +113,7 @@ impl IndexStore {
             updated_files,
             removed_files,
             &[],
+            "",
         )
     }
 
@@ -112,6 +128,7 @@ impl IndexStore {
         updated_files: &[IndexedFileUpdate],
         removed_files: &[String],
         dep_edges: &[(String, String, FactQuality)],
+        extractor_version: &str,
     ) -> anyhow::Result<()> {
         let mut conn = self.open_connection()?;
         let tx = conn.transaction()?;
@@ -139,8 +156,15 @@ impl IndexStore {
 
         tx.execute("DELETE FROM repo_info", [])?;
         tx.execute(
-            "INSERT INTO repo_info (repo, root_path, indexed_at, index_version, schema_version) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![repo, root_path.to_string_lossy().to_string(), indexed_at, index_version, SCHEMA_VERSION],
+            "INSERT INTO repo_info (repo, root_path, indexed_at, index_version, schema_version, extractor_version) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                repo,
+                root_path.to_string_lossy().to_string(),
+                indexed_at,
+                index_version,
+                SCHEMA_VERSION,
+                extractor_version,
+            ],
         )?;
         tx.commit()?;
         Ok(())

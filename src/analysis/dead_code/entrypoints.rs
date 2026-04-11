@@ -43,6 +43,16 @@ pub(crate) fn is_test_file(file_path: &str) -> bool {
         || file_path.contains("/test/")
 }
 
+/// Test/bench fixture files are parser inputs held as source of truth for
+/// tree-sitter snapshots. They are never executed and have no import edges,
+/// so reachability-based dead-code detection flags every one of them with
+/// confidence 1.0. Skip them unconditionally.
+pub(crate) fn is_test_fixture(file_path: &str) -> bool {
+    file_path.contains("/fixtures/")
+        || file_path.starts_with("fixtures/")
+        || file_path.contains("/lang_samples/")
+}
+
 pub(crate) fn entrypoint_root_notes(
     file_path: &str,
     entry_patterns: &[String],
@@ -117,6 +127,11 @@ fn glob_match(pattern: &str, path: &str) -> bool {
 /// Paths are returned relative to `root_path` (the indexed repo root), matching
 /// the shape of `all_files`. When `root_path` is `None` this is a no-op — we
 /// can't read `Cargo.toml` contents without a disk anchor.
+///
+/// `Cargo.toml` is discovered by walking the filesystem from `root_path`
+/// rather than scanning `all_files`, because the symbol indexer does not
+/// track `.toml` manifests — the list would otherwise come back empty and
+/// the detector would become a no-op.
 pub(crate) fn detect_cargo_target_files(
     root_path: Option<&Path>,
     all_files: &[String],
@@ -127,21 +142,21 @@ pub(crate) fn detect_cargo_target_files(
     };
 
     let file_set: HashSet<&str> = all_files.iter().map(String::as_str).collect();
-    let cargo_dirs: Vec<String> = all_files
-        .iter()
-        .filter(|f| {
-            Path::new(f)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|n| n == "Cargo.toml")
-                .unwrap_or(false)
+    let cargo_dirs: Vec<String> = ignore::WalkBuilder::new(root)
+        .git_ignore(true)
+        .hidden(false)
+        .build()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_some_and(|ft| ft.is_file()) && entry.file_name() == "Cargo.toml"
         })
-        .map(|f| {
-            Path::new(f)
+        .filter_map(|entry| {
+            entry
+                .path()
                 .parent()
+                .and_then(|p| p.strip_prefix(root).ok())
                 .and_then(|p| p.to_str())
-                .unwrap_or("")
-                .to_string()
+                .map(|s| s.replace('\\', "/"))
         })
         .collect();
 
@@ -194,4 +209,51 @@ pub(crate) fn detect_cargo_target_files(
     }
 
     targets
+}
+
+#[cfg(test)]
+mod cargo_target_tests {
+    use super::detect_cargo_target_files;
+    use std::fs;
+
+    #[test]
+    fn auto_discovers_tests_examples_benches_without_indexed_cargo_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("tests")).unwrap();
+        fs::write(root.join("tests/it.rs"), "").unwrap();
+        fs::create_dir_all(root.join("examples")).unwrap();
+        fs::write(root.join("examples/demo.rs"), "").unwrap();
+        fs::create_dir_all(root.join("benches")).unwrap();
+        fs::write(root.join("benches/bench.rs"), "").unwrap();
+        fs::create_dir_all(root.join("crates/inner/tests")).unwrap();
+        fs::write(
+            root.join("crates/inner/Cargo.toml"),
+            "[package]\nname = \"inner\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("crates/inner/tests/it.rs"), "").unwrap();
+
+        let all_files: Vec<String> = vec![
+            "tests/it.rs".into(),
+            "examples/demo.rs".into(),
+            "benches/bench.rs".into(),
+            "crates/inner/tests/it.rs".into(),
+        ];
+
+        let targets = detect_cargo_target_files(Some(root), &all_files);
+        assert!(targets.contains("tests/it.rs"), "{:?}", targets);
+        assert!(targets.contains("examples/demo.rs"), "{:?}", targets);
+        assert!(targets.contains("benches/bench.rs"), "{:?}", targets);
+        assert!(
+            targets.contains("crates/inner/tests/it.rs"),
+            "{:?}",
+            targets
+        );
+    }
 }

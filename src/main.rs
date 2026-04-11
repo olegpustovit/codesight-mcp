@@ -165,6 +165,15 @@ fn init_tracing(log_format: LogFormat) {
 }
 
 fn run() -> anyhow::Result<()> {
+    // Log the build stamp up front so operators can detect a stale
+    // long-running MCP server after an on-disk fix has landed. Every
+    // response also carries these fields in `_meta` for the same reason.
+    tracing::info!(
+        version = codesight_mcp::config::BUILD_VERSION,
+        sha = codesight_mcp::config::BUILD_SHA,
+        build_time = codesight_mcp::config::BUILD_TIME,
+        "codesight-mcp starting"
+    );
     let config = AppConfig::load();
     let service = Arc::new(CodeService::new(config)?);
     run_stdio(service)

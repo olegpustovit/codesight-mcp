@@ -1,13 +1,40 @@
 //! Integration tests: get context bundle.
 
 use std::fs;
+use std::sync::OnceLock;
 
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::indexing::imports::context_bundle_import_lines;
 use codesight_mcp::service::CodeService;
 use codesight_mcp::test_support;
 use serde_json::json;
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
+
+const IMPORTS_DEMO_PY: &str =
+    "import os\nfrom pathlib import Path\n\ndef my_func(x: int) -> str:\n    return str(x)\n";
+
+/// Process-lifetime shared fixture for the read-only cases. Hosts
+/// `write_small_repo` plus an extra `imports_demo.py` used by the
+/// imports-from-file assertion. Each case used to re-ingest the same
+/// fixture from scratch — 1 s+ per call × 4 cases dominated the suite.
+/// The handler logic under test is identical across cases, so they share
+/// one indexed instance. The extra file lives only in this fixture (not
+/// in `write_small_repo`) because `suggest_queries` asserts exact
+/// symbol/file counts on that shared helper.
+fn shared_small_repo() -> (&'static CodeService, &'static str) {
+    static SHARED: OnceLock<(TempDir, CodeService, String)> = OnceLock::new();
+    let (_ws, svc, sid) = SHARED.get_or_init(|| {
+        let workspace = tempdir().unwrap();
+        let root = workspace.path().join("repo");
+        let src = root.join("src");
+        test_support::write_small_repo(&src).unwrap();
+        fs::write(src.join("imports_demo.py"), IMPORTS_DEMO_PY).unwrap();
+        let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+        let sid = ingest(&svc, &root);
+        (workspace, svc, sid)
+    });
+    (svc, sid.as_str())
+}
 
 #[test]
 fn get_context_bundle_suite() {
@@ -76,14 +103,9 @@ fn read_symbol_source(svc: &CodeService, source_id: &str, stable_id: &str) -> St
 }
 
 fn case_symbol_source_and_name_kind() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    let src = root.join("src");
-    test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-    let sym = first_symbol_id(&svc, &sid, "add");
-    let expected_source = read_symbol_source(&svc, &sid, &sym);
+    let (svc, sid) = shared_small_repo();
+    let sym = first_symbol_id(svc, sid, "add");
+    let expected_source = read_symbol_source(svc, sid, &sym);
 
     let bundle = svc
         .dispatch(
@@ -103,19 +125,8 @@ fn case_symbol_source_and_name_kind() {
 }
 
 fn case_imports_from_file() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    let src = root.join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(
-        src.join("test.py"),
-        "import os\nfrom pathlib import Path\n\ndef my_func(x: int) -> str:\n    return str(x)\n",
-    )
-    .unwrap();
-
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-    let sym = first_symbol_id(&svc, &sid, "my_func");
+    let (svc, sid) = shared_small_repo();
+    let sym = first_symbol_id(svc, sid, "my_func");
 
     let bundle = svc
         .dispatch(
@@ -144,12 +155,7 @@ fn case_imports_from_file() {
 }
 
 fn case_invalid_symbol_error() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    let src = root.join("src");
-    test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
+    let (svc, sid) = shared_small_repo();
 
     let bundle = svc
         .dispatch(
@@ -170,13 +176,8 @@ fn case_invalid_symbol_error() {
 }
 
 fn case_meta_envelope() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    let src = root.join("src");
-    test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &root);
-    let sym = first_symbol_id(&svc, &sid, "add");
+    let (svc, sid) = shared_small_repo();
+    let sym = first_symbol_id(svc, sid, "add");
 
     let bundle = svc
         .dispatch(

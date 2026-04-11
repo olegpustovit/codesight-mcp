@@ -17,7 +17,19 @@ pub(super) fn augment_with_fuzzy(
     auto_fuzzy: bool,
     symbols: &mut Vec<SearchSymbol>,
 ) {
-    let threshold = args.fuzzy_threshold.unwrap_or(0.3);
+    // When the caller opts in with `fuzzy=true`, lower the trigram threshold
+    // and enable a default Levenshtein fallback so single-character
+    // transpositions in short queries (e.g. `vlaidate` → `validate`) match.
+    // Trigram Jaccard alone degrades quickly on short queries: swapping two
+    // adjacent letters drops the score below 0.3. An edit-distance bound of 2
+    // catches these without polluting longer queries, because the bound is
+    // absolute characters and `normalize_fuzzy_compare` strips underscores.
+    let threshold = args
+        .fuzzy_threshold
+        .unwrap_or(if auto_fuzzy { 0.3 } else { 0.25 });
+    let max_edit_distance = args
+        .max_edit_distance
+        .or(if auto_fuzzy { None } else { Some(2) });
     let primary_ids: HashSet<String> = symbols.iter().map(|s| s.id.clone()).collect();
     let scan_cap = per_kind_cap.saturating_mul(50).clamp(500, 12_000);
     let Ok(candidates) = store.symbols_light_scan(args.kind.as_deref(), scope, scan_cap) else {
@@ -29,7 +41,7 @@ pub(super) fn augment_with_fuzzy(
             continue;
         }
         let score = fuzzy::score_name_pair(&args.query, &c.name);
-        if fuzzy::fuzzy_candidate_passes(&score, threshold, args.max_edit_distance) {
+        if fuzzy::fuzzy_candidate_passes(&score, threshold, max_edit_distance) {
             if !auto_fuzzy {
                 c.match_type = Some("fuzzy".to_string());
                 c.fuzzy_similarity = Some(score.similarity);

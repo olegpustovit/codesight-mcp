@@ -483,6 +483,42 @@ const C: i32 = 1;
 }
 
 #[test]
+fn scm_rust_generic_impl_methods_are_receiver_scoped() {
+    // `impl<T> Wrapper<T>` and `impl<T> Trait for Wrapper<T>` used to lose
+    // the receiver name because the tags.scm impl pattern only matched a
+    // plain `type_identifier`, not a `generic_type`. Without the receiver
+    // prefix, same-named methods from different impls in one file collide
+    // in the stable symbol id and break round-trips.
+    let src = r#"
+struct Wrapper<T>(T);
+impl<T> Wrapper<T> {
+    fn into_inner(self) -> T { self.0 }
+}
+trait Take { fn take(self) -> i32; }
+impl<T> Take for Wrapper<T> {
+    fn take(self) -> i32 { 0 }
+}
+"#;
+    let scm = make_extractor("rust").extract("l.rs", src).unwrap();
+    let into_inner = scm
+        .iter()
+        .find(|s| s.name == "into_inner")
+        .expect("into_inner should be extracted");
+    assert_eq!(
+        into_inner.qualified_name, "Wrapper.into_inner",
+        "generic inherent impl method should carry receiver prefix"
+    );
+    let take = scm
+        .iter()
+        .find(|s| s.name == "take" && s.qualified_name.contains("Wrapper"))
+        .expect("take should be extracted with Wrapper scope");
+    assert_eq!(
+        take.qualified_name, "Wrapper.take",
+        "generic trait-for-impl method should carry receiver prefix"
+    );
+}
+
+#[test]
 fn scm_cpp_full_coverage() {
     let src = r#"
 namespace ns { void helper() {} }

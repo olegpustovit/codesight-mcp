@@ -75,7 +75,7 @@ impl CodeService {
                             "stable_id": h.get("id"),
                             "kind": h.get("kind"),
                             "path": h.get("file"),
-                            "line": h.get("line"),
+                            "start_line": h.get("line"),
                         },
                     }));
                 }

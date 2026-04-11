@@ -433,10 +433,7 @@ fn resolve_rust_bare_sibling(
     // Candidate files the first segment could refer to, anchored at the
     // from-file's directory only (not the whole project — that was the old
     // false-positive trap).
-    let candidates = [
-        format!("{dir}/{first}.rs"),
-        format!("{dir}/{first}/mod.rs"),
-    ];
+    let candidates = [format!("{dir}/{first}.rs"), format!("{dir}/{first}/mod.rs")];
     let first_hit = candidates
         .iter()
         .find(|c| known_files.iter().any(|f| f == *c))?;
@@ -568,11 +565,8 @@ mod rust_resolve_tests {
             "src/framework/laravel/render.rs",
             "src/framework/nuxt/render.rs",
         ]);
-        let got = resolve_rust_specifier(
-            "super::render",
-            "src/framework/laravel/provider.rs",
-            &known,
-        );
+        let got =
+            resolve_rust_specifier("super::render", "src/framework/laravel/provider.rs", &known);
         assert_eq!(got.as_deref(), Some("src/framework/laravel/render.rs"));
     }
 
@@ -595,11 +589,7 @@ mod rust_resolve_tests {
         // `super::sibling` from `foo/mod.rs` should resolve in `foo/`'s
         // parent directory (one level above `foo/`).
         let known = files(&["src/framework/laravel/mod.rs", "src/framework/nuxt.rs"]);
-        let got = resolve_rust_specifier(
-            "super::nuxt",
-            "src/framework/laravel/mod.rs",
-            &known,
-        );
+        let got = resolve_rust_specifier("super::nuxt", "src/framework/laravel/mod.rs", &known);
         assert_eq!(got.as_deref(), Some("src/framework/nuxt.rs"));
     }
 
@@ -616,11 +606,7 @@ mod rust_resolve_tests {
         // (or `src/service/mod.rs`), NOT to `src/lib/service.rs`.
         // Regression for the 94%-dead-code bug where crate roots were
         // treated like ordinary 2018-style module files.
-        let known = files(&[
-            "src/lib.rs",
-            "src/service.rs",
-            "src/models/mod.rs",
-        ]);
+        let known = files(&["src/lib.rs", "src/service.rs", "src/models/mod.rs"]);
         let got = resolve_rust_specifier("self::service", "src/lib.rs", &known);
         assert_eq!(got.as_deref(), Some("src/service.rs"));
         let got2 = resolve_rust_specifier("self::models", "src/lib.rs", &known);
@@ -662,12 +648,7 @@ mod rust_resolve_tests {
             "src/framework/laravel/regex.rs",
         ]);
         assert!(
-            resolve_rust_specifier(
-                "regex",
-                "src/framework/nextjs/middleware.rs",
-                &known
-            )
-            .is_none()
+            resolve_rust_specifier("regex", "src/framework/nextjs/middleware.rs", &known).is_none()
         );
     }
 
@@ -680,11 +661,7 @@ mod rust_resolve_tests {
             "crates/cs-storage/src/lib.rs",
             "crates/cs-storage/src/db.rs",
         ]);
-        let got = resolve_rust_specifier(
-            "crate::db",
-            "crates/cs-storage/src/lib.rs",
-            &known,
-        );
+        let got = resolve_rust_specifier("crate::db", "crates/cs-storage/src/lib.rs", &known);
         assert_eq!(got.as_deref(), Some("crates/cs-storage/src/db.rs"));
     }
 }

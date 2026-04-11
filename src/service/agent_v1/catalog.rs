@@ -28,7 +28,24 @@ impl CodeService {
     pub(in crate::service) fn catalog_sources(&self, v: Value) -> anyhow::Result<Value> {
         let _args: CatalogSourcesArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
-        let code_rows = list_repo_summaries(&self.config.repos_dir())?;
+        // Route each code source through `ensure_repo_store` first so the
+        // same auto-reindex-on-stale path that `manage_indexes status` and
+        // `search_catalog` use is also applied here. Without this,
+        // `catalog_sources` used to lag behind `manage_indexes status`
+        // whenever the on-disk data had drifted since server start because
+        // `list_repo_summaries` read raw metadata without triggering the
+        // freshness check.
+        let initial_code_rows = list_repo_summaries(&self.config.repos_dir())?;
+        let mut code_rows: Vec<_> = Vec::with_capacity(initial_code_rows.len());
+        for m in initial_code_rows {
+            if let Ok(store) = self.ensure_repo_store(&m.repo, None)
+                && let Ok(refreshed) = store.repo_summary()
+            {
+                code_rows.push(refreshed);
+            } else {
+                code_rows.push(m);
+            }
+        }
         let doc_values = list_doc_summaries(&self.config.docs_dir())?;
 
         let mut sources: Vec<Value> = Vec::new();

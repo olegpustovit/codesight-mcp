@@ -54,7 +54,7 @@ pub(super) fn parse_symbol_kind(kind_str: &str) -> Option<SymbolKind> {
 pub(super) fn parse_host_tree(ext: &ScmExtractor, source: &str) -> Result<Tree> {
     let mut parser = Parser::new();
     parser
-        .set_language(&ext.compiled.grammar)
+        .set_language(&ext.compiled().grammar)
         .map_err(|e| anyhow!("set_language: {e}"))?;
     parser
         .parse(source, None)
@@ -66,21 +66,18 @@ pub(super) fn collect_raw_captures(
     source: &str,
     tree: &Tree,
 ) -> Result<CaptureBatch> {
+    let compiled = ext.compiled();
     let mut cursor = QueryCursor::new();
-    let capture_names = ext.compiled.tags_query.capture_names();
+    let capture_names = compiled.tags_query.capture_names();
 
     // QueryMatches is a StreamingIterator — text predicates (#match?, #eq?) are
     // checked automatically. We extract owned data from each match before advancing.
     let mut raws = Vec::new();
     let mut standalone_docs = Vec::new();
-    let mut matches = cursor.matches(
-        &ext.compiled.tags_query,
-        tree.root_node(),
-        source.as_bytes(),
-    );
+    let mut matches = cursor.matches(&compiled.tags_query, tree.root_node(), source.as_bytes());
     while let Some(m) = matches.next() {
         let mut props =
-            super::pattern::read_pattern_props(&ext.compiled.tags_query, m.pattern_index);
+            super::pattern::read_pattern_props(&compiled.tags_query, m.pattern_index);
 
         let mut def_start = 0usize;
         let mut def_end = 0usize;

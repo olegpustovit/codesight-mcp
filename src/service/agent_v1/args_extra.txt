@@ -1,9 +1,0 @@
-const RANKED_CONTEXT_MAX_QUERY_LEN: usize = 500;
-
-fn default_include_children() -> bool {
-    true
-}
-
-fn default_ctx_limit() -> usize {
-    5
-}

@@ -71,7 +71,7 @@ Call codesight search_catalog { "source_id": "<repo>", "query": "dispatch", "lim
 Call codesight inspect_structure { "source_id": "<repo>", "view": "file_outline", "path": "src/main.rs" }
 ```
 
-The response carries `timing_ms` and the raw result set; the S4-P11 response envelope with `tokens_saved` telemetry is tracked in [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md) and lands in an imminent patch.
+The response carries `timing_ms` and the raw result set; the unified response envelope with `tokens_saved` telemetry is tracked in [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md) and lands in an imminent patch.
 
 ## Where state lives
 
@@ -103,5 +103,5 @@ Run `ingest_sources local_path=.` once per workspace; rerun after large changes.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — crate split, data flow, FactQuality taxonomy, dependency direction.
 - [`CONFIGURATION.md`](CONFIGURATION.md) — every `CODESIGHT_*` env var, precedence chain, `check` subcommand output.
-- [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md) — active refactor program (S1–S4 workstreams) and what's next.
+- [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md) — current state: open workstreams, metrics, test-drive issues, improvement backlog.
 - [`AGENTS.md`](AGENTS.md) — repo conventions, test layering, day-to-day commands.

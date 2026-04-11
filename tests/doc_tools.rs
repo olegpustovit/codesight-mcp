@@ -245,11 +245,7 @@ fn doc_index_catalog_toc_search_read_outline_delete() {
         )
         .unwrap();
     assert!(verified["ok"].as_bool().unwrap());
-    assert!(
-        verified["data"]["items"][0]
-            .get("hash_verified")
-            .is_some()
-    );
+    assert!(verified["data"]["items"][0].get("hash_verified").is_some());
 
     let bad_sec = svc
         .dispatch(

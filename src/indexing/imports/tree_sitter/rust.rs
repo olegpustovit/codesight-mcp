@@ -210,10 +210,7 @@ mod tests {
         let edges = extract_rust_imports_ts("use std::collections::HashMap;\n").unwrap();
         assert_eq!(
             specs(&edges),
-            vec![(
-                "std::collections".to_string(),
-                vec!["HashMap".to_string()]
-            )]
+            vec![("std::collections".to_string(), vec!["HashMap".to_string()])]
         );
     }
 
@@ -222,8 +219,7 @@ mod tests {
         // Nested paths flatten into their full prefix: `sync::Mutex` inside
         // `tokio::{…}` becomes specifier `tokio::sync`, name `Mutex`. This
         // mirrors the handling of `std::collections::HashMap`.
-        let edges =
-            extract_rust_imports_ts("use tokio::{sync::Mutex, task};\n").unwrap();
+        let edges = extract_rust_imports_ts("use tokio::{sync::Mutex, task};\n").unwrap();
         let mut s = specs(&edges);
         s.sort();
         assert_eq!(
@@ -264,8 +260,7 @@ mod tests {
 
     #[test]
     fn use_as_preserves_real_path() {
-        let edges =
-            extract_rust_imports_ts("use serde_json::Value as Json;\n").unwrap();
+        let edges = extract_rust_imports_ts("use serde_json::Value as Json;\n").unwrap();
         assert_eq!(
             specs(&edges),
             vec![("serde_json".to_string(), vec!["Value".to_string()])]
@@ -295,8 +290,7 @@ mod tests {
     fn inline_mod_emits_no_edge_but_walks_into_body() {
         // `mod inner { use crate::Foo; }` should emit the inner `use` edge
         // but NOT a `self::inner` edge (it's inline, not a file declaration).
-        let edges =
-            extract_rust_imports_ts("mod inner { use crate::Foo; }\n").unwrap();
+        let edges = extract_rust_imports_ts("mod inner { use crate::Foo; }\n").unwrap();
         assert_eq!(
             specs(&edges),
             vec![("crate".to_string(), vec!["Foo".to_string()])]

@@ -124,7 +124,7 @@ fn build_semantic_item(
             "summary": summary,
         },
         "snippet": summary,
-        "score": score,
+        "score": crate::service::agent_v1::util::round_score(score),
         "line": rec.start_line,
     })
 }

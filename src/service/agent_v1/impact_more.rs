@@ -22,7 +22,41 @@ impl CodeService {
             Err(e) => return self.error_response(&timer, e),
         };
 
-        let target = args.target.as_deref().unwrap_or("");
+        // Accept `target` as the primary input, but also honor refs[0] so
+        // callers can pass a symbol/file ref like every other evaluate_impact
+        // analysis. Reject with InvalidArgument if neither is set — silent
+        // "stable / 0 commits / file: \"\"" responses used to masquerade as
+        // a real result.
+        let target_owned = args
+            .target
+            .as_deref()
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                args.refs.as_ref().and_then(|refs| {
+                    refs.first().and_then(|r| {
+                        r.stable_id
+                            .clone()
+                            .or_else(|| r.id.clone())
+                            .or_else(|| r.path.clone())
+                            .filter(|s| !s.is_empty())
+                    })
+                })
+            });
+        let Some(target) = target_owned else {
+            return self.error_response(
+                &timer,
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "INVALID_REQUEST",
+                    message: "churn_rate requires `target` (a file path or symbol id) or \
+                              at least one entry in `refs`."
+                        .to_string(),
+                    detail: json!({ "analysis": "churn_rate" }),
+                },
+            );
+        };
+        let target = target.as_str();
         let days = args.days.unwrap_or(90);
 
         let root = match store.root_path() {

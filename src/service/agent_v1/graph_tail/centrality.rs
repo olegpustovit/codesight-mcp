@@ -43,7 +43,7 @@ impl CodeService {
                 .map(|(i, (node, score))| {
                     let deg = degrees.get(*node);
                     json!({
-                        "symbol_id": node,
+                        "path": node,
                         "rank": i + 1,
                         "score": score,
                         "in_degree": deg.map(|d| d.in_degree).unwrap_or(0),
@@ -64,7 +64,7 @@ impl CodeService {
                 .enumerate()
                 .map(|(i, (node, deg))| {
                     json!({
-                        "symbol_id": node,
+                        "path": node,
                         "rank": i + 1,
                         "score": (deg.in_degree + deg.out_degree) as f64,
                         "in_degree": deg.in_degree,
@@ -81,7 +81,7 @@ impl CodeService {
             json!({
                 "graph": "centrality",
                 "algorithm": algo,
-                "ranked_symbols": ranked,
+                "ranked_files": ranked,
                 "iterations_to_converge": iterations,
             }),
         )

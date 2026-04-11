@@ -94,15 +94,19 @@ impl CodeService {
             .file_language(&file_path)?
             .filter(|l| l != "unknown")
             .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let requested_start = args.start_line;
         let requested_end = args.end_line;
         let (line_count, start_line, end_line, body) =
             slice_file_lines(&content, args.start_line, args.end_line);
         let end_line_clamped = matches!(requested_end, Some(req) if req > end_line);
-        let warnings: Vec<&'static str> = if end_line_clamped {
-            vec!["end_line_clamped"]
-        } else {
-            Vec::new()
-        };
+        let start_line_clamped = matches!(requested_start, Some(req) if req > start_line);
+        let mut warnings: Vec<&'static str> = Vec::new();
+        if start_line_clamped {
+            warnings.push("start_line_clamped");
+        }
+        if end_line_clamped {
+            warnings.push("end_line_clamped");
+        }
         self.success_response(
             &timer,
             json!({
@@ -113,6 +117,7 @@ impl CodeService {
                 "language": language,
                 "start_line": start_line,
                 "end_line": end_line,
+                "start_line_clamped": start_line_clamped,
                 "end_line_clamped": end_line_clamped,
                 "line_count": line_count,
                 "warnings": warnings,

@@ -10,6 +10,34 @@ use crate::extractors::engine::scm::{ScmMetadata, parse_scm_header};
 
 include!(concat!(env!("OUT_DIR"), "/builtin_query_packs.rs"));
 
+/// Content-addressed stamp over the built-in query pack payload plus the
+/// crate version. Used by the indexer to detect that extractor behavior has
+/// changed even when no source file on disk has — tags.scm edits, grammar
+/// bumps, and new built-in packs all change the stamp, forcing a rehash of
+/// previously-cached files on next incremental ingest.
+pub fn builtin_extractor_version_stamp() -> &'static str {
+    use std::sync::OnceLock;
+    static STAMP: OnceLock<String> = OnceLock::new();
+    STAMP
+        .get_or_init(|| {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
+            hasher.update(b"\0");
+            for (pack_id, query, injections, metadata) in BUILTIN_QUERY_PACKS {
+                hasher.update(pack_id.as_bytes());
+                hasher.update(b"\0");
+                hasher.update(query.as_bytes());
+                hasher.update(b"\0");
+                hasher.update(injections.unwrap_or("").as_bytes());
+                hasher.update(b"\0");
+                hasher.update(metadata.unwrap_or("").as_bytes());
+                hasher.update(b"\0");
+            }
+            hasher.finalize().to_hex().to_string()
+        })
+        .as_str()
+}
+
 #[derive(Clone)]
 pub struct QueryPackDefinition {
     pub pack_id: String,
@@ -199,4 +227,21 @@ fn validate_pack_metadata(pack_id: &str, metadata: &ScmMetadata) -> Result<()> {
         bail!("query pack {pack_id} must declare either grammar or override_extractor");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod stamp_tests {
+    use super::builtin_extractor_version_stamp;
+
+    #[test]
+    fn stamp_is_stable_and_nonempty_hex() {
+        let a = builtin_extractor_version_stamp();
+        let b = builtin_extractor_version_stamp();
+        assert_eq!(a, b, "stamp must be deterministic within a process");
+        assert_eq!(a.len(), 64, "stamp must be blake3 hex (64 chars)");
+        assert!(
+            a.chars().all(|c| c.is_ascii_hexdigit()),
+            "stamp must be hex only"
+        );
+    }
 }

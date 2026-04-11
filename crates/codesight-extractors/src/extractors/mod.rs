@@ -51,6 +51,7 @@ pub trait LanguageExtractor: Send + Sync {
     fn extract(&self, file_path: &str, source: &str) -> anyhow::Result<Vec<StoredSymbol>>;
 }
 
+#[derive(Clone)]
 pub struct ExtractorRegistry {
     extractors: Vec<Arc<dyn LanguageExtractor>>,
     profile_extractors: Vec<Arc<profiles::ProfiledExtractor>>,

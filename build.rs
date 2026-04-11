@@ -131,13 +131,48 @@ fn macos_link_sdk() {
     println!("cargo:rustc-link-arg={sdk_root}");
 }
 
+/// Emit `CODESIGHT_BUILD_SHA` and `CODESIGHT_BUILD_TIME` as compile-time env
+/// vars so every response can advertise the running binary's build stamp.
+/// This is how clients detect a stale MCP server after the on-disk fix has
+/// landed but the long-running process still reflects the previous build.
+fn emit_build_stamp() {
+    let sha = std::process::Command::new("git")
+        .args(["rev-parse", "--short=12", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=CODESIGHT_BUILD_SHA={sha}");
+
+    // Seconds since Unix epoch — cheap, portable, deterministic against
+    // reproducible builds (SOURCE_DATE_EPOCH overrides if set).
+    let t = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        });
+    println!("cargo:rustc-env=CODESIGHT_BUILD_TIME={t}");
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    // Re-run the build script when HEAD moves so the SHA stays in sync.
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/refs/heads");
+}
+
 #[cfg(target_os = "macos")]
 fn main() {
     generate_builtin_query_packs();
+    emit_build_stamp();
     macos_link_sdk();
 }
 
 #[cfg(not(target_os = "macos"))]
 fn main() {
     generate_builtin_query_packs();
+    emit_build_stamp();
 }

@@ -41,7 +41,7 @@ pub(super) fn run_injections(
     source: &str,
     tree: &Tree,
 ) -> Vec<StoredSymbol> {
-    let Some(query) = ext.compiled.injections_query.as_ref() else {
+    let Some(query) = ext.compiled().injections_query.as_ref() else {
         return Vec::new();
     };
 

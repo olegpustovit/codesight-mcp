@@ -25,7 +25,7 @@ mod registry;
 mod structure;
 mod util;
 mod util_graph;
-pub(in crate::service) mod validate;
+pub(crate) mod validate;
 
 use serde_json::Value;
 
