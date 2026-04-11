@@ -185,7 +185,8 @@
             "importers",
             "calls",
             "dependencies",
-            "dependency_cycles"
+            "dependency_cycles",
+            "centrality"
           ]
         },
         "ref": {
@@ -229,7 +230,8 @@
             "impact_preview",
             "rename_safety",
             "changed_units",
-            "diff"
+            "diff",
+            "churn_rate"
           ]
         },
         "refs": {

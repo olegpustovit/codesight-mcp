@@ -23,32 +23,6 @@ pub(crate) fn make_summary(content: &str) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::make_summary;
-
-    #[test]
-    fn truncates_on_char_boundary_with_multibyte_at_limit() {
-        // `…` is 3 bytes (U+2026). Place it so it straddles byte 200.
-        let mut s = "a".repeat(198);
-        s.push('…');
-        s.push_str(" tail");
-        let out = make_summary(&s);
-        assert!(out.ends_with("..."));
-        assert!(out.is_char_boundary(out.len()));
-    }
-
-    #[test]
-    fn short_input_returned_verbatim() {
-        assert_eq!(make_summary("hello"), "hello");
-    }
-
-    #[test]
-    fn empty_input_returns_empty() {
-        assert_eq!(make_summary("   "), "");
-    }
-}
-
 pub(crate) fn slug_from_text(text: &str) -> String {
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
@@ -163,4 +137,29 @@ pub(crate) fn build_sections(
     }
 
     sections
+}
+
+#[cfg(test)]
+mod tests {
+    use super::make_summary;
+
+    #[test]
+    fn truncates_on_char_boundary_with_multibyte_at_limit() {
+        let mut s = "a".repeat(198);
+        s.push('…');
+        s.push_str(" tail");
+        let out = make_summary(&s);
+        assert!(out.ends_with("..."));
+        assert!(out.is_char_boundary(out.len()));
+    }
+
+    #[test]
+    fn short_input_returned_verbatim() {
+        assert_eq!(make_summary("hello"), "hello");
+    }
+
+    #[test]
+    fn empty_input_returns_empty() {
+        assert_eq!(make_summary("   "), "");
+    }
 }

@@ -483,8 +483,7 @@ fn crate_root_of(from_file: &str) -> Option<String> {
 /// - `foo/mod.rs`       → parent of `foo` (one level up)
 /// - `src/foo.rs`       → `src`
 fn parent_module_dir(from_file: &str) -> Option<String> {
-    if from_file.ends_with("/mod.rs") {
-        let parent = &from_file[..from_file.len() - "/mod.rs".len()];
+    if let Some(parent) = from_file.strip_suffix("/mod.rs") {
         return parent_dir_string(parent);
     }
     parent_dir_string(from_file)
@@ -496,8 +495,7 @@ fn parent_module_dir(from_file: &str) -> Option<String> {
 /// - `foo/mod.rs` → `foo`
 /// - `foo/bar.rs` → `foo/bar` (2018+ style: submodules of `bar` live there)
 fn self_module_dir(from_file: &str) -> Option<String> {
-    if from_file.ends_with("/mod.rs") {
-        let parent = &from_file[..from_file.len() - "/mod.rs".len()];
+    if let Some(parent) = from_file.strip_suffix("/mod.rs") {
         return Some(parent.to_string());
     }
     // Crate roots: `lib.rs` / `main.rs` live at `.../src/lib.rs` and their

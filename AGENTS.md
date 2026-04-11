@@ -61,6 +61,12 @@ for default filesystem tools.
 
 ## Tests (non-negotiable)
 
+- **Never leave a broken test or failing lint in place.** If you discover a pre-existing failing test, clippy error, or broken implementation while working on something else, **fix it in the same session** — even if it's not part of your original task. Do not:
+  - Skip it with a comment like "pre-existing, not my regression."
+  - Mark it `#[ignore]` to get CI green.
+  - Quietly scope your runs to avoid hitting it.
+  - Defer it to "a later cleanup pass."
+  Root-cause it and restore the contract the test was enforcing, or (if the test is genuinely stale) update it to the new contract in the same patch. Noticing a broken thing and walking past it is how this codebase rots.
 - **Do not lose tests.** Refactors and simplifications must keep the suite meaningful: no deleting tests to silence failures, no broad `#[ignore]` to hide breakage, no shrinking fixtures or assertions without an intentional contract change.
 - When behavior changes on purpose, update tests and docs together so they still encode the product contract.
 - New work adds or extends tests when it adds behavior; “cleanup” is not an excuse to drop coverage.
