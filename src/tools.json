@@ -29,7 +29,7 @@
   },
   {
     "name": "catalog_sources",
-    "description": "List indexed sources (code and docs) with capabilities and hints.",
+    "description": "List indexed sources (code and docs) with capabilities and hints. Code and docs for the same workspace share one `source_id`, distinguished by the `domains` field on each entry. On downstream calls, pass `source_id` together with the `domain` you want to query (where supported).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -234,7 +234,23 @@
         },
         "refs": {
           "type": "array",
-          "description": "blast_radius/impact_preview/rename_safety: required, at least refs[0] as a symbol ref. diff: exactly two symbol refs in the same file. changed_units: one or two commit refs ({kind: 'commit', id: '<sha>'}); one compares against HEAD."
+          "description": "blast_radius/impact_preview/rename_safety: required, at least refs[0] as a symbol ref. rename_safety additionally requires `new_name` on refs[0]. diff: exactly two symbol refs in the same file. changed_units: one or two commit refs ({kind: 'commit', id: '<sha>'}); one compares against HEAD.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": { "type": "string" },
+              "id": { "type": "string" },
+              "stable_id": { "type": "string" },
+              "source_id": { "type": "string" },
+              "path": { "type": "string" },
+              "start_line": { "type": "integer" },
+              "end_line": { "type": "integer" },
+              "new_name": {
+                "type": "string",
+                "description": "rename_safety only: the proposed new symbol name."
+              }
+            }
+          }
         },
         "repo_path": { "type": "string" }
       }
@@ -260,7 +276,7 @@
         },
         "refs": {
           "type": "array",
-          "description": "complexity: required symbol ref. doc_coverage: optional list of symbol refs (capped at 200)."
+          "description": "complexity: required symbol ref. doc_coverage: required list of symbol refs (capped at 200)."
         },
         "granularity": {
           "type": "string",
@@ -282,11 +298,19 @@
         },
         "top_n": {
           "type": "integer",
-          "description": "hotspots / dead_code: cap the returned list size (default 50)."
+          "description": "hotspots / dead_code: cap the returned list size (default 50 for hotspots, 25 for dead_code)."
         },
         "min_complexity": {
           "type": "integer",
           "description": "hotspots: minimum cyclomatic complexity threshold."
+        },
+        "max_tokens": {
+          "type": "integer",
+          "description": "dead_code: serialized-response token budget (≈4 bytes/token). Trims dead_files/dead_symbols until the response fits. Alias: token_budget."
+        },
+        "token_budget": {
+          "type": "integer",
+          "description": "Alias for max_tokens."
         },
         "repo_path": { "type": "string" }
       }
@@ -340,14 +364,14 @@
   },
   {
     "name": "manage_indexes",
-    "description": "Invalidate, delete, rebuild, or status for a source index.",
+    "description": "Invalidate, delete, rebuild, or status for a source index. Every action targets a single source and requires `source_id`; use `catalog_sources` first to obtain one. `rebuild` additionally requires `root_hint` (a filesystem path).",
     "inputSchema": {
       "type": "object",
-      "required": ["action"],
+      "required": ["action", "source_id"],
       "properties": {
         "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status"] },
-        "source_id": { "type": "string" },
-        "root_hint": { "type": "string", "description": "Filesystem path for rebuild." },
+        "source_id": { "type": "string", "description": "Required. The source the action targets, as returned by `catalog_sources`." },
+        "root_hint": { "type": "string", "description": "Filesystem path; required for `rebuild`." },
         "domains": { "type": "string" }
       }
     }

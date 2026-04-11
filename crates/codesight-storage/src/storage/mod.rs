@@ -17,6 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub use repo_summary::RepoMetadata;
+pub use symbol_reads::is_outline_noise;
 pub use symbol_record::{SymbolMetadata, SymbolRecord};
 pub use types::{AnalysisSymbol, RetrievedSymbol, SearchSymbol, SymbolSourceRecord};
 

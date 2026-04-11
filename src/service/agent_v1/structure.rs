@@ -109,16 +109,31 @@ impl CodeService {
                 } else {
                     (outline, false)
                 };
-                // Compute most_central_symbols via dependency graph PageRank
+                // Compute most_central_symbols via dependency graph PageRank.
+                // Nodes in this graph are file paths, so emit file-shaped
+                // entries (no synthetic `symbol_id` — clients that want to
+                // round-trip into `read_content` should pass `kind: "file"`
+                // with `path`). Noise files (build.rs, .mcp.json, …) are
+                // filtered so config artifacts don't dominate the ranking.
                 let adj = store.dependency_graph().unwrap_or_default();
                 let most_central = if !adj.is_empty() {
                     let pr = crate::analysis::graph::compute_pagerank(&adj, 0.85, 100, 1e-6);
-                    let mut ranked: Vec<_> = pr.scores.iter().collect();
+                    let mut ranked: Vec<_> = pr
+                        .scores
+                        .iter()
+                        .filter(|(node, _)| {
+                            !codesight_storage::storage::is_outline_noise(node.as_str())
+                        })
+                        .collect();
                     ranked
                         .sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-                    ranked.iter().take(5).map(|(node, score)| {
-                        json!({ "symbol_id": node, "file": node, "score": score, "kind": "file" })
-                    }).collect::<Vec<Value>>()
+                    ranked
+                        .iter()
+                        .take(5)
+                        .map(|(node, score)| {
+                            json!({ "kind": "file", "path": node, "score": score })
+                        })
+                        .collect::<Vec<Value>>()
                 } else {
                     Vec::new()
                 };

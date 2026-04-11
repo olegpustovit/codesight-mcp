@@ -21,6 +21,44 @@ This repository is the `codesight-mcp` Rust crate at repo root.
 | Workspace config | Optional repo-root `.codesight.toml` (TOML) for per-workspace adaptive languages, extra extensions, query-pack roots. |
 | [`tests/`](tests/) | Integration tests. Checked-in fixtures: [`tests/fixtures/doc_reference/`](tests/fixtures/doc_reference/), [`tests/fixtures/code_reference/`](tests/fixtures/code_reference/), [`tests/fixtures/lang_samples/`](tests/fixtures/lang_samples/). |
 
+## Dogfooding (non-negotiable)
+
+**Drive test-drive and self-fix work through `codesight-mcp` itself.** We are
+building a retrieval engine — if we don't use it on ourselves we won't notice
+when it's broken. Exploration must go through the MCP tools before reaching
+for default filesystem tools.
+
+### Tool replacement map
+
+| Default tool | Use instead | Notes |
+|--------------|-------------|-------|
+| `Grep` / `rg` for symbols, imports, references | `mcp__codesight__search_catalog` (`query_mode=keyword`) | symbol-aware scoring, cross-file |
+| `Grep` / `rg` for raw regex over file text | `mcp__codesight__search_catalog` (`query_mode=regex`) | routes to file-text search automatically |
+| `Glob` / `find` for tree walks | `mcp__codesight__inspect_structure` (`view=file_tree` or `repo_outline`) | respects index, skips `.codesight-index/**` |
+| `Read` of a known file/range | `mcp__codesight__read_content` (`kind=file` + `start_line`/`end_line`) | carries `language`, clamp warnings, `_meta` token savings |
+| `Read` of a symbol body | `mcp__codesight__read_content` (`kind=symbol`) | hashes, context_lines, drift detection |
+| manual import chasing | `mcp__codesight__inspect_graph` (`graph=importers` / `references` / `calls`) | real graph edges, cross-repo-aware |
+| manual impact review before a rename/refactor | `mcp__codesight__evaluate_impact` (`analysis=blast_radius` / `rename_safety` / `impact_preview`) | structured findings |
+| ad-hoc hotspot / dead-code spotting | `mcp__codesight__evaluate_quality` (`analysis=repo_health` / `dead_code` / `hotspots` / `doc_coverage`) | operator-facing metric schema |
+| digest/packing work for a ticket | `mcp__codesight__assemble_context` (`mode=bundle` / `context_bundle` / `ranked` / `query_suggestions`) | token-budgeted output |
+| checking whether an index is fresh | `mcp__codesight__manage_indexes` (`action=status`) → `mcp__codesight__ingest_sources` | never assume staleness by hand |
+
+### Fallback rules
+
+- Default filesystem tools (`Grep`, `Glob`, `Read`, `Edit`, `Write`, `Bash`)
+  remain the right choice for **writing** changes, running tests, and
+  editing files — you can't commit through an MCP tool.
+- Fall back to `Grep` / `Read` for retrieval **only when**:
+  1. codesight can't answer the question (e.g. the file isn't indexed, the
+     grammar is missing, the tool itself is the thing under repair); or
+  2. you've already tried the codesight path once and captured the gap.
+- Every retrieval-path fallback must be logged as a test-drive issue in
+  `CODESIGHT_TESTDRIVE_ISSUES_v*.md` — that's how gaps convert into
+  product fixes.
+- Issues found during a test-drive land in the same file and get fixed in
+  the same working session wherever practical — don't let it rot into a
+  backlog.
+
 ## Tests (non-negotiable)
 
 - **Do not lose tests.** Refactors and simplifications must keep the suite meaningful: no deleting tests to silence failures, no broad `#[ignore]` to hide breakage, no shrinking fixtures or assertions without an intentional contract change.

@@ -413,6 +413,7 @@ dependencies = [
  "anyhow",
  "codesight-core",
  "criterion",
+ "ignore",
  "rusqlite",
  "serde",
  "serde_json",

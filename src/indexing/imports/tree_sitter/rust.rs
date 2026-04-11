@@ -50,6 +50,24 @@ fn walk(node: Node<'_>, source: &str, edges: &mut Vec<ImportEdge>) {
             }
             return;
         }
+        "mod_item" => {
+            // `mod foo;` (no body) declares that `foo` lives in a sibling
+            // file — emit a `self::foo` edge so the resolver maps it to
+            // `foo.rs` / `foo/mod.rs` under the current file's module dir.
+            // `mod foo { … }` (has body) is inline and generates no edge,
+            // but we still descend into it to collect nested `use` edges.
+            let has_body = node.child_by_field_name("body").is_some();
+            if !has_body
+                && let Some(name_n) = node.child_by_field_name("name")
+                && let Ok(name) = source_slice(name_n, source)
+            {
+                edges.push(ImportEdge {
+                    specifier: format!("self::{name}"),
+                    names: Vec::new(),
+                });
+                return;
+            }
+        }
         _ => {}
     }
     let mut i = 0u32;
@@ -257,5 +275,31 @@ mod tests {
     #[test]
     fn parse_error_returns_none() {
         assert!(extract_rust_imports_ts("use ::::;").is_none());
+    }
+
+    #[test]
+    fn mod_decl_emits_self_edge() {
+        let edges = extract_rust_imports_ts("pub mod service;\nmod models;\n").unwrap();
+        let mut s = specs(&edges);
+        s.sort();
+        assert_eq!(
+            s,
+            vec![
+                ("self::models".to_string(), Vec::<String>::new()),
+                ("self::service".to_string(), Vec::<String>::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_mod_emits_no_edge_but_walks_into_body() {
+        // `mod inner { use crate::Foo; }` should emit the inner `use` edge
+        // but NOT a `self::inner` edge (it's inline, not a file declaration).
+        let edges =
+            extract_rust_imports_ts("mod inner { use crate::Foo; }\n").unwrap();
+        assert_eq!(
+            specs(&edges),
+            vec![("crate".to_string(), vec!["Foo".to_string()])]
+        );
     }
 }

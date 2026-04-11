@@ -106,3 +106,92 @@ fn glob_match(pattern: &str, path: &str) -> bool {
         .map(|re| re.is_match(path))
         .unwrap_or(false)
 }
+
+/// Collect Cargo target files that are always live roots in practice:
+///
+/// - Auto-discovered targets: any `.rs` file under `tests/`, `examples/`, or
+///   `benches/` next to a `Cargo.toml`.
+/// - Explicit `[[test]]` / `[[example]]` / `[[bench]]` entries with a `path`
+///   field.
+///
+/// Paths are returned relative to `root_path` (the indexed repo root), matching
+/// the shape of `all_files`. When `root_path` is `None` this is a no-op — we
+/// can't read `Cargo.toml` contents without a disk anchor.
+pub(crate) fn detect_cargo_target_files(
+    root_path: Option<&Path>,
+    all_files: &[String],
+) -> HashSet<String> {
+    let mut targets = HashSet::new();
+    let Some(root) = root_path else {
+        return targets;
+    };
+
+    let file_set: HashSet<&str> = all_files.iter().map(String::as_str).collect();
+    let cargo_dirs: Vec<String> = all_files
+        .iter()
+        .filter(|f| {
+            Path::new(f)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n == "Cargo.toml")
+                .unwrap_or(false)
+        })
+        .map(|f| {
+            Path::new(f)
+                .parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+
+    let join_rel = |dir: &str, sub: &str| -> String {
+        if dir.is_empty() {
+            sub.to_string()
+        } else {
+            format!("{dir}/{sub}")
+        }
+    };
+
+    for cargo_dir in &cargo_dirs {
+        for subdir in ["tests", "examples", "benches"] {
+            let prefix = join_rel(cargo_dir, subdir);
+            for file in all_files {
+                if !file.ends_with(".rs") {
+                    continue;
+                }
+                let matches_subdir = file == &prefix
+                    || file.starts_with(&format!("{prefix}/"))
+                    || file.starts_with(&format!("{prefix}\\"));
+                if matches_subdir {
+                    targets.insert(file.clone());
+                }
+            }
+        }
+
+        let cargo_toml_rel = join_rel(cargo_dir, "Cargo.toml");
+        let cargo_toml_abs = root.join(&cargo_toml_rel);
+        let Ok(contents) = fs::read_to_string(&cargo_toml_abs) else {
+            continue;
+        };
+        let Ok(parsed) = contents.parse::<toml::Value>() else {
+            continue;
+        };
+        for key in ["test", "example", "bench", "bin"] {
+            let Some(entries) = parsed.get(key).and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for entry in entries {
+                let Some(path) = entry.get("path").and_then(|p| p.as_str()) else {
+                    continue;
+                };
+                let rel = join_rel(cargo_dir, path);
+                if file_set.contains(rel.as_str()) {
+                    targets.insert(rel);
+                }
+            }
+        }
+    }
+
+    targets
+}

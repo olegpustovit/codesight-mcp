@@ -142,9 +142,21 @@ fn test_not_indexed() {
 
 fn test_empty_symbol_ids() {
     let (_ws, svc, sid) = make_doc_fixture();
-    let r = get_doc_coverage(&svc, &sid, vec![]);
-    assert_eq!(r["data"]["symbols_checked"].as_u64().unwrap(), 0);
-    assert_eq!(r["data"]["coverage_pct"].as_f64().unwrap(), 0.0);
+    let r = svc
+        .dispatch(
+            "evaluate_quality",
+            json!({
+                "source_id": sid,
+                "analysis": "doc_coverage",
+                "refs": [],
+            }),
+        )
+        .unwrap();
+    assert!(
+        !r["ok"].as_bool().unwrap(),
+        "empty refs must error, not silently return 0% (see CODESIGHT_TESTDRIVE_ISSUES_v3.md #14)"
+    );
+    assert_eq!(r["error"]["category"].as_str().unwrap(), "invalid_argument");
 }
 
 // ── Coverage detection ───────────────────────────────────────────────────────

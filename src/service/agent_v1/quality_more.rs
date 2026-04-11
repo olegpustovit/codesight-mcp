@@ -292,6 +292,21 @@ impl CodeService {
                     })
                     .unwrap_or_default();
                 symbol_ids.truncate(200);
+                if symbol_ids.is_empty() {
+                    return self.error_response(
+                        timer,
+                        ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
+                            code: "INVALID_REQUEST",
+                            message: "doc_coverage requires at least one `refs[*]` entry with kind=symbol."
+                                .to_string(),
+                            detail: json!({
+                                "analysis": "doc_coverage",
+                                "hint": "Pass symbol refs resolved from search_catalog or inspect_structure."
+                            }),
+                        },
+                    );
+                }
                 let data = quality::doc_coverage_payload(&doc_store, &symbol_ids)?;
                 self.success_response(timer, data)
             }

@@ -92,18 +92,23 @@ impl CodeService {
                 };
                 if hit {
                     let line_num = idx + 1;
+                    // stable_id is the file path only — a file ref is
+                    // round-trippable through read_content as-is. The hit's
+                    // line number lives on `line` / `ref.start_line`.
                     let mut row = json!({
                         "ref": {
-                            "id": format!("{rel}#L{}", line_num),
-                            "stable_id": format!("{rel}#L{}", line_num),
+                            "id": rel,
+                            "stable_id": rel,
                             "source_id": source_id,
                             "domain": "code",
                             "kind": "file",
                             "path": rel,
+                            "start_line": line_num,
                             "title": format!("line {}", line_num),
                             "summary": line.trim().chars().take(200).collect::<String>(),
                         },
                         "snippet": line.trim(),
+                        "score": 1.0,
                         "line": line_num,
                     });
                     if ctx > 0 {

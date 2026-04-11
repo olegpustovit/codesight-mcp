@@ -3,7 +3,9 @@ use std::path::Path;
 
 use crate::{analysis::evidence::EvidenceNote, storage::AnalysisSymbol};
 
-use super::entrypoints::{detect_main_guard_files, entrypoint_root_notes, is_test_file};
+use super::entrypoints::{
+    detect_cargo_target_files, detect_main_guard_files, entrypoint_root_notes, is_test_file,
+};
 
 pub(crate) struct RepoReachability {
     pub live_roots: HashSet<String>,
@@ -22,6 +24,7 @@ pub(crate) fn build_repo_reachability(
     entry_patterns: &[String],
 ) -> RepoReachability {
     let main_guard_files = detect_main_guard_files(root_path, all_files, all_symbols);
+    let cargo_target_files = detect_cargo_target_files(root_path, all_files);
     let mut live_roots = HashSet::new();
     let mut explicit_live_roots = HashSet::new();
     let mut evidence_notes = Vec::new();
@@ -46,6 +49,16 @@ pub(crate) fn build_repo_reachability(
             evidence_notes.push(EvidenceNote::heuristic(
                 "main_guard",
                 format!("file '{file}' contains a __name__ == '__main__' style guard"),
+            ));
+        }
+
+        if cargo_target_files.contains(file) {
+            explicit_roots_found = true;
+            live_roots.insert(file.clone());
+            explicit_live_roots.insert(file.clone());
+            evidence_notes.push(EvidenceNote::structural(
+                "cargo_target",
+                format!("file '{file}' is a Cargo [[test]]/[[example]]/[[bench]]/[[bin]] target"),
             ));
         }
     }

@@ -43,6 +43,8 @@ impl CodeService {
 
             let mut entry = json!({
                 "source_id": m.repo,
+                "domain": "code",
+                "stable_key": format!("{}#code", m.repo),
                 "display_name": m.repo,
                 "root_hint": root_hint,
                 "domains": ["code"],
@@ -76,6 +78,8 @@ impl CodeService {
 
             sources.push(json!({
                 "source_id": repo,
+                "domain": "docs",
+                "stable_key": format!("{repo}#docs"),
                 "display_name": repo,
                 "root_hint": root_hint,
                 "domains": ["docs"],

@@ -51,17 +51,28 @@ impl IndexStore {
         Ok(m)
     }
 
-    /// Sample symbols for `query_suggestions` example queries (deterministic order).
+    /// Sample symbols for `query_suggestions` example queries, ordered by
+    /// PageRank-relevant kinds first (functions, classes, methods, structs,
+    /// traits) so operator-facing suggestions land on real API surface rather
+    /// than top-of-tree constants. Returns `(name, kind, file_path)`.
     pub fn symbol_samples_for_suggestions(
         &self,
         limit: usize,
-    ) -> anyhow::Result<Vec<(String, String)>> {
+    ) -> anyhow::Result<Vec<(String, String, String)>> {
         let conn = self.open_read_only()?;
-        let lim = limit.clamp(1, 32) as i64;
-        let mut stmt =
-            conn.prepare("SELECT name, kind FROM symbols ORDER BY file_path, name LIMIT ?1")?;
+        let lim = limit.clamp(1, 64) as i64;
+        let mut stmt = conn.prepare(
+            r#"SELECT name, kind, file_path FROM symbols
+               WHERE kind IN ('function','method','class','struct','trait','interface','enum')
+               ORDER BY file_path, name
+               LIMIT ?1"#,
+        )?;
         let rows = stmt.query_map(rusqlite::params![lim], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         let mut v = Vec::new();
         for row in rows {

@@ -253,6 +253,10 @@ pub struct EvaluateQualityArgs {
     pub file_path: Option<String>,
     #[serde(default)]
     pub min_callers: Option<u64>,
+    /// Optional token budget for the serialized response body. Alias
+    /// `token_budget`.
+    #[serde(default, alias = "token_budget")]
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]

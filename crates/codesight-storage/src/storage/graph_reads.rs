@@ -152,6 +152,36 @@ impl IndexStore {
         }))
     }
 
+    /// Language-agnostic "most imported files" ranked by in-degree from the
+    /// stored dependency edge table. Excludes build scripts and tool manifests
+    /// (`is_outline_noise`). Returns `(file_path, importer_count)` pairs.
+    pub fn most_imported_files(&self, limit: usize) -> anyhow::Result<Vec<(String, usize)>> {
+        let conn = self.open_read_only()?;
+        let mut stmt = conn.prepare(
+            "SELECT target_file, COUNT(DISTINCT source_file) AS importers
+             FROM dependency_edges
+             WHERE target_file != source_file
+             GROUP BY target_file
+             ORDER BY importers DESC, target_file ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+        })?;
+        let mut out: Vec<(String, usize)> = Vec::new();
+        let cap = limit.clamp(1, 100);
+        for row in rows {
+            let (path, n) = row?;
+            if crate::storage::is_outline_noise(&path) {
+                continue;
+            }
+            out.push((path, n));
+            if out.len() >= cap {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     /// Fast stat-based staleness check. Returns true if any indexed file has
     /// a different size or mtime on disk, or if new source files exist that
     /// aren't in the index. Does NOT read file contents or compute hashes.

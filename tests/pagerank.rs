@@ -446,12 +446,17 @@ fn outline_most_central_symbols_shape() {
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let central = r["data"]["most_central_symbols"].as_array().unwrap();
     for sym in central {
-        assert!(
-            sym["symbol_id"].is_string(),
-            "should have symbol_id: {sym:?}"
-        );
+        assert!(sym["path"].is_string(), "should have path: {sym:?}");
         assert!(sym["score"].is_number(), "should have score: {sym:?}");
-        assert!(sym["kind"].is_string(), "should have kind: {sym:?}");
+        assert_eq!(
+            sym["kind"].as_str(),
+            Some("file"),
+            "centrality nodes are files: {sym:?}"
+        );
+        assert!(
+            sym.get("symbol_id").is_none(),
+            "symbol_id is no longer emitted (was file path, not a symbol): {sym:?}"
+        );
     }
 }
 
@@ -462,9 +467,9 @@ fn outline_most_central_top_is_most_imported_file() {
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let central = r["data"]["most_central_symbols"].as_array().unwrap();
     assert!(!central.is_empty(), "should have central symbols");
-    let top_id = central[0]["symbol_id"].as_str().unwrap();
+    let top_path = central[0]["path"].as_str().unwrap();
     assert!(
-        top_id.contains("core.py"),
-        "top central symbol should be from core.py (imported by 2 files), got '{top_id}'"
+        top_path.contains("core.py"),
+        "top central file should be core.py (imported by 2 files), got '{top_path}'"
     );
 }

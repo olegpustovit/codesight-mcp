@@ -491,13 +491,23 @@ fn parent_module_dir(from_file: &str) -> Option<String> {
 }
 
 /// Return the directory where submodules of `from_file`'s module live.
+/// - `src/lib.rs` / `src/main.rs` → `src` (crate roots: submodules live
+///   alongside the root file, not under a `lib/`/`main/` directory)
 /// - `foo/mod.rs` → `foo`
-/// - `foo/bar.rs` → `foo/bar` (where submodules of `bar` live in 2018+ style)
-/// - `src/foo.rs` → `src/foo`
+/// - `foo/bar.rs` → `foo/bar` (2018+ style: submodules of `bar` live there)
 fn self_module_dir(from_file: &str) -> Option<String> {
     if from_file.ends_with("/mod.rs") {
         let parent = &from_file[..from_file.len() - "/mod.rs".len()];
         return Some(parent.to_string());
+    }
+    // Crate roots: `lib.rs` / `main.rs` live at `.../src/lib.rs` and their
+    // submodules live in `.../src/`, never in `.../src/lib/`.
+    if from_file.ends_with("/lib.rs") || from_file.ends_with("/main.rs") {
+        return parent_dir_string(from_file);
+    }
+    // Bare `lib.rs` / `main.rs` at the project root (no enclosing dir).
+    if from_file == "lib.rs" || from_file == "main.rs" {
+        return Some(String::new());
     }
     let stripped = from_file.strip_suffix(".rs")?;
     Some(stripped.to_string())
@@ -600,6 +610,30 @@ mod rust_resolve_tests {
         let known = files(&["src/a/mod.rs", "src/a/inner.rs"]);
         let got = resolve_rust_specifier("self::inner", "src/a/mod.rs", &known);
         assert_eq!(got.as_deref(), Some("src/a/inner.rs"));
+    }
+
+    #[test]
+    fn self_from_lib_rs_resolves_to_crate_root_sibling() {
+        // `mod service;` in `src/lib.rs` must map to `src/service.rs`
+        // (or `src/service/mod.rs`), NOT to `src/lib/service.rs`.
+        // Regression for the 94%-dead-code bug where crate roots were
+        // treated like ordinary 2018-style module files.
+        let known = files(&[
+            "src/lib.rs",
+            "src/service.rs",
+            "src/models/mod.rs",
+        ]);
+        let got = resolve_rust_specifier("self::service", "src/lib.rs", &known);
+        assert_eq!(got.as_deref(), Some("src/service.rs"));
+        let got2 = resolve_rust_specifier("self::models", "src/lib.rs", &known);
+        assert_eq!(got2.as_deref(), Some("src/models/mod.rs"));
+    }
+
+    #[test]
+    fn self_from_main_rs_resolves_to_crate_root_sibling() {
+        let known = files(&["src/main.rs", "src/cli.rs"]);
+        let got = resolve_rust_specifier("self::cli", "src/main.rs", &known);
+        assert_eq!(got.as_deref(), Some("src/cli.rs"));
     }
 
     #[test]

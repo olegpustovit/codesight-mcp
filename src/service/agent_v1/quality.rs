@@ -114,6 +114,56 @@ impl CodeService {
                     meta.file_count, meta.symbol_count, fn_method, meta.index_version
                 );
                 let evidence = serde_json::to_value(&meta)?;
+                let mut findings = vec![json!({
+                    "finding_id": "repo_health:summary",
+                    "analysis": "repo_health",
+                    "severity": "info",
+                    "confidence": 1.0,
+                    "summary": "index metadata snapshot",
+                    "evidence": evidence,
+                    "related_refs": [],
+                })];
+                if dead_code_pct >= 20.0 {
+                    let severity = if dead_code_pct >= 50.0 {
+                        "error"
+                    } else {
+                        "warning"
+                    };
+                    findings.push(json!({
+                        "finding_id": "repo_health:dead_code",
+                        "analysis": "repo_health",
+                        "severity": severity,
+                        "confidence": 0.6,
+                        "summary": format!(
+                            "{dead_code_pct:.1}% of files ({dead_count}/{}) unreachable from live roots — detector may be missing entry points (check Cargo [[test]]/[[example]]/[[bench]] targets) or mod-declaration edges",
+                            meta.file_count
+                        ),
+                        "evidence": { "dead_code_pct": dead_code_pct, "dead_count": dead_count, "file_count": meta.file_count },
+                        "related_refs": [],
+                    }));
+                }
+                if cycle_count > 0 {
+                    findings.push(json!({
+                        "finding_id": "repo_health:cycles",
+                        "analysis": "repo_health",
+                        "severity": "warning",
+                        "confidence": 0.8,
+                        "summary": format!("{cycle_count} dependency cycle(s) detected"),
+                        "evidence": { "cycle_count": cycle_count },
+                        "related_refs": [],
+                    }));
+                }
+                if index_stale {
+                    findings.push(json!({
+                        "finding_id": "repo_health:index_stale",
+                        "analysis": "repo_health",
+                        "severity": "warning",
+                        "confidence": 1.0,
+                        "summary": "index is stale compared to the filesystem; re-run ingest_sources",
+                        "evidence": { "indexed_at": meta.indexed_at },
+                        "related_refs": [],
+                    }));
+                }
                 self.success_response(
                     &timer,
                     json!({
@@ -130,15 +180,7 @@ impl CodeService {
                         "cycles_sample": cycles_sample,
                         "top_hotspots": top_hotspots,
                         "index_stale": index_stale,
-                        "findings": [{
-                            "finding_id": "repo_health:summary",
-                            "analysis": "repo_health",
-                            "severity": "info",
-                            "confidence": 1.0,
-                            "summary": "index metadata snapshot",
-                            "evidence": evidence,
-                            "related_refs": [],
-                        }],
+                        "findings": findings,
                     }),
                 )
             }
@@ -152,13 +194,13 @@ impl CodeService {
                 let min_confidence = args.min_confidence.unwrap_or(0.5);
                 let include_tests = args.include_tests.unwrap_or(true);
                 let entry_patterns = args.entry_point_patterns.clone().unwrap_or_default();
-                // Cap dead_files / dead_symbols so a large repo can't return
-                // 100k+ characters. top_n doubles as the limit for parity with
-                // the hotspots analysis.
-                let limit = args.top_n.unwrap_or(50);
+                // Cap dead_files / dead_symbols so a large repo can't blow the
+                // MCP response budget. Default is conservative; callers can
+                // raise via top_n or tighten further via max_tokens.
+                let limit = args.top_n.unwrap_or(25);
                 let raw_bytes = store.repo_total_bytes()?;
                 let timer = MetaBuilder::new(raw_bytes);
-                let data = dead_code::dead_code_payload(
+                let mut data = dead_code::dead_code_payload(
                     &store,
                     granularity,
                     min_confidence,
@@ -166,6 +208,9 @@ impl CodeService {
                     &entry_patterns,
                     Some(limit),
                 )?;
+                if let Some(budget) = args.max_tokens {
+                    dead_code::pack_dead_code_to_budget(&mut data, budget);
+                }
                 self.success_response_with_meta_extra(
                     &timer,
                     data,

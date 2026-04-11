@@ -19,7 +19,10 @@ fn unknown_tool_returns_envelope_error() {
 }
 
 #[test]
-fn evaluate_quality_unsupported_emits_warning_and_empty_findings() {
+fn evaluate_quality_unsupported_is_invalid_argument() {
+    // Post-tightening contract: unknown `analysis` values are rejected at
+    // schema validation time with INVALID_ARGUMENT instead of silently
+    // falling through to a NOT_IMPLEMENTED warning.
     let dir = tempdir().unwrap();
     let svc = CodeService::new(AppConfig::new(dir.path().to_path_buf())).unwrap();
     let r = svc
@@ -31,11 +34,9 @@ fn evaluate_quality_unsupported_emits_warning_and_empty_findings() {
             }),
         )
         .unwrap();
-    assert_eq!(r["ok"], true);
-    let w = r["warnings"].as_array().unwrap();
-    assert!(!w.is_empty());
-    let findings = r["data"]["findings"].as_array().unwrap();
-    assert!(findings.is_empty());
+    assert_eq!(r["ok"], false, "{r}");
+    let err = r.get("error").expect("error envelope");
+    assert_eq!(err["code"], "INVALID_ARGUMENT");
 }
 
 #[test]

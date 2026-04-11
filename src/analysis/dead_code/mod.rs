@@ -88,13 +88,7 @@ pub fn dead_code_payload(
         dead_files.push(json!({
             "file": file,
             "confidence": confidence,
-            "signals": ["unreachable_from_live_roots"],
-            "evidence_notes": serialize_notes(&[
-                EvidenceNote::structural(
-                    "unreachable_from_live_roots",
-                    "file is not reachable from the seeded dependency graph roots",
-                ),
-            ]),
+            "signal": "unreachable_from_live_roots",
         }));
     }
 
@@ -118,13 +112,7 @@ pub fn dead_code_payload(
                 "file": symbol.file_path,
                 "line": symbol.start_line,
                 "confidence": 0.8,
-                "signals": ["dead_file"],
-                "evidence_notes": serialize_notes(&[
-                    EvidenceNote::structural(
-                        "dead_file",
-                        "symbol is reported because its containing file is unreachable",
-                    ),
-                ]),
+                "signal": "dead_file",
             }));
         }
     }
@@ -149,7 +137,6 @@ pub fn dead_code_payload(
         "live_root_count": reachability.live_roots.len(),
         "truncated": truncated,
         "analysis_notes": "dead code detection uses dependency-graph reachability plus labeled entry-root heuristics",
-        "evidence_notes": serialize_notes(&reachability.evidence_notes),
     });
 
     if let Some(framework_warning) = reachability.framework_warning {
@@ -260,4 +247,49 @@ fn is_barrel_exported(symbol: &AnalysisSymbol, all_file_contents: &[(String, Str
 
 fn serialize_notes(notes: &[EvidenceNote]) -> Value {
     serde_json::to_value(notes).unwrap_or_else(|_| json!([]))
+}
+
+/// Trim `dead_files` and `dead_symbols` in an already-built `dead_code`
+/// payload so the serialized response fits under `max_tokens` (≈4 bytes per
+/// token). Sets `truncated: true` when anything was dropped. Used by the
+/// `evaluate_quality` handler when callers pass `max_tokens`.
+pub fn pack_dead_code_to_budget(data: &mut Value, max_tokens: u32) {
+    let byte_budget = (max_tokens as usize).saturating_mul(crate::config::BYTES_PER_TOKEN as usize);
+    if serialized_len(data) <= byte_budget {
+        return;
+    }
+    let mut any_dropped = false;
+    loop {
+        let files_len = data
+            .get("dead_files")
+            .and_then(|v| v.as_array())
+            .map(Vec::len)
+            .unwrap_or(0);
+        let syms_len = data
+            .get("dead_symbols")
+            .and_then(|v| v.as_array())
+            .map(Vec::len)
+            .unwrap_or(0);
+        if files_len == 0 && syms_len == 0 {
+            break;
+        }
+        if syms_len >= files_len {
+            if let Some(arr) = data.get_mut("dead_symbols").and_then(|v| v.as_array_mut()) {
+                arr.pop();
+            }
+        } else if let Some(arr) = data.get_mut("dead_files").and_then(|v| v.as_array_mut()) {
+            arr.pop();
+        }
+        any_dropped = true;
+        if serialized_len(data) <= byte_budget {
+            break;
+        }
+    }
+    if any_dropped {
+        data["truncated"] = json!(true);
+    }
+}
+
+fn serialized_len(v: &Value) -> usize {
+    serde_json::to_vec(v).map(|b| b.len()).unwrap_or(0)
 }

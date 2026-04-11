@@ -82,7 +82,6 @@ fn run_returns_required_fields() {
         "dead_count",
         "cycle_count",
         "cycles_sample",
-        "unstable_modules",
         "top_hotspots",
     ] {
         assert!(d.get(key).is_some(), "missing data.{key}");
@@ -127,7 +126,6 @@ fn run_counts_non_negative() {
     assert!(d["total_symbols"].as_u64().is_some());
     assert!(d["cycle_count"].as_u64().is_some());
     assert!(d["dead_count"].as_u64().is_some());
-    assert!(d["unstable_modules"].as_u64().is_some());
 }
 
 fn run_dead_code_pct_range() {

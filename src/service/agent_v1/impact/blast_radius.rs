@@ -21,10 +21,15 @@ impl CodeService {
         let depth = args.depth.unwrap_or(2);
         let include_depth_scores = args.include_depth_scores.unwrap_or(false);
 
-        let symbol_name = args
+        // Accept either a stable symbol id (preferred — uses the direct
+        // symbol-id lookup) or a bare symbol name (falls back to walking
+        // file outlines). Previously the handler conflated the two: passing
+        // `refs[0].stable_id` ended up matching it against `sym.name`, which
+        // never hit, so blast_radius returned zero importers for every
+        // ref-based call.
+        let stable_id = args
             .symbol_id
             .as_deref()
-            .or(args.target.as_deref())
             .or_else(|| {
                 args.refs
                     .as_ref()
@@ -32,6 +37,15 @@ impl CodeService {
                     .and_then(|r| r.stable_id.as_deref().or(r.id.as_deref()))
             })
             .unwrap_or("");
+        let symbol_name = args.target.as_deref().unwrap_or_else(|| {
+            // Extract bare name from a stable_id of the form
+            // `path::Name#kind` — last segment after `::`, before `#`.
+            stable_id
+                .rsplit("::")
+                .next()
+                .and_then(|tail| tail.split('#').next())
+                .unwrap_or("")
+        });
 
         let adj = store.dependency_graph()?;
         let mut reverse_adj: std::collections::HashMap<String, Vec<String>> =
@@ -47,16 +61,23 @@ impl CodeService {
 
         let all_files = store.all_file_paths()?;
         let mut symbol_file: Option<String> = None;
-        for file in &all_files {
-            let outline = store.file_outline(file)?;
-            for sym in &outline {
-                if sym["name"].as_str() == Some(symbol_name) {
-                    symbol_file = Some(file.clone());
+        if !stable_id.is_empty()
+            && let Ok(Some(rec)) = store.symbol_record(stable_id)
+        {
+            symbol_file = Some(rec.file_path);
+        }
+        if symbol_file.is_none() && !symbol_name.is_empty() {
+            for file in &all_files {
+                let outline = store.file_outline(file)?;
+                for sym in &outline {
+                    if sym["name"].as_str() == Some(symbol_name) {
+                        symbol_file = Some(file.clone());
+                        break;
+                    }
+                }
+                if symbol_file.is_some() {
                     break;
                 }
-            }
-            if symbol_file.is_some() {
-                break;
             }
         }
 

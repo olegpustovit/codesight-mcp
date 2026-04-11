@@ -218,7 +218,10 @@ impl CodeService {
                     language_distribution.insert(lang.clone(), json!(n));
                 }
 
-                let samples = match store.symbol_samples_for_suggestions(6) {
+                // Prefer high-centrality symbols from src/ and crates/*/src/
+                // so onboarding suggestions land on the public API, not
+                // build.rs constants or editor config keys.
+                let samples = match store.symbol_samples_for_suggestions(20) {
                     Ok(s) => s,
                     Err(e) => return self.error_response(timer, index_error(e)),
                 };
@@ -227,15 +230,23 @@ impl CodeService {
                     "tool": "search_catalog",
                     "description": "Run a hybrid catalog search over this indexed workspace.",
                 })];
-                for (name, kind) in samples {
+                let mut added = 0usize;
+                for (name, kind, file_path) in samples {
+                    if added >= 5 {
+                        break;
+                    }
+                    if codesight_storage::storage::is_outline_noise(&file_path) {
+                        continue;
+                    }
                     example_queries.push(json!({
                         "query": name.clone(),
                         "tool": "search_catalog",
                         "description": format!("Find indexed {kind} `{name}`."),
                     }));
+                    added += 1;
                 }
 
-                let most_imported_files: Vec<Value> = match store.python_most_imported_files(10) {
+                let most_imported_files: Vec<Value> = match store.most_imported_files(10) {
                     Ok(rows) => rows
                         .into_iter()
                         .map(|(file, n)| json!({ "file": file, "imported_by": n }))

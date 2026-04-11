@@ -194,6 +194,10 @@ pub fn language_for_path(file_path: &str) -> &'static str {
         "rs" => "rust",
         "rb" => "ruby",
         "php" => "php",
+        "scm" => "tree-sitter-query",
+        "toml" => "toml",
+        "md" | "markdown" => "markdown",
+        "yaml" | "yml" => "yaml",
         _ => "unknown",
     }
 }

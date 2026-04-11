@@ -2,8 +2,38 @@
 
 use std::collections::{HashMap, HashSet};
 
+/// Edges that represent module containment ("foo/bar.rs uses its parent
+/// mod.rs" or "foo.rs uses the crate root lib.rs") are structural back-edges,
+/// not runtime dependencies. Including them in cycle detection inflates
+/// strongly connected components with noise (one 20+ file "cycle" across
+/// siblings that all re-export through a shared `mod.rs`).
+///
+/// An edge `src → tgt` is treated as a structural back-edge when `tgt` is
+/// an ancestor module file of `src`: either `<some-prefix>/mod.rs`,
+/// `<some-prefix>/lib.rs`, or `<some-prefix>/main.rs` where the prefix
+/// is a directory ancestor of `src`.
+fn is_structural_back_edge(src: &str, tgt: &str) -> bool {
+    let Some((tgt_dir, tgt_file)) = tgt.rsplit_once('/') else {
+        // Crate-root at repo root (no directory).
+        return matches!(tgt, "mod.rs" | "lib.rs" | "main.rs");
+    };
+    if !matches!(tgt_file, "mod.rs" | "lib.rs" | "main.rs") {
+        return false;
+    }
+    // For `lib.rs` / `main.rs` we treat the target dir itself as the module
+    // root. For `mod.rs` the module root is the directory the file sits in.
+    // In both cases, `src` being inside `tgt_dir/` (or equal to `tgt_dir`)
+    // means the edge points at a strictly-ancestor module file.
+    src != tgt
+        && (src.starts_with(&format!("{tgt_dir}/"))
+            || src == tgt_dir
+            || (tgt_dir.is_empty() && src.contains('/')))
+}
+
 /// Find all strongly connected components of size > 1 in a directed graph.
-/// Returns cycles as sorted Vec<String>.
+/// Returns cycles as sorted Vec<String>. Structural back-edges from child
+/// modules to their ancestor `mod.rs` / `lib.rs` / `main.rs` are excluded
+/// from the SCC search so they do not inflate extractor-tree cycles.
 pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
     let mut index_counter: usize = 0;
     let mut stack: Vec<String> = Vec::new();
@@ -33,6 +63,9 @@ pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
             for w in neighbors {
                 if w == v {
                     // Skip self-loops
+                    continue;
+                }
+                if is_structural_back_edge(v, w) {
                     continue;
                 }
                 if !indices.contains_key(w.as_str()) {
@@ -100,4 +133,54 @@ pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
 
     sccs.sort();
     sccs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn adj(edges: &[(&str, &str)]) -> HashMap<String, Vec<String>> {
+        let mut a: HashMap<String, Vec<String>> = HashMap::new();
+        for (s, t) in edges {
+            a.entry((*s).to_string())
+                .or_default()
+                .push((*t).to_string());
+            a.entry((*t).to_string()).or_default();
+        }
+        a
+    }
+
+    #[test]
+    fn structural_back_edges_dont_create_cycles() {
+        // `asm.rs` re-exports through `extractors/mod.rs`, which `pub mod asm;`s
+        // it back. That child→parent edge is structural and should not make
+        // the pair look like a runtime cycle.
+        let a = adj(&[
+            ("src/extractors/mod.rs", "src/extractors/asm.rs"),
+            ("src/extractors/asm.rs", "src/extractors/mod.rs"),
+        ]);
+        assert!(find_cycles(&a).is_empty());
+    }
+
+    #[test]
+    fn real_cycle_between_siblings_is_reported() {
+        // Two siblings that genuinely cross-reference each other with
+        // no parent-mod indirection should still show up.
+        let a = adj(&[
+            ("src/a/foo.rs", "src/a/bar.rs"),
+            ("src/a/bar.rs", "src/a/foo.rs"),
+        ]);
+        let cycles = find_cycles(&a);
+        assert_eq!(cycles.len(), 1);
+        assert_eq!(cycles[0], vec!["src/a/bar.rs", "src/a/foo.rs"]);
+    }
+
+    #[test]
+    fn child_to_crate_root_lib_rs_is_structural() {
+        let a = adj(&[
+            ("src/lib.rs", "src/service.rs"),
+            ("src/service.rs", "src/lib.rs"),
+        ]);
+        assert!(find_cycles(&a).is_empty());
+    }
 }

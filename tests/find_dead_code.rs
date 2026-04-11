@@ -268,7 +268,6 @@ fn errors_response_shape() {
         "dead_symbol_count",
         "live_root_count",
         "analysis_notes",
-        "evidence_notes",
     ] {
         assert!(!data[key].is_null(), "missing key: {key}");
     }

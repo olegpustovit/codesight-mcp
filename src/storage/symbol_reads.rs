@@ -8,9 +8,29 @@ use serde_json::Value;
 use crate::storage::class_hierarchy::ClassIndexRow;
 use crate::config::BYTES_PER_TOKEN;
 use crate::core::symbols::{ExtractionTier, SymbolKind};
+use crate::db::SKIP_DIRS;
 use crate::storage::{SymbolMetadata, SymbolRecord};
 
 use super::IndexStore;
+
+/// Paths that should never appear in a code outline: codesight's own index
+/// artifacts, tool manifests, and any directory on the SKIP_DIRS list.
+/// Applied at read time as a belt-and-suspenders layer on top of the walker
+/// filter — catches stale DB entries from older ingests that ran before the
+/// SKIP_DIRS list grew.
+pub(crate) fn is_outline_noise(path: &str) -> bool {
+    if let Some(first) = path.split('/').next() {
+        if SKIP_DIRS.iter().any(|d| *d == first) {
+            return true;
+        }
+    }
+    // Top-level tool manifests and lock files: legitimate config, but their
+    // "symbols" are JSON keys, not code. Noise in a repo outline.
+    matches!(
+        path,
+        ".mcp.json" | "package.json" | "package-lock.json" | "tsconfig.json"
+    )
+}
 
 impl IndexStore {
     pub fn class_index_rows(&self) -> anyhow::Result<Vec<ClassIndexRow>> {
@@ -172,17 +192,27 @@ impl IndexStore {
             "SELECT file_path, id, kind, extraction_tier, name, signature, start_line FROM symbols ORDER BY file_path, start_line",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok(serde_json::json!({
-                "file": row.get::<_, String>(0)?,
-                "id": row.get::<_, String>(1)?,
-                "kind": row.get::<_, String>(2)?,
-                "extraction_tier": row.get::<_, String>(3)?,
-                "name": row.get::<_, String>(4)?,
-                "signature": row.get::<_, String>(5)?,
-                "line": row.get::<_, u32>(6)?,
-            }))
+            let file_path: String = row.get(0)?;
+            Ok((
+                file_path,
+                serde_json::json!({
+                    "file": row.get::<_, String>(0)?,
+                    "id": row.get::<_, String>(1)?,
+                    "kind": row.get::<_, String>(2)?,
+                    "extraction_tier": row.get::<_, String>(3)?,
+                    "name": row.get::<_, String>(4)?,
+                    "signature": row.get::<_, String>(5)?,
+                    "line": row.get::<_, u32>(6)?,
+                }),
+            ))
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        let out: Vec<Value> = rows
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|(path, _)| !is_outline_noise(path))
+            .map(|(_, v)| v)
+            .collect();
+        Ok(out)
     }
 
     pub fn file_outline(&self, file_path: &str) -> anyhow::Result<Vec<Value>> {

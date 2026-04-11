@@ -36,6 +36,18 @@ pub(crate) fn extract_imports(content: &str) -> Vec<ImportEdge> {
         }
         if let Some(rest) = body.strip_prefix("use ") {
             parse_use_line(rest, &mut edges);
+            continue;
+        }
+        // `mod foo;` declarations — skip inline `mod foo { ... }` (anything
+        // that isn't terminated with `;` on the same line).
+        if let Some(rest) = body.strip_prefix("mod ")
+            && !rest.contains('{')
+            && let Some(name) = first_ident(rest.trim())
+        {
+            edges.push(ImportEdge {
+                specifier: format!("self::{name}"),
+                names: Vec::new(),
+            });
         }
     }
     edges
@@ -237,6 +249,28 @@ mod tests {
         let edges = extract_imports(
             "fn main() {\n    let x = 1;\n    println!(\"use not real\");\n}\n",
         );
+        assert!(edges.is_empty(), "got {edges:?}");
+    }
+
+    #[test]
+    fn mod_decl_emits_self_edge() {
+        let edges = extract_imports("pub mod service;\nmod models;\n");
+        let mut out = specs(&edges);
+        out.sort();
+        assert_eq!(
+            out,
+            vec![
+                ("self::models".to_string(), Vec::<String>::new()),
+                ("self::service".to_string(), Vec::<String>::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_mod_block_is_skipped() {
+        // `mod inner { ... }` on a single line with a body is NOT a file
+        // declaration — no edge.
+        let edges = extract_imports("mod inner { fn x() {} }\n");
         assert!(edges.is_empty(), "got {edges:?}");
     }
 }

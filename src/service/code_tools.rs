@@ -8,7 +8,7 @@ use super::args::*;
 use super::helpers::{slice_file_lines, *};
 use super::{CodeService, MAX_QUERY_LEN};
 use crate::{
-    indexing::code_index,
+    indexing::{code_index, imports::language_for_path},
     repo_id::normalize_repo_id,
     savings::MetaBuilder,
     storage::{self, IndexStore, RetrievedSymbol, SearchSymbol},
@@ -92,9 +92,17 @@ impl CodeService {
         };
         let language = store
             .file_language(&file_path)?
-            .unwrap_or_else(|| "unknown".to_string());
+            .filter(|l| l != "unknown")
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let requested_end = args.end_line;
         let (line_count, start_line, end_line, body) =
             slice_file_lines(&content, args.start_line, args.end_line);
+        let end_line_clamped = matches!(requested_end, Some(req) if req > end_line);
+        let warnings: Vec<&'static str> = if end_line_clamped {
+            vec!["end_line_clamped"]
+        } else {
+            Vec::new()
+        };
         self.success_response(
             &timer,
             json!({
@@ -105,7 +113,9 @@ impl CodeService {
                 "language": language,
                 "start_line": start_line,
                 "end_line": end_line,
+                "end_line_clamped": end_line_clamped,
                 "line_count": line_count,
+                "warnings": warnings,
             }),
         )
     }

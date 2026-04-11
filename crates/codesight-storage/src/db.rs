@@ -113,8 +113,20 @@ pub fn check_staleness(
         ))
     })?;
 
+    let skip_set: HashSet<&str> = SKIP_DIRS.iter().copied().collect();
+    let path_in_skipped_dir = |rel: &str| -> bool {
+        rel.split('/').next().is_some_and(|seg| skip_set.contains(seg))
+    };
+
     for row in rows {
         let (file_path, db_size, db_mtime) = row?;
+        // Skip stale entries from older ingests that ran before a dir was
+        // added to SKIP_DIRS — e.g. `.codesight-index/_savings.json`, whose
+        // mtime is rewritten by codesight on every call and would otherwise
+        // mark the index permanently stale.
+        if path_in_skipped_dir(&file_path) {
+            continue;
+        }
         indexed_paths.insert(file_path.clone());
         let full = root_path.join(&file_path);
         match fs::metadata(&full) {
@@ -134,16 +146,27 @@ pub fn check_staleness(
         }
     }
 
-    // Check for new files not in the index
-    let skip_set: HashSet<&str> = SKIP_DIRS.iter().copied().collect();
-    for entry in walkdir::WalkDir::new(root_path)
-        .into_iter()
-        .filter_entry(|e| {
-            !e.file_type().is_dir() || !skip_set.contains(e.file_name().to_string_lossy().as_ref())
+    // Check for new files not in the index. Mirror the ingest walker
+    // (`ignore::WalkBuilder` with git-ignore support + SKIP_DIRS) so the
+    // staleness check never flags files the ingester would skip — otherwise
+    // gitignored source files permanently mark the index stale.
+    let walker = ignore::WalkBuilder::new(root_path)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .filter_entry(|entry| {
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                let name = entry.file_name().to_string_lossy();
+                return !SKIP_DIRS.iter().any(|skip| *skip == name);
+            }
+            true
         })
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-    {
+        .build();
+    for entry in walker.flatten() {
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+            continue;
+        }
         let rel = entry
             .path()
             .strip_prefix(root_path)
