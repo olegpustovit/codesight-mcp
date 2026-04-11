@@ -1,8 +1,8 @@
 use std::fs;
 
 use codesight_mcp::config::AppConfig;
+use codesight_mcp::db;
 use codesight_mcp::service::CodeService;
-use rusqlite::Connection;
 use serde_json::json;
 
 #[test]
@@ -36,7 +36,7 @@ fn indexed_symbols_persist_extraction_tiers() {
     assert!(indexed["ok"].as_bool().unwrap(), "{indexed:?}");
 
     let repo = indexed["data"]["source_id"].as_str().unwrap();
-    let conn = Connection::open(cfg.repo_db_path(repo)).unwrap();
+    let conn = db::open_ro(&cfg.repo_db_path(repo)).unwrap();
     let mut stmt = conn
         .prepare("SELECT language, extraction_tier FROM symbols ORDER BY language, name")
         .unwrap();

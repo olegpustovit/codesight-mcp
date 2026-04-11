@@ -74,6 +74,12 @@ const BUILTIN_GRAMMARS: &[GrammarDefinition] = &[
         loader: || tree_sitter_elixir::LANGUAGE.into(),
     },
     GrammarDefinition {
+        language_name: "ejs",
+        grammar_name: "embedded_template",
+        extensions: &["ejs"],
+        loader: || tree_sitter_embedded_template::LANGUAGE.into(),
+    },
+    GrammarDefinition {
         language_name: "erlang",
         grammar_name: "erlang",
         extensions: &["erl", "hrl"],

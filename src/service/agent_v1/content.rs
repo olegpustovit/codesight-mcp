@@ -2,27 +2,18 @@
 
 use serde_json::{Value, json};
 
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::ReadContentArgs;
 use crate::service::agent_v1::util::err_item;
-use crate::service::args::{FileContentArgs, GetSectionArgs, parse_args};
-use crate::service::helpers::ToolError;
+use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::args::{FileContentArgs, GetSectionArgs};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn read_content(&self, v: Value) -> anyhow::Result<Value> {
-        let args: ReadContentArgs = match parse_args(v) {
-            Ok(a) => a,
-            Err(e) => {
-                return self.error_response(
-                    &MetaBuilder::new(0),
-                    ToolError {
-                        code: "INVALID_PARAMS",
-                        message: format!("Invalid parameters: {e}"),
-                        detail: json!({}),
-                    },
-                );
-            }
+        let args: ReadContentArgs = match ValidatedArgs::from_validated(v) {
+            Ok(a) => a.into_inner(),
+            Err(err) => return self.error_response(&MetaBuilder::new(0), err),
         };
         // Clamp context_lines: negative -> 0, excessive -> 50
         let context_lines = (args.context_lines.max(0) as usize).min(50);
@@ -77,7 +68,7 @@ impl CodeService {
                                     }),
                                 );
                             }
-                            json!({ "content": o })
+                            o
                         }
                         Err(e) => err_item(e.code, &e.message),
                     }
@@ -131,7 +122,7 @@ impl CodeService {
                                         }),
                                     );
                                 }
-                                json!({ "content": o })
+                                o
                             }
                         }
                         Err(e) => err_item("INTERNAL", &e.to_string()),
@@ -162,10 +153,27 @@ impl CodeService {
                                 err_item(code, msg)
                             } else {
                                 let mut data = v["data"].clone();
-                                if !want_body && let Some(obj) = data.as_object_mut() {
-                                    obj.remove("content");
+                                if let Some(content_str) =
+                                    data.get("content").and_then(|v| v.as_str())
+                                {
+                                    raw_bytes_total =
+                                        raw_bytes_total.saturating_add(content_str.len() as u64);
                                 }
-                                json!({ "content": data })
+                                if let Some(obj) = data.as_object_mut() {
+                                    if !want_body {
+                                        obj.remove("content");
+                                    }
+                                    obj.insert(
+                                        "ref".to_string(),
+                                        json!({
+                                            "source_id": sid,
+                                            "domain": "code",
+                                            "kind": "file",
+                                            "path": file_path,
+                                        }),
+                                    );
+                                }
+                                data
                             }
                         }
                         (Err(e), _) => err_item(e.code, &e.message),

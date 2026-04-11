@@ -2,8 +2,10 @@
 
 mod analysis_reads;
 mod convert;
+pub mod doc_schema;
 mod graph_reads;
 mod index_store;
+pub mod migrations;
 mod repo_summary;
 mod schema;
 mod search;

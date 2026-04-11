@@ -170,20 +170,27 @@ impl crate::extractors::LanguageExtractor for RazorExtractor {
     }
 }
 
-static RE_PAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^@page\s+"([^"]+)""#).unwrap());
-static RE_INJECT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^@inject\s+(\S+)\s+(\w+)"#).unwrap());
-static RE_HTML_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"id="([^"]+)""#).unwrap());
-static RE_SCRIPT_SRC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"<script\s+[^>]*src="([^"]+)""#).unwrap());
+static RE_PAGE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^@page\s+"([^"]+)""#).expect("infallible: razor @page regex"));
+static RE_INJECT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^@inject\s+(\S+)\s+(\w+)"#).expect("infallible: razor @inject regex")
+});
+static RE_HTML_ID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"id="([^"]+)""#).expect("infallible: razor html id regex"));
+static RE_SCRIPT_SRC: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"<script\s+[^>]*src="([^"]+)""#).expect("infallible: razor script src regex")
+});
 static RE_CSHARP_METHOD: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:public|private|protected|internal)?\s*(?:override\s+)?(?:static\s+)?(?:async\s+)?(?:void|string|int|bool|decimal|float|double|long|char|byte|Task(?:<[^>]+>)?|\w+)\s+(\w+)\s*\(").unwrap()
+    Regex::new(r"(?:public|private|protected|internal)?\s*(?:override\s+)?(?:static\s+)?(?:async\s+)?(?:void|string|int|bool|decimal|float|double|long|char|byte|Task(?:<[^>]+>)?|\w+)\s+(\w+)\s*\(")
+        .expect("infallible: razor C# method regex")
 });
 static RE_CSHARP_FIELD: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:public|private|protected|internal)\s+(?:static\s+)?(?:readonly\s+)?(?:int|string|bool|decimal|float|double|long|char|byte|\w+)\s+(\w+)\s*[=;]").unwrap()
+    Regex::new(r"(?:public|private|protected|internal)\s+(?:static\s+)?(?:readonly\s+)?(?:int|string|bool|decimal|float|double|long|char|byte|\w+)\s+(\w+)\s*[=;]")
+        .expect("infallible: razor C# field regex")
 });
-static RE_JS_FUNCTION: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"function\s+(\w+)\s*\(").unwrap());
+static RE_JS_FUNCTION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"function\s+(\w+)\s*\(").expect("infallible: razor JS function regex")
+});
 
 fn extract_csharp_blocks(
     file_path: &str,
@@ -191,12 +198,16 @@ fn extract_csharp_blocks(
     view_name: &str,
     symbols: &mut Vec<StoredSymbol>,
 ) {
-    let block_re: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?m)@(?:functions|code)\s*\{").unwrap());
+    let block_re: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?m)@(?:functions|code)\s*\{").expect("infallible: razor code block regex")
+    });
 
     for m in block_re.find_iter(source) {
         let block_start = m.start();
-        let brace_start = source[block_start..].find('{').unwrap() + block_start;
+        let Some(brace_rel) = source[block_start..].find('{') else {
+            continue;
+        };
+        let brace_start = brace_rel + block_start;
         if let Some(block_end) = find_matching_brace(source, brace_start) {
             let block_content = &source[brace_start + 1..block_end];
             let body_start_file = brace_start + 1;
@@ -276,7 +287,10 @@ fn extract_csharp_block_via_regex(
         if name == "get" || name == "set" || name == "value" {
             continue;
         }
-        let match_start = caps.get(0).unwrap().start();
+        let Some(full) = caps.get(0) else {
+            continue;
+        };
+        let match_start = full.start();
         let abs_byte = brace_start + 1 + match_start;
         let line_num = source[..abs_byte].lines().count() as u32;
         let line_text = source
@@ -322,7 +336,10 @@ fn extract_csharp_block_via_regex(
         {
             continue;
         }
-        let match_start = caps.get(0).unwrap().start();
+        let Some(full) = caps.get(0) else {
+            continue;
+        };
+        let match_start = full.start();
         let abs_byte = brace_start + 1 + match_start;
         let line_num = source[..abs_byte].lines().count() as u32;
         let line_text = source
@@ -372,7 +389,10 @@ fn extract_inline_js(
         ) {
             for caps in RE_JS_FUNCTION.captures_iter(block.content) {
                 let name = caps[1].to_string();
-                let match_start = caps.get(0).unwrap().start();
+                let Some(full) = caps.get(0) else {
+                    continue;
+                };
+                let match_start = full.start();
                 let abs_byte = block.content_start_byte + match_start;
                 let line_num = source[..abs_byte].lines().count() as u32;
                 let line_text = source
@@ -484,7 +504,7 @@ fn make_sym(
     let qualified_name = if scopes.is_empty() {
         name.to_string()
     } else {
-        format!("{}.{}", scopes.last().unwrap(), name)
+        format!("{}.{}", &scopes[scopes.len() - 1], name)
     };
     let source_text = source
         .get(start_byte..end_byte)

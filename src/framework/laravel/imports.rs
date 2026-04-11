@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use regex::Regex;
-
 use crate::framework::ExtraImport;
 
 use super::api_client::extract_api_calls;
 use super::blade::extract_blade_imports;
 use super::facade::extract_facade_imports;
 use super::inertia::{extract_inertia_renders, resolve_inertia_page};
+use super::regex::RE;
 use super::routes::{match_route, parse_routes};
 use super::snapshot::LaravelSnapshot;
 
@@ -39,7 +38,6 @@ fn collect_route_controller_imports(
         return;
     }
 
-    let route_fqn_re = Regex::new(r#"(\\[A-Za-z\\]+Controller)::class"#).unwrap();
     for route_file in ["routes/web.php", "routes/api.php"] {
         let route_path = root.join(route_file);
         if !route_path.exists() {
@@ -56,7 +54,7 @@ fn collect_route_controller_imports(
 
         let mut seen_controllers = HashSet::new();
         let mut route_imports = Vec::new();
-        for capture in route_fqn_re.captures_iter(&content) {
+        for capture in RE.route_controller_fqn.captures_iter(&content) {
             let fqn = capture[1].to_string();
             if seen_controllers.insert(fqn.clone()) {
                 route_imports.push(ExtraImport {
@@ -86,7 +84,6 @@ fn collect_model_relationship_imports(
     root: &Path,
     imports: &mut HashMap<String, Vec<ExtraImport>>,
 ) {
-    let model_fqn_re = Regex::new(r#"(\\[A-Za-z\\]+)::class"#).unwrap();
     for (model_path, model_info) in &snapshot.models {
         if model_info.relationships.is_empty() {
             continue;
@@ -95,7 +92,7 @@ fn collect_model_relationship_imports(
         let mut seen = HashSet::new();
         let mut model_imports = Vec::new();
         if let Ok(content) = std::fs::read_to_string(root.join(model_path)) {
-            for capture in model_fqn_re.captures_iter(&content) {
+            for capture in RE.model_fqn_class.captures_iter(&content) {
                 let fqn = capture[1].to_string();
                 let short = fqn.rsplit('\\').next().unwrap_or(&fqn).to_string();
                 if model_info.relationships.iter().any(|relationship| {

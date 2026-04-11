@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use codesight_mcp::dep_graph::build_dependency_graph;
+use codesight_mcp::analysis::graph::build_dependency_graph;
 use codesight_mcp::indexing::imports::{
     extract_imports, load_tsconfig_aliases, parse_tsconfig_paths, resolve_imports_to_files,
     resolve_specifier,

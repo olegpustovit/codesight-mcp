@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use regex::Regex;
+use super::regex::RE;
 
 /// Extract Inertia page references from PHP content.
 /// Returns page component paths relative to resources/js/Pages/.
@@ -8,8 +8,7 @@ pub fn extract_inertia_renders(content: &str) -> Vec<String> {
     let mut pages = Vec::new();
 
     // Inertia::render('Page/Name') or Inertia::render("Page/Name")
-    let render_re = Regex::new(r#"Inertia::render\(\s*['"]([^'"]+)['"]\s*"#).unwrap();
-    for cap in render_re.captures_iter(content) {
+    for cap in RE.inertia_render.captures_iter(content) {
         let page = cap[1].to_string();
         if !pages.contains(&page) {
             pages.push(page);
@@ -18,8 +17,7 @@ pub fn extract_inertia_renders(content: &str) -> Vec<String> {
 
     // inertia('Page/Name') helper function — avoid matching Inertia::inertia(
     // by requiring that the preceding character (if any) is not `:` or a word char.
-    let helper_re = Regex::new(r#"(?:^|[^:\w])inertia\(\s*['"]([^'"]+)['"]\s*"#).unwrap();
-    for cap in helper_re.captures_iter(content) {
+    for cap in RE.inertia_helper.captures_iter(content) {
         let page = cap[1].to_string();
         if !pages.contains(&page) {
             pages.push(page);

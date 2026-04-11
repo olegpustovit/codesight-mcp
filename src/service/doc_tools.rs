@@ -9,6 +9,7 @@ use crate::{
     storage::doc_index::{self, DocStore},
 };
 use serde_json::{Value, json};
+use tracing::info;
 
 impl CodeService {
     pub(crate) fn do_index_local(&self, root: &std::path::Path) -> anyhow::Result<DocIndexResult> {
@@ -27,6 +28,7 @@ impl CodeService {
             return self.error_response(
                 &MetaBuilder::new(0),
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_ID",
                     message: "Missing section identifier.".to_string(),
                     detail: json!({ "source_id": args.source_id }),
@@ -46,6 +48,7 @@ impl CodeService {
                 return self.error_response(
                     &timer,
                     ToolError {
+                        category: ToolErrorCategory::NotFound,
                         code: "NOT_FOUND",
                         message: format!("Section '{section_id}' not found in index."),
                         detail: json!({ "id": section_id }),
@@ -62,6 +65,7 @@ impl CodeService {
                 return self.error_response(
                     &timer,
                     ToolError {
+                        category: ToolErrorCategory::NotFound,
                         code: "NOT_FOUND",
                         message: format!("File '{}' is missing from disk.", record.file_path),
                         detail: json!({ "id": section_id }),
@@ -105,7 +109,7 @@ impl CodeService {
                     && root.is_dir()
                     && store.is_stale(&root).unwrap_or(false)
                 {
-                    eprintln!("codesight-mcp: auto-reindexing stale doc source '{repo}'");
+                    info!(repo = %repo, "auto-reindexing stale doc source");
                     let _ = self.do_index_local(&root);
                     return self.open_doc_store(repo);
                 }
@@ -114,16 +118,18 @@ impl CodeService {
             Err(err) if err.code == "NOT_INDEXED" => {
                 if let Some(path_str) = repo_path {
                     let root = canonicalize_root(path_str).map_err(|e| ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
                         code: "INVALID_REPO",
                         message: e.to_string(),
                         detail: json!({ "path": path_str }),
                     })?;
-                    eprintln!(
-                        "codesight-mcp: auto-indexing docs source '{}' from {}",
-                        repo,
-                        root.display()
+                    info!(
+                        repo = %repo,
+                        root = %root.display(),
+                        "auto-indexing docs source from path"
                     );
                     self.do_index_local(&root).map_err(|e| ToolError {
+                        category: ToolErrorCategory::Internal,
                         code: "INDEX_ERROR",
                         message: format!("Auto-indexing failed: {e:#}"),
                         detail: json!({ "source_id": repo }),
@@ -142,6 +148,7 @@ impl CodeService {
         DocStore::open_existing(db_path)
             .map_err(index_error)?
             .ok_or_else(|| ToolError {
+                category: ToolErrorCategory::InvalidArgument,
                 code: "NOT_INDEXED",
                 message: format!("Doc source '{repo}' has not been indexed."),
                 detail: json!({ "source_id": repo }),

@@ -1,34 +1,140 @@
 mod agent_v1;
 mod args;
 mod code_tools;
+pub mod dispatch_timeout;
 mod doc_tools;
 mod helpers;
+pub mod savings;
+
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::{Value, json};
+use tracing::instrument;
 
 use crate::{
     config::AppConfig,
     extractors::ExtractorRegistry,
-    savings::{MetaBuilder, SavingsLedger},
+    reindex_state::ReindexStateManager,
+    service::savings::{Meta, MetaBuilder, SavingsLedger},
 };
-use helpers::{ToolError, attach_meta};
+use helpers::{ToolError, ToolErrorCategory, attach_meta};
 
 const MAX_QUERY_LEN: usize = 1000;
+
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
 
 pub struct CodeService {
     config: AppConfig,
     ledger: SavingsLedger,
+    /// Serializes read-modify-write access to the savings ledger so that
+    /// concurrent dispatch tasks do not clobber each other's updates.
+    ledger_guard: Mutex<()>,
+    reindex_states: Arc<ReindexStateManager>,
 }
 
 impl CodeService {
     pub fn new(config: AppConfig) -> anyhow::Result<Self> {
         config.ensure_layout()?;
+        agent_v1::validate::init_schemas()
+            .map_err(|e| anyhow::anyhow!("tools.json schema init failed: {e}"))?;
         let ledger = SavingsLedger::new(config.savings_file());
-        Ok(Self { config, ledger })
+        let reindex_states = Arc::new(ReindexStateManager::new());
+        if config.strict_freshness {
+            // Honor the global flag; individual handlers can still block on
+            // `await_freshness_if_strict` without plumbing the config down.
+            if let Err(error) = reindex_states.set_freshness_mode("strict") {
+                tracing::warn!(error = %error, "failed to apply strict freshness mode");
+            }
+        }
+        Ok(Self {
+            config,
+            ledger,
+            ledger_guard: Mutex::new(()),
+            reindex_states,
+        })
     }
 
+    /// Run `f` with the savings-ledger mutex held. Poison is recovered
+    /// because a poisoned lock only means a previous caller panicked mid-run;
+    /// the on-disk JSON is still readable.
+    fn with_ledger_locked<R>(&self, f: impl FnOnce(&SavingsLedger) -> R) -> R {
+        let _guard = self
+            .ledger_guard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        f(&self.ledger)
+    }
+
+    fn ledger_success_meta<T: serde::Serialize>(
+        &self,
+        timer: &MetaBuilder,
+        body: &T,
+    ) -> anyhow::Result<Meta> {
+        self.with_ledger_locked(|ledger| timer.success(body, ledger))
+    }
+
+    fn ledger_error_meta(&self, timer: &MetaBuilder) -> anyhow::Result<Meta> {
+        self.with_ledger_locked(|ledger| timer.error(ledger))
+    }
+
+    /// Expose the shared reindex state manager so external orchestration and
+    /// tests can observe or drive lifecycle transitions.
+    pub fn reindex_states(&self) -> &Arc<ReindexStateManager> {
+        &self.reindex_states
+    }
+
+    pub fn config(&self) -> &AppConfig {
+        &self.config
+    }
+
+    #[instrument(level = "info", skip(self, arguments), fields(tool = tool_name))]
     pub fn dispatch(&self, tool_name: &str, arguments: Value) -> anyhow::Result<Value> {
-        agent_v1::dispatch(self, tool_name, arguments)
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            agent_v1::dispatch(self, tool_name, arguments)
+        }));
+        let dispatched = match result {
+            Ok(inner) => inner,
+            Err(panic_payload) => {
+                let message = panic_message(&panic_payload);
+                tracing::error!(tool = tool_name, %message, "tool handler panicked");
+                Err(ToolError::new(
+                    ToolErrorCategory::Internal,
+                    "HANDLER_PANIC",
+                    format!("tool '{tool_name}' panicked: {message}"),
+                    json!({ "tool": tool_name }),
+                )
+                .into())
+            }
+        };
+        match dispatched {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                // Any leaked error becomes a categorized error response so the MCP
+                // boundary never returns an uncategorized failure. If the underlying
+                // error is a ToolError, preserve its category; otherwise classify as
+                // Internal with the full context chain in the message.
+                let tool_error = match err.downcast::<ToolError>() {
+                    Ok(te) => te,
+                    Err(other) => ToolError::new(
+                        ToolErrorCategory::Internal,
+                        "INTERNAL_ERROR",
+                        format!("{other:#}"),
+                        json!({ "tool": tool_name }),
+                    ),
+                };
+                let timer = MetaBuilder::new(0);
+                self.error_response(&timer, tool_error)
+            }
+        }
     }
 
     pub(super) fn extractors_for_root(&self, root: &std::path::Path) -> ExtractorRegistry {
@@ -64,7 +170,7 @@ impl CodeService {
             "data": data,
             "warnings": warnings,
         });
-        let mut meta_val = serde_json::to_value(timer.success(&body, &self.ledger)?)?;
+        let mut meta_val = serde_json::to_value(self.ledger_success_meta(timer, &body)?)?;
         if let Value::Object(ref mut map) = meta_val {
             for (k, v) in meta_extra {
                 map.insert(k, v);
@@ -78,24 +184,36 @@ impl CodeService {
         timer: &MetaBuilder,
         error: ToolError,
     ) -> anyhow::Result<Value> {
-        let meta = timer.error(&self.ledger)?;
+        let meta = self.ledger_error_meta(timer)?;
         let body = json!({
             "ok": false,
             "data": { "detail": error.detail.clone() },
             "warnings": [],
             "error": {
+                "category": error.category,
                 "code": error.code,
                 "message": error.message,
                 "detail": error.detail,
             },
         });
-        attach_meta(body, serde_json::to_value(meta)?)
+        // Surface the category on `_meta.error_category` so clients can dispatch
+        // on category (timeout, invalid_argument, not_found, …) without peeking
+        // into the nested error object. Source of truth stays on `error.category`.
+        let mut meta_val = serde_json::to_value(meta)?;
+        if let Value::Object(ref mut map) = meta_val {
+            map.insert(
+                "error_category".to_string(),
+                serde_json::to_value(error.category)?,
+            );
+        }
+        attach_meta(body, meta_val)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::Arc;
 
     use serde_json::json;
     use tempfile::tempdir;
@@ -171,5 +289,66 @@ class SessionManager:
             .as_str()
             .unwrap();
         assert!(src.contains("Dependency injection database session."));
+    }
+
+    #[test]
+    fn concurrent_ledger_updates_are_not_lost() {
+        // Route N concurrent ledger writes through `with_ledger_locked` and
+        // assert the final total is the exact sum. Without the mutex, the
+        // read-modify-write inside `SavingsLedger::record` lets two threads
+        // load the same base value and clobber each other's increment, so
+        // the final total would drift below the expected sum.
+        let workspace = tempdir().expect("tempdir");
+        let service = Arc::new(
+            CodeService::new(AppConfig::new(workspace.path().join("index"))).expect("service"),
+        );
+
+        const THREADS: u64 = 32;
+        const DELTA: u64 = 1_000;
+        let mut handles = Vec::new();
+        for _ in 0..THREADS {
+            let svc = service.clone();
+            handles.push(std::thread::spawn(move || {
+                svc.with_ledger_locked(|ledger| ledger.record(DELTA))
+                    .expect("record");
+            }));
+        }
+        for h in handles {
+            h.join().expect("join");
+        }
+
+        let total = service.ledger.current_total().expect("current_total");
+        assert_eq!(total, THREADS * DELTA, "ledger lost updates");
+    }
+
+    #[test]
+    fn ingest_returns_reindex_busy_when_already_in_progress() {
+        let workspace = tempdir().expect("tempdir");
+        let repo_root = workspace.path().join("repo");
+        fs::create_dir_all(&repo_root).unwrap();
+        fs::write(repo_root.join("lib.py"), "x = 1\n").unwrap();
+
+        let service =
+            CodeService::new(AppConfig::new(workspace.path().join("index"))).expect("service");
+
+        let repo_id = crate::repo_id::normalize_repo_id(&repo_root.canonicalize().unwrap());
+        service
+            .reindex_states()
+            .try_mark_reindex_start(&repo_id)
+            .expect("first claim");
+
+        let out = service
+            .dispatch(
+                "ingest_sources",
+                json!({
+                    "path": repo_root.to_string_lossy(),
+                    "domains": "code",
+                    "incremental": true,
+                }),
+            )
+            .expect("dispatch");
+        assert_eq!(out["ok"], json!(false));
+        assert_eq!(out["error"]["category"], json!("transient"));
+        assert_eq!(out["error"]["code"], json!("REINDEX_BUSY"));
     }
 }

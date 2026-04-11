@@ -80,6 +80,10 @@ impl FactQuality {
         self.into()
     }
 
+    pub fn from_db(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+
     /// Facts suitable as primary evidence for graph, dead-code, and strict quality analysis.
     #[must_use]
     pub fn suitable_for_strict_analysis(self) -> bool {

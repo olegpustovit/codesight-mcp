@@ -311,5 +311,86 @@ pub fn resolve_import_edge_for_graph(
         let resolved = resolve_imports_to_files(&[top], known_files_vec, from_file);
         return resolved.into_iter().next();
     }
+    if (lang.eq_ignore_ascii_case("rust") || lang.eq_ignore_ascii_case("rs"))
+        && edge.specifier.contains("::")
+    {
+        return resolve_rust_specifier(&edge.specifier, from_file, known_files_vec);
+    }
     None
+}
+
+/// Map a Rust `::`-path specifier to a local file, stripping `crate::`,
+/// `self::`, `super::` prefixes and attempting both `stem.rs` and
+/// `stem/mod.rs` candidates against the known-files list.
+fn resolve_rust_specifier(
+    specifier: &str,
+    from_file: &str,
+    known_files: &[String],
+) -> Option<String> {
+    let mut segments: Vec<&str> = specifier.split("::").filter(|s| !s.is_empty()).collect();
+    while matches!(segments.first().copied(), Some("crate") | Some("self") | Some("super")) {
+        segments.remove(0);
+    }
+    if segments.is_empty() {
+        return None;
+    }
+    // Try the most specific → least specific match so `a::b::c` prefers
+    // `a/b/c.rs` over `a.rs` when both exist.
+    for take in (1..=segments.len()).rev() {
+        let sub = &segments[..take];
+        let joined = sub.join("/");
+        let candidates = [format!("{joined}.rs"), format!("{joined}/mod.rs")];
+        for cand in &candidates {
+            if let Some(hit) = known_files.iter().find(|f| {
+                f.as_str() == cand
+                    || f.ends_with(&format!("/{cand}"))
+                    || f.ends_with(&format!("src/{cand}"))
+            }) && hit.as_str() != from_file
+            {
+                return Some(hit.clone());
+            }
+        }
+    }
+    // Last-segment stem fallback (covers flat projects): `models` → `models.rs`.
+    let last = segments.last()?.to_string();
+    resolve_imports_to_files(&[last], known_files, from_file)
+        .into_iter()
+        .next()
+}
+
+#[cfg(test)]
+mod rust_resolve_tests {
+    use super::*;
+
+    fn files(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn crate_prefix_resolves_to_mod_file() {
+        let known = files(&["src/lib.rs", "src/models.rs"]);
+        let got = resolve_rust_specifier("crate::models", "src/lib.rs", &known);
+        assert_eq!(got.as_deref(), Some("src/models.rs"));
+    }
+
+    #[test]
+    fn nested_path_prefers_longest_match() {
+        let known = files(&["src/lib.rs", "src/a/b.rs"]);
+        let got = resolve_rust_specifier("crate::a::b", "src/lib.rs", &known);
+        assert_eq!(got.as_deref(), Some("src/a/b.rs"));
+    }
+
+    #[test]
+    fn mod_rs_candidate_matches() {
+        let known = files(&["src/lib.rs", "src/a/mod.rs"]);
+        let got = resolve_rust_specifier("crate::a", "src/lib.rs", &known);
+        assert_eq!(got.as_deref(), Some("src/a/mod.rs"));
+    }
+
+    #[test]
+    fn external_crate_returns_none() {
+        let known = files(&["src/lib.rs", "src/models.rs"]);
+        assert!(resolve_rust_specifier("serde", "src/lib.rs", &known).is_none());
+        assert!(resolve_rust_specifier("std::collections", "src/lib.rs", &known).is_none());
+    }
 }

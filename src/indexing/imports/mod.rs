@@ -1,7 +1,7 @@
 //! Single subsystem for structural import extraction and resolution.
 //!
-//! Tree-sitter is the primary extractor for Python, JS/TS/TSX/JSX, and Go when the parse tree
-//! has no errors; line-based parsers provide fallback and cover Vue, SQL, and Dart.
+//! Tree-sitter is the primary extractor for Python, JS/TS/TSX/JSX, Go, and Rust when the
+//! parse tree has no errors; line-based parsers provide fallback and cover Vue, SQL, and Dart.
 
 mod bundle;
 mod cross_repo;
@@ -21,6 +21,8 @@ pub use resolve::{
 };
 
 use serde::{Deserialize, Serialize};
+
+use crate::core::symbols::FactQuality;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportExtractionMode {
@@ -81,6 +83,11 @@ const IMPORT_EXTRACTION_CAPABILITIES: &[ImportExtractionCapability] = &[
         aliases: &["golang"],
         mode: ImportExtractionMode::TreeSitterFirst,
     },
+    ImportExtractionCapability {
+        canonical_language: "rust",
+        aliases: &["rs"],
+        mode: ImportExtractionMode::TreeSitterFirst,
+    },
 ];
 
 /// A structured import edge extracted from source code.
@@ -113,6 +120,64 @@ pub fn supports_import_extraction(language: &str) -> bool {
     import_capability_for_language(language).is_some()
 }
 
+#[must_use]
+fn import_fact_quality_for(language: &str, tree_sitter_used: bool) -> FactQuality {
+    match import_capability_for_language(language) {
+        Some(cap) if cap.mode == ImportExtractionMode::FallbackOnly => FactQuality::Heuristic,
+        Some(_) if tree_sitter_used => FactQuality::BaselineStructural,
+        Some(_) => FactQuality::Heuristic,
+        None => FactQuality::Heuristic,
+    }
+}
+
+/// Extract structured import edges together with coarse quality for dependency-graph storage.
+///
+/// Tree-sitter-backed paths for supported languages map to [`FactQuality::BaselineStructural`];
+/// line fallbacks and `FallbackOnly` languages map to [`FactQuality::Heuristic`].
+#[must_use]
+pub fn extract_imports_with_quality(
+    content: &str,
+    file_path: &str,
+    language: &str,
+) -> (Vec<ImportEdge>, FactQuality) {
+    let lang = language.to_ascii_lowercase();
+    let path_lang = language_for_path(file_path);
+    let effective = if lang == "unknown" && path_lang != "unknown" {
+        path_lang.to_string()
+    } else {
+        lang.clone()
+    };
+
+    let (edges, used_tree_sitter) = match effective.as_str() {
+        "python" => match tree_sitter::extract_python_imports_ts(content) {
+            Some(v) => (v, true),
+            None => (fallback::python::extract_imports(content), false),
+        },
+        "javascript" | "typescript" | "tsx" | "jsx" | "js" | "ts" => {
+            match tree_sitter::extract_js_imports_ts(content, &effective) {
+                Some(v) => (v, true),
+                None => (fallback::js_ts::extract_imports(content), false),
+            }
+        }
+        "vue" => (fallback::vue::extract_imports(content), false),
+        "sql" => (fallback::sql::extract_imports(content), false),
+        "dart" => (fallback::dart::extract_imports(content), false),
+        "go" | "golang" => match tree_sitter::extract_go_imports_ts(content) {
+            Some(v) if !v.is_empty() => (v, true),
+            _ => (fallback::go::extract_imports(content), false),
+        },
+        "rust" | "rs" => match tree_sitter::extract_rust_imports_ts(content) {
+            Some(v) => (v, true),
+            None => (fallback::rust::extract_imports(content), false),
+        },
+        _ => (Vec::new(), false),
+    };
+
+    let edges = fallback::helpers::deduplicate_edges(edges);
+    let quality = import_fact_quality_for(&effective, used_tree_sitter);
+    (edges, quality)
+}
+
 /// Detect language from file path extension.
 pub fn language_for_path(file_path: &str) -> &'static str {
     let ext = file_path.rsplit('.').next().unwrap_or("");
@@ -135,42 +200,25 @@ pub fn language_for_path(file_path: &str) -> &'static str {
 
 /// Extract structured import edges from source content for any supported language.
 pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<ImportEdge> {
-    let lang = language.to_ascii_lowercase();
-    let path_lang = language_for_path(file_path);
-    let effective = if lang == "unknown" && path_lang != "unknown" {
-        path_lang.to_string()
-    } else {
-        lang.clone()
-    };
-
-    let edges = match effective.as_str() {
-        "python" => match tree_sitter::extract_python_imports_ts(content) {
-            Some(v) => v,
-            None => fallback::python::extract_imports(content),
-        },
-        "javascript" | "typescript" | "tsx" | "jsx" | "js" | "ts" => {
-            match tree_sitter::extract_js_imports_ts(content, &effective) {
-                Some(v) => v,
-                None => fallback::js_ts::extract_imports(content),
-            }
-        }
-        "vue" => fallback::vue::extract_imports(content),
-        "sql" => fallback::sql::extract_imports(content),
-        "dart" => fallback::dart::extract_imports(content),
-        "go" | "golang" => match tree_sitter::extract_go_imports_ts(content) {
-            Some(v) if !v.is_empty() => v,
-            _ => fallback::go::extract_imports(content),
-        },
-        _ => Vec::new(),
-    };
-
-    let _ = file_path;
-    fallback::helpers::deduplicate_edges(edges)
+    extract_imports_with_quality(content, file_path, language).0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::symbols::FactQuality;
+
+    #[test]
+    fn python_imports_with_quality_is_structural_when_tree_sitter_runs() {
+        let (_edges, q) = extract_imports_with_quality("from b import mid\n", "m.py", "python");
+        assert_eq!(q, FactQuality::BaselineStructural);
+    }
+
+    #[test]
+    fn dart_imports_with_quality_is_heuristic_fallback_only() {
+        let (_edges, q) = extract_imports_with_quality("import 'dart:io';\n", "main.dart", "dart");
+        assert_eq!(q, FactQuality::Heuristic);
+    }
 
     #[test]
     fn python_from_import_extracts_module_line_targets() {

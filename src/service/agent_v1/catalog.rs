@@ -4,10 +4,10 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::path_map;
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::CatalogSourcesArgs;
-use crate::service::args::parse_args;
+use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::savings::MetaBuilder;
 use crate::storage::doc_index::{DocStore, list_doc_summaries};
 use crate::storage::{IndexStore, list_repo_summaries};
 
@@ -26,7 +26,7 @@ fn index_metadata_staleness_warning(indexed_at: &str) -> Option<String> {
 
 impl CodeService {
     pub(in crate::service) fn catalog_sources(&self, v: Value) -> anyhow::Result<Value> {
-        let _args: CatalogSourcesArgs = parse_args(v)?;
+        let _args: CatalogSourcesArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
         let code_rows = list_repo_summaries(&self.config.repos_dir())?;
         let doc_values = list_doc_summaries(&self.config.docs_dir())?;

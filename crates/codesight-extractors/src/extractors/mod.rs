@@ -20,6 +20,8 @@ pub(crate) mod yaml;
 
 use std::{collections::HashMap, path::Path, sync::Arc};
 
+use tracing::warn;
+
 use crate::core::pipeline::StoredSymbol;
 use crate::core::symbols::ExtractionTier;
 
@@ -141,7 +143,7 @@ impl ExtractorRegistry {
             if ext.is_empty() || ext == "." {
                 let msg =
                     format!("extra_extensions: skipping empty extension for language '{lang_raw}'");
-                eprintln!("{msg}");
+                warn!(message = %msg, "extra_extensions");
                 warnings.push(msg);
                 continue;
             }
@@ -149,7 +151,7 @@ impl ExtractorRegistry {
             if lang.is_empty() {
                 let msg =
                     format!("extra_extensions: skipping extension '{ext}' with empty language");
-                eprintln!("{msg}");
+                warn!(message = %msg, "extra_extensions");
                 warnings.push(msg);
                 continue;
             }
@@ -160,7 +162,7 @@ impl ExtractorRegistry {
                 let msg = format!(
                     "extra_extensions: unknown language '{lang}' for extension '.{ext_norm}', skipping"
                 );
-                eprintln!("{msg}");
+                warn!(message = %msg, "extra_extensions");
                 warnings.push(msg);
                 continue;
             }

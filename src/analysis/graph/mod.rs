@@ -20,7 +20,10 @@ pub use calls::{
 };
 pub use coupling::{CouplingMetrics, compute_coupling};
 pub use cycles::find_cycles;
-pub use import_graph::{build_dependency_graph, build_dependency_graph_with_aliases};
+pub use import_graph::{
+    build_dependency_graph, build_dependency_graph_edges_with_aliases,
+    build_dependency_graph_with_aliases,
+};
 pub use layers::{LayerDef, LayerViolation, file_to_layer, find_layer_violations};
 pub use pagerank::{InOutDegree, PageRankResult, compute_in_out_degrees, compute_pagerank};
 pub use psr4::{Psr4Map, fqn_to_symbol, load_psr4_map, symbol_to_fqn};

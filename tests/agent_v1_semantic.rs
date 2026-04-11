@@ -5,7 +5,7 @@ use std::fs;
 use std::sync::{Mutex, MutexGuard};
 
 use codesight_mcp::config::AppConfig;
-use codesight_mcp::semantic::{self, EmbeddingStore};
+use codesight_mcp::retrieval::semantic::{self, EmbeddingStore};
 use codesight_mcp::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;

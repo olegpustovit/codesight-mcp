@@ -1,7 +1,14 @@
+use std::sync::LazyLock;
+
 use regex::Regex;
 use tree_sitter::Node;
 
 use crate::extractors::common::parse_tree;
+
+static ROUTE_EXPORT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b")
+        .expect("Next.js route export regex is a compile-time constant")
+});
 
 /// Convert an App Router file path to a URL route.
 ///
@@ -68,11 +75,8 @@ pub fn next_api_methods_from_content(content: &str) -> Vec<String> {
 }
 
 fn next_api_methods_regex(content: &str) -> Vec<String> {
-    let re =
-        Regex::new(r"export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b")
-            .unwrap();
     let mut methods: Vec<String> = Vec::new();
-    for cap in re.captures_iter(content) {
+    for cap in ROUTE_EXPORT_RE.captures_iter(content) {
         let m = cap[1].to_string();
         if !methods.contains(&m) {
             methods.push(m);

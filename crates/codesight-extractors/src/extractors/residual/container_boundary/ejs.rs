@@ -1,13 +1,31 @@
-//! **EJS** embedded JavaScript/HTML needs bracket and partial-token handling; shared SCM packs do
-//! not encode this template surface well enough for reliable symbol output.
+//! **EJS**: embedded JavaScript template. The grammar-backed pipeline now owns
+//! scriptlet detection and JavaScript delegation through `runtime/queries/ejs/`
+//! (`tags.scm` + `injections.scm`, backed by `tree-sitter-embedded-template`).
+//!
+//! This override stays only for two tiny host-semantic post-passes that the grammar
+//! does not encode structurally:
+//!
+//! 1. A synthetic **template** symbol derived from the file stem (downstream outline
+//!    consumers expect every template file to surface at least one symbol).
+//! 2. An `include('path')` directive scan emitted as **Import** symbols so the graph
+//!    builder sees template-to-partial edges.
+//!
+//! Everything else (JavaScript function/class/const detection, offset remapping) is
+//! grammar-backed via the shared injections runner and `containers::extract_host_segment`.
+//!
+//! Exit criteria: if `tree-sitter-embedded-template` ever exposes `include(...)` as
+//! a distinct node kind and structural raw-output context, both post-passes can move
+//! into `runtime/queries/ejs/tags.scm` and this override can be deleted.
+
+use std::sync::{LazyLock, OnceLock};
+
 use anyhow::Result;
 use regex::Regex;
-use std::sync::LazyLock;
 
 use crate::core::pipeline::StoredSymbol;
 use crate::core::symbols::{ExtractionTier, SymbolKind};
-
-use crate::extractors::containers::{RemapOptions, SegmentOrigin, extract_host_segment};
+use crate::extractors::engine::catalogs::QueryPackCatalog;
+use crate::extractors::engine::scm::ScmExtractor;
 
 pub struct EjsExtractor;
 
@@ -20,47 +38,51 @@ impl crate::extractors::LanguageExtractor for EjsExtractor {
         &["ejs"]
     }
 
-    fn extract(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
-        let mut symbols = Vec::new();
+    fn extraction_tier(&self) -> ExtractionTier {
+        ExtractionTier::CuratedQueryPack
+    }
 
-        // Synthetic template symbol: always emitted, named from the file stem.
+    fn extract(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
+        // 1. Grammar-backed extraction via the ejs query pack. Its `injections.scm`
+        //    delegates every `(code)` span to the JavaScript extractor and remaps
+        //    resulting symbols back into host coordinates — no regex masking.
+        let mut symbols = ejs_pack()?
+            .extract(file_path, source)
+            .unwrap_or_else(|_| Vec::new());
+
+        // Delegated JS symbols must surface as language "ejs" so downstream outline
+        // and graph queries see a consistent host language for the template file.
+        for symbol in &mut symbols {
+            symbol.language = "ejs".to_string();
+        }
+
+        // 2. Synthetic template symbol — host semantics, not a grammar construct.
         let template_name = std::path::Path::new(file_path)
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("template");
-        symbols.push(make_symbol(
-            file_path,
-            template_name,
-            SymbolKind::Template,
-            1,
-            source.lines().next().unwrap_or(""),
+        symbols.insert(
             0,
-            source.len(),
-            source,
-        ));
+            make_symbol(
+                file_path,
+                template_name,
+                SymbolKind::Template,
+                1,
+                source.lines().next().unwrap_or(""),
+                0,
+                source.len(),
+                source,
+            ),
+        );
 
-        let masked_javascript = mask_ejs_scriptlets(source);
-        let mut delegated = extract_host_segment(
-            "javascript",
-            file_path,
-            source,
-            &masked_javascript,
-            SegmentOrigin::new(source, 0),
-            RemapOptions {
-                language_override: Some("ejs"),
-                ..Default::default()
-            },
-        )
-        .unwrap_or_default();
-        delegated.retain(|symbol| symbol.kind == SymbolKind::Function);
-        if delegated.is_empty() {
-            delegated.extend(regex_function_symbols(file_path, source));
-        }
-        symbols.extend(delegated);
-
+        // 3. `include('path')` directive scan → Import symbols. The grammar produces
+        //    these as regular JavaScript call expressions inside `(code)` nodes; a
+        //    tiny regex post-pass picks them up by path without re-parsing.
         for (line_num, line_start, line_end, line) in source_lines(source) {
-            if let Some(caps) = re::INCLUDE.captures(line) {
-                let path = caps.get(1).unwrap().as_str();
+            if let Some(caps) = INCLUDE_RE.captures(line) {
+                let Some(path) = caps.get(1).map(|g| g.as_str()) else {
+                    continue;
+                };
                 symbols.push(make_symbol(
                     file_path,
                     path,
@@ -79,19 +101,22 @@ impl crate::extractors::LanguageExtractor for EjsExtractor {
     }
 }
 
-mod re {
-    use super::*;
-
-    // Match: <% function name(args) ... %>  or  function name(args) { inside scriptlets
-    pub static FUNCTION: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?:<%[-=]?\s*)?function\s+(\w+)\s*\([^)]*\)").unwrap());
-
-    // Match: <%- include('path') %> or <%- include('path', ...) %>
-    // Supports both single and double quotes
-    pub static INCLUDE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"<%[-=]?\s*include\s*\(\s*['"]([^'"]+)['"]\s*(?:,[^)]*)?\)"#).unwrap()
-    });
+fn ejs_pack() -> Result<&'static ScmExtractor> {
+    // Built-in pack is compiled in; a missing entry is a logic bug, not a runtime error.
+    static EJS_PACK: OnceLock<ScmExtractor> = OnceLock::new();
+    Ok(EJS_PACK.get_or_init(|| {
+        let catalog = QueryPackCatalog::builtin();
+        let pack = catalog
+            .find_by_pack_id("ejs")
+            .expect("infallible: built-in catalog missing ejs query pack");
+        ScmExtractor::from_pack(pack).expect("infallible: ejs pack failed to build")
+    }))
 }
+
+static INCLUDE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"<%[-=]?\s*include\s*\(\s*['"]([^'"]+)['"]\s*(?:,[^)]*)?\)"#)
+        .expect("infallible: ejs include regex")
+});
 
 fn source_lines(source: &str) -> Vec<(u32, usize, usize, &str)> {
     let mut lines = Vec::new();
@@ -103,60 +128,6 @@ fn source_lines(source: &str) -> Vec<(u32, usize, usize, &str)> {
         byte_offset += line.len() + 1;
     }
     lines
-}
-
-fn regex_function_symbols(file_path: &str, source: &str) -> Vec<StoredSymbol> {
-    source_lines(source)
-        .into_iter()
-        .filter_map(|(line_num, line_start, line_end, line)| {
-            let caps = re::FUNCTION.captures(line)?;
-            let name = caps.get(1)?.as_str();
-            let signature = caps.get(0)?.as_str().trim();
-            Some(make_symbol_with_sig(
-                file_path,
-                name,
-                SymbolKind::Function,
-                line_num,
-                signature,
-                line_start,
-                line_end,
-                source,
-            ))
-        })
-        .collect()
-}
-
-fn mask_ejs_scriptlets(source: &str) -> String {
-    let bytes = source.as_bytes();
-    let mut masked = bytes
-        .iter()
-        .map(|byte| if *byte == b'\n' { b'\n' } else { b' ' })
-        .collect::<Vec<_>>();
-    let mut index = 0usize;
-
-    while index + 1 < bytes.len() {
-        if bytes[index] == b'<' && bytes[index + 1] == b'%' {
-            let open_len = if matches!(bytes.get(index + 2), Some(b'=') | Some(b'-')) {
-                3
-            } else {
-                2
-            };
-            let mut cursor = index + open_len;
-            while cursor + 1 < bytes.len() {
-                if bytes[cursor] == b'%' && bytes[cursor + 1] == b'>' {
-                    masked[(index + open_len)..cursor]
-                        .copy_from_slice(&bytes[(index + open_len)..cursor]);
-                    index = cursor + 2;
-                    break;
-                }
-                cursor += 1;
-            }
-        } else {
-            index += 1;
-        }
-    }
-
-    String::from_utf8(masked).expect("masked EJS buffer should stay utf-8")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -178,7 +149,7 @@ fn make_symbol(
     let signature = line_text.trim().to_string();
     StoredSymbol {
         id: format!("{file_path}::{name}#{}", kind.as_str()),
-        extraction_tier: ExtractionTier::ManualOverride,
+        extraction_tier: ExtractionTier::CuratedQueryPack,
         language: "ejs".to_string(),
         file_path: file_path.to_string(),
         qualified_name: name.to_string(),
@@ -196,51 +167,13 @@ fn make_symbol(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn make_symbol_with_sig(
-    file_path: &str,
-    name: &str,
-    kind: SymbolKind,
-    line_num: u32,
-    signature: &str,
-    start_byte: usize,
-    end_byte: usize,
-    source: &str,
-) -> StoredSymbol {
-    let source_text = source
-        .get(start_byte..end_byte)
-        .unwrap_or(signature)
-        .to_string();
-    let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
-    StoredSymbol {
-        id: format!("{file_path}::{name}#{}", kind.as_str()),
-        extraction_tier: ExtractionTier::ManualOverride,
-        language: "ejs".to_string(),
-        file_path: file_path.to_string(),
-        qualified_name: name.to_string(),
-        name: name.to_string(),
-        kind,
-        signature: signature.to_string(),
-        summary: signature.to_string(),
-        start_line: line_num,
-        end_line: line_num,
-        start_byte,
-        end_byte,
-        source_hash,
-        source_text,
-        file_size_bytes: source.len() as u64,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::EjsExtractor;
     use crate::core::symbols::SymbolKind;
     use crate::extractors::LanguageExtractor;
 
-    #[test]
-    fn ejs_extracts_template_and_functions() {
-        let src = r#"<!DOCTYPE html>
+    const TEMPLATE: &str = r#"<!DOCTYPE html>
 <html>
 <head><title><%= title %></title></head>
 <body>
@@ -254,27 +187,49 @@ mod tests {
 </body>
 </html>
 "#;
-        let syms = EjsExtractor.extract("views/index.ejs", src).unwrap();
+
+    #[test]
+    fn ejs_template_and_include_symbols_from_post_pass() {
+        let syms = EjsExtractor.extract("views/index.ejs", TEMPLATE).unwrap();
         assert!(
             syms.iter()
-                .any(|s| s.name == "index" && s.kind == SymbolKind::Template)
+                .any(|s| s.name == "index" && s.kind == SymbolKind::Template),
+            "missing synthetic template symbol: {syms:?}"
         );
         assert!(
             syms.iter()
-                .any(|s| s.name == "formatDate" && s.kind == SymbolKind::Function)
+                .any(|s| s.name == "partials/header" && s.kind == SymbolKind::Import),
+            "missing header include: {syms:?}"
         );
         assert!(
             syms.iter()
-                .any(|s| s.name == "partials/header" && s.kind == SymbolKind::Import)
-        );
-        assert!(
-            syms.iter()
-                .any(|s| s.name == "partials/footer" && s.kind == SymbolKind::Import)
+                .any(|s| s.name == "partials/footer" && s.kind == SymbolKind::Import),
+            "missing footer include: {syms:?}"
         );
     }
 
     #[test]
-    fn ejs_no_scriptlets_produces_template_only() {
+    fn ejs_javascript_functions_come_from_grammar_backed_injection() {
+        let syms = EjsExtractor.extract("views/index.ejs", TEMPLATE).unwrap();
+        let formatted = syms
+            .iter()
+            .find(|s| s.name == "formatDate")
+            .unwrap_or_else(|| panic!("no formatDate symbol: {syms:?}"));
+        assert_eq!(formatted.kind, SymbolKind::Function);
+        // Grammar-backed injections must emit the symbol under the EJS host language,
+        // and its byte span must fall inside the original .ejs source.
+        assert_eq!(formatted.language, "ejs");
+        assert!(formatted.end_byte <= TEMPLATE.len());
+        assert!(
+            TEMPLATE[formatted.start_byte..formatted.end_byte].contains("formatDate"),
+            "injected symbol span mis-remapped: {}..{}",
+            formatted.start_byte,
+            formatted.end_byte
+        );
+    }
+
+    #[test]
+    fn ejs_static_template_produces_template_symbol_only() {
         let src = "<html><body><h1>Hello</h1></body></html>";
         let syms = EjsExtractor.extract("static.ejs", src).unwrap();
         assert_eq!(syms.len(), 1);

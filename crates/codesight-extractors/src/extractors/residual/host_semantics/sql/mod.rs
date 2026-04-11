@@ -3,7 +3,7 @@
 
 mod fallback;
 
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use crate::core::symbols::ExtractionTier;
 use crate::extractors::engine::catalogs::QueryPackCatalog;
@@ -30,7 +30,7 @@ impl crate::extractors::LanguageExtractor for SqlExtractor {
         file_path: &str,
         source: &str,
     ) -> anyhow::Result<Vec<crate::core::pipeline::StoredSymbol>> {
-        let mut symbols = sql_pack()
+        let mut symbols = sql_pack()?
             .extract(file_path, source)
             .unwrap_or_else(|_| Vec::new());
         enrich_structural_symbols(source, &mut symbols);
@@ -42,15 +42,16 @@ impl crate::extractors::LanguageExtractor for SqlExtractor {
     }
 }
 
-fn sql_pack() -> &'static ScmExtractor {
-    static SQL_PACK: LazyLock<ScmExtractor> = LazyLock::new(|| {
+fn sql_pack() -> anyhow::Result<&'static ScmExtractor> {
+    // Built-in pack is compiled in; a missing entry is a logic bug, not a runtime error.
+    static SQL_PACK: OnceLock<ScmExtractor> = OnceLock::new();
+    Ok(SQL_PACK.get_or_init(|| {
         let catalog = QueryPackCatalog::builtin();
         let pack = catalog
             .find_by_pack_id("sql")
-            .expect("missing sql query pack");
-        ScmExtractor::from_pack(pack).expect("failed to compile sql query pack")
-    });
-    &SQL_PACK
+            .expect("infallible: built-in catalog missing sql query pack");
+        ScmExtractor::from_pack(pack).expect("infallible: sql pack failed to build")
+    }))
 }
 
 fn enrich_structural_symbols(source: &str, symbols: &mut [crate::core::pipeline::StoredSymbol]) {

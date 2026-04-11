@@ -5,15 +5,15 @@ use std::collections::HashSet;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::{IngestSourcesArgs, ManageIndexesArgs};
-use crate::service::args::parse_args;
-use crate::service::helpers::ToolError;
+use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn manage_indexes(&self, v: Value) -> anyhow::Result<Value> {
-        let args: ManageIndexesArgs = parse_args(v)?;
+        let args: ManageIndexesArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let action = args.action.to_ascii_lowercase();
         let timer = MetaBuilder::new(0);
 
@@ -23,6 +23,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "source_id required for invalidate/delete.".to_string(),
                             detail: json!({}),
@@ -35,6 +36,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "NOT_INDEXED",
                             message: format!("No index for '{sid}'."),
                             detail: json!({ "source_id": sid }),
@@ -56,6 +58,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "root_hint required for rebuild.".to_string(),
                             detail: json!({}),
@@ -66,6 +69,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "source_id required for rebuild.".to_string(),
                             detail: json!({}),
@@ -88,6 +92,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "source_id required for status.".to_string(),
                             detail: json!({}),
@@ -122,6 +127,7 @@ impl CodeService {
                 self.error_response(
                     &timer,
                     ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
                         code: "NOT_INDEXED",
                         message: format!("No index for '{sid}'."),
                         detail: json!({ "source_id": sid }),
@@ -131,6 +137,7 @@ impl CodeService {
             _ => self.error_response(
                 &timer,
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: format!("Unknown manage_indexes action '{}'.", args.action),
                     detail: json!({ "action": args.action }),
@@ -147,13 +154,14 @@ impl CodeService {
             #[serde(default)]
             force: bool,
         }
-        let args: Args = parse_args(v)?;
+        let args: Args = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
 
         // Check for embedding provider
-        let provider = crate::semantic::detect_embedding_provider();
+        let provider = crate::retrieval::semantic::detect_embedding_provider();
         let Some(provider) = provider else {
             return self.error_response(&timer, ToolError {
+                category: ToolErrorCategory::InvalidArgument,
                 code: "no_embedding_provider",
                 message: "No embedding provider configured. Set CODESIGHT_EMBED_MODEL, or OPENAI_API_KEY+OPENAI_EMBED_MODEL, or GOOGLE_API_KEY+GOOGLE_EMBED_MODEL.".into(),
                 detail: json!({}),
@@ -169,7 +177,7 @@ impl CodeService {
         let sym_infos = store.all_symbols_with_source()?;
         let emb_path = self.config.embedding_path(&args.source_id);
         let model_path = emb_path.with_extension("tfidf.json");
-        let mut emb_store = crate::semantic::EmbeddingStore::open(&emb_path);
+        let mut emb_store = crate::retrieval::semantic::EmbeddingStore::open(&emb_path);
 
         // Check if already embedded (cached)
         let already_embedded = if !args.force {
@@ -197,7 +205,7 @@ impl CodeService {
             .map(|s| (s.id.clone(), format!("{} {} {}", s.name, s.kind, s.source)))
             .collect();
 
-        let (vocab, embeddings) = crate::semantic::compute_tfidf_embeddings(&documents);
+        let (vocab, embeddings) = crate::retrieval::semantic::compute_tfidf_embeddings(&documents);
 
         // Build DF map for query vector computation
         let mut df: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
@@ -212,7 +220,7 @@ impl CodeService {
             }
         }
 
-        let model = crate::semantic::TfidfModel {
+        let model = crate::retrieval::semantic::TfidfModel {
             vocab: vocab.clone(),
             doc_count: documents.len(),
             df,
@@ -248,7 +256,7 @@ impl CodeService {
             #[serde(default)]
             max_results: Option<usize>,
         }
-        let args: Args = parse_args(v)?;
+        let args: Args = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
 
         let store = match self.ensure_repo_store(&args.source_id, None) {
@@ -262,6 +270,7 @@ impl CodeService {
             return self.error_response(
                 &timer,
                 ToolError {
+                    category: ToolErrorCategory::NotFound,
                     code: "NOT_FOUND",
                     message: "No column metadata found for this source.".into(),
                     detail: json!({}),
@@ -311,6 +320,7 @@ impl CodeService {
             return self.error_response(
                 &timer,
                 ToolError {
+                    category: ToolErrorCategory::NotFound,
                     code: "NOT_FOUND",
                     message: "No column metadata found for this source.".into(),
                     detail: json!({}),

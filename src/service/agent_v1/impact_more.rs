@@ -5,11 +5,11 @@ use std::collections::HashSet;
 use serde_json::{Value, json};
 
 use crate::analysis::impact;
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::agent_v1::util_graph::build_call_chain;
-use crate::service::helpers::ToolError;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn evaluate_impact_churn_rate(
@@ -31,6 +31,7 @@ impl CodeService {
                 return self.error_response(
                     &timer,
                     ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
                         code: "NOT_LOCAL",
                         message: "Source is not a local repository.".to_string(),
                         detail: json!({}),
@@ -71,6 +72,7 @@ impl CodeService {
                         return self.error_response(
                             &timer,
                             ToolError {
+                                category: ToolErrorCategory::NotFound,
                                 code: "NOT_FOUND",
                                 message: format!("Target '{target}' not found."),
                                 detail: json!({ "target": target }),
@@ -200,6 +202,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::NotFound,
                             code: "NOT_FOUND",
                             message: format!("Symbol '{}' not found in index.", sym_name_from_id),
                             detail: json!({ "symbol_id": sym_name_from_id }),
@@ -215,6 +218,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::NotFound,
                             code: "NOT_FOUND",
                             message: format!("Symbol '{}' not found in index.", sid),
                             detail: json!({ "stable_id": sid }),
@@ -226,6 +230,7 @@ impl CodeService {
             return self.error_response(
                 &timer,
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message:
                         "impact_preview requires symbol_id or refs[0] with a symbol stable_id."
@@ -237,8 +242,8 @@ impl CodeService {
 
         // Find callers using call edges
         let sym_infos = store.all_symbols_with_source()?;
-        let edges = crate::dep_graph::build_call_edges(&sym_infos);
-        let callers = crate::dep_graph::find_callers(&sym_id, &edges, 3);
+        let edges = crate::analysis::graph::build_call_edges(&sym_infos);
+        let callers = crate::analysis::graph::find_callers(&sym_id, &edges, 3);
 
         // Build affected_symbols (deduplicated)
         let mut affected_symbols: Vec<Value> = Vec::new();
@@ -342,6 +347,7 @@ impl CodeService {
             return self.error_response(
                 &timer,
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: "rename_safety requires refs[0].".to_string(),
                     detail: json!({}),
@@ -357,6 +363,7 @@ impl CodeService {
             return self.error_response(
                 &timer,
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: "rename_safety requires new_name on the ref.".to_string(),
                     detail: json!({}),
@@ -369,6 +376,7 @@ impl CodeService {
                 return self.error_response(
                     &timer,
                     ToolError {
+                        category: ToolErrorCategory::NotFound,
                         code: "NOT_FOUND",
                         message: format!("Symbol '{sym_id}' not found in index."),
                         detail: json!({ "stable_id": sym_id }),

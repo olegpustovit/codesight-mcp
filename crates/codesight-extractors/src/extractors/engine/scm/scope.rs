@@ -168,7 +168,8 @@ class UserService:
                     (expression_statement (string) @doc))) @definition.method
             "#,
         )?;
-        let mut raws = super::super::capture::collect_raw_captures(&extractor, source)?.raws;
+        let tree = super::super::capture::parse_host_tree(&extractor, source)?;
+        let mut raws = super::super::capture::collect_raw_captures(&extractor, source, &tree)?.raws;
 
         dedupe_captures(&mut raws);
         let symbols = infer_scopes_and_finalize_symbols(&extractor, "svc.py", source, &mut raws);

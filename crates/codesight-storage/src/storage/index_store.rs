@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use rusqlite::{Connection, Transaction, params};
+use tracing::instrument;
 
 use super::RepoMetadata;
 use crate::{
@@ -17,16 +18,18 @@ use std::collections::HashMap;
 
 use super::IndexStore;
 use super::convert::{to_i64_u64, to_i64_usize};
-use super::schema::INDEX_STORE_INIT_SQL;
+use super::migrations;
+use crate::core::symbols::FactQuality;
 
 impl IndexStore {
+    #[instrument(level = "debug", name = "index_open", skip_all, fields(path = %db_path.display(), kind = "code_index_open"))]
     pub fn open(db_path: PathBuf) -> anyhow::Result<Self> {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
         }
         let store = Self { db_path };
-        let conn = store.open_connection()?;
-        conn.execute_batch(INDEX_STORE_INIT_SQL.as_str())?;
+        let conn = db::open_rw(&store.db_path)?;
+        migrations::apply_code_index_migrations(&conn)?;
         Ok(store)
     }
 
@@ -108,7 +111,7 @@ impl IndexStore {
         touched_files: &[FileFingerprint],
         updated_files: &[IndexedFileUpdate],
         removed_files: &[String],
-        dep_edges: &[(String, String)],
+        dep_edges: &[(String, String, FactQuality)],
     ) -> anyhow::Result<()> {
         let mut conn = self.open_connection()?;
         let tx = conn.transaction()?;
@@ -125,10 +128,12 @@ impl IndexStore {
                 [&file.file_path],
             )?;
         }
-        for (source, target) in dep_edges {
+        for (source, target, quality) in dep_edges {
+            let q = quality.as_str();
             tx.execute(
-                "INSERT OR IGNORE INTO dependency_edges (source_file, target_file) VALUES (?1, ?2)",
-                params![source, target],
+                "INSERT INTO dependency_edges (source_file, target_file, import_fact_quality) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(source_file, target_file) DO UPDATE SET import_fact_quality = excluded.import_fact_quality",
+                params![source, target, q],
             )?;
         }
 
@@ -190,11 +195,13 @@ impl IndexStore {
     }
 
     pub(crate) fn open_connection(&self) -> anyhow::Result<Connection> {
-        db::open_rw(&self.db_path)
+        let conn = db::open_rw(&self.db_path)?;
+        migrations::apply_code_index_migrations(&conn)?;
+        Ok(conn)
     }
 
     pub(crate) fn open_read_only(&self) -> anyhow::Result<Connection> {
-        db::open_ro(&self.db_path)
+        Ok(db::open_ro(&self.db_path)?)
     }
 
     pub(crate) fn delete_removed_files(

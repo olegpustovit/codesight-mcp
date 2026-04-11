@@ -13,6 +13,7 @@
 mod capture;
 mod docs;
 mod extract;
+mod injections;
 mod load;
 mod metadata;
 mod pattern;
@@ -26,6 +27,7 @@ pub use super::catalogs::QUERY_FILES;
 pub use metadata::{ScmMetadata, parse_scm_header};
 
 use anyhow::Result;
+use tracing::warn;
 
 use super::catalogs::{QueryPackCatalog, QueryPackDefinition};
 use crate::core::pipeline::StoredSymbol;
@@ -92,9 +94,10 @@ pub fn build_scm_extractors_from_catalog(
         match ScmExtractor::from_pack(pack) {
             Ok(ext) => extractors.push(Box::new(ext)),
             Err(e) => {
-                eprintln!(
-                    "warning: failed to compile query pack {}: {e}",
-                    pack.pack_id
+                warn!(
+                    pack_id = %pack.pack_id,
+                    error = %e,
+                    "failed to compile query pack"
                 );
             }
         }

@@ -6,11 +6,11 @@ use serde_json::{Value, json};
 
 use crate::core::symbols::SymbolKind;
 use crate::indexing::imports::context_bundle_import_lines;
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::{AssembleContextArgs, ContentRef};
 use crate::service::agent_v1::util::*;
-use crate::service::helpers::{ToolError, index_error};
+use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn assemble_context_bundle(
@@ -22,6 +22,7 @@ impl CodeService {
             return self.error_response(
                 timer,
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: "context_bundle requires refs with a symbol ref.".to_string(),
                     detail: json!({}),
@@ -37,6 +38,7 @@ impl CodeService {
             return self.error_response(
                 timer,
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: "context_bundle requires at least one symbol ref.".to_string(),
                     detail: json!({}),
@@ -50,6 +52,7 @@ impl CodeService {
                 return self.error_response(
                     timer,
                     ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
                         code: "INVALID_REQUEST",
                         message: format!("Unknown budget_strategy '{bs_raw}'."),
                         detail: json!({ "budget_strategy": bs_raw }),
@@ -90,6 +93,7 @@ impl CodeService {
                 return self.error_response(
                     timer,
                     ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
                         code: "INVALID_REQUEST",
                         message: "symbol ref needs id or stable_id.".to_string(),
                         detail: json!({}),
@@ -135,6 +139,7 @@ impl CodeService {
                     return self.error_response(
                         timer,
                         ToolError {
+                            category: ToolErrorCategory::NotFound,
                             code: "NOT_FOUND",
                             message: format!("File '{}' is missing from disk.", sym.file),
                             detail: json!({ "file": sym.file }),
@@ -217,11 +222,22 @@ impl CodeService {
                 });
                 return self.success_response(&timer, body);
             }
-            let fid = sym_refs[0]
+            let Some(fid) = sym_refs[0]
                 .stable_id
                 .clone()
                 .or(sym_refs[0].id.clone())
-                .unwrap();
+                .filter(|s| !s.is_empty())
+            else {
+                return self.error_response(
+                    &timer,
+                    ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
+                        code: "INVALID_REQUEST",
+                        message: "symbol ref needs id or stable_id.".to_string(),
+                        detail: json!({}),
+                    },
+                );
+            };
             let body = json!({
                 "mode": "context_bundle",
                 "symbol_id": fid,
@@ -237,7 +253,7 @@ impl CodeService {
 
         let multi_shape = sym_refs.len() > 1 || include_report;
         let body = if !multi_shape {
-            let r0 = rows.first().expect("non-empty bundle rows");
+            let r0 = &rows[0];
             let mut o = json!({
                 "mode": "context_bundle",
                 "symbol_id": r0.sym_id,

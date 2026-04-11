@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::{DEFAULT_FILE_TREE_MAX_FILES, InspectStructureArgs};
 use crate::service::agent_v1::file_tree::{
@@ -12,12 +11,13 @@ use crate::service::agent_v1::file_tree::{
     normalize_file_tree_path_prefix,
 };
 use crate::service::agent_v1::util_graph::build_toc_tree;
-use crate::service::args::parse_args;
-use crate::service::helpers::ToolError;
+use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn inspect_structure(&self, v: Value) -> anyhow::Result<Value> {
-        let args: InspectStructureArgs = parse_args(v)?;
+        let args: InspectStructureArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let view = args.view.to_ascii_lowercase();
         let fp = args.file_path.clone().or(args.path.clone());
         let warnings = Vec::new();
@@ -31,7 +31,16 @@ impl CodeService {
                 };
                 let raw_bytes = store.repo_total_bytes()?;
                 let timer = MetaBuilder::new(raw_bytes);
-                let max_files = args.max_files.unwrap_or(DEFAULT_FILE_TREE_MAX_FILES).max(1);
+                let mut max_files = args.max_files.unwrap_or(DEFAULT_FILE_TREE_MAX_FILES).max(1);
+                // Apply token budget as a row cap. Each tree entry serializes to
+                // roughly 120 bytes (path + language + size + symbol_count);
+                // take the stricter of max_files and max_tokens.
+                if let Some(budget) = args.max_tokens {
+                    let budget_rows = (budget as usize)
+                        .saturating_mul(crate::config::BYTES_PER_TOKEN as usize)
+                        / 120;
+                    max_files = max_files.min(budget_rows.max(1));
+                }
                 let prefix = normalize_file_tree_path_prefix(&args.path);
                 let mut rows = store.file_tree_rows()?;
                 if let Some(ref pref) = prefix {
@@ -93,10 +102,17 @@ impl CodeService {
                 let raw_bytes = store.repo_total_bytes()?;
                 let timer = MetaBuilder::new(raw_bytes);
                 let outline = store.repo_outline()?;
+                let (outline, truncated) = if let Some(budget) = args.max_tokens {
+                    crate::service::agent_v1::util::pack_catalog_items_to_token_budget(
+                        outline, budget,
+                    )
+                } else {
+                    (outline, false)
+                };
                 // Compute most_central_symbols via dependency graph PageRank
                 let adj = store.dependency_graph().unwrap_or_default();
                 let most_central = if !adj.is_empty() {
-                    let pr = crate::dep_graph::compute_pagerank(&adj, 0.85, 100, 1e-6);
+                    let pr = crate::analysis::graph::compute_pagerank(&adj, 0.85, 100, 1e-6);
                     let mut ranked: Vec<_> = pr.scores.iter().collect();
                     ranked
                         .sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -108,7 +124,12 @@ impl CodeService {
                 };
                 self.success_response(
                     &timer,
-                    json!({ "view": "repo_outline", "items": outline, "most_central_symbols": most_central }),
+                    json!({
+                        "view": "repo_outline",
+                        "items": outline,
+                        "most_central_symbols": most_central,
+                        "truncated": truncated,
+                    }),
                 )
             }
             "repository_rollup" => {
@@ -141,6 +162,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message:
                                 "file_outline: pass either file_path/path or file_paths, not both."
@@ -179,6 +201,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "file_outline requires path, file_path, or file_paths."
                                 .to_string(),
@@ -225,6 +248,7 @@ impl CodeService {
                         return self.error_response(
                             &timer,
                             ToolError {
+                                category: ToolErrorCategory::InvalidArgument,
                                 code: "INVALID_REQUEST",
                                 message: "document_outline requires path or file_path.".to_string(),
                                 detail: json!({}),
@@ -236,6 +260,7 @@ impl CodeService {
                         return self.error_response(
                             &timer,
                             ToolError {
+                                category: ToolErrorCategory::NotFound,
                                 code: "NOT_FOUND",
                                 message: format!("Document '{file_path}' is not indexed."),
                                 detail: json!({ "path": file_path }),
@@ -257,14 +282,22 @@ impl CodeService {
                 };
                 let raw_bytes = store.repo_total_bytes()?;
                 let timer = MetaBuilder::new(raw_bytes);
-                let class_name = match fp.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                let class_name = match args
+                    .class_path
+                    .as_ref()
+                    .or(fp.as_ref())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
                     Some(n) => n.to_string(),
                     None => {
                         return self.error_response(
                             &timer,
                             ToolError {
+                                category: ToolErrorCategory::InvalidArgument,
                                 code: "INVALID_REQUEST",
-                                message: "class_hierarchy requires path (class name).".to_string(),
+                                message: "class_hierarchy requires class_path (the class name)."
+                                    .to_string(),
                                 detail: json!({}),
                             },
                         );
@@ -276,6 +309,7 @@ impl CodeService {
                         return self.error_response(
                             &timer,
                             ToolError {
+                                category: ToolErrorCategory::Internal,
                                 code: "INDEX_ERROR",
                                 message: e.to_string(),
                                 detail: json!({}),
@@ -283,11 +317,13 @@ impl CodeService {
                         );
                     }
                 };
-                let Some(view) = crate::class_hierarchy::compute_hierarchy_view(&rows, &class_name)
+                let Some(view) =
+                    crate::storage::class_hierarchy::compute_hierarchy_view(&rows, &class_name)
                 else {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::NotFound,
                             code: "NOT_FOUND",
                             message: format!("Class '{class_name}' not found in index."),
                             detail: json!({ "class_name": class_name }),
@@ -311,6 +347,7 @@ impl CodeService {
                 self.error_response(
                     &timer,
                     ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
                         code: "INVALID_REQUEST",
                         message: format!("Unknown inspect_structure view '{}'.", args.view),
                         detail: json!({ "view": args.view }),

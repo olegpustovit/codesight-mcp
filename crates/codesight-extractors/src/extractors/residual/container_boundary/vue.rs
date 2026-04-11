@@ -115,7 +115,7 @@ struct ScriptBlock<'a> {
 }
 
 static LANG_TS_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)\blang\s*=\s*["']ts["']"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"(?i)\blang\s*=\s*["']ts["']"#).expect("infallible: vue regex"));
 
 fn extract_script_block(source: &str) -> Option<ScriptBlock<'_>> {
     let block = find_html_tag_blocks(source, "script")

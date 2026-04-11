@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::complexity::{complexity_assessment, cyclomatic_complexity};
+use crate::analysis::complexity::{complexity_assessment, cyclomatic_complexity};
 use crate::storage::{IndexStore, doc_index::DocStore};
 
 pub fn complexity_payload(store: &IndexStore, symbol_id: &str) -> anyhow::Result<Option<Value>> {

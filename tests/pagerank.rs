@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use codesight_mcp::analysis::graph::{compute_in_out_degrees, compute_pagerank};
 use codesight_mcp::config::AppConfig;
-use codesight_mcp::dep_graph::{compute_in_out_degrees, compute_pagerank};
 use codesight_mcp::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::tempdir;

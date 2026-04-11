@@ -2,7 +2,7 @@
 //! path-aware post-pass because plays/tasks are host semantics layered over YAML structure.
 
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use anyhow::Result;
 use tree_sitter::Node;
@@ -35,29 +35,30 @@ impl crate::extractors::LanguageExtractor for YamlExtractor {
         source: &str,
     ) -> anyhow::Result<Vec<crate::core::pipeline::StoredSymbol>> {
         if !path_suggests_ansible_layout(Path::new(file_path)) {
-            return yaml_pack().extract(file_path, source);
+            return yaml_pack()?.extract(file_path, source);
         }
 
         let tree = parse_tree(tree_sitter_yaml::LANGUAGE, source)?;
         let mut symbols = Vec::new();
         visit_ansible_nodes(tree.root_node(), file_path, source, &mut symbols)?;
         if symbols.is_empty() {
-            return yaml_pack().extract(file_path, source);
+            return yaml_pack()?.extract(file_path, source);
         }
         symbols.sort_by_key(|symbol| (symbol.start_byte, symbol.end_byte));
         Ok(symbols)
     }
 }
 
-fn yaml_pack() -> &'static ScmExtractor {
-    static YAML_PACK: LazyLock<ScmExtractor> = LazyLock::new(|| {
+fn yaml_pack() -> anyhow::Result<&'static ScmExtractor> {
+    // Built-in pack is compiled in; a missing entry is a logic bug, not a runtime error.
+    static YAML_PACK: OnceLock<ScmExtractor> = OnceLock::new();
+    Ok(YAML_PACK.get_or_init(|| {
         let catalog = QueryPackCatalog::builtin();
         let pack = catalog
             .find_by_pack_id("yaml")
-            .expect("missing yaml query pack");
-        ScmExtractor::from_pack(pack).expect("failed to compile yaml query pack")
-    });
-    &YAML_PACK
+            .expect("infallible: built-in catalog missing yaml query pack");
+        ScmExtractor::from_pack(pack).expect("infallible: yaml pack failed to build")
+    }))
 }
 
 fn visit_ansible_nodes(

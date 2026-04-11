@@ -1,0 +1,8 @@
+{
+  "total_tokens_saved": 0,
+  "total_cost_avoided": {
+    "claude_opus": 0.0,
+    "claude_sonnet": 0.0,
+    "gpt4o": 0.0
+  }
+}

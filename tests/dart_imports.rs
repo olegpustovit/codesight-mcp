@@ -103,7 +103,7 @@ fn test_no_false_positives_from_non_import_lines() {
 }
 
 #[test]
-fn test_dart_not_in_missing_extractors_after_t19() {
+fn test_dart_extractor_resolves_for_dart_files() {
     let reg = ExtractorRegistry::default();
     let ext = reg.extractor_for_path(Path::new("main.dart"));
     assert!(ext.is_some(), "Dart extractor must resolve for .dart files");

@@ -4,11 +4,11 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::analysis::reference_check;
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::ContentRef;
-use crate::service::args::parse_args;
-use crate::service::helpers::ToolError;
+use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn check_references(&self, v: Value) -> anyhow::Result<Value> {
@@ -27,7 +27,7 @@ impl CodeService {
         fn default_search_content() -> bool {
             true
         }
-        let args: Args = parse_args(v)?;
+        let args: Args = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
 
         let store = match self.ensure_repo_store(&args.source_id, None) {
@@ -39,6 +39,7 @@ impl CodeService {
             return self.error_response(
                 &timer,
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: "Cannot provide both 'identifier' and 'identifiers'.".into(),
                     detail: json!({}),
@@ -65,6 +66,7 @@ impl CodeService {
             return self.error_response(
                 &timer,
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: "check_references requires 'identifier', 'identifiers', or 'refs'."
                         .into(),

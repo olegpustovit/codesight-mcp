@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use regex::Regex;
-
+use super::regex::RE;
 use crate::framework::ExtraImport;
 
 /// Map of Laravel facade names to their underlying classes.
@@ -28,12 +27,10 @@ fn facade_map() -> HashMap<&'static str, &'static str> {
 /// Extract facade usage from PHP content and return resolved imports.
 pub fn extract_facade_imports(content: &str) -> Vec<ExtraImport> {
     let facades = facade_map();
-    let re = Regex::new(r"\b(\w+)::(\w+)\(").unwrap();
-
     let mut seen = std::collections::HashSet::new();
     let mut imports = Vec::new();
 
-    for cap in re.captures_iter(content) {
+    for cap in RE.facade_call.captures_iter(content) {
         let facade_name = &cap[1];
         let method = &cap[2];
 

@@ -1,4 +1,4 @@
-use regex::Regex;
+use super::regex::RE;
 
 /// Convert blade dot-notation to a file path.
 /// `welcome` -> `resources/views/welcome.blade.php`
@@ -21,32 +21,27 @@ pub fn extract_blade_imports(content: &str) -> Vec<String> {
     let mut imports = Vec::new();
 
     // @extends('name')
-    let extends_re = Regex::new(r#"@extends\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap();
-    for cap in extends_re.captures_iter(content) {
+    for cap in RE.blade_extends.captures_iter(content) {
         imports.push(blade_dot_to_path(&cap[1]));
     }
 
     // @include('name')
-    let include_re = Regex::new(r#"@include\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap();
-    for cap in include_re.captures_iter(content) {
+    for cap in RE.blade_include.captures_iter(content) {
         imports.push(blade_dot_to_path(&cap[1]));
     }
 
     // @includeWhen($cond, 'name')
-    let include_when_re = Regex::new(r#"@includeWhen\([^,]+,\s*['"]([^'"]+)['"]\s*\)"#).unwrap();
-    for cap in include_when_re.captures_iter(content) {
+    for cap in RE.blade_include_when.captures_iter(content) {
         imports.push(blade_dot_to_path(&cap[1]));
     }
 
     // @includeFirst(['name1', 'name2']) - only take first
-    let include_first_re = Regex::new(r#"@includeFirst\(\s*\[\s*['"]([^'"]+)['"]"#).unwrap();
-    for cap in include_first_re.captures_iter(content) {
+    for cap in RE.blade_include_first.captures_iter(content) {
         imports.push(blade_dot_to_path(&cap[1]));
     }
 
     // <x-component-name /> or <x-component-name>
-    let component_re = Regex::new(r"<x-([\w.-]+)\s*[/> ]").unwrap();
-    for cap in component_re.captures_iter(content) {
+    for cap in RE.blade_component.captures_iter(content) {
         imports.push(blade_component_to_path(&cap[1]));
     }
 

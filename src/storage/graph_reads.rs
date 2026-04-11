@@ -41,7 +41,7 @@ impl IndexStore {
     }
 
     /// Return all symbols with their source text, for call graph building.
-    pub fn all_symbols_with_source(&self) -> anyhow::Result<Vec<crate::dep_graph::SymbolInfo>> {
+    pub fn all_symbols_with_source(&self) -> anyhow::Result<Vec<crate::analysis::graph::SymbolInfo>> {
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare(
             "SELECT id, kind, extraction_tier, name, file_path, start_line, end_line, source_text FROM symbols ORDER BY file_path, start_line",
@@ -50,7 +50,7 @@ impl IndexStore {
             let tier_str: String = row.get(2)?;
             let extraction_tier = crate::core::symbols::ExtractionTier::from_db(&tier_str)
                 .unwrap_or(crate::core::symbols::ExtractionTier::ManualOverride);
-            Ok(crate::dep_graph::SymbolInfo {
+            Ok(crate::analysis::graph::SymbolInfo {
                 id: row.get(0)?,
                 kind: row.get(1)?,
                 name: row.get(3)?,

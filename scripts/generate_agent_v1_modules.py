@@ -53,7 +53,7 @@ def main() -> None:
 
     common_impl_header = (
         "use serde_json::{Value, json};\n\n"
-        "use crate::savings::MetaBuilder;\n"
+        "use crate::service::savings::MetaBuilder;\n"
         "use crate::service::agent_v1::args::*;\n"
         "use crate::service::agent_v1::util::*;\n"
         "use crate::service::helpers::*;\n"
@@ -104,9 +104,9 @@ def main() -> None:
             "use walkdir::WalkDir;\n\n"
             "use crate::config::BYTES_PER_TOKEN;\n"
             "use crate::storage::doc_index::DocStore;\n"
-            "use crate::fuzzy;\n"
+            "use crate::retrieval::fuzzy;\n"
             "use crate::storage::SearchSymbol;\n"
-            "use crate::semantic;\n"
+            "use crate::retrieval::semantic;\n"
             "use crate::storage::IndexStore;\n\n"
             "use crate::service::helpers::{canonicalize_root, should_descend, to_repo_relative, normalize_search_scope};\n\n"
         ),
@@ -119,7 +119,7 @@ def main() -> None:
             "use crate::core::symbols::SymbolKind;\n"
             "use crate::storage::SearchSymbol;\n"
             "use crate::repo_id::normalize_repo_id;\n"
-            "use crate::sections;\n"
+            "use crate::retrieval::sections;\n"
             "use crate::storage::IndexStore;\n\n"
         ),
     )
@@ -129,11 +129,11 @@ def main() -> None:
         extra_use=(
             "use std::collections::BTreeMap;\n\n"
             "use walkdir::WalkDir;\n\n"
-            "use crate::class_hierarchy;\n"
+            "use crate::storage::class_hierarchy;\n"
             "use crate::storage::doc_index::DocStore;\n"
             "use crate::framework;\n"
             "use crate::repo_id::normalize_repo_id;\n"
-            "use crate::sections;\n"
+            "use crate::retrieval::sections;\n"
             "use crate::storage::IndexStore;\n\n"
         ),
     )
@@ -174,7 +174,7 @@ def main() -> None:
         code = (
             f"/** `{arm_name}` graph mode. */\n"
             "use serde_json::{Value, json};\n\n"
-            "use crate::savings::MetaBuilder;\n"
+            "use crate::service::savings::MetaBuilder;\n"
             "use crate::service::agent_v1::args::InspectGraphArgs;\n"
             "use crate::service::helpers::ToolError;\n"
             "use crate::service::{CodeService, MAX_QUERY_LEN};\n\n"

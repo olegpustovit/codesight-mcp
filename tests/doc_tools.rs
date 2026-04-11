@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use codesight_mcp::config::AppConfig;
-use codesight_mcp::sections::should_skip_relative_doc_path;
+use codesight_mcp::retrieval::sections::should_skip_relative_doc_path;
 use codesight_mcp::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
@@ -231,7 +231,7 @@ fn doc_index_catalog_toc_search_read_outline_delete() {
         )
         .unwrap();
     assert!(one["ok"].as_bool().unwrap());
-    let c0 = &one["data"]["items"][0]["content"];
+    let c0 = &one["data"]["items"][0];
     assert!(c0.get("content").is_some());
 
     let verified = svc
@@ -246,7 +246,7 @@ fn doc_index_catalog_toc_search_read_outline_delete() {
         .unwrap();
     assert!(verified["ok"].as_bool().unwrap());
     assert!(
-        verified["data"]["items"][0]["content"]
+        verified["data"]["items"][0]
             .get("hash_verified")
             .is_some()
     );

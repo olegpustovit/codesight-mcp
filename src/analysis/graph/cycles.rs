@@ -47,13 +47,14 @@ pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
                         sccs,
                     );
                     let wl = lowlinks[w.as_str()];
-                    let vl = lowlinks.get_mut(v).unwrap();
+                    // Invariant: `v` gained a lowlink when this frame started.
+                    let vl = lowlinks.get_mut(v).expect("lowlink for current vertex");
                     if wl < *vl {
                         *vl = wl;
                     }
                 } else if on_stack.contains(w.as_str()) {
                     let wi = indices[w.as_str()];
-                    let vl = lowlinks.get_mut(v).unwrap();
+                    let vl = lowlinks.get_mut(v).expect("lowlink for current vertex");
                     if wi < *vl {
                         *vl = wi;
                     }
@@ -64,7 +65,8 @@ pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
         if lowlinks[v] == indices[v] {
             let mut scc = Vec::new();
             loop {
-                let w = stack.pop().unwrap();
+                // Invariant: SCC head `v` remains on the stack until popped here.
+                let w = stack.pop().expect("non-empty stack closing SCC");
                 on_stack.remove(&w);
                 scc.push(w.clone());
                 if w == v {

@@ -53,7 +53,11 @@
         },
         "scope": { "type": "string" },
         "limit": { "type": "integer", "default": 10 },
-        "query_mode": { "type": "string", "enum": ["keyword", "natural_language", "regex"] },
+        "query_mode": {
+          "type": "string",
+          "enum": ["keyword", "natural_language", "regex"],
+          "description": "regex mode auto-routes to file-text search (unit_kinds ignored)."
+        },
         "context_lines": {
           "type": "integer",
           "description": "Lines of context before/after for file text hits (code domain, unit_kinds file)."
@@ -138,9 +142,16 @@
         },
         "path": {
           "type": "string",
-          "description": "Optional subtree prefix for file_tree (repo-relative, trailing slash optional). file_outline uses file_path / path as file path."
+          "description": "file_tree: optional subtree prefix (repo-relative). file_outline: file path."
         },
-        "file_path": { "type": "string" },
+        "file_path": {
+          "type": "string",
+          "description": "file_outline: file path (alternative to `path`)."
+        },
+        "class_path": {
+          "type": "string",
+          "description": "class_hierarchy: required — name of the class to root the hierarchy on."
+        },
         "file_paths": {
           "type": "array",
           "items": { "type": "string" },
@@ -150,13 +161,17 @@
           "type": "integer",
           "description": "file_tree only: max files before truncation (default 500)."
         },
+        "max_tokens": {
+          "type": "integer",
+          "description": "Optional token budget (≈4 bytes/token) applied to file_tree and repo_outline."
+        },
         "repo_path": { "type": "string" }
       }
     }
   },
   {
     "name": "inspect_graph",
-    "description": "Heuristic references and same-file related symbols; other graph modes may be unsupported.",
+    "description": "Reference, import, and dependency graph queries.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "graph"],
@@ -170,13 +185,24 @@
             "importers",
             "calls",
             "dependencies",
-            "dependency_cycles",
-            "cross_source"
+            "dependency_cycles"
           ]
         },
         "ref": {
           "type": "object",
           "description": "Target symbol ref for references/related."
+        },
+        "symbol_id": {
+          "type": "string",
+          "description": "calls: required — stable id of the symbol whose call sites to enumerate."
+        },
+        "file_path": {
+          "type": "string",
+          "description": "importers: required — file path whose importers to enumerate."
+        },
+        "cross_repo": {
+          "type": "boolean",
+          "description": "dependencies: include cross-repo package edges when true."
         },
         "limit": { "type": "integer", "default": 20 },
         "repo_path": { "type": "string" }
@@ -185,7 +211,7 @@
   },
   {
     "name": "evaluate_impact",
-    "description": "Change-oriented analysis; diff supported for two symbols in the same file.",
+    "description": "Change-oriented analysis: blast radius, rename safety, diffs, and since-commit change reports.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
@@ -201,21 +227,54 @@
             "diff"
           ]
         },
-        "refs": { "type": "array" },
+        "refs": {
+          "type": "array",
+          "description": "blast_radius/impact_preview/rename_safety: required, at least refs[0] as a symbol ref. diff: exactly two symbol refs in the same file. changed_units: one or two commit refs ({kind: 'commit', id: '<sha>'}); one compares against HEAD."
+        },
         "repo_path": { "type": "string" }
       }
     }
   },
   {
     "name": "evaluate_quality",
-    "description": "Quality metrics; complexity and repo_health supported; others may return warnings.",
+    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
       "properties": {
         "source_id": { "type": "string" },
-        "analysis": { "type": "string" },
-        "refs": { "type": "array" },
+        "analysis": {
+          "type": "string",
+          "enum": [
+            "complexity",
+            "repo_health",
+            "dead_code",
+            "hotspots",
+            "doc_coverage"
+          ]
+        },
+        "refs": {
+          "type": "array",
+          "description": "complexity: required symbol ref. doc_coverage: optional list of symbol refs (capped at 200)."
+        },
+        "granularity": {
+          "type": "string",
+          "enum": ["file", "symbol"],
+          "description": "dead_code: file or symbol granularity (default file)."
+        },
+        "min_confidence": {
+          "type": "number",
+          "description": "dead_code: minimum confidence threshold (default 0.5)."
+        },
+        "include_tests": {
+          "type": "boolean",
+          "description": "dead_code: include test files (default true)."
+        },
+        "entry_point_patterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "dead_code: additional entry-point file-name patterns."
+        },
         "repo_path": { "type": "string" }
       }
     }
@@ -235,7 +294,7 @@
         "query": { "type": "string" },
         "refs": {
           "type": "array",
-          "description": "Required for section_context (section ref). Same shape as read_content refs."
+          "description": "section_context: required — one section ref. context_bundle: required — one symbol ref. Same shape as read_content refs."
         },
         "limit": { "type": "integer", "default": 5 },
         "include_children": {

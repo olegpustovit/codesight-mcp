@@ -4,10 +4,10 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::analysis::cross_repo_map::{self, BuildCrossRepoOutcome};
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
-use crate::service::args::parse_args;
-use crate::service::helpers::ToolError;
+use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn get_cross_repo_map(&self, v: Value) -> anyhow::Result<Value> {
@@ -16,13 +16,14 @@ impl CodeService {
             #[serde(default)]
             source_id: Option<String>,
         }
-        let args: Args = parse_args(v)?;
+        let args: Args = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
 
         match cross_repo_map::build_cross_repo_map(&self.config, args.source_id.as_deref())? {
             BuildCrossRepoOutcome::FilterMissing { source_id } => self.error_response(
                 &timer,
                 ToolError {
+                    category: ToolErrorCategory::NotFound,
                     code: "NOT_FOUND",
                     message: format!("Source '{source_id}' not found in index."),
                     detail: json!({ "source_id": source_id }),

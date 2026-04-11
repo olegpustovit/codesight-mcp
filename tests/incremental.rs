@@ -223,7 +223,7 @@ fn run_crlf_preserved_in_cached_files() {
         read["ok"].as_bool().unwrap(),
         "read_content failed: {read:?}"
     );
-    let content = read["data"]["items"][0]["content"]["content"]
+    let content = read["data"]["items"][0]["content"]
         .as_str()
         .expect("content field should be a string");
     assert!(

@@ -2,9 +2,9 @@
 
 use serde_json::Value;
 
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
-use crate::service::helpers::ToolError;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 type AgentV1Handler = fn(&CodeService, Value) -> anyhow::Result<Value>;
 
@@ -42,6 +42,7 @@ pub(in crate::service) fn not_found(svc: &CodeService, tool_name: &str) -> anyho
     svc.error_response(
         &MetaBuilder::new(0),
         ToolError {
+            category: ToolErrorCategory::NotFound,
             code: "NOT_FOUND",
             message: format!("Tool '{tool_name}' is not implemented."),
             detail: serde_json::json!({ "tool": tool_name }),

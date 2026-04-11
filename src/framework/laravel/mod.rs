@@ -13,6 +13,7 @@ mod migrations;
 mod models;
 mod php_structure;
 mod provider;
+mod regex;
 mod render;
 mod routes;
 mod snapshot;

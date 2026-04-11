@@ -2,19 +2,19 @@
 
 use serde_json::{Value, json};
 
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::RANKED_CONTEXT_MAX_QUERY_LEN;
 use crate::service::agent_v1::args::{
     AssembleContextArgs, ContentRef, ReadContentArgs, SearchCatalogArgs,
 };
 use crate::service::agent_v1::util::*;
-use crate::service::args::parse_args;
-use crate::service::helpers::ToolError;
+use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn assemble_context(&self, v: Value) -> anyhow::Result<Value> {
-        let args: AssembleContextArgs = parse_args(v)?;
+        let args: AssembleContextArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let mode = args.mode.to_ascii_lowercase();
         let timer = MetaBuilder::new(0);
 
@@ -24,6 +24,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "assemble_context bundle requires query.".to_string(),
                             detail: json!({}),
@@ -118,6 +119,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "assemble_context ranked requires query.".to_string(),
                             detail: json!({}),
@@ -129,6 +131,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "assemble_context ranked query is empty.".to_string(),
                             detail: json!({}),
@@ -139,6 +142,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: format!(
                                 "Query exceeds ranked context limit of {RANKED_CONTEXT_MAX_QUERY_LEN} characters."
@@ -151,6 +155,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "token_budget must be greater than zero for ranked context."
                                 .to_string(),
@@ -206,7 +211,7 @@ impl CodeService {
                 let budget = args.max_tokens;
                 let mut context_items: Vec<Value> = Vec::new();
                 let mut total_tokens: u64 = 0;
-                let mut warnings = Vec::new();
+                let warnings: Vec<Value> = Vec::new();
 
                 'hits: for item in items.into_iter() {
                     let ref_obj = item.get("ref").cloned().unwrap_or(Value::Null);
@@ -223,8 +228,6 @@ impl CodeService {
                         continue;
                     }
                     let relevance = item.get("score").and_then(|s| s.as_f64()).unwrap_or(0.0);
-                    let centrality: f64 = 0.0;
-                    let combined = relevance;
 
                     let read_args = ReadContentArgs {
                         source_id: args.source_id.clone(),
@@ -252,7 +255,7 @@ impl CodeService {
                     if read_res.get("ok").and_then(|b| b.as_bool()) != Some(true) {
                         continue;
                     }
-                    let source = read_res["data"]["items"][0]["content"]["source"]
+                    let source = read_res["data"]["items"][0]["source"]
                         .as_str()
                         .unwrap_or("")
                         .to_string();
@@ -267,20 +270,11 @@ impl CodeService {
                         "symbol_id": sid,
                         "source": source,
                         "relevance_score": relevance,
-                        "centrality_score": centrality,
-                        "combined_score": combined,
                         "tokens": tks,
                     }));
                     if context_items.len() >= lim {
                         break;
                     }
-                }
-
-                if !context_items.is_empty() {
-                    warnings.push(json!({
-                        "code": "PARTIAL_RANKED_CONTEXT",
-                        "message": "centrality_score is not computed yet; values are placeholders.",
-                    }));
                 }
 
                 let body = json!({
@@ -289,8 +283,10 @@ impl CodeService {
                     "total_tokens": total_tokens,
                     "strategy": strategy_label,
                 });
-                let raw_bytes = serde_json::to_string(&body)
-                    .map(|s| s.len() as u64)
+                let raw_bytes = self
+                    .ensure_repo_store(&args.source_id, args.repo_path.as_deref())
+                    .ok()
+                    .and_then(|store| store.repo_total_bytes().ok())
                     .unwrap_or(1)
                     .max(1);
                 let timer = MetaBuilder::new(raw_bytes);

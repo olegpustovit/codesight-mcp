@@ -392,7 +392,8 @@ impl crate::extractors::LanguageExtractor for AlExtractor {
 }
 
 fn strip_xml_tags(s: &str) -> String {
-    static XML_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
+    static XML_TAG: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"<[^>]+>").expect("infallible: al xml tag strip regex"));
     XML_TAG.replace_all(s, "").trim().to_string()
 }
 
@@ -413,7 +414,7 @@ fn make_symbol(
     let qualified_name = if scopes.is_empty() {
         name.to_string()
     } else {
-        format!("{}.{}", scopes.last().unwrap(), name)
+        format!("{}.{}", &scopes[scopes.len() - 1], name)
     };
     let source_text = source
         .get(start_byte..end_byte)
@@ -458,7 +459,7 @@ fn make_symbol_with_sig(
     let qualified_name = if scopes.is_empty() {
         name.to_string()
     } else {
-        format!("{}.{}", scopes.last().unwrap(), name)
+        format!("{}.{}", &scopes[scopes.len() - 1], name)
     };
     let source_text = source
         .get(start_byte..end_byte)
@@ -495,64 +496,70 @@ mod re {
         Regex::new(
             r#"(?i)^(table|codeunit|page|report|query|xmlport|pageextension|tableextension|enumextension|enum|controladdin)\s+(?:\d+\s+)?"([^"]+)"(?:\s+extends\s+"[^"]+")?"#,
         )
-        .unwrap()
+        .expect("infallible: al top-level object regex")
     });
 
     // Interface: interface "Name"
-    static INTERFACE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^interface\s+"([^"]+)""#).unwrap());
+    static INTERFACE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)^interface\s+"([^"]+)""#).expect("infallible: al regex")
+    });
 
     // Unquoted controladdin: controladdin MyAddIn
     static CONTROLADDIN_UNQUOTED: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^controladdin\s+(\w+)"#).unwrap());
+        LazyLock::new(|| Regex::new(r#"(?i)^controladdin\s+(\w+)"#).expect("infallible: al regex"));
 
     // Procedures
-    static PROCEDURE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^(?:local\s+|internal\s+)?procedure\s+(\w+)").unwrap());
+    static PROCEDURE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^(?:local\s+|internal\s+)?procedure\s+(\w+)")
+            .expect("infallible: al regex")
+    });
 
     // Triggers
     static TRIGGER: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^trigger\s+(\w+)\s*\(").unwrap());
+        LazyLock::new(|| Regex::new(r"(?i)^trigger\s+(\w+)\s*\(").expect("infallible: al regex"));
 
     // Events (in controladdin)
     static EVENT: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^event\s+(\w+)\s*\(").unwrap());
+        LazyLock::new(|| Regex::new(r"(?i)^event\s+(\w+)\s*\(").expect("infallible: al regex"));
 
     // Fields: field(N; Name; Type) or field(N; "Name"; Type) or field(Name; SourceExpr) in page
     static FIELD: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^field\(([^)]+)\)"#).unwrap());
+        LazyLock::new(|| Regex::new(r#"(?i)^field\(([^)]+)\)"#).expect("infallible: al regex"));
 
     // Enum values: value(N; Name)
     static VALUE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^value\(([^)]+)\)"#).unwrap());
+        LazyLock::new(|| Regex::new(r#"(?i)^value\(([^)]+)\)"#).expect("infallible: al regex"));
 
     // Actions: action(Name) or action("Name")
     static ACTION: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^action\(([^)]+)\)"#).unwrap());
+        LazyLock::new(|| Regex::new(r#"(?i)^action\(([^)]+)\)"#).expect("infallible: al regex"));
 
     // Keys: key(Name; Columns)
-    static KEY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)^key\(([^)]+)\)"#).unwrap());
+    static KEY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"(?i)^key\(([^)]+)\)"#).expect("infallible: al regex"));
 
     // Columns: column(Name; SourceExpr)
     static COLUMN: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^column\(([^)]+)\)"#).unwrap());
+        LazyLock::new(|| Regex::new(r#"(?i)^column\(([^)]+)\)"#).expect("infallible: al regex"));
 
     // FieldGroups: fieldgroup(Name; Columns)
-    static FIELDGROUP: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^fieldgroup\(([^)]+)\)"#).unwrap());
+    static FIELDGROUP: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)^fieldgroup\(([^)]+)\)"#).expect("infallible: al regex")
+    });
 
     // DataItems: dataitem(Name; SourceTable)
     static DATAITEM: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^dataitem\(([^)]+)\)"#).unwrap());
+        LazyLock::new(|| Regex::new(r#"(?i)^dataitem\(([^)]+)\)"#).expect("infallible: al regex"));
 
     // XMLport elements: textelement(Name), tableelement(Name; Table), fieldelement(Name; SourceExpr)
     static XMLPORT_ELEM: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(?i)^(textelement|tableelement|fieldelement)\(([^)]+)\)"#).unwrap()
+        Regex::new(r#"(?i)^(textelement|tableelement|fieldelement)\(([^)]+)\)"#)
+            .expect("infallible: al xmlport element regex")
     });
 
     // Variables: Name: Type (inside var block)
     static VARIABLE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^(\w+)\s*:\s*(.+?)\s*;$").unwrap());
+        LazyLock::new(|| Regex::new(r"^(\w+)\s*:\s*(.+?)\s*;$").expect("infallible: al regex"));
 
     pub fn top_level_object(s: &str) -> Option<(String, String)> {
         if let Some(caps) = TOP_LEVEL.captures(s) {

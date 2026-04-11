@@ -81,7 +81,9 @@ fn extract_js_import_names(clause: &str) -> Vec<String> {
     }
 
     let parts: Vec<&str> = if clause.contains('{') {
-        let brace_start = clause.find('{').unwrap();
+        let Some(brace_start) = clause.find('{') else {
+            return names;
+        };
         let brace_end = clause.find('}').unwrap_or(clause.len());
         let before = clause[..brace_start].trim().trim_end_matches(',').trim();
         let inside = &clause[brace_start + 1..brace_end];
@@ -97,7 +99,10 @@ fn extract_js_import_names(clause: &str) -> Vec<String> {
         }
         items
     } else if clause.starts_with("* as ") {
-        let name = clause.strip_prefix("* as ").unwrap().trim();
+        let Some(rest) = clause.strip_prefix("* as ") else {
+            return names;
+        };
+        let name = rest.trim();
         vec![name]
     } else {
         vec![clause]

@@ -3,15 +3,15 @@
 use serde_json::{Value, json};
 
 use crate::analysis::{dead_code, quality};
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
-use crate::service::args::parse_args;
-use crate::service::helpers::ToolError;
+use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn evaluate_quality(&self, v: Value) -> anyhow::Result<Value> {
-        let args: EvaluateQualityArgs = parse_args(v)?;
+        let args: EvaluateQualityArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let a = args.analysis.to_ascii_lowercase();
         let timer = MetaBuilder::new(0);
 
@@ -21,6 +21,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "complexity requires refs[0].".to_string(),
                             detail: json!({}),
@@ -36,6 +37,7 @@ impl CodeService {
                     return self.error_response(
                         &timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "complexity requires a symbol ref.".to_string(),
                             detail: json!({}),
@@ -53,6 +55,7 @@ impl CodeService {
                         return self.error_response(
                             &timer,
                             ToolError {
+                                category: ToolErrorCategory::NotFound,
                                 code: "NOT_FOUND",
                                 message: format!("Symbol '{id}' not found."),
                                 detail: json!({ "id": id }),
@@ -81,17 +84,36 @@ impl CodeService {
                 let timer = MetaBuilder::new(raw_bytes);
                 let fn_method = store.fn_method_symbol_count().unwrap_or(0);
                 let avg_complexity = store.avg_line_span_fn_methods().unwrap_or(0.0);
-                let unstable_modules = usize::from(meta.is_stale.unwrap_or(false));
+                let index_stale = meta.is_stale.unwrap_or(false);
+
+                let adj = store.dependency_graph_strict()?;
+                let cycles = crate::analysis::graph::find_cycles(&adj);
+                let cycle_count = cycles.len();
+                let cycles_sample: Vec<_> = cycles.iter().take(5).cloned().collect();
+
+                let dead_code_data = dead_code::dead_code_payload(&store, "file", 0.5, true, &[])?;
+                let dead_count = dead_code_data
+                    .get("dead_file_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let dead_code_pct = if meta.file_count == 0 {
+                    0.0
+                } else {
+                    (dead_count as f64 / meta.file_count as f64) * 100.0
+                };
+
+                let hotspots_data = quality::hotspots_payload(&store, 1, 5)?;
+                let top_hotspots = hotspots_data
+                    .get("hotspots")
+                    .cloned()
+                    .unwrap_or_else(|| json!([]));
+
                 let summary = format!(
                     "{} indexed files, {} symbols ({} functions/methods); index v{}",
                     meta.file_count, meta.symbol_count, fn_method, meta.index_version
                 );
                 let evidence = serde_json::to_value(&meta)?;
-                let warnings = vec![json!({
-                    "code": "PARTIAL_REPO_HEALTH",
-                    "message": "dead_code_pct, dead_count, cycle_count, cycles_sample, and top_hotspots are placeholders until dependency/dead-code analysis is implemented.",
-                })];
-                self.success_response_with_warnings(
+                self.success_response(
                     &timer,
                     json!({
                         "analysis": "repo_health",
@@ -99,14 +121,14 @@ impl CodeService {
                         "summary": summary,
                         "total_files": meta.file_count,
                         "total_symbols": meta.symbol_count,
-                        "avg_complexity": avg_complexity,
-                        "dead_code_pct": 0.0,
-                        "dead_count": 0,
-                        "cycle_count": 0,
-                        "cycles_sample": json!([]),
-                        "unstable_modules": unstable_modules,
-                        "top_hotspots": json!([]),
                         "fn_method_count": fn_method,
+                        "avg_complexity": avg_complexity,
+                        "dead_count": dead_count,
+                        "dead_code_pct": dead_code_pct,
+                        "cycle_count": cycle_count,
+                        "cycles_sample": cycles_sample,
+                        "top_hotspots": top_hotspots,
+                        "index_stale": index_stale,
                         "findings": [{
                             "finding_id": "repo_health:summary",
                             "analysis": "repo_health",
@@ -117,7 +139,6 @@ impl CodeService {
                             "related_refs": [],
                         }],
                     }),
-                    warnings,
                 )
             }
             "dead_code" => {

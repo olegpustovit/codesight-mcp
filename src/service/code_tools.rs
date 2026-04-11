@@ -2,6 +2,7 @@ use std::fs;
 
 use anyhow::Context;
 use serde_json::{Value, json};
+use tracing::info;
 
 use super::args::*;
 use super::helpers::{slice_file_lines, *};
@@ -44,7 +45,9 @@ impl CodeService {
                 file_count: outcome.summary.file_count,
                 symbol_count: outcome.summary.symbol_count,
                 languages: outcome.summary.languages,
-                missing_extractors: outcome.summary.missing_extractors,
+                languages_without_import_extractor: outcome
+                    .summary
+                    .languages_without_import_extractor,
             },
             warnings,
         ))
@@ -57,6 +60,7 @@ impl CodeService {
                 return self.error_response(
                     &MetaBuilder::new(0),
                     ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
                         code: "INVALID_ID",
                         message: "Missing file_path parameter.".to_string(),
                         detail: json!({ "source_id": args.source_id }),
@@ -78,6 +82,7 @@ impl CodeService {
                 return self.error_response(
                     &timer,
                     ToolError {
+                        category: ToolErrorCategory::NotFound,
                         code: "NOT_FOUND",
                         message: format!("File '{file_path}' not found on disk."),
                         detail: json!({ "source_id": args.source_id, "file": file_path }),
@@ -144,6 +149,7 @@ impl CodeService {
             .symbol_record(symbol_id)
             .map_err(index_error)?
             .ok_or_else(|| ToolError {
+                category: ToolErrorCategory::NotFound,
                 code: "NOT_FOUND",
                 message: format!("Symbol '{symbol_id}' not found in index."),
                 detail: json!({ "id": symbol_id }),
@@ -151,6 +157,7 @@ impl CodeService {
 
         let file_path = record.root_path.join(&record.file_path);
         let bytes = fs::read(&file_path).map_err(|_| ToolError {
+            category: ToolErrorCategory::NotFound,
             code: "NOT_FOUND",
             message: format!("File '{}' is missing from disk.", record.file_path),
             detail: json!({ "id": symbol_id, "file": record.file_path }),
@@ -160,6 +167,7 @@ impl CodeService {
         let symbol_slice = source
             .get(record.start_byte..record.end_byte)
             .ok_or_else(|| ToolError {
+                category: ToolErrorCategory::InvalidArgument,
                 code: "STALE_ID",
                 message: format!("Stored offsets for '{symbol_id}' are stale."),
                 detail: json!({ "id": symbol_id }),
@@ -215,7 +223,7 @@ impl CodeService {
                         .is_stale(&root, |p| extractors.extractor_for_path(p).is_some())
                         .unwrap_or(false)
                     {
-                        eprintln!("codesight-mcp: auto-reindexing stale repo '{repo}'");
+                        info!(repo = %repo, "auto-reindexing stale code repo");
                         let _ = self.do_index_folder(&root);
                         return self.open_repo_store(repo);
                     }
@@ -236,16 +244,18 @@ impl CodeService {
 
                 if let Some(path_str) = repo_path {
                     let root = canonicalize_root(path_str).map_err(|e| ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
                         code: "INVALID_REPO",
                         message: e.to_string(),
                         detail: json!({ "path": path_str }),
                     })?;
-                    eprintln!(
-                        "codesight-mcp: auto-indexing '{}' from {}",
-                        repo,
-                        root.display()
+                    info!(
+                        repo = %repo,
+                        root = %root.display(),
+                        "auto-indexing code repo from path"
                     );
                     self.do_index_folder(&root).map_err(|e| ToolError {
+                        category: ToolErrorCategory::Internal,
                         code: "INDEX_ERROR",
                         message: format!("Auto-indexing failed: {e:#}"),
                         detail: json!({ "source_id": repo }),
@@ -264,6 +274,7 @@ impl CodeService {
         IndexStore::open_existing(db_path)
             .map_err(index_error)?
             .ok_or_else(|| ToolError {
+                category: ToolErrorCategory::InvalidArgument,
                 code: "NOT_INDEXED",
                 message: format!("Code source '{repo}' has not been indexed."),
                 detail: json!({ "source_id": repo }),
@@ -288,6 +299,7 @@ impl CodeService {
         // 2. Enumerate indexed repos and try fuzzy match
         let repos =
             storage::list_repo_summaries(&self.config.repos_dir()).map_err(|e| ToolError {
+                category: ToolErrorCategory::InvalidArgument,
                 code: "INTERNAL",
                 message: format!("Failed to list repos: {e}"),
                 detail: json!({}),
@@ -324,14 +336,16 @@ impl CodeService {
             }
         }
 
-        match matches.len() {
-            0 => Err(ToolError {
+        match matches.as_slice() {
+            [] => Err(ToolError {
+                category: ToolErrorCategory::InvalidArgument,
                 code: "NOT_INDEXED",
                 message: format!("Source '{query}' not found among indexed sources."),
                 detail: json!({ "source_id": query }),
             }),
-            1 => Ok(matches.into_iter().next().unwrap()),
+            [single] => Ok(single.clone()),
             _ => Err(ToolError {
+                category: ToolErrorCategory::InvalidArgument,
                 code: "AMBIGUOUS_SOURCE",
                 message: format!(
                     "Source identifier '{query}' is ambiguous; matches: {}",

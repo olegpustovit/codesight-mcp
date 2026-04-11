@@ -8,11 +8,12 @@ use std::{
 };
 
 use ignore::WalkBuilder;
+use tracing::instrument;
 
 use crate::{
+    analysis::graph as dep_graph,
     config::{AppConfig, GITIGNORE_WARNING_FILE_THRESHOLD},
     core::pipeline::{FileFingerprint, IndexedFileUpdate},
-    dep_graph,
     extractors::ExtractorRegistry,
     indexing::packages,
     repo_id::normalize_repo_id,
@@ -32,7 +33,7 @@ pub struct CodeIndexSummary {
     pub file_count: usize,
     pub symbol_count: usize,
     pub languages: BTreeMap<String, usize>,
-    pub missing_extractors: Vec<String>,
+    pub languages_without_import_extractor: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +42,12 @@ pub struct CodeIndexOutcome {
     pub warnings: Vec<IndexWarning>,
 }
 
+#[instrument(
+    level = "info",
+    name = "ingest",
+    skip(config),
+    fields(root = %root.display())
+)]
 pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIndexOutcome> {
     let repo = normalize_repo_id(root);
     let store = IndexStore::open(config.repo_db_path(&repo))?;
@@ -75,7 +82,7 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
         let entry = match result {
             Ok(entry) => entry,
             Err(err) => {
-                eprintln!("codesight-mcp: walk error: {err}");
+                tracing::warn!(error = %err, "walk error during code index");
                 continue;
             }
         };
@@ -98,7 +105,7 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
         let metadata = match entry.metadata() {
             Ok(metadata) => metadata,
             Err(err) => {
-                eprintln!("codesight-mcp: skipping {}: {err}", path.display());
+                tracing::warn!(path = %path.display(), error = %err, "skipping file (metadata)");
                 continue;
             }
         };
@@ -112,7 +119,7 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(err) => {
-                eprintln!("codesight-mcp: failed to read {}: {err}", path.display());
+                tracing::warn!(path = %path.display(), error = %err, "failed to read file");
                 continue;
             }
         };
@@ -142,9 +149,10 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
         let symbols = match extractor.extract(&relative_path, &source) {
             Ok(symbols) => symbols,
             Err(err) => {
-                eprintln!(
-                    "codesight-mcp: tree-sitter extraction failed for {}: {err:#}",
-                    path.display()
+                tracing::warn!(
+                    path = %path.display(),
+                    error = format!("{err:#}"),
+                    "tree-sitter extraction failed"
                 );
                 continue;
             }
@@ -179,15 +187,7 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
 
     let alias_map = crate::indexing::imports::load_tsconfig_aliases(&root.to_string_lossy());
     let alias_ref = (!alias_map.is_empty()).then_some(&alias_map);
-    let adjacency = dep_graph::build_dependency_graph_with_aliases(&graph_sources, alias_ref);
-    let dep_edges: Vec<(String, String)> = adjacency
-        .iter()
-        .flat_map(|(source, targets)| {
-            targets
-                .iter()
-                .map(move |target| (source.clone(), target.clone()))
-        })
-        .collect();
+    let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(&graph_sources, alias_ref);
 
     let indexed_at = chrono::Utc::now().to_rfc3339();
     store.apply_index_with_deps(
@@ -207,7 +207,7 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
     }
 
     let metadata = store.repo_metadata()?;
-    let missing_extractors: Vec<String> = indexed_languages
+    let languages_without_import_extractor: Vec<String> = indexed_languages
         .into_iter()
         .filter(|language| !crate::indexing::imports::supports_import_extraction(language))
         .collect();
@@ -219,7 +219,7 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
             file_count: metadata.file_count,
             symbol_count: metadata.symbol_count,
             languages: metadata.languages,
-            missing_extractors,
+            languages_without_import_extractor,
         },
         warnings,
     })

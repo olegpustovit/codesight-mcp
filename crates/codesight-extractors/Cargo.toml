@@ -11,6 +11,8 @@ codesight-core = { path = "../codesight-core" }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
 streaming-iterator = "0.1.9"
 toml = "0.8"
 tree-sitter = "0.26.8"
@@ -20,6 +22,7 @@ tree-sitter-cpp = "0.23.4"
 tree-sitter-css = "0.25.0"
 tree-sitter-dart = "0.1.0"
 tree-sitter-elixir = "0.3.5"
+tree-sitter-embedded-template = "0.25.0"
 tree-sitter-erlang = "0.15.0"
 tree-sitter-fortran = "0.5.1"
 tree-sitter-gleam = "1.0.0"
@@ -42,3 +45,10 @@ tree-sitter-swift = "0.7.1"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-xml = "0.7.0"
 tree-sitter-yaml = "0.7.2"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "scm"
+harness = false

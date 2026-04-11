@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+# Self-host smoke test: build codesight-mcp, index this repo, and run a canned
+# `search_catalog` query through the MCP server over stdin. Prints raw timing
+# from the handler result (the S4-P11 envelope will surface `tokens_saved` once
+# it lands). Exits non-zero if any step fails.
+#
+# Usage: ./scripts/selfhost-index
+#
+# This script is intentionally POSIX-sh, not bash — it should run on any
+# operator laptop without extra dependencies.
+
+set -eu
+
+ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT_DIR"
+
+BIN="$ROOT_DIR/target/release/codesight-mcp"
+
+echo "==> building release binary"
+cargo build --release --quiet
+
+if [ ! -x "$BIN" ]; then
+    echo "selfhost-index: binary not found at $BIN" >&2
+    exit 1
+fi
+
+echo "==> writing workspace config"
+"$BIN" init --workspace --force >/dev/null
+
+echo "==> running check"
+"$BIN" check --workspace "$ROOT_DIR" || {
+    echo "selfhost-index: check failed" >&2
+    exit 1
+}
+
+echo "==> driving MCP over stdin: initialize -> ingest_sources -> search_catalog"
+
+# Build the JSON-RPC frames. Each line is one JSON-RPC request; codesight-mcp
+# reads line-delimited JSON-RPC on stdin.
+SOURCE_ID="codesight-selfhost"
+REQS=$(cat <<EOF
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"selfhost-index","version":"0.0.0"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ingest_sources","arguments":{"local_path":"$ROOT_DIR","source_id":"$SOURCE_ID"}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_catalog","arguments":{"source_id":"$SOURCE_ID","query":"dispatch","limit":5}}}
+EOF
+)
+
+printf '%s\n' "$REQS" | "$BIN" serve 2>/tmp/codesight-selfhost.stderr || {
+    echo "selfhost-index: serve failed; stderr in /tmp/codesight-selfhost.stderr" >&2
+    tail -20 /tmp/codesight-selfhost.stderr >&2
+    exit 1
+}
+
+echo
+echo "selfhost-index: done. stderr log: /tmp/codesight-selfhost.stderr"

@@ -18,12 +18,15 @@ pub(super) fn extract_ctes(
 ) -> Result<()> {
     use std::sync::LazyLock;
 
-    static CTE_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)(?:WITH|,)\s+(\w+)\s+AS\s*\(").unwrap());
+    static CTE_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(?:WITH|,)\s+(\w+)\s+AS\s*\(").expect("infallible: sql CTE name regex")
+    });
 
     for cap in CTE_RE.captures_iter(source) {
-        let name = cap.get(1).unwrap().as_str();
-        let full_match = cap.get(0).unwrap();
+        let (Some(name_m), Some(full_match)) = (cap.get(1), cap.get(0)) else {
+            continue;
+        };
+        let name = name_m.as_str();
         let start_byte = full_match.start();
         if symbols.iter().any(|s| s.start_byte == start_byte) {
             continue;
@@ -65,8 +68,10 @@ pub(super) fn extract_dbt_macros(
     let macro_re =
         Regex::new(r"(?s)\{%-?\s*macro\s+(\w+)\s*\(([^)]*)\)\s*-?%\}.*?\{%-?\s*endmacro\s*-?%\}")?;
     for cap in macro_re.captures_iter(source) {
-        let full_match = cap.get(0).unwrap();
-        let name = cap.get(1).unwrap().as_str();
+        let (Some(full_match), Some(name_m)) = (cap.get(0), cap.get(1)) else {
+            continue;
+        };
+        let name = name_m.as_str();
         let start_byte = full_match.start();
         let end_byte = full_match.end();
         let start_line = source[..start_byte].lines().count() as u32;
@@ -99,8 +104,10 @@ pub(super) fn extract_dbt_macros(
     let test_re =
         Regex::new(r"(?s)\{%-?\s*test\s+(\w+)\s*\([^)]*\)\s*-?%\}.*?\{%-?\s*endtest\s*-?%\}")?;
     for cap in test_re.captures_iter(source) {
-        let full_match = cap.get(0).unwrap();
-        let name = cap.get(1).unwrap().as_str();
+        let (Some(full_match), Some(name_m)) = (cap.get(0), cap.get(1)) else {
+            continue;
+        };
+        let name = name_m.as_str();
         let start_byte = full_match.start();
         let end_byte = full_match.end();
         let start_line = source[..start_byte].lines().count() as u32;
@@ -131,8 +138,10 @@ pub(super) fn extract_dbt_macros(
     let snap_re =
         Regex::new(r"(?s)\{%-?\s*snapshot\s+(\w+)\s*-?%\}.*?\{%-?\s*endsnapshot\s*-?%\}")?;
     for cap in snap_re.captures_iter(source) {
-        let full_match = cap.get(0).unwrap();
-        let name = cap.get(1).unwrap().as_str();
+        let (Some(full_match), Some(name_m)) = (cap.get(0), cap.get(1)) else {
+            continue;
+        };
+        let name = name_m.as_str();
         let start_byte = full_match.start();
         let end_byte = full_match.end();
         let start_line = source[..start_byte].lines().count() as u32;
@@ -164,8 +173,10 @@ pub(super) fn extract_dbt_macros(
         r"(?s)\{%-?\s*materialization\s+(\w+)\s*,.*?-?%\}.*?\{%-?\s*endmaterialization\s*-?%\}",
     )?;
     for cap in mat_re.captures_iter(source) {
-        let full_match = cap.get(0).unwrap();
-        let name = cap.get(1).unwrap().as_str();
+        let (Some(full_match), Some(name_m)) = (cap.get(0), cap.get(1)) else {
+            continue;
+        };
+        let name = name_m.as_str();
         let start_byte = full_match.start();
         let end_byte = full_match.end();
         let start_line = source[..start_byte].lines().count() as u32;

@@ -5,8 +5,8 @@ use std::path::Path;
 
 use chrono::{Duration, Utc};
 use codesight_mcp::config::AppConfig;
+use codesight_mcp::db;
 use codesight_mcp::service::CodeService;
-use rusqlite::Connection;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -45,7 +45,7 @@ fn ingest_code(svc: &CodeService, root: &Path) -> String {
 fn backdate_index(cfg: &AppConfig, source_id: &str, days: i64) {
     let db_path = cfg.repo_db_path(source_id);
     let old = (Utc::now() - Duration::days(days)).to_rfc3339();
-    let conn = Connection::open(db_path).unwrap();
+    let conn = db::open_rw(&db_path).unwrap();
     conn.execute("UPDATE repo_info SET indexed_at = ?1", [&old])
         .unwrap();
 }
@@ -369,7 +369,7 @@ fn run_read_file_slices_and_missing() {
         "start_line": 2,
         "end_line": 99
     }]));
-    let d = &clamp["data"]["items"][0]["content"];
+    let d = &clamp["data"]["items"][0];
     assert_eq!(d["start_line"], json!(2));
     assert_eq!(d["end_line"], json!(3));
     assert_eq!(d["line_count"], json!(3));
@@ -385,20 +385,20 @@ fn run_read_file_slices_and_missing() {
         "start_line": 3,
         "end_line": 1
     }]));
-    let d = &rev["data"]["items"][0]["content"];
+    let d = &rev["data"]["items"][0];
     assert_eq!(d["start_line"], json!(3));
     assert_eq!(d["end_line"], json!(3));
     assert_eq!(d["content"].as_str().unwrap(), "    return FLAG");
 
     let empty = read(json!([{ "kind": "file", "path": "empty.py" }]));
-    let d = &empty["data"]["items"][0]["content"];
+    let d = &empty["data"]["items"][0];
     assert_eq!(d["line_count"], json!(0));
     assert_eq!(d["start_line"], json!(0));
     assert_eq!(d["end_line"], json!(0));
     assert_eq!(d["content"].as_str().unwrap(), "");
 
     let verbatim = read(json!([{ "kind": "file", "path": "demo.txt" }]));
-    let d = &verbatim["data"]["items"][0]["content"];
+    let d = &verbatim["data"]["items"][0];
     assert_eq!(d["line_count"], json!(2));
     assert_eq!(d["start_line"], json!(1));
     assert_eq!(d["end_line"], json!(2));

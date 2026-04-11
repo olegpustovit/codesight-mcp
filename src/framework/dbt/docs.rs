@@ -1,13 +1,23 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use regex::Regex;
 
+static DOCS_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)\{%\s*docs\s+(\S+)\s*%\}(.*?)\{%\s*enddocs\s*%\}")
+        .expect("dbt docs block regex is a compile-time constant")
+});
+
+static DOC_CALL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\{\{\s*doc\(\s*['"](\w+)['"]\s*\)\s*\}\}"#)
+        .expect("dbt doc() call regex is a compile-time constant")
+});
+
 /// Parse `{% docs <name> %}...{% enddocs %}` blocks from markdown content.
 pub fn parse_doc_blocks_from_content(content: &str) -> HashMap<String, String> {
-    let re = Regex::new(r"(?s)\{%\s*docs\s+(\S+)\s*%\}(.*?)\{%\s*enddocs\s*%\}").unwrap();
     let mut blocks = HashMap::new();
-    for cap in re.captures_iter(content) {
+    for cap in DOCS_BLOCK_RE.captures_iter(content) {
         let name = cap[1].to_string();
         let body = cap[2].trim().to_string();
         blocks.insert(name, body);
@@ -49,8 +59,7 @@ pub fn resolve_description(desc: &str, doc_blocks: &HashMap<String, String>) -> 
     if desc.is_empty() {
         return String::new();
     }
-    let re = Regex::new(r#"\{\{\s*doc\(\s*['"](\w+)['"]\s*\)\s*\}\}"#).unwrap();
-    let result = re.replace_all(desc, |caps: &regex::Captures| {
+    let result = DOC_CALL_RE.replace_all(desc, |caps: &regex::Captures| {
         let name = &caps[1];
         doc_blocks.get(name).cloned().unwrap_or_default()
     });

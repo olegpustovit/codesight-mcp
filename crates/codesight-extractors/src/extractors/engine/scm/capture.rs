@@ -2,7 +2,7 @@
 
 use anyhow::{Result, anyhow};
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Parser, QueryCursor};
+use tree_sitter::{Parser, QueryCursor, Tree};
 
 use crate::extractors::common::{first_line, node_text, source_slice};
 
@@ -51,14 +51,21 @@ pub(super) fn parse_symbol_kind(kind_str: &str) -> Option<SymbolKind> {
     })
 }
 
-pub(super) fn collect_raw_captures(ext: &ScmExtractor, source: &str) -> Result<CaptureBatch> {
+pub(super) fn parse_host_tree(ext: &ScmExtractor, source: &str) -> Result<Tree> {
     let mut parser = Parser::new();
     parser
         .set_language(&ext.compiled.grammar)
         .map_err(|e| anyhow!("set_language: {e}"))?;
-    let tree = parser
+    parser
         .parse(source, None)
-        .ok_or_else(|| anyhow!("parse returned no tree"))?;
+        .ok_or_else(|| anyhow!("parse returned no tree"))
+}
+
+pub(super) fn collect_raw_captures(
+    ext: &ScmExtractor,
+    source: &str,
+    tree: &Tree,
+) -> Result<CaptureBatch> {
     let mut cursor = QueryCursor::new();
     let capture_names = ext.compiled.tags_query.capture_names();
 

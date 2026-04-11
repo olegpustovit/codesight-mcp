@@ -3,8 +3,8 @@
 use std::fs;
 
 use codesight_mcp::config::AppConfig;
+use codesight_mcp::db;
 use codesight_mcp::service::CodeService;
-use rusqlite::Connection;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -255,7 +255,7 @@ fn run_mtime_persisted_in_sqlite() {
     assert!(r2["ok"].as_bool().unwrap());
 
     let db_path = cfg.repo_db_path(sid);
-    let conn = Connection::open(&db_path).unwrap();
+    let conn = db::open_ro(&db_path).unwrap();
     let mtime: i64 = conn
         .query_row(
             "SELECT modified_ns FROM files WHERE file_path = ?1",

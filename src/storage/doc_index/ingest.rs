@@ -11,7 +11,7 @@ use walkdir::{DirEntry, WalkDir};
 
 use crate::{
     repo_id::normalize_repo_id,
-    sections::{extract_sections, is_doc_file},
+    retrieval::sections::{extract_sections, is_doc_file},
 };
 
 use super::{DocFileUpdate, DocStore};

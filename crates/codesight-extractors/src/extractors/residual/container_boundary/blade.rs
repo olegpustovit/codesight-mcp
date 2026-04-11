@@ -176,18 +176,24 @@ fn make_symbol(
 mod re {
     use super::*;
 
-    static EXTENDS: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"@extends\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap());
-    static SECTION: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"@section\(\s*['"]([^'"]+)['"]"#).unwrap());
-    static COMPONENT: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"@component\(\s*['"]([^'"]+)['"]"#).unwrap());
-    static INCLUDE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"@include\(\s*['"]([^'"]+)['"]"#).unwrap());
-    static PUSH: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"@push\(\s*['"]([^'"]+)['"]"#).unwrap());
-    static LIVEWIRE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"@livewire\(\s*['"]([^'"]+)['"]"#).unwrap());
+    static EXTENDS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"@extends\(\s*['"]([^'"]+)['"]\s*\)"#).expect("infallible: blade regex")
+    });
+    static SECTION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"@section\(\s*['"]([^'"]+)['"]"#).expect("infallible: blade regex")
+    });
+    static COMPONENT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"@component\(\s*['"]([^'"]+)['"]"#).expect("infallible: blade regex")
+    });
+    static INCLUDE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"@include\(\s*['"]([^'"]+)['"]"#).expect("infallible: blade regex")
+    });
+    static PUSH: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"@push\(\s*['"]([^'"]+)['"]"#).expect("infallible: blade regex")
+    });
+    static LIVEWIRE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"@livewire\(\s*['"]([^'"]+)['"]"#).expect("infallible: blade regex")
+    });
 
     pub fn extends(s: &str) -> Option<String> {
         EXTENDS.captures(s).map(|c| c[1].to_string())
@@ -216,10 +222,12 @@ struct BladePhpBlock<'a> {
 }
 
 fn blade_php_blocks(source: &str) -> Vec<BladePhpBlock<'_>> {
-    static AT_PHP: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?is)@php\s*(.*?)\s*@endphp").unwrap());
-    static PHP_TAG: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?is)<\?php\s*(.*?)\s*\?>").unwrap());
+    static AT_PHP: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?is)@php\s*(.*?)\s*@endphp").expect("infallible: blade regex")
+    });
+    static PHP_TAG: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?is)<\?php\s*(.*?)\s*\?>").expect("infallible: blade regex")
+    });
 
     AT_PHP
         .captures_iter(source)

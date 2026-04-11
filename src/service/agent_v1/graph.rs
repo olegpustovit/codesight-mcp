@@ -2,18 +2,18 @@
 
 use serde_json::{Value, json};
 
-use crate::fuzzy;
-use crate::savings::MetaBuilder;
+use crate::retrieval::fuzzy;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::agent_v1::util_graph::graph_ref_symbol_id;
-use crate::service::args::parse_args;
-use crate::service::helpers::ToolError;
+use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 use crate::storage::SearchSymbol;
 
 impl CodeService {
     pub(in crate::service) fn inspect_graph(&self, v: Value) -> anyhow::Result<Value> {
-        let args: InspectGraphArgs = parse_args(v)?;
+        let args: InspectGraphArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let mode = args.graph.to_ascii_lowercase();
         let limit = (if args.limit == 0 { 25 } else { args.limit }).clamp(1, 50);
         let mut warnings = Vec::new();
@@ -26,6 +26,7 @@ impl CodeService {
                         return self.error_response(
                             &MetaBuilder::new(0),
                             ToolError {
+                                category: ToolErrorCategory::InvalidArgument,
                                 code: "INVALID_REQUEST",
                                 message: e.to_string(),
                                 detail: json!({}),
@@ -52,6 +53,7 @@ impl CodeService {
                         return self.error_response(
                             &timer,
                             ToolError {
+                                category: ToolErrorCategory::NotFound,
                                 code: "NOT_FOUND",
                                 message: format!("Symbol '{sym_id}' not found."),
                                 detail: json!({ "id": sym_id }),
@@ -95,6 +97,7 @@ impl CodeService {
                         return self.error_response(
                             &MetaBuilder::new(0),
                             ToolError {
+                                category: ToolErrorCategory::InvalidArgument,
                                 code: "INVALID_REQUEST",
                                 message: e.to_string(),
                                 detail: json!({}),
@@ -111,6 +114,7 @@ impl CodeService {
                     return self.error_response(
                         &MetaBuilder::new(0),
                         ToolError {
+                            category: ToolErrorCategory::NotFound,
                             code: "NOT_FOUND",
                             message: format!("Symbol '{sym_id}' not found."),
                             detail: json!({ "id": sym_id }),
@@ -123,6 +127,7 @@ impl CodeService {
                         return self.error_response(
                             &MetaBuilder::new(0),
                             ToolError {
+                                category: ToolErrorCategory::NotFound,
                                 code: "NOT_FOUND",
                                 message: format!("Symbol '{sym_id}' not found."),
                                 detail: json!({ "id": sym_id }),
@@ -139,6 +144,7 @@ impl CodeService {
                         return self.error_response(
                             &timer,
                             ToolError {
+                                category: ToolErrorCategory::Internal,
                                 code: "INDEX_ERROR",
                                 message: e.to_string(),
                                 detail: json!({}),

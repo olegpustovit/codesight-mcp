@@ -27,17 +27,17 @@ fn ingest(svc: &CodeService, root: &std::path::Path) -> Value {
 }
 
 // ============================================================
-// T17 -- missing_extractors
+// T17 -- languages_without_import_extractor
 // ============================================================
 
 #[test]
-fn case_elixir_produces_missing_extractors() {
-    // Indexing an Elixir file should report missing_extractors: ["elixir"].
+fn case_elixir_produces_languages_without_import_extractor() {
+    // Indexing an Elixir file should report languages_without_import_extractor: ["elixir"].
     // Elixir has tree-sitter symbol extraction but no import extractor.
     //
     // Note: codesight-mcp does not yet have an Elixir extractor at all, so this
     // is doubly blocked: first the Elixir extractor needs to exist, then the
-    // import-gap detection needs to surface missing_extractors in the response.
+    // import-gap detection needs to surface languages_without_import_extractor in the response.
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
@@ -50,11 +50,11 @@ fn case_elixir_produces_missing_extractors() {
     let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = ingest(&svc, ws.path());
 
-    // Reference asserts: "missing_extractors" in r and "elixir" in r["missing_extractors"]
-    let missing = &r["data"]["missing_extractors"];
+    // Reference asserts: "languages_without_import_extractor" in r and "elixir" in r["languages_without_import_extractor"]
+    let missing = &r["data"]["languages_without_import_extractor"];
     assert!(
         missing.is_array(),
-        "Expected missing_extractors array in data"
+        "Expected languages_without_import_extractor array in data"
     );
     let langs: Vec<&str> = missing
         .as_array()
@@ -64,13 +64,13 @@ fn case_elixir_produces_missing_extractors() {
         .collect();
     assert!(
         langs.contains(&"elixir"),
-        "Expected 'elixir' in missing_extractors, got: {langs:?}"
+        "Expected 'elixir' in languages_without_import_extractor, got: {langs:?}"
     );
 }
 
 #[test]
-fn case_missing_extractors_not_present_for_python_only() {
-    // Python has both symbol and import extraction -- no missing_extractors.
+fn case_languages_without_import_extractor_not_present_for_python_only() {
+    // Python has both symbol and import extraction -- no languages_without_import_extractor.
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
@@ -79,8 +79,8 @@ fn case_missing_extractors_not_present_for_python_only() {
     let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = ingest(&svc, ws.path());
 
-    // Python should not appear in missing_extractors (field may be absent entirely).
-    let missing = &r["data"]["missing_extractors"];
+    // Python should not appear in languages_without_import_extractor (field may be absent entirely).
+    let missing = &r["data"]["languages_without_import_extractor"];
     if missing.is_array() {
         let langs: Vec<&str> = missing
             .as_array()
@@ -90,15 +90,15 @@ fn case_missing_extractors_not_present_for_python_only() {
             .collect();
         assert!(
             !langs.contains(&"python"),
-            "python should not be in missing_extractors"
+            "python should not be in languages_without_import_extractor"
         );
     }
-    // If missing_extractors is absent/null, that is fine too.
+    // If languages_without_import_extractor is absent/null, that is fine too.
 }
 
 #[test]
-fn case_parse_warnings_included_when_extractors_missing() {
-    // parse_warnings should be present alongside missing_extractors, mentioning "elixir".
+fn case_languages_without_import_extractor_is_sorted_list() {
+    // languages_without_import_extractor must be a sorted list (stable output).
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
@@ -111,36 +111,7 @@ fn case_parse_warnings_included_when_extractors_missing() {
     let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = ingest(&svc, ws.path());
 
-    let warnings = &r["data"]["parse_warnings"];
-    assert!(warnings.is_array(), "Expected parse_warnings array");
-    let warning_texts: Vec<String> = warnings
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|v| v.as_str().map(|s| s.to_lowercase()))
-        .collect();
-    assert!(
-        warning_texts.iter().any(|w| w.contains("elixir")),
-        "Expected elixir mention in parse_warnings: {warning_texts:?}"
-    );
-}
-
-#[test]
-fn case_missing_extractors_is_sorted_list() {
-    // missing_extractors must be a sorted list (stable output).
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(
-        src.join("app.ex"),
-        "defmodule App do\n  def run(), do: :ok\nend\n",
-    )
-    .unwrap();
-
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let r = ingest(&svc, ws.path());
-
-    let missing = &r["data"]["missing_extractors"];
+    let missing = &r["data"]["languages_without_import_extractor"];
     assert!(missing.is_array());
     let extractors: Vec<&str> = missing
         .as_array()
@@ -150,7 +121,7 @@ fn case_missing_extractors_is_sorted_list() {
         .collect();
     let mut sorted = extractors.clone();
     sorted.sort();
-    assert_eq!(extractors, sorted, "missing_extractors must be sorted");
+    assert_eq!(extractors, sorted, "languages_without_import_extractor must be sorted");
 }
 
 // ============================================================

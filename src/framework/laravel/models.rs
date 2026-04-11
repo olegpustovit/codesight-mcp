@@ -1,4 +1,4 @@
-use regex::Regex;
+use super::regex::RE;
 
 use super::php_structure;
 use super::types::{ModelInfo, Relationship};
@@ -74,11 +74,7 @@ pub fn parse_model(content: &str) -> ModelInfo {
 fn parse_model_regex(content: &str) -> ModelInfo {
     let mut info = ModelInfo::default();
 
-    let rel_re = Regex::new(
-        r#"\$this->(hasMany|hasOne|belongsTo|belongsToMany|hasManyThrough|hasOneThrough|morphMany|morphOne|morphTo|morphToMany|morphedByMany)\(\s*\\?([A-Za-z\\]+)::class"#,
-    )
-    .unwrap();
-    for cap in rel_re.captures_iter(content) {
+    for cap in RE.model_relationship.captures_iter(content) {
         let kind = cap[1].to_string();
         let target_full = cap[2].to_string();
         let target = target_full
@@ -89,17 +85,14 @@ fn parse_model_regex(content: &str) -> ModelInfo {
         info.relationships.push(Relationship { kind, target });
     }
 
-    let fillable_re = Regex::new(r#"\$fillable\s*=\s*\[(.*?)\]"#).unwrap();
-    if let Some(cap) = fillable_re.captures(content) {
+    if let Some(cap) = RE.model_fillable.captures(content) {
         let items_str = &cap[1];
-        let item_re = Regex::new(r#"['"](\w+)['"]"#).unwrap();
-        for item in item_re.captures_iter(items_str) {
+        for item in RE.fillable_item.captures_iter(items_str) {
             info.fillable.push(item[1].to_string());
         }
     }
 
-    let scope_re = Regex::new(r"(?:public\s+)?function\s+scope(\w+)").unwrap();
-    for cap in scope_re.captures_iter(content) {
+    for cap in RE.scope_method.captures_iter(content) {
         info.scopes.push(cap[1].to_string());
     }
 

@@ -1,34 +1,66 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 use walkdir::DirEntry;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolErrorCategory {
+    InvalidArgument,
+    NotFound,
+    /// Retryable I/O, timeouts, rate limits. Surfaced on `_meta.error_category`
+    /// when a handler exceeds `CODESIGHT_HANDLER_TIMEOUT_SECS` or otherwise
+    /// fails in a retryable way.
+    Transient,
+    Internal,
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("[{code}] {message}")]
 pub struct ToolError {
+    pub category: ToolErrorCategory,
     pub code: &'static str,
     pub message: String,
     pub detail: Value,
 }
 
-pub fn index_error(error: anyhow::Error) -> ToolError {
-    ToolError {
-        code: "INDEX_ERROR",
-        message: error.to_string(),
-        detail: json!({}),
+impl ToolError {
+    pub fn new(
+        category: ToolErrorCategory,
+        code: &'static str,
+        message: impl Into<String>,
+        detail: Value,
+    ) -> Self {
+        Self {
+            category,
+            code,
+            message: message.into(),
+            detail,
+        }
     }
+}
+
+pub fn index_error(error: anyhow::Error) -> ToolError {
+    ToolError::new(
+        ToolErrorCategory::Internal,
+        "INDEX_ERROR",
+        error.to_string(),
+        json!({}),
+    )
 }
 
 pub fn validate_id(symbol_id: &str) -> Result<(), ToolError> {
     if symbol_id.contains("::") && symbol_id.contains('#') {
         Ok(())
     } else {
-        Err(ToolError {
-            code: "INVALID_ID",
-            message: format!("Stable identifier '{symbol_id}' is malformed."),
-            detail: json!({ "id": symbol_id }),
-        })
+        Err(ToolError::new(
+            ToolErrorCategory::InvalidArgument,
+            "INVALID_ID",
+            format!("Stable identifier '{symbol_id}' is malformed."),
+            json!({ "id": symbol_id }),
+        ))
     }
 }
 
@@ -62,6 +94,7 @@ pub fn to_repo_relative(path: &Path, root: &Path) -> anyhow::Result<String> {
 /// globs match gitignore-style glob behavior.
 pub fn normalize_search_scope(scope: &str) -> String {
     let s = scope.replace('\\', "/");
+    // Infallible: split always yields at least one (possibly empty) segment.
     let head = s.split('*').next().unwrap_or("").trim_matches('/').trim();
     head.to_string()
 }

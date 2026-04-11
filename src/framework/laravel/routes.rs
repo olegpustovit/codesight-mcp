@@ -1,8 +1,7 @@
 use std::path::Path;
 
-use regex::Regex;
-
 use super::php_structure;
+use super::regex::RE;
 use super::types::RouteInfo;
 
 /// Parse Laravel route definitions from PHP content.
@@ -28,12 +27,7 @@ pub fn parse_routes(content: &str) -> Vec<RouteInfo> {
 fn parse_routes_regex(content: &str) -> Vec<RouteInfo> {
     let mut routes = Vec::new();
 
-    let route_re = Regex::new(
-        r#"Route::(get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]\s*,\s*\[([A-Za-z\\]+)::class\s*,\s*['"](\w+)['"]\s*\]\s*\)(?:\s*->\s*name\(\s*['"]([^'"]+)['"]\s*\))?"#,
-    )
-    .unwrap();
-
-    for cap in route_re.captures_iter(content) {
+    for cap in RE.route_array_callback.captures_iter(content) {
         let verb = cap[1].to_uppercase();
         let uri = cap[2].to_string();
         let controller_full = cap[3].to_string();

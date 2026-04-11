@@ -69,7 +69,7 @@ fn read_symbol_source(svc: &CodeService, source_id: &str, stable_id: &str) -> St
         )
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    r["data"]["items"][0]["content"]["source"]
+    r["data"]["items"][0]["source"]
         .as_str()
         .unwrap()
         .to_string()

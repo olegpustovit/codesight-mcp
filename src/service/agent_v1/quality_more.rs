@@ -1,15 +1,22 @@
 //! Quality analyses: hotspots, extraction, links, doc coverage.
 
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
+use regex::Regex;
 use serde_json::{Value, json};
 
+static MD_INTERNAL_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // Infallible: fixed markdown link pattern.
+    Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").expect("infallible markdown link regex")
+});
+
+use crate::analysis::complexity::cyclomatic_complexity;
 use crate::analysis::quality;
-use crate::complexity::cyclomatic_complexity;
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
-use crate::service::helpers::ToolError;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn evaluate_quality_tail(
@@ -54,6 +61,7 @@ impl CodeService {
                         return self.error_response(
                             timer,
                             ToolError {
+                                category: ToolErrorCategory::InvalidArgument,
                                 code: "INVALID_REQUEST",
                                 message: "extraction_candidates requires file_path.".to_string(),
                                 detail: json!({}),
@@ -81,6 +89,7 @@ impl CodeService {
                         return self.error_response(
                             &timer,
                             ToolError {
+                                category: ToolErrorCategory::NotFound,
                                 code: "NOT_FOUND",
                                 message: format!("File '{file_path}' not found in index."),
                                 detail: json!({ "file_path": file_path }),
@@ -168,13 +177,14 @@ impl CodeService {
 
                 let mut broken_links: Vec<Value> = Vec::new();
 
-                let link_re = regex::Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").unwrap();
                 // Scan each doc file for internal links
                 for sec in &all_sections {
                     let content = &sec.content_text;
                     // Find markdown links: [text](target)
-                    for cap in link_re.captures_iter(content) {
-                        let target = cap.get(2).unwrap().as_str();
+                    for cap in MD_INTERNAL_LINK_RE.captures_iter(content) {
+                        let Some(target) = cap.get(2).map(|m| m.as_str()) else {
+                            continue;
+                        };
                         // Skip external links
                         if target.starts_with("http://")
                             || target.starts_with("https://")
@@ -285,17 +295,15 @@ impl CodeService {
                 let data = quality::doc_coverage_payload(&doc_store, &symbol_ids)?;
                 self.success_response(timer, data)
             }
-            _ => {
-                let warnings = vec![json!({
-                    "code": "NOT_IMPLEMENTED",
-                    "message": format!("quality analysis '{analysis}' is not implemented."),
-                })];
-                self.success_response_with_warnings(
-                    timer,
-                    json!({ "analysis": analysis, "findings": [] }),
-                    warnings,
-                )
-            }
+            _ => self.error_response(
+                timer,
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "INVALID_REQUEST",
+                    message: format!("Unknown quality analysis '{analysis}'."),
+                    detail: json!({ "analysis": analysis }),
+                },
+            ),
         }
     }
 }

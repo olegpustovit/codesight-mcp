@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use codesight_mcp::config::AppConfig;
-use codesight_mcp::sections::{convert_html_to_markdown, extract_html_sections};
+use codesight_mcp::retrieval::sections::{convert_html_to_markdown, extract_html_sections};
 use codesight_mcp::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::tempdir;

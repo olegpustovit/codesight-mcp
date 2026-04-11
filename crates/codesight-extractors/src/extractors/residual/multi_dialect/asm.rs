@@ -140,17 +140,23 @@ fn extract_docstring(lines: &[&str], line_idx: usize) -> Option<String> {
 // --- WLA-DX ---
 mod wla_dx_re {
     use super::*;
-    static SECTION: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^\.section\s+"([^"]+)""#).unwrap());
-    static RAMSECTION: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^\.ramsection\s+"([^"]+)""#).unwrap());
-    static MACRO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^\.macro\s+(\w+)").unwrap());
-    static DEFINE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^\.(?:define|def)\s+([\w.]+)").unwrap());
+    static SECTION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)^\.section\s+"([^"]+)""#).expect("infallible: asm regex")
+    });
+    static RAMSECTION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)^\.ramsection\s+"([^"]+)""#).expect("infallible: asm regex")
+    });
+    static MACRO: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^\.macro\s+(\w+)").expect("infallible: asm regex"));
+    static DEFINE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^\.(?:define|def)\s+([\w.]+)").expect("infallible: asm regex")
+    });
     static STRUCT: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^\.struct\s+(\w+)").unwrap());
-    static ENUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^\.enum\s+(\w+)").unwrap());
-    static LABEL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([a-zA-Z][\w.]*)\s*:").unwrap());
+        LazyLock::new(|| Regex::new(r"(?i)^\.struct\s+(\w+)").expect("infallible: asm regex"));
+    static ENUM: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^\.enum\s+(\w+)").expect("infallible: asm regex"));
+    static LABEL: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^([a-zA-Z][\w.]*)\s*:").expect("infallible: asm regex"));
 
     pub fn section(s: &str) -> Option<String> {
         SECTION.captures(s).map(|c| c[1].to_string())
@@ -335,11 +341,15 @@ fn extract_wla_dx(file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
 mod nasm_re {
     use super::*;
     static SECTION: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^section\s+(\.\w+)").unwrap());
-    static DEFINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^%define\s+(\w+)").unwrap());
-    static MACRO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^%macro\s+(\w+)").unwrap());
-    static EQU: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^(\w+)\s+equ\s+").unwrap());
-    static LABEL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([a-zA-Z_]\w*)\s*:").unwrap());
+        LazyLock::new(|| Regex::new(r"(?i)^section\s+(\.\w+)").expect("infallible: asm regex"));
+    static DEFINE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^%define\s+(\w+)").expect("infallible: asm regex"));
+    static MACRO: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^%macro\s+(\w+)").expect("infallible: asm regex"));
+    static EQU: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^(\w+)\s+equ\s+").expect("infallible: asm regex"));
+    static LABEL: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^([a-zA-Z_]\w*)\s*:").expect("infallible: asm regex"));
 
     pub fn section(s: &str) -> Option<String> {
         SECTION.captures(s).map(|c| c[1].to_string())
@@ -448,9 +458,11 @@ fn extract_nasm(file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
 mod gas_re {
     use super::*;
     static SET_EQU: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^\.(set|equ)\s+(\w+)").unwrap());
-    static MACRO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^\.macro\s+(\w+)").unwrap());
-    static LABEL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([a-zA-Z_]\w*)\s*:").unwrap());
+        LazyLock::new(|| Regex::new(r"(?i)^\.(set|equ)\s+(\w+)").expect("infallible: asm regex"));
+    static MACRO: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^\.macro\s+(\w+)").expect("infallible: asm regex"));
+    static LABEL: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^([a-zA-Z_]\w*)\s*:").expect("infallible: asm regex"));
 
     pub fn set_equ(s: &str) -> Option<String> {
         SET_EQU.captures(s).map(|c| c[2].to_string())
@@ -523,13 +535,17 @@ fn extract_gas(file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
 // --- CA65 ---
 mod ca65_re {
     use super::*;
-    static SEGMENT: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)^\.segment\s+"([^"]+)""#).unwrap());
-    static PROC: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^\.proc\s+(\w+)").unwrap());
-    static MACRO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^\.macro\s+(\w+)").unwrap());
+    static SEGMENT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)^\.segment\s+"([^"]+)""#).expect("infallible: asm regex")
+    });
+    static PROC: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^\.proc\s+(\w+)").expect("infallible: asm regex"));
+    static MACRO: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^\.macro\s+(\w+)").expect("infallible: asm regex"));
     static DEFINE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)^\.define\s+(\w+)").unwrap());
-    static CONST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\w+)\s*:?=\s*").unwrap());
+        LazyLock::new(|| Regex::new(r"(?i)^\.define\s+(\w+)").expect("infallible: asm regex"));
+    static CONST: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^(\w+)\s*:?=\s*").expect("infallible: asm regex"));
 
     pub fn segment(s: &str) -> Option<String> {
         SEGMENT.captures(s).map(|c| c[1].to_string())

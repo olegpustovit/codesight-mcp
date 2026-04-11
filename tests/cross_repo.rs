@@ -4,6 +4,7 @@ use std::fs;
 use tempfile::tempdir;
 
 use codesight_mcp::config::AppConfig;
+use codesight_mcp::db;
 use codesight_mcp::indexing::packages::{
     RepoEntry, build_package_registry, extract_package_names, extract_root_package_from_specifier,
     find_repos_for_package,
@@ -397,7 +398,7 @@ fn case_old_index_without_package_names_loads_cleanly() {
         let db_path = entry.path().join("index.sqlite3");
         if db_path.exists() {
             // Delete package_names from meta table
-            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            let conn = db::open_rw(&db_path).unwrap();
             let _ = conn.execute("DELETE FROM meta WHERE key = 'package_names'", []);
             drop(conn);
 

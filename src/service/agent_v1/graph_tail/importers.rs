@@ -1,0 +1,105 @@
+//! `inspect_graph graph=importers` — who imports this file, plus optional cross-repo importers.
+
+use std::collections::HashSet;
+
+use serde_json::{Value, json};
+
+use crate::indexing::imports::{extract_imports, language_for_path, package_reference_evidence};
+use crate::service::CodeService;
+use crate::service::agent_v1::args::InspectGraphArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
+use crate::storage::{IndexStore, list_repo_summaries};
+
+impl CodeService {
+    pub(super) fn graph_importers(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
+        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
+            Ok(s) => s,
+            Err(e) => return self.error_response(&MetaBuilder::new(0), e),
+        };
+        let Some(file_path) = args.file_path.as_deref() else {
+            return self.error_response(
+                &MetaBuilder::new(0),
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "INVALID_REQUEST",
+                    message: "importers mode requires file_path.".into(),
+                    detail: json!({}),
+                },
+            );
+        };
+        let adj = store.dependency_graph()?;
+        let importers: Vec<&String> = adj
+            .iter()
+            .filter(|(_, deps)| deps.iter().any(|d| d == file_path))
+            .map(|(src, _)| src)
+            .collect();
+        let mut data = json!({
+            "graph": "importers",
+            "file_path": file_path,
+            "importer_count": importers.len(),
+            "importers": importers,
+            "has_importers": !importers.is_empty(),
+        });
+
+        let cross_repo = args.cross_repo.unwrap_or(self.config.cross_repo_default);
+        if cross_repo {
+            let summaries = list_repo_summaries(&self.config.repos_dir())?;
+            let mut repo_entries = Vec::new();
+            for summary in &summaries {
+                let db_path = self.config.repo_db_path(&summary.repo);
+                if db_path.exists()
+                    && let Ok(s) = IndexStore::open(db_path)
+                {
+                    let pkg_names = s.get_package_names().unwrap_or_default();
+                    repo_entries.push(crate::indexing::packages::RepoEntry {
+                        repo_id: summary.repo.clone(),
+                        package_names: pkg_names,
+                    });
+                }
+            }
+            let my_pkg_names = store.get_package_names().unwrap_or_default();
+            let mut cross_importers: Vec<Value> = Vec::new();
+            for entry in &repo_entries {
+                if entry.repo_id == args.source_id {
+                    continue;
+                }
+                let db_path = self.config.repo_db_path(&entry.repo_id);
+                if let Ok(other_store) = IndexStore::open(db_path)
+                    && let Ok(root) = other_store.root_path()
+                {
+                    let files = other_store.all_file_paths().unwrap_or_default();
+                    for file in &files {
+                        let full_path = root.join(file);
+                        if let Ok(content) = std::fs::read_to_string(&full_path) {
+                            let language = language_for_path(file);
+                            let edges = extract_imports(&content, file, language);
+                            for pkg in &my_pkg_names {
+                                if let Some(evidence) =
+                                    package_reference_evidence(&edges, language, pkg)
+                                {
+                                    cross_importers.push(json!({
+                                        "from_repo": entry.repo_id,
+                                        "to_repo": args.source_id,
+                                        "package_name": pkg,
+                                        "evidence": evidence,
+                                    }));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let mut seen: HashSet<String> = HashSet::new();
+            cross_importers.retain(|e| {
+                let key = format!("{}->{}:{}", e["from_repo"], e["to_repo"], e["package_name"]);
+                seen.insert(key)
+            });
+            data["cross_repo_importer_count"] = json!(cross_importers.len());
+            data["cross_repo_importers"] = json!(cross_importers);
+        }
+
+        self.success_response(&MetaBuilder::new(0), data)
+    }
+}

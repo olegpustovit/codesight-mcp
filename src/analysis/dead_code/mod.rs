@@ -8,8 +8,7 @@ use std::collections::HashSet;
 use serde_json::{Value, json};
 
 use crate::{
-    analysis::evidence::EvidenceNote,
-    dep_graph,
+    analysis::{evidence::EvidenceNote, graph as dep_graph},
     storage::{AnalysisSymbol, IndexStore},
 };
 
@@ -25,7 +24,7 @@ pub fn dead_code_payload(
     entry_patterns: &[String],
 ) -> anyhow::Result<Value> {
     let all_symbols = store.all_symbols_for_analysis()?;
-    let dep_graph = store.dependency_graph()?;
+    let dep_graph = store.dependency_graph_strict()?;
     let all_files = store.all_file_paths()?;
     let root_path = store.root_path().ok();
 
@@ -126,7 +125,7 @@ pub fn dead_code_payload(
 /// Build the `data` object for `evaluate_quality` with `analysis: "dead_code_v2"`.
 pub fn dead_code_v2_payload(store: &IndexStore, min_confidence: f64) -> anyhow::Result<Value> {
     let all_symbols = store.all_symbols_for_analysis()?;
-    let dep_graph = store.dependency_graph()?;
+    let dep_graph = store.dependency_graph_strict()?;
     let all_files = store.all_file_paths()?;
     let root_path = store.root_path().ok();
     let all_file_contents = store.all_file_contents().unwrap_or_default();

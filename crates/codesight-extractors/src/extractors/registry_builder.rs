@@ -3,6 +3,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use tracing::warn;
+
 use crate::adaptive_languages::project_extra_extensions;
 
 use super::{
@@ -15,9 +17,10 @@ pub(crate) fn build_registry(project_root: Option<&Path>) -> ExtractorRegistry {
     let pack_catalog = match project_root {
         Some(root) => {
             engine::catalogs::QueryPackCatalog::for_workspace_root(root).unwrap_or_else(|error| {
-                eprintln!(
-                    "warning: failed to load workspace query packs from {}: {error:#}",
-                    root.display()
+                warn!(
+                    root = %root.display(),
+                    error = format!("{error:#}"),
+                    "failed to load workspace query packs; using builtin catalog"
                 );
                 engine::catalogs::QueryPackCatalog::builtin()
             })

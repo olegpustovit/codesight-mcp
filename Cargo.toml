@@ -12,6 +12,7 @@ license = "Apache-2.0"
 [dependencies]
 anyhow = "1"
 blake3 = "1"
+clap = { version = "4", features = ["derive", "env"] }
 chrono = { version = "0.4", features = ["serde"] }
 codesight-core = { path = "crates/codesight-core" }
 codesight-extractors = { path = "crates/codesight-extractors" }
@@ -45,11 +46,14 @@ tree-sitter-swift = "0.7.1"
 tree-sitter-typescript = "0.23.2"
 streaming-iterator = "0.1.9"
 ignore = "0.4"
+jsonschema = { version = "0.26", default-features = false }
 walkdir = "2"
 regex = "1"
 serde_yaml = "0.9"
-log = "0.4"
 toml = "0.8"
+tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std", "signal", "time", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tree-sitter-kotlin-ng = "1.1.0"
 tree-sitter-perl = "1.1.2"
 tree-sitter-erlang = "0.15.0"
@@ -65,5 +69,15 @@ tempfile = "3"
 [profile.release]
 lto = true
 codegen-units = 1
-panic = "abort"
+# Unwinding (not abort) so the dispatch boundary in src/service/mod.rs can
+# catch_unwind around individual tool handlers — one bad file must never take
+# down the long-lived MCP server.
+panic = "unwind"
 strip = true
+
+# Benches inherit from `release` but disable LTO and bump codegen-units so
+# repeated bench runs don't rebuild the entire dep graph end-to-end.
+# (`panic` is ignored on the bench profile by cargo.)
+[profile.bench]
+lto = false
+codegen-units = 16

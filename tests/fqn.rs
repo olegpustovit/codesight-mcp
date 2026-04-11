@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use codesight_mcp::dep_graph::{Psr4Map, fqn_to_symbol, symbol_to_fqn};
+use codesight_mcp::analysis::graph::{Psr4Map, fqn_to_symbol, symbol_to_fqn};
 
 fn standard_psr4_map() -> Psr4Map {
     let mut map = HashMap::new();

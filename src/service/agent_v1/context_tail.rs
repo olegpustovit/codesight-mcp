@@ -2,12 +2,12 @@
 
 use serde_json::{Value, json};
 
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::AssembleContextArgs;
 use crate::service::agent_v1::util::*;
 use crate::service::args::GetSectionArgs;
-use crate::service::helpers::{ToolError, index_error};
+use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn assemble_context_tail(
@@ -22,6 +22,7 @@ impl CodeService {
                     return self.error_response(
                         timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "section_context requires refs with at least one section ref."
                                 .to_string(),
@@ -37,6 +38,7 @@ impl CodeService {
                     return self.error_response(
                         timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "section_context requires a non-empty refs list.".to_string(),
                             detail: json!({}),
@@ -47,6 +49,7 @@ impl CodeService {
                     return self.error_response(
                         timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "section_context requires kind \"section\" on the target ref."
                                 .to_string(),
@@ -63,6 +66,7 @@ impl CodeService {
                     return self.error_response(
                         timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "section ref needs id or stable_id.".to_string(),
                             detail: json!({}),
@@ -188,6 +192,8 @@ impl CodeService {
                     Ok(s) => s,
                     Err(e) => return self.error_response(timer, e),
                 };
+                let raw_bytes = store.repo_total_bytes().unwrap_or(0).max(1);
+                let timer_overall = MetaBuilder::new(raw_bytes);
                 let summary = match store.repo_summary() {
                     Ok(s) => s,
                     Err(e) => return self.error_response(timer, index_error(e)),
@@ -196,6 +202,7 @@ impl CodeService {
                     return self.error_response(
                         timer,
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "EMPTY_INDEX",
                             message: "Index contains no symbols.".to_string(),
                             detail: json!({ "source_id": args.source_id }),
@@ -246,12 +253,7 @@ impl CodeService {
                     "example_queries": example_queries,
                     "most_imported_files": most_imported_files,
                 });
-                let raw_bytes = serde_json::to_string(&body)
-                    .map(|s| s.len() as u64)
-                    .unwrap_or(1)
-                    .max(1);
-                let timer = MetaBuilder::new(raw_bytes);
-                self.success_response(&timer, body)
+                self.success_response(&timer_overall, body)
             }
             "context_bundle" => self.assemble_context_bundle(args, timer),
             "workspace_digest" => {
@@ -260,7 +262,17 @@ impl CodeService {
                     .as_array()
                     .cloned()
                     .unwrap_or_default();
-                let timer = MetaBuilder::new(0);
+                // Sum estimated_naive_tokens across listed sources so savings
+                // reflect "how much would the agent have had to read across
+                // all of these sources" rather than zero.
+                let naive_tokens: u64 = sources
+                    .iter()
+                    .filter_map(|s| s.get("estimated_naive_tokens").and_then(|v| v.as_u64()))
+                    .sum();
+                let raw_bytes = naive_tokens
+                    .saturating_mul(crate::config::BYTES_PER_TOKEN)
+                    .max(1);
+                let timer = MetaBuilder::new(raw_bytes);
                 self.success_response(
                     &timer,
                     json!({
@@ -273,6 +285,7 @@ impl CodeService {
             _ => self.error_response(
                 timer,
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: format!("Unknown assemble_context mode '{}'.", args.mode),
                     detail: json!({ "mode": args.mode }),

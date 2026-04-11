@@ -132,9 +132,14 @@ pub struct InspectStructureArgs {
     pub file_path: Option<String>,
     #[serde(default)]
     pub file_paths: Option<Vec<String>>,
+    #[serde(default)]
+    pub class_path: Option<String>,
     /// Cap the number of **files** listed (`file_tree` only; default 500).
     #[serde(default)]
     pub max_files: Option<usize>,
+    /// Optional token budget (~4 bytes/token) for file_tree / repo_outline.
+    #[serde(default, alias = "token_budget")]
+    pub max_tokens: Option<u32>,
     #[serde(default)]
     pub repo_path: Option<String>,
 }
@@ -154,7 +159,7 @@ pub struct InspectGraphArgs {
     pub module_path: Option<String>,
     /// For `layer_violations` graph mode: layer rules.
     #[serde(default)]
-    pub rules: Option<Vec<crate::dep_graph::LayerDef>>,
+    pub rules: Option<Vec<crate::analysis::graph::LayerDef>>,
     /// For `calls` mode: symbol to analyze.
     #[serde(default)]
     pub symbol_id: Option<String>,

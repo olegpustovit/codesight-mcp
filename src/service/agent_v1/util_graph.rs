@@ -76,7 +76,7 @@ pub(in crate::service) fn extract_symbol_names_from_content(
 pub(in crate::service) fn build_call_chain(
     target_id: &str,
     caller_id: &str,
-    edges: &[crate::dep_graph::CallEdge],
+    edges: &[crate::analysis::graph::CallEdge],
 ) -> Vec<String> {
     use std::collections::{HashMap, VecDeque};
     // Build reverse edge map: callee -> callers
@@ -93,7 +93,10 @@ pub(in crate::service) fn build_call_chain(
     let mut visited = HashSet::new();
     visited.insert(target_id.to_string());
     while let Some(path) = queue.pop_front() {
-        let current = path.last().unwrap().clone();
+        let Some(last) = path.last() else {
+            continue;
+        };
+        let current = last.clone();
         if current == caller_id {
             return path;
         }

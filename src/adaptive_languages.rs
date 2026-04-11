@@ -1,32 +1,43 @@
 //! Adaptive language detection: TOML project config for enabling languages per workspace.
+//!
+//! The narrow extractor-facing schema (`PROJECT_CONFIG_FILE`, `project_extra_extensions`,
+//! `project_query_pack_roots`, `read_project_config`) lives in
+//! [`codesight_extractors::adaptive_languages`] and is re-exported here so the product
+//! crate has a single source of truth. The product-owned pieces below — in-memory config
+//! cache and the full adaptive-language flow — add on top and require the extended
+//! `CodesightProjectConfig` struct with `languages_adaptive` / `languages` fields.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{LazyLock, RwLock};
 
 use serde::Deserialize;
-use std::sync::LazyLock;
+
+pub use codesight_extractors::adaptive_languages::{
+    PROJECT_CONFIG_FILE, project_extra_extensions, project_query_pack_roots,
+};
 
 // ---------------------------------------------------------------------------
 // Project config cache
 // ---------------------------------------------------------------------------
+//
+// Read-dominant: invalidate/prime fire on config file changes; lookups happen
+// on every indexing pass. `RwLock` lets parallel readers proceed without
+// serializing behind a single mutex guard.
 
-/// Filename for workspace-local Codesight settings (TOML).
-pub const PROJECT_CONFIG_FILE: &str = ".codesight.toml";
+static PROJECT_CONFIGS: LazyLock<RwLock<HashMap<String, serde_json::Value>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
-static PROJECT_CONFIGS: LazyLock<Mutex<HashMap<String, serde_json::Value>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-static PROJECT_CONFIG_HASHES: LazyLock<Mutex<HashMap<String, String>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static PROJECT_CONFIG_HASHES: LazyLock<RwLock<HashMap<String, String>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Evict a project root from the in-memory config caches.
 pub fn invalidate_project_config_cache(project_root: &str) {
     let resolved = resolve_path(project_root);
-    if let Ok(mut configs) = PROJECT_CONFIGS.lock() {
+    if let Ok(mut configs) = PROJECT_CONFIGS.write() {
         configs.remove(&resolved);
     }
-    if let Ok(mut hashes) = PROJECT_CONFIG_HASHES.lock() {
+    if let Ok(mut hashes) = PROJECT_CONFIG_HASHES.write() {
         hashes.remove(&resolved);
     }
 }
@@ -35,10 +46,10 @@ pub fn invalidate_project_config_cache(project_root: &str) {
 #[doc(hidden)]
 pub fn prime_config_cache(project_root: &str, config: serde_json::Value, hash: &str) {
     let resolved = resolve_path(project_root);
-    if let Ok(mut configs) = PROJECT_CONFIGS.lock() {
+    if let Ok(mut configs) = PROJECT_CONFIGS.write() {
         configs.insert(resolved.clone(), config);
     }
-    if let Ok(mut hashes) = PROJECT_CONFIG_HASHES.lock() {
+    if let Ok(mut hashes) = PROJECT_CONFIG_HASHES.write() {
         hashes.insert(resolved, hash.to_owned());
     }
 }
@@ -48,16 +59,12 @@ pub fn prime_config_cache(project_root: &str, config: serde_json::Value, hash: &
 pub fn config_cache_contains(project_root: &str) -> (bool, bool) {
     let resolved = resolve_path(project_root);
     let in_configs = PROJECT_CONFIGS
-        .lock()
-        .map(
-            |c: std::sync::MutexGuard<'_, HashMap<String, serde_json::Value>>| {
-                c.contains_key(&resolved)
-            },
-        )
+        .read()
+        .map(|c| c.contains_key(&resolved))
         .unwrap_or(false);
     let in_hashes = PROJECT_CONFIG_HASHES
-        .lock()
-        .map(|h: std::sync::MutexGuard<'_, HashMap<String, String>>| h.contains_key(&resolved))
+        .read()
+        .map(|h| h.contains_key(&resolved))
         .unwrap_or(false);
     (in_configs, in_hashes)
 }
@@ -66,6 +73,12 @@ pub fn config_cache_contains(project_root: &str) -> (bool, bool) {
 // TOML project shape (workspace `.codesight.toml`)
 // ---------------------------------------------------------------------------
 
+/// Product-layer view of `.codesight.toml`.
+///
+/// Adds `languages_adaptive` / `languages` on top of the narrow extractor-facing schema
+/// in [`codesight_extractors::adaptive_languages::CodesightProjectConfig`]. The extractor
+/// crate owns the extension/query-pack fields; this struct adds what the adaptive-language
+/// flow below needs.
 #[derive(Debug, Deserialize)]
 pub struct CodesightProjectConfig {
     #[serde(default)]
@@ -76,58 +89,6 @@ pub struct CodesightProjectConfig {
     pub extra_extensions: Option<HashMap<String, String>>,
     #[serde(default)]
     pub query_pack_roots: Option<Vec<String>>,
-}
-
-pub fn read_project_config(project_root: &Path) -> Option<CodesightProjectConfig> {
-    let content = std::fs::read_to_string(project_root.join(PROJECT_CONFIG_FILE)).ok()?;
-    toml::from_str(&content).ok()
-}
-
-pub fn project_extra_extensions(project_root: &Path) -> HashMap<String, String> {
-    read_project_config(project_root)
-        .and_then(|cfg| cfg.extra_extensions)
-        .unwrap_or_default()
-}
-
-/// Query-pack directories merged into the built-in catalog for this workspace.
-///
-/// Order:
-/// 1. Legacy `query_pack_roots` entries from `.codesight.toml` (relative paths resolve under `project_root`).
-/// 2. `<project_root>/.codesight/queries/` when that directory exists (forward-looking convention; wins on duplicate pack ids).
-pub fn project_query_pack_roots(project_root: &Path) -> Vec<PathBuf> {
-    let toml_roots: Vec<PathBuf> = read_project_config(project_root)
-        .and_then(|cfg| cfg.query_pack_roots)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|path| {
-            let path = PathBuf::from(path);
-            if path.is_absolute() {
-                path
-            } else {
-                project_root.join(path)
-            }
-        })
-        .collect();
-
-    let mut combined = toml_roots;
-    let convention = project_root.join(".codesight/queries");
-    if convention.is_dir() {
-        combined.push(convention);
-    }
-
-    dedupe_query_pack_roots(combined)
-}
-
-fn dedupe_query_pack_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut out = Vec::with_capacity(roots.len());
-    let mut seen: HashSet<PathBuf> = HashSet::new();
-    for root in roots {
-        let key = root.canonicalize().unwrap_or_else(|_| root.clone());
-        if seen.insert(key) {
-            out.push(root);
-        }
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -219,9 +180,10 @@ pub fn apply_adaptive_languages(
 
         let new_content = render_adaptive_config_toml(detected, _all_languages);
         if let Err(e) = std::fs::write(&config_path, &new_content) {
-            eprintln!(
-                "adaptive_languages: failed to write {}: {e}",
-                config_path.display()
+            tracing::warn!(
+                path = %config_path.display(),
+                error = %e,
+                "adaptive_languages: failed to write config"
             );
             return false;
         }
@@ -231,9 +193,10 @@ pub fn apply_adaptive_languages(
     } else if global_adaptive {
         let new_content = render_adaptive_config_toml(detected, _all_languages);
         if let Err(e) = std::fs::write(&config_path, &new_content) {
-            eprintln!(
-                "adaptive_languages: failed to create {}: {e}",
-                config_path.display()
+            tracing::warn!(
+                path = %config_path.display(),
+                error = %e,
+                "adaptive_languages: failed to create config"
             );
             return false;
         }

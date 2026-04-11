@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 summarize.
 
 use codesight_mcp::model::SymbolKind;
-use codesight_mcp::summarizer::{
+use codesight_mcp::retrieval::summarizer::{
     CircuitBreaker, SummarizerConfig, SummarySymbol, extract_summary_from_docstring,
     get_model_name, get_provider_name, signature_fallback, summarize_symbols_simple,
 };

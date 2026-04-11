@@ -1,8 +1,10 @@
 //! Shared SQLite helpers for IndexStore and DocStore.
 
-use std::{collections::HashSet, fs, path::Path};
+use std::{collections::HashSet, fs, path::Path, time::Duration};
 
 use rusqlite::{Connection, OpenFlags};
+
+use crate::error::StorageResult;
 
 /// Shared `repo_info` DDL for code and documentation SQLite stores.
 pub const REPO_INFO_DDL: &str = r#"CREATE TABLE IF NOT EXISTS repo_info (
@@ -29,18 +31,47 @@ pub const SKIP_DIRS: &[&str] = &[
     "target",
 ];
 
-pub fn open_rw(path: &Path) -> anyhow::Result<Connection> {
-    let conn = Connection::open(path)?;
+fn apply_rw_pragmas(conn: &Connection) -> StorageResult<()> {
+    // Writable connection: production-oriented SQLite tuning (REFACTOR_PLAN P2).
+    conn.busy_timeout(Duration::from_millis(5000))?;
     conn.pragma_update(None, "foreign_keys", true)?;
-    Ok(conn)
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    conn.pragma_update(None, "mmap_size", 268_435_456i64)?;
+    conn.pragma_update(None, "cache_size", -65_536i64)?;
+    Ok(())
 }
 
-pub fn open_ro(path: &Path) -> anyhow::Result<Connection> {
+/// Read-only open: cannot switch `journal_mode` (requires write). Assumes writers already
+/// enabled WAL; still set busy timeout so concurrent readers wait on checkpoints.
+pub fn open_ro(path: &Path) -> StorageResult<Connection> {
     let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
+    conn.busy_timeout(Duration::from_millis(5000))?;
     Ok(conn)
+}
+
+pub fn open_rw(path: &Path) -> StorageResult<Connection> {
+    let conn = Connection::open(path)?;
+    apply_rw_pragmas(&conn)?;
+    Ok(conn)
+}
+
+/// Best-effort passive WAL checkpoint against an existing database file.
+///
+/// Intended for cleanup hooks (shutdown, abnormal reindex drop) where we want
+/// to avoid leaving a fat WAL behind but must not block writers. Silently
+/// returns `Ok(())` if the file is missing — there is nothing to checkpoint.
+pub fn wal_checkpoint_passive(path: &Path) -> StorageResult<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let conn = open_rw(path)?;
+    conn.pragma_update(None, "wal_checkpoint", "PASSIVE")?;
+    Ok(())
 }
 
 pub fn tokenize(text: &str) -> Vec<String> {
@@ -59,7 +90,7 @@ pub fn check_staleness(
     root_path: &Path,
     file_table: &str,
     is_relevant: impl Fn(&str) -> bool,
-) -> anyhow::Result<bool> {
+) -> StorageResult<bool> {
     let count_sql = format!("SELECT COUNT(*) FROM {file_table}");
     let file_count = conn.query_row(&count_sql, [], |r| r.get::<_, i64>(0))? as usize;
     if file_count > 10_000 {

@@ -2,6 +2,7 @@
 
 pub mod doc_index;
 
+pub use codesight_storage::class_hierarchy;
 pub use codesight_storage::storage::{
     AnalysisSymbol, IndexStore, RepoMetadata, RetrievedSymbol, SearchSymbol, SymbolMetadata,
     SymbolRecord, SymbolSourceRecord, list_repo_summaries,

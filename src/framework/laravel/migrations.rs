@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use regex::Regex;
 
 use super::php_structure;
+use super::regex::RE;
 use super::types::MigrationInfo;
 
 /// Parse a Laravel migration file for table name and column definitions.
@@ -40,20 +41,21 @@ fn migration_columns_regex(content: &str) -> HashMap<String, Vec<String>> {
     let Some(col_re) = Regex::new(r#"\$table->\w+\(\s*['"]([\w]+)['"]\s*\)"#).ok() else {
         return HashMap::new();
     };
-    let mod_re = Regex::new(r"^(->(\w+)\(\))+").unwrap();
-    let single_mod = Regex::new(r"->(\w+)\(\)").unwrap();
     let mut columns: HashMap<String, Vec<String>> = HashMap::new();
     for cap in col_re.captures_iter(content) {
         let col_name = cap[1].to_string();
         if helpers.contains(&col_name.as_str()) {
             continue;
         }
-        let full_match_end = cap.get(0).unwrap().end();
+        let Some(full) = cap.get(0) else {
+            continue;
+        };
+        let full_match_end = full.end();
         let rest = &content[full_match_end..];
         let mut modifiers = Vec::new();
-        if let Some(m) = mod_re.find(rest) {
+        if let Some(m) = RE.migration_modifier_chain.find(rest) {
             let chain = m.as_str();
-            for mc in single_mod.captures_iter(chain) {
+            for mc in RE.migration_single_modifier.captures_iter(chain) {
                 modifiers.push(mc[1].to_string());
             }
         }

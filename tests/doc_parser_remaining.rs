@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use codesight_mcp::config::AppConfig;
-use codesight_mcp::sections::{
+use codesight_mcp::retrieval::sections::{
     convert_html_to_markdown, convert_json, convert_openapi, extract_markdown_sections,
     extract_references, extract_sections, extract_tags, preprocess_content, preprocess_notebook,
     sniff_openapi,

@@ -5,17 +5,34 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::core::symbols::FactQuality;
+
 use super::IndexStore;
 
 impl IndexStore {
-    /// Return the file-level dependency adjacency list from stored edges.
+    fn parse_import_edge_quality(value: &str) -> FactQuality {
+        FactQuality::from_db(value).unwrap_or(FactQuality::BaselineStructural)
+    }
+
+    /// Return the file-level dependency adjacency list from stored edges (all import tiers).
     pub fn dependency_graph(
         &self,
     ) -> anyhow::Result<std::collections::HashMap<String, Vec<String>>> {
-        let conn = self.open_read_only()?;
+        Ok(self
+            .dependency_graph_with_import_quality()?
+            .into_iter()
+            .map(|(src, targets)| (src, targets.into_iter().map(|(path, _)| path).collect()))
+            .collect())
+    }
 
-        // Start with all files as nodes (even those with no edges)
-        let mut adj: std::collections::HashMap<String, Vec<String>> =
+    /// Stored dependency edges with [`FactQuality`] from import extraction (see REFACTOR_PLAN).
+    pub fn dependency_graph_with_import_quality(
+        &self,
+    ) -> anyhow::Result<std::collections::HashMap<String, Vec<(String, FactQuality)>>> {
+        // RW connection so schema migration runs before reads on older indexes.
+        let conn = self.open_connection()?;
+
+        let mut adj: std::collections::HashMap<String, Vec<(String, FactQuality)>> =
             std::collections::HashMap::new();
         {
             let mut stmt = conn.prepare("SELECT file_path FROM files")?;
@@ -24,20 +41,41 @@ impl IndexStore {
                 adj.entry(row?).or_default();
             }
         }
-
-        // Add edges
         {
-            let mut stmt = conn.prepare("SELECT source_file, target_file FROM dependency_edges")?;
+            let mut stmt = conn.prepare(
+                "SELECT source_file, target_file, import_fact_quality FROM dependency_edges",
+            )?;
             let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                let src = row.get::<_, String>(0)?;
+                let tgt = row.get::<_, String>(1)?;
+                let q = row.get::<_, String>(2)?;
+                Ok((src, tgt, Self::parse_import_edge_quality(&q)))
             })?;
             for row in rows {
-                let (src, tgt) = row?;
-                adj.entry(src).or_default().push(tgt);
+                let (src, tgt, q) = row?;
+                adj.entry(src).or_default().push((tgt, q));
             }
         }
 
         Ok(adj)
+    }
+
+    /// Adjacency built only from import edges marked suitable for strict graph analysis.
+    pub fn dependency_graph_strict(
+        &self,
+    ) -> anyhow::Result<std::collections::HashMap<String, Vec<String>>> {
+        let detailed = self.dependency_graph_with_import_quality()?;
+        let mut out: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for (src, targets) in detailed {
+            let keep: Vec<String> = targets
+                .into_iter()
+                .filter(|(_, q)| q.suitable_for_strict_analysis())
+                .map(|(path, _)| path)
+                .collect();
+            out.insert(src, keep);
+        }
+        Ok(out)
     }
 
     /// Return all symbols with their source text, for call graph building.
@@ -122,9 +160,12 @@ impl IndexStore {
         F: Fn(&Path) -> bool,
     {
         let conn = self.open_read_only()?;
-        crate::db::check_staleness(&conn, root_path, "files", |rel| {
-            is_source_file(Path::new(rel))
-        })
+        Ok(crate::db::check_staleness(
+            &conn,
+            root_path,
+            "files",
+            |rel| is_source_file(Path::new(rel)),
+        )?)
     }
 
     pub fn file_count(&self) -> anyhow::Result<usize> {

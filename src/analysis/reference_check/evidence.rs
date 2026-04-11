@@ -1,8 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    analysis::evidence::EvidenceNote,
-    dep_graph,
+    analysis::{evidence::EvidenceNote, graph as dep_graph},
     indexing::{
         imports::{ImportEdge, extract_imports, language_for_path},
         packages::extract_root_package_from_specifier,
@@ -55,7 +54,7 @@ struct FileImportFacts {
 
 pub struct ReferenceEvidenceProvider {
     file_imports: Vec<FileImportFacts>,
-    symbol_sources: Vec<crate::dep_graph::SymbolInfo>,
+    symbol_sources: Vec<crate::analysis::graph::SymbolInfo>,
     raw_contents: Vec<(String, String)>,
 }
 

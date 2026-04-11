@@ -1,13 +1,13 @@
-//! Late `inspect_graph` modes (find_references, FQN, cross_source).
+//! Late `inspect_graph` modes (find_references, FQN).
 
 use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use crate::savings::MetaBuilder;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
-use crate::service::helpers::ToolError;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(in crate::service) fn inspect_graph_tail_b(
@@ -15,7 +15,7 @@ impl CodeService {
         args: &InspectGraphArgs,
         mode: &str,
         _limit: usize,
-        warnings: &mut Vec<Value>,
+        _warnings: &mut Vec<Value>,
     ) -> anyhow::Result<Value> {
         match mode {
             "find_references" => {
@@ -29,7 +29,7 @@ impl CodeService {
                 let ci_word_match = |body: &str, name: &str| -> bool {
                     let body_lc = body.to_lowercase();
                     let name_lc = name.to_lowercase();
-                    crate::dep_graph::word_match(&body_lc, &name_lc)
+                    crate::analysis::graph::word_match(&body_lc, &name_lc)
                 };
 
                 // Batch mode: identifiers array
@@ -93,6 +93,7 @@ impl CodeService {
                     return self.error_response(
                         &MetaBuilder::new(0),
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "find_references mode requires identifier.".into(),
                             detail: json!({}),
@@ -137,7 +138,7 @@ impl CodeService {
                 }
 
                 let _call_edges = if include_call_chain {
-                    Some(crate::dep_graph::build_call_edges(&sym_infos))
+                    Some(crate::analysis::graph::build_call_edges(&sym_infos))
                 } else {
                     None
                 };
@@ -150,7 +151,7 @@ impl CodeService {
                     });
                     if include_call_chain {
                         // For each file, find the symbols in that file that call the identifier
-                        let file_syms: Vec<&crate::dep_graph::SymbolInfo> =
+                        let file_syms: Vec<&crate::analysis::graph::SymbolInfo> =
                             sym_infos.iter().filter(|s| &s.file == file).collect();
                         let mut calling_symbols: Vec<Value> = Vec::new();
                         for fs in &file_syms {
@@ -199,6 +200,7 @@ impl CodeService {
                     return self.error_response(
                         &MetaBuilder::new(0),
                         ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
                             code: "INVALID_REQUEST",
                             message: "resolve_fqn mode requires fqn parameter.".into(),
                             detail: json!({}),
@@ -224,6 +226,7 @@ impl CodeService {
                     return self.error_response(
                         &MetaBuilder::new(0),
                         ToolError {
+                            category: ToolErrorCategory::NotFound,
                             code: "NOT_FOUND",
                             message:
                                 "No PSR-4 autoload map found (composer.json missing or invalid)."
@@ -233,7 +236,7 @@ impl CodeService {
                     );
                 };
                 let source_files: HashSet<String> = store.all_file_paths()?.into_iter().collect();
-                match crate::dep_graph::fqn_to_symbol(fqn, &psr4_map, &source_files) {
+                match crate::analysis::graph::fqn_to_symbol(fqn, &psr4_map, &source_files) {
                     Some(symbol_id) => self.success_response(
                         &MetaBuilder::new(0),
                         json!({
@@ -245,6 +248,7 @@ impl CodeService {
                     None => self.error_response(
                         &MetaBuilder::new(0),
                         ToolError {
+                            category: ToolErrorCategory::NotFound,
                             code: "NOT_FOUND",
                             message: format!(
                                 "FQN '{}' could not be resolved against the indexed source files.",
@@ -255,20 +259,10 @@ impl CodeService {
                     ),
                 }
             }
-            "cross_source" => {
-                warnings.push(json!({
-                    "code": "NOT_IMPLEMENTED",
-                    "message": "graph mode 'cross_source' needs edge indexes not yet available.",
-                }));
-                self.success_response_with_warnings(
-                    &MetaBuilder::new(0),
-                    json!({ "graph": mode, "edges": [], "nodes": [] }),
-                    warnings.clone(),
-                )
-            }
             _ => self.error_response(
                 &MetaBuilder::new(0),
                 ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: format!("Unknown inspect_graph graph mode '{mode}'."),
                     detail: json!({ "graph": args.graph }),

@@ -5,5 +5,6 @@ pub(super) mod go;
 pub(super) mod helpers;
 pub(super) mod js_ts;
 pub(super) mod python;
+pub(super) mod rust;
 pub(super) mod sql;
 pub(super) mod vue;

@@ -66,6 +66,7 @@ END;
 CREATE TABLE IF NOT EXISTS dependency_edges (
     source_file TEXT NOT NULL,
     target_file TEXT NOT NULL,
+    import_fact_quality TEXT NOT NULL DEFAULT 'baseline_structural',
     PRIMARY KEY (source_file, target_file),
     FOREIGN KEY(source_file) REFERENCES files(file_path) ON DELETE CASCADE,
     FOREIGN KEY(target_file) REFERENCES files(file_path) ON DELETE CASCADE

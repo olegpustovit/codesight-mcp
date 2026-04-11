@@ -40,7 +40,7 @@ pub struct IndexResult {
     pub file_count: usize,
     pub symbol_count: usize,
     pub languages: BTreeMap<String, usize>,
-    pub missing_extractors: Vec<String>,
+    pub languages_without_import_extractor: Vec<String>,
 }
 
 pub struct DocIndexResult {
@@ -48,8 +48,4 @@ pub struct DocIndexResult {
     pub indexed_at: String,
     pub file_count: usize,
     pub section_count: usize,
-}
-
-pub fn parse_args<T: for<'de> Deserialize<'de>>(arguments: serde_json::Value) -> anyhow::Result<T> {
-    Ok(serde_json::from_value(arguments)?)
 }

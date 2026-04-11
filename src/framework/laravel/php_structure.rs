@@ -5,11 +5,10 @@
 //! when the tree does not yield columns.
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
-use regex::Regex;
 use tree_sitter::Node;
 
+use super::regex::RE as LRE;
 use super::types::{MigrationInfo, ModelInfo, Relationship, RouteInfo};
 
 fn parse_php(content: &str) -> Option<tree_sitter::Tree> {
@@ -62,9 +61,8 @@ fn try_schema_create_table_name(node: Node<'_>, source: &str) -> Option<String> 
 }
 
 fn schema_create_first_table_regex(call_text: &str) -> Option<String> {
-    static RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"Schema::create\s*\(\s*['"](?P<t>[\w]+)['"]"#).unwrap());
-    RE.captures(call_text)
+    LRE.schema_create
+        .captures(call_text)
         .and_then(|c| c.name("t").map(|m| m.as_str().to_string()))
 }
 
@@ -254,10 +252,8 @@ fn collect_routes(node: Node<'_>, source: &str, out: &mut Vec<RouteInfo>) {
 }
 
 fn route_from_call_node(node: Node<'_>, source: &str) -> Option<RouteInfo> {
-    static ROUTE_HEAD: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"Route::(get|post|put|delete|patch)\s*\(").unwrap());
     let t = node_text(node, source)?.trim();
-    let verb = ROUTE_HEAD.captures(t)?.get(1)?.as_str();
+    let verb = LRE.route_verb.captures(t)?.get(1)?.as_str();
     let args = extract_call_arguments_blob(node, source)?;
     let uri = first_string_in_blob(&args)?;
     let (controller, action) = parse_route_array_target(&args)?;
@@ -313,9 +309,8 @@ fn parse_route_array_target(args_blob: &str) -> Option<(String, String)> {
 }
 
 fn extract_chained_route_name(full_call_text: &str) -> Option<String> {
-    static RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"->\s*name\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap());
-    RE.captures(full_call_text)
+    LRE.route_name
+        .captures(full_call_text)
         .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
 }
 

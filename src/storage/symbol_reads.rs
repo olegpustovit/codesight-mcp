@@ -5,7 +5,7 @@ use rusqlite::params;
 
 use serde_json::Value;
 
-use crate::class_hierarchy::ClassIndexRow;
+use crate::storage::class_hierarchy::ClassIndexRow;
 use crate::config::BYTES_PER_TOKEN;
 use crate::core::symbols::{ExtractionTier, SymbolKind};
 use crate::storage::{SymbolMetadata, SymbolRecord};
@@ -30,7 +30,7 @@ impl IndexStore {
                 name: row.get(1)?,
                 file_path: row.get(2)?,
                 start_line: row.get::<_, u32>(3)?,
-                header_line: crate::class_hierarchy::header_line_from_source(&source),
+                header_line: crate::storage::class_hierarchy::header_line_from_source(&source),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

@@ -55,7 +55,10 @@ impl crate::extractors::LanguageExtractor for VerseExtractor {
 
             // Module: NAME<...> := module:
             if let Some(caps) = re::MODULE.captures(trimmed) {
-                let name = caps.get(1).unwrap().as_str();
+                let Some(name) = caps.get(1).map(|g| g.as_str()) else {
+                    byte_offset += line.len() + 1;
+                    continue;
+                };
                 symbols.push(make_symbol(
                     file_path,
                     name,
@@ -72,7 +75,10 @@ impl crate::extractors::LanguageExtractor for VerseExtractor {
             }
             // Class: name<...> := class<...>(...):
             else if let Some(caps) = re::CLASS.captures(trimmed) {
-                let name = caps.get(1).unwrap().as_str();
+                let Some(name) = caps.get(1).map(|g| g.as_str()) else {
+                    byte_offset += line.len() + 1;
+                    continue;
+                };
                 symbols.push(make_symbol(
                     file_path,
                     name,
@@ -89,7 +95,10 @@ impl crate::extractors::LanguageExtractor for VerseExtractor {
             }
             // Enum: NAME<...> := enum:
             else if let Some(caps) = re::ENUM.captures(trimmed) {
-                let name = caps.get(1).unwrap().as_str();
+                let Some(name) = caps.get(1).map(|g| g.as_str()) else {
+                    byte_offset += line.len() + 1;
+                    continue;
+                };
                 symbols.push(make_symbol(
                     file_path,
                     name,
@@ -106,7 +115,10 @@ impl crate::extractors::LanguageExtractor for VerseExtractor {
             }
             // Extension method: (Param:Type).MethodName<...>(...):ReturnType = ...
             else if let Some(caps) = re::EXTENSION_METHOD.captures(trimmed) {
-                let name = caps.get(1).unwrap().as_str();
+                let Some(name) = caps.get(1).map(|g| g.as_str()) else {
+                    byte_offset += line.len() + 1;
+                    continue;
+                };
                 symbols.push(make_symbol(
                     file_path,
                     name,
@@ -122,7 +134,10 @@ impl crate::extractors::LanguageExtractor for VerseExtractor {
             }
             // Method: Name<...>(...):ReturnType = ...  (inside a class scope)
             else if let Some(caps) = re::METHOD.captures(trimmed) {
-                let name = caps.get(1).unwrap().as_str();
+                let Some(name) = caps.get(1).map(|g| g.as_str()) else {
+                    byte_offset += line.len() + 1;
+                    continue;
+                };
                 let kind = if scope_stack.is_empty() {
                     SymbolKind::Function
                 } else {
@@ -135,7 +150,10 @@ impl crate::extractors::LanguageExtractor for VerseExtractor {
             }
             // Variable/constant: var? Name<...>:Type = ...
             else if let Some(caps) = re::VARIABLE.captures(trimmed) {
-                let name = caps.get(1).unwrap().as_str();
+                let Some(name) = caps.get(1).map(|g| g.as_str()) else {
+                    byte_offset += line.len() + 1;
+                    continue;
+                };
                 symbols.push(make_symbol(
                     file_path,
                     name,
@@ -186,28 +204,38 @@ mod re {
     use super::*;
 
     // Module: NAME<visibility> := module:
-    pub static MODULE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^(\w+)(?:<[^>]*>)?\s*:=\s*module\s*:").unwrap());
+    pub static MODULE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(\w+)(?:<[^>]*>)?\s*:=\s*module\s*:").expect("infallible: verse module regex")
+    });
 
     // Class: name<visibility><specifiers> := class<specifiers>(...):
-    pub static CLASS: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^(\w+)(?:<[^>]*>)*\s*:=\s*class(?:<[^>]*>)*\s*\(").unwrap());
+    pub static CLASS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(\w+)(?:<[^>]*>)*\s*:=\s*class(?:<[^>]*>)*\s*\(")
+            .expect("infallible: verse class regex")
+    });
 
     // Enum: NAME<visibility> := enum:
-    pub static ENUM: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^(\w+)(?:<[^>]*>)?\s*:=\s*enum\s*:").unwrap());
+    pub static ENUM: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(\w+)(?:<[^>]*>)?\s*:=\s*enum\s*:").expect("infallible: verse enum regex")
+    });
 
     // Extension method: (Param:Type).MethodName<...>(...):ReturnType = ...
-    pub static EXTENSION_METHOD: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^\([^)]+\)\.(\w+)(?:<[^>]*>)*\s*\(").unwrap());
+    pub static EXTENSION_METHOD: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^\([^)]+\)\.(\w+)(?:<[^>]*>)*\s*\(")
+            .expect("infallible: verse extension method regex")
+    });
 
     // Method/function: Name<visibility>(args):ReturnType = ...
-    pub static METHOD: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^(\w+)(?:<[^>]*>)*\s*\([^)]*\)(?:<[^>]*>)*\s*:").unwrap());
+    pub static METHOD: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(\w+)(?:<[^>]*>)*\s*\([^)]*\)(?:<[^>]*>)*\s*:")
+            .expect("infallible: verse method regex")
+    });
 
     // Variable: var? Name<visibility>:Type = ...
-    pub static VARIABLE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^(?:var\s+)?(\w+)(?:<[^>]*>)\s*:\s*\w+").unwrap());
+    pub static VARIABLE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(?:var\s+)?(\w+)(?:<[^>]*>)\s*:\s*\w+")
+            .expect("infallible: verse variable regex")
+    });
 }
 
 #[allow(clippy::too_many_arguments)]

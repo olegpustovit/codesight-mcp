@@ -1,33 +1,33 @@
 //! Shared tree-sitter helpers for language extractors (Strategy implementations).
 
-use anyhow::{Context, Result, anyhow};
 use tree_sitter::{Node, Tree};
 
 use crate::core::pipeline::StoredSymbol;
 use crate::core::symbols::{ExtractionTier, SymbolKind};
+use crate::error::{ExtractError, ExtractResult};
 
-pub fn parse_tree(lang: impl Into<tree_sitter::Language>, source: &str) -> Result<Tree> {
+pub fn parse_tree(lang: impl Into<tree_sitter::Language>, source: &str) -> ExtractResult<Tree> {
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&lang.into())
-        .context("failed to load tree-sitter grammar")?;
+        .map_err(|_| ExtractError::GrammarLoad)?;
     parser
         .parse(source, None)
-        .ok_or_else(|| anyhow!("tree-sitter returned no parse tree"))
+        .ok_or(ExtractError::MissingParseTree)
 }
 
-pub fn node_text<'a>(node: Node<'_>, source: &'a str) -> Result<&'a str> {
+pub fn node_text<'a>(node: Node<'_>, source: &'a str) -> ExtractResult<&'a str> {
     node.utf8_text(source.as_bytes())
-        .context("tree-sitter node was not valid utf-8")
+        .map_err(|_| ExtractError::InvalidUtf8)
 }
 
-pub fn source_slice<'a>(node: Node<'_>, source: &'a str) -> Result<&'a str> {
+pub fn source_slice<'a>(node: Node<'_>, source: &'a str) -> ExtractResult<&'a str> {
     source
         .get(node.start_byte()..node.end_byte())
-        .context("tree-sitter byte range was out of bounds")
+        .ok_or(ExtractError::ByteRangeOutOfBounds)
 }
 
-pub fn first_line(node: Node<'_>, source: &str) -> Result<String> {
+pub fn first_line(node: Node<'_>, source: &str) -> ExtractResult<String> {
     Ok(source_slice(node, source)?
         .lines()
         .next()
@@ -54,7 +54,7 @@ pub fn push_symbol(
     span: Node<'_>,
     source: &str,
     summary: Option<String>,
-) -> Result<()> {
+) -> ExtractResult<()> {
     push_symbol_ex(
         symbols, file_path, language, scopes, name, kind, span, source, summary, None,
     )
@@ -74,7 +74,7 @@ pub fn push_symbol_prequalified(
     span: Node<'_>,
     source: &str,
     summary: Option<String>,
-) -> Result<()> {
+) -> ExtractResult<()> {
     let signature = first_line(span, source)?;
     let summary = summary.unwrap_or_else(|| signature.clone());
     let source_text = source_slice(span, source)?.to_string();
@@ -112,7 +112,7 @@ pub fn push_symbol_ex(
     source: &str,
     summary: Option<String>,
     signature_prefix: Option<&str>,
-) -> Result<()> {
+) -> ExtractResult<()> {
     let qualified_name = qualify(scopes, name);
     let mut signature = first_line(span, source)?;
     if let Some(prefix) = signature_prefix {
