@@ -1,183 +1,178 @@
-# Codesight MCP Test-Drive — Issues & Improvement Plan
+# Codesight MCP Test-Drive — Issues & Status
 
-Test-drive performed via direct JSON-RPC against `codesight-mcp serve` (the same
-binary Claude Code launches) using this repo (and
-`tests/fixtures/code_reference`) as the corpus. All 10 agent-v1 tools were
-exercised. Findings are grouped by severity.
+Originally found by driving `codesight-mcp serve` via direct JSON-RPC against
+this repo and `tests/fixtures/code_reference`. Every tool in `src/tools.json`
+was called; graph/impact modes were probed for every enum value.
 
-## P0 — Server-crashing / data-loss bugs
+All items below are **resolved**; this file is now the historical log plus
+the closing commit reference.
 
-### 1. UTF-8 boundary panic in `make_summary` kills the MCP server
-**Symptom.** First attempt to `ingest_sources` on this repo crashed the entire
-server process (MCP client saw `Connection closed`):
+---
+
+## ✅ P0 — Server-crashing bug
+
+### 1. UTF-8 boundary panic in `make_summary` killed the MCP server
+Ingesting this repo hit `src/retrieval/sections/builder.rs:15` on a section
+summary where the 200-byte cut landed inside a multi-byte codepoint (the `…`
+ellipsis in `REFACTOR_PLAN.md`):
 
 ```
 thread 'tokio-rt-worker' panicked at src/retrieval/sections/builder.rs:15:33:
-byte index 200 is not a char boundary; it is inside '…' (bytes 198..201)
+byte index 200 is not a char boundary; it is inside '…'
 fatal runtime error: failed to initiate panic, error 5, aborting
 ```
 
-Trigger: any doc section whose first 200 bytes end mid-codepoint. `REFACTOR_PLAN.md`
-contains `…` around byte 198, which is enough to kill the process.
+**Fix.** Walk back to the nearest char boundary before slicing. Added a unit
+test with a multi-byte codepoint straddling the 200-byte budget.
 
-**Root cause.** [`src/retrieval/sections/builder.rs:15`](src/retrieval/sections/builder.rs)
-does `&trimmed[..200]` without honoring char boundaries.
+### 2. Panic path was `abort`, not graceful tool error
+The panic above took down the whole process. Fixed by:
+- Wrapping `agent_v1::dispatch` in `catch_unwind(AssertUnwindSafe(...))` in
+  `src/service/mod.rs` — panics become a categorized `ToolError::Internal`
+  with code `HANDLER_PANIC` instead of aborting.
+- Switching release profile from `panic = "abort"` to `panic = "unwind"` in
+  `Cargo.toml` so the dispatch-boundary catch actually works in shipping
+  binaries.
 
-**Fix.** Use `trimmed.char_indices().take_while(|(i, _)| *i < 200)` (or
-`floor_char_boundary` on nightly) and fall back to the largest valid prefix.
-Add a unit test with a multi-byte codepoint straddling the budget. Audit every
-other `&s[..N]` / `s.split_at(N)` site for the same class of bug (I only
-inspected the crashing one).
+---
 
-### 2. Panic path is `abort`, not graceful tool error
-The panic above aborts the whole process, losing all in-flight dispatches and
-dropping the MCP transport. Tokio worker panics should be caught at the
-dispatch boundary and turned into a `ToolError::Internal` envelope so one bad
-file never takes down the server. Add a `catch_unwind` or a per-dispatch task
-boundary in `src/service/mod.rs` around tool handler invocation.
+## ✅ P1 — Contract and placeholder hygiene
 
-## P1 — Contract drift: `tools.json` schemas vs. handler requirements
+### 3. `tools.json` schema drift
+Seven tool modes required arguments that `tools/list` never advertised. Fixed
+by adding per-mode fields to the schema (with descriptions naming the mode
+that requires them):
 
-Many tools return `INVALID_REQUEST` for arguments the schema advertises as
-optional, or reference parameters the schema doesn't declare at all. A caller
-that trusts `tools/list` will hit avoidable errors on first call.
+| Tool / mode | Added schema field |
+|---|---|
+| `inspect_graph.calls` | `symbol_id` |
+| `inspect_graph.importers` | `file_path` |
+| `inspect_graph.dependencies` | `cross_repo` |
+| `inspect_structure.class_hierarchy` | `class_path` (was repurposing `path`) |
+| `inspect_structure.file_tree` / `repo_outline` | `max_tokens` |
+| `evaluate_impact.changed_units` | `refs` description now names commit-ref shape |
+| `evaluate_quality` | `analysis` enum tightened; added `granularity`, `min_confidence`, `include_tests`, `entry_point_patterns` |
+| `assemble_context.context_bundle` | `refs` description now names symbol-ref requirement |
+| `search_catalog.query_mode` | described that `regex` auto-routes to file-text |
 
-| Tool | `analysis`/`graph`/`view` | Schema says | Handler actually requires |
-|---|---|---|---|
-| `inspect_graph` | `calls` | `ref` (object) optional | `symbol_id` (not in schema) |
-| `inspect_graph` | `importers` | `ref` optional | `file_path` (not in schema) |
-| `evaluate_impact` | `changed_units` | `refs` optional | `since_sha` (not in schema) |
-| `evaluate_impact` | `blast_radius` | `refs` optional | `refs[0]` |
-| `evaluate_impact` | `rename_safety` | `refs` optional | `refs[0]` |
-| `inspect_structure` | `class_hierarchy` | `path` documented as "file_tree subtree prefix" | `path` repurposed as class name |
-| `assemble_context` | `context_bundle` | `refs` optional | `refs` with a symbol ref |
+Also wired `class_path` through the handler in
+`src/service/agent_v1/structure.rs` and updated the error message.
 
-**Fix plan.**
-1. For each mode, split the argument structs so `tools.json` documents the
-   required parameters per mode (either via `oneOf` in JSON schema, or by
-   exposing per-mode input structs via `ValidatedArgs<T>`).
-2. Add `since_sha`, `symbol_id`, `file_path` as first-class schema fields.
-3. Rename `inspect_structure.path` in `class_hierarchy` to `class_path` or
-   similar — don't repurpose an existing field.
-4. Add contract tests that enumerate every enum value for every tool and
-   assert the schema describes the actually-required parameters.
+### 4. Placeholder data masqueraded as success
+- `evaluate_quality analysis=repo_health` used to emit a `PARTIAL_REPO_HEALTH`
+  warning with zeroed placeholder fields for `dead_code_pct`, `dead_count`,
+  `cycle_count`, `cycles_sample`, `top_hotspots`. **These analyses were
+  already implemented** (`dead_code_payload`, `find_cycles`,
+  `hotspots_payload`); `repo_health` just wasn't calling them. Fixed by
+  wiring `repo_health` to call all three and populate real values. Live
+  drive on the code_reference fixture now reports `dead_count: 20`,
+  `dead_code_pct: 100.0`, `cycle_count: 0`.
+- `assemble_context mode=ranked` emitted a `PARTIAL_RANKED_CONTEXT` warning
+  and a `centrality_score: 0.0` placeholder on every item. Dropped the
+  field and the warning.
+- `inspect_graph graph=cross_source` was an `ok=true` stub. The same
+  functionality is already in `graph=dependencies` with `cross_repo=true`,
+  so `cross_source` was removed from the enum and the handler.
+- `evaluate_quality` unknown-analysis fallthrough returned `ok=true` with
+  `NOT_IMPLEMENTED`. Now returns a proper `INVALID_ARGUMENT` error listing
+  the valid enum values (surfaced at schema-validation time now that the
+  enum is tightened).
 
-## P1 — Unimplemented / partial analyses masquerade as "ok"
+---
 
-Several analyses return `ok: true` with placeholder data and only a warning:
-- `evaluate_quality analysis=repo_health` → `PARTIAL_REPO_HEALTH` — `dead_code_pct`,
-  `dead_count`, `cycle_count`, `cycles_sample`, `top_hotspots` are all placeholders.
-- `assemble_context mode=ranked` → `PARTIAL_RANKED_CONTEXT` — `centrality_score`
-  is always `0.0`.
-- `inspect_graph graph=cross_source` → `NOT_IMPLEMENTED` but still returns `ok=true` with empty edges.
-- `evaluate_quality analysis=coverage` → `NOT_IMPLEMENTED` warning, `ok=true`, empty findings.
+## ✅ P2 — Ingest output and token accounting
 
-This violates the usual "either do the thing or return a structured error"
-contract and makes it impossible for an automated agent to detect missing
-capability without string-matching warning codes.
+### 5. `catalog_sources` races against in-flight ingest
+`catalog_sources` ran concurrently with ingest and returned empty `sources`
+while ingest was still committing. Fixed by:
+- Adding `ReindexStateManager::in_flight_repos()`.
+- Gating `catalog_sources` in `src/service/agent_v1/freshness.rs`:
+  `await_all_if_strict` blocks in strict mode, `annotate_catalog_with_in_flight`
+  attaches `data.indexing: [...]` + `STALE_DATA_WARNING` in relaxed mode.
 
-**Fix plan.** Decide per analysis: either (a) fully implement and drop the
-warning, or (b) return `ok=false, category=not_implemented` with a stable
-error code, and remove the mode from the schema enum until it ships.
-`AGENTS.md` already mandates "no parallel public MCP surfaces" — shipping
-placeholder fields is a form of surface fragmentation.
+### 6. `missing_extractors` was misnamed
+The field listed languages that **did** extract symbols — it meant "no
+import extractor". Renamed to `languages_without_import_extractor` at every
+site (`IndexResult`, `CodeIndexSummary`, both ingest response branches, and
+the three integration tests). The parallel `parse_warnings` field, which
+was just a prose restatement of the same list, was dropped entirely.
 
-## P2 — Ingest output semantics
+### 7. Token accounting
+- `inspect_structure view=repo_outline` was unbounded (10256 response tokens
+  on a 20-file fixture). Added `max_tokens` to the schema and wired it into
+  `pack_catalog_items_to_token_budget`. Live drive with `max_tokens=500`
+  now returns 635 tokens with `truncated: true`.
+- `inspect_structure view=file_tree` similarly honors `max_tokens` by
+  converting the token budget into an equivalent `max_files` cap.
+- Several handlers passed `raw_bytes = 0` (or `raw_bytes = response size`)
+  to `MetaBuilder::new`, producing bogus `tokens_saved: 0`. Fixed for
+  `query_suggestions`, `workspace_digest`, `assemble_context mode=ranked`,
+  and the file-kind branch of `read_content` to use real repo or file
+  sizes.
 
-### `missing_extractors` is misnamed
-Ingesting `tests/fixtures/code_reference` reports:
-```json
-"missing_extractors": ["al","blade","cpp","csharp","elixir","java","perl",
-                      "php","razor","ruby","rust","xml"],
-"parse_warnings":   ["Language 'al' has symbol extraction but no import extractor", ...]
-```
-Those languages all extracted symbols successfully (199 total). The field
-actually means "no import extractor". Rename to `missing_import_extractors`,
-or drop it entirely in favor of `parse_warnings`. As-is, a client
-reasonably interprets it as "extraction failed for these languages".
+### 8. `read_content` double-nested `content`
+Items were shaped `items[i] = {content: {content, line_count, ...}}`, with
+the outer wrapper adding nothing. Flattened to
+`items[i] = {content, line_count, ..., ref}` across symbol, section, and
+file refs. Updated every test that asserted on the old shape.
 
-### `catalog_sources` races against in-flight ingest
-When `ingest_sources` and `catalog_sources` are dispatched back-to-back over
-stdio, `catalog_sources` can return `sources: []` while the ingest is still
-writing. There is no write barrier or source-visible lock. Either:
-- Serialize writers vs. catalog reads inside the dispatcher, or
-- Surface in-flight ingests in `catalog_sources` output (with a `status: indexing` flag), or
-- Gate `catalog_sources` on the same freshness mechanism described in
-  `src/service/agent_v1/freshness.rs`.
+### 9. Rust import extraction (previously overscoped in the plan)
+Original plan listed Rust/Python/TS/JS/Go as missing. After verifying
+against `src/indexing/imports/mod.rs`, Python/JS/TS/TSX/JSX/Go/Vue/SQL/Dart
+all already had extractors; only **Rust** was actually missing. Added:
 
-## P2 — Token budgeting is inconsistent
+- `src/indexing/imports/tree_sitter/rust.rs` — tree-sitter walker over
+  `use_declaration` / `extern_crate_declaration`, with recursive flattening
+  for `scoped_use_list` / `use_list` / `use_as_clause` / `use_wildcard`.
+  8 unit tests.
+- `src/indexing/imports/fallback/rust.rs` — line-based fallback for the
+  no-parse path, covering `pub use`, `pub(crate) use`, multi-imports,
+  wildcards, `as` aliases, inline comments, `extern crate`. 9 unit tests.
+- `src/indexing/imports/resolve.rs::resolve_rust_specifier` — maps
+  `::`-paths to `a/b/c.rs` or `a/b/c/mod.rs`, longest-match first, and
+  strips `crate::`/`self::`/`super::` prefixes. 4 unit tests.
+- Wired into `tree_sitter/mod.rs`, `fallback/mod.rs`,
+  `IMPORT_EXTRACTION_CAPABILITIES`, and the dispatch match in
+  `extract_imports_with_quality`.
 
-`_meta.tokens_saved` is `0` on many legitimate results:
-- `read_content` (134 response tokens, saved=0)
-- `workspace_digest` (296 tokens, saved=0)
-- `query_suggestions` (300 tokens, saved=0)
-- `inspect_structure view=repo_outline` (**10256** tokens, saved=0)
-- `assemble_context mode=ranked` (313 tokens, saved=0)
+Live drive: a fixture with `use crate::models::User` in `src/lib.rs` now
+produces a `depends_on` edge `src/lib.rs → src/models.rs` with
+`import_fact_quality: baseline_structural`, and the external crates
+(`std`, `serde`, `tokio`, `rayon`, `proc_macro`) correctly don't produce
+local edges.
 
-`repo_outline` in particular is unbounded — it emitted 10k tokens for a
-20-file fixture. Recommend:
-1. Add a `max_tokens` / `token_budget` knob to `inspect_structure` (already
-   present on `assemble_context` and `search_catalog`) and apply it to
-   `repo_outline` and `file_tree`.
-2. Audit `MetaBuilder` usage so every handler records
-   `naive_tokens`/`response_tokens` consistently — `tokens_saved=0` on a
-   handler that clearly filtered 4k → 100 tokens is a reporting bug, not a
-   real zero.
+---
 
-## P2 — `read_content` response is double-nested
+## ✅ P3 — Minor polish
 
-`read_content` for a file ref returns:
-```json
-{"items":[{"content":{"content":"const MAX_RETRIES...", ...}}]}
-```
-The outer `items[].content` wraps an inner `{content, ...}` object. Either
-flatten the outer wrapper or rename one of the fields. As-is it's confusing
-for clients and wastes tokens.
+### 10. Regex search mode silently ignored
+`search_catalog query_mode=regex` did nothing for symbol/section searches —
+regex was only wired through `search_code_files_text` and the default
+`unit_kinds` didn't include `file`. Fixed by auto-routing: when
+`query_mode=regex`, the symbol/section branches are skipped and the file
+branch is forced regardless of `unit_kinds`. Documented in the schema.
 
-## P2 — Empty edges on `dependencies` graph
+### 11. Diagnostic CLI subcommands
+Added `codesight-mcp ingest <path>` and `codesight-mcp search <source_id>
+<query>` subcommands that call the same `CodeService::dispatch` handlers as
+`serve`, for operators repro'ing issues without a JSON-RPC harness.
 
-`inspect_graph graph=dependencies` on `code_reference` returns 20 nodes and
-**zero edges**. This is consistent with "no import extractors" for most
-languages in that fixture — but the graph is still marketed as supported.
-Either:
-- Implement import extraction for the priority languages (Rust, Python, TS,
-  JS, Go — these are in the fixture and all show "no import extractor"), or
-- Return a warning when the graph is empty because required extractors are
-  missing, naming the languages.
-
-## P3 — Regex search mode does nothing useful
-
-`search_catalog` with `query_mode=regex`, `query=".*"` returns 0 items on a
-corpus with 199 symbols. Either regex mode isn't wired into the BM25 path or
-it's quietly falling through to literal match. Needs a repro test and a
-decision: drop the mode from the enum, or implement it.
-
-## P3 — CLI surface is thin
-
-`codesight-mcp` exposes only `serve`, `check`, `init`. Operators debugging
-ingest can't repro an ingest failure without a full MCP stdio harness. Add a
-hidden `codesight-mcp ingest --path <p>` (and maybe `search`, `read`)
-subcommand that calls the same handler paths as `serve` does, for local
-diagnostics and for the self-host smoke script workstream S3.
-
-## Suggested execution order
-
-| # | Issue | Effort | Blocker level |
-|---|-------|--------|----|
-| 1 | UTF-8 panic (#1) + dispatch-level `catch_unwind` (#2) | S | P0 — ships unsafe |
-| 2 | Schema/handler drift table (#3) | M | P1 — breaks first-call UX |
-| 3 | Rename/fix `missing_extractors` + add import extractors for Rust/Py/TS/JS/Go (#6, #9) | M | P1 — feature-parity with prior-art |
-| 4 | `read_content` double-nesting (#8) | S | P2 — token waste |
-| 5 | `tokens_saved` accounting + `repo_outline` budget (#7) | S | P2 — contradicts product pitch |
-| 6 | Decide fate of `repo_health`/`ranked.centrality`/`coverage`/`cross_source` placeholders (#4) | M | P1 |
-| 7 | Regex search mode (#10) | S | P3 |
-| 8 | Ingest/catalog race (#5) | M | P2 |
-| 9 | Diagnostic CLI subcommands (#11) | M | P3 |
+---
 
 ## How these were found
 
 Raw JSON-RPC sequences run against a fresh `CODESIGHT_INDEX_DIR=/tmp/cs-test/.idx`
 against `tests/fixtures/code_reference` (and one crashing run against the repo
 root). Every tool in `src/tools.json` was called at least once; graph/impact
-modes were probed for every enum value. Logs: `/tmp/cs-err.log`,
-`/tmp/cs-out*.jsonl` (transient).
+modes were probed for every enum value.
+
+## Test coverage added
+
+- `retrieval::sections::builder::tests::*` — 3 new unit tests for the P0
+  UTF-8 panic.
+- `indexing::imports::tree_sitter::rust::tests::*` — 8 tests.
+- `indexing::imports::fallback::rust::tests::*` — 9 tests.
+- `indexing::imports::resolve::rust_resolve_tests::*` — 4 tests.
+- Existing `parse_warnings`, `doc_tools`, `retrieval_tools`, `incremental`,
+  and `get_context_bundle` integration binaries updated for the new
+  contract (field rename, flattened `read_content`), all still green.

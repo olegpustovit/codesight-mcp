@@ -91,7 +91,8 @@ impl CodeService {
                 let cycle_count = cycles.len();
                 let cycles_sample: Vec<_> = cycles.iter().take(5).cloned().collect();
 
-                let dead_code_data = dead_code::dead_code_payload(&store, "file", 0.5, true, &[])?;
+                let dead_code_data =
+                    dead_code::dead_code_payload(&store, "file", 0.5, true, &[], None)?;
                 let dead_count = dead_code_data
                     .get("dead_file_count")
                     .and_then(|v| v.as_u64())
@@ -151,6 +152,10 @@ impl CodeService {
                 let min_confidence = args.min_confidence.unwrap_or(0.5);
                 let include_tests = args.include_tests.unwrap_or(true);
                 let entry_patterns = args.entry_point_patterns.clone().unwrap_or_default();
+                // Cap dead_files / dead_symbols so a large repo can't return
+                // 100k+ characters. top_n doubles as the limit for parity with
+                // the hotspots analysis.
+                let limit = args.top_n.unwrap_or(50);
                 let raw_bytes = store.repo_total_bytes()?;
                 let timer = MetaBuilder::new(raw_bytes);
                 let data = dead_code::dead_code_payload(
@@ -159,6 +164,7 @@ impl CodeService {
                     min_confidence,
                     include_tests,
                     &entry_patterns,
+                    Some(limit),
                 )?;
                 self.success_response_with_meta_extra(
                     &timer,

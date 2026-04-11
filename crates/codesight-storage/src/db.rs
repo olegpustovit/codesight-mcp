@@ -29,6 +29,11 @@ pub const SKIP_DIRS: &[&str] = &[
     "build",
     ".tox",
     "target",
+    // codesight's own state: the index dir (when nested under a repo being
+    // indexed) and generated caches. Indexing these makes the server
+    // see its own savings ledger as "dead code", which is absurd.
+    ".codesight-index",
+    ".codesight",
 ];
 
 fn apply_rw_pragmas(conn: &Connection) -> StorageResult<()> {

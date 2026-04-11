@@ -16,17 +16,41 @@ use self::entrypoints::is_test_file;
 use self::reachability::build_repo_reachability;
 
 /// Build the `data` object for `evaluate_quality` with `analysis: "dead_code"`.
+///
+/// `limit` caps the `dead_files` / `dead_symbols` arrays in the response
+/// (full counts are always reported via `dead_file_count` / `dead_symbol_count`).
+/// `None` means unbounded, preserving existing callers that pass through the
+/// internal `repo_health` → `dead_code` integration.
 pub fn dead_code_payload(
     store: &IndexStore,
     granularity: &str,
     min_confidence: f64,
     include_tests: bool,
     entry_patterns: &[String],
+    limit: Option<usize>,
 ) -> anyhow::Result<Value> {
     let all_symbols = store.all_symbols_for_analysis()?;
     let dep_graph = store.dependency_graph_strict()?;
     let all_files = store.all_file_paths()?;
     let root_path = store.root_path().ok();
+
+    // Files that actually contain executable code. A file with only
+    // JSON keys (tags.scm captures them as `constant`) or other data-only
+    // symbols has no place in a reachability graph — otherwise every
+    // `.mcp.json` / `package.json` shows up as "dead code" forever.
+    // Only files with at least one function/method/class/trait/struct/enum
+    // qualify.
+    let is_executable = |kind: &str| {
+        matches!(
+            kind.to_ascii_lowercase().as_str(),
+            "function" | "method" | "class" | "trait" | "struct" | "enum" | "type" | "module"
+        )
+    };
+    let files_with_code: HashSet<&str> = all_symbols
+        .iter()
+        .filter(|s| is_executable(&s.kind))
+        .map(|s| s.file_path.as_str())
+        .collect();
 
     let reachability = build_repo_reachability(
         &all_files,
@@ -43,6 +67,9 @@ pub fn dead_code_payload(
             continue;
         }
         if reachability.reachable_files.contains(file) {
+            continue;
+        }
+        if !files_with_code.contains(file.as_str()) {
             continue;
         }
 
@@ -104,6 +131,15 @@ pub fn dead_code_payload(
 
     let dead_file_count = dead_files.len();
     let dead_symbol_count = dead_symbols.len();
+    let truncated = match limit {
+        Some(cap) => {
+            let need = dead_files.len() > cap || dead_symbols.len() > cap;
+            dead_files.truncate(cap);
+            dead_symbols.truncate(cap);
+            need
+        }
+        None => false,
+    };
     let mut data = json!({
         "analysis": "dead_code",
         "dead_files": dead_files,
@@ -111,6 +147,7 @@ pub fn dead_code_payload(
         "dead_symbols": if granularity == "symbol" { json!(dead_symbols) } else { json!([]) },
         "dead_symbol_count": if granularity == "symbol" { dead_symbol_count } else { 0 },
         "live_root_count": reachability.live_roots.len(),
+        "truncated": truncated,
         "analysis_notes": "dead code detection uses dependency-graph reachability plus labeled entry-root heuristics",
         "evidence_notes": serialize_notes(&reachability.evidence_notes),
     });

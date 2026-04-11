@@ -223,9 +223,26 @@ impl CodeService {
                         .is_stale(&root, |p| extractors.extractor_for_path(p).is_some())
                         .unwrap_or(false)
                     {
-                        info!(repo = %repo, "auto-reindexing stale code repo");
-                        let _ = self.do_index_folder(&root);
-                        return self.open_repo_store(repo);
+                        // Coordinate with ReindexStateManager so N concurrent
+                        // reads don't each kick off their own full reindex.
+                        // If another thread already holds the slot, skip our
+                        // reindex and hand back the current store — freshness
+                        // gating will annotate the response as stale in
+                        // relaxed mode, and block in strict mode.
+                        let repo_id = crate::repo_id::normalize_repo_id(&root);
+                        if self.reindex_states.try_mark_reindex_start(&repo_id).is_ok() {
+                            info!(repo = %repo, "auto-reindexing stale code repo");
+                            let result = self.do_index_folder(&root);
+                            if result.is_err() {
+                                self.reindex_states.mark_reindex_failed(
+                                    &repo_id,
+                                    "auto-reindex on stale read failed",
+                                );
+                            } else {
+                                self.reindex_states.mark_reindex_done(&repo_id);
+                            }
+                            return self.open_repo_store(repo);
+                        }
                     }
                 }
                 Ok(store)

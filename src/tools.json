@@ -204,6 +204,11 @@
           "type": "boolean",
           "description": "dependencies: include cross-repo package edges when true."
         },
+        "max_tokens": {
+          "type": "integer",
+          "description": "dependencies: optional token budget (≈4 bytes/token) for edges/nodes. Alias `token_budget`."
+        },
+        "token_budget": { "type": "integer", "description": "Alias of max_tokens." },
         "limit": { "type": "integer", "default": 20 },
         "repo_path": { "type": "string" }
       }
@@ -274,6 +279,14 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "dead_code: additional entry-point file-name patterns."
+        },
+        "top_n": {
+          "type": "integer",
+          "description": "hotspots / dead_code: cap the returned list size (default 50)."
+        },
+        "min_complexity": {
+          "type": "integer",
+          "description": "hotspots: minimum cyclomatic complexity threshold."
         },
         "repo_path": { "type": "string" }
       }

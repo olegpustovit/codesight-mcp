@@ -47,7 +47,7 @@ impl CodeService {
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
         let adj = store.dependency_graph_with_import_quality()?;
-        let edges: Vec<Value> = adj
+        let all_edges: Vec<Value> = adj
             .iter()
             .flat_map(|(src, targets)| {
                 targets.iter().map(move |(tgt, quality)| {
@@ -60,11 +60,48 @@ impl CodeService {
                 })
             })
             .collect();
-        let mut data = json!({
-            "graph": mode,
-            "edges": edges,
-            "nodes": adj.keys().collect::<Vec<_>>(),
-        });
+        let total_edges = all_edges.len();
+
+        // Apply token budget first (more user-facing than raw count), then
+        // fall back to edge-count limit if no budget was specified. This
+        // prevents unbounded 100k+ responses on large repos.
+        let budgeted = args.max_tokens.is_some();
+        let (edges, truncated) = if let Some(budget) = args.max_tokens {
+            crate::service::agent_v1::util::pack_catalog_items_to_token_budget(
+                all_edges, budget,
+            )
+        } else {
+            let cap = if args.limit == 0 { 200 } else { args.limit };
+            let trunc = all_edges.len() > cap;
+            let mut kept = all_edges;
+            kept.truncate(cap);
+            (kept, trunc)
+        };
+
+        let nodes: Vec<&String> = adj.keys().collect();
+        let node_count = nodes.len();
+        let mut data = if budgeted {
+            // Under an explicit token budget, the nodes list is the biggest
+            // single offender on a 400-file repo (~20k chars). Drop it and
+            // return just a count; callers can retrieve the file list via
+            // `inspect_structure view=file_tree` if they need it.
+            json!({
+                "graph": mode,
+                "edges": edges,
+                "edge_count": total_edges,
+                "node_count": node_count,
+                "truncated": truncated,
+            })
+        } else {
+            json!({
+                "graph": mode,
+                "edges": edges,
+                "edge_count": total_edges,
+                "nodes": nodes,
+                "node_count": node_count,
+                "truncated": truncated,
+            })
+        };
 
         let cross_repo = args.cross_repo.unwrap_or(self.config.cross_repo_default);
         if cross_repo {

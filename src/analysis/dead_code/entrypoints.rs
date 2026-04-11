@@ -23,6 +23,11 @@ pub(crate) const ENTRYPOINT_BASENAMES: &[&str] = &[
     "server.ts",
     "main.go",
     "main.rs",
+    // Rust crate roots (not just binaries)
+    "lib.rs",
+    // Cargo build scripts — always live via cargo, never reachable via
+    // normal import graphs.
+    "build.rs",
     "main.c",
     "main.cpp",
 ];

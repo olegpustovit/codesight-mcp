@@ -296,6 +296,16 @@ pub fn resolve_import_edge_for_graph(
     known_files_vec: &[String],
     alias_map: Option<&HashMap<String, Vec<String>>>,
 ) -> Option<String> {
+    // Rust has `::`-path imports that overlap with external crate names.
+    // Route every Rust edge through the Rust-aware resolver, which only
+    // accepts local candidates when the specifier starts with
+    // `crate`/`self`/`super`. Bare names like `regex` / `serde` / `tokio`
+    // are correctly treated as external (return None) rather than falling
+    // through to the generic stem-match fallback — which would false-match
+    // any local file sharing the name.
+    if lang.eq_ignore_ascii_case("rust") || lang.eq_ignore_ascii_case("rs") {
+        return resolve_rust_specifier(&edge.specifier, from_file, known_files_vec);
+    }
     if let Some(p) = resolve_specifier(&edge.specifier, from_file, source_files, alias_map) {
         return Some(p);
     }
@@ -311,11 +321,6 @@ pub fn resolve_import_edge_for_graph(
         let resolved = resolve_imports_to_files(&[top], known_files_vec, from_file);
         return resolved.into_iter().next();
     }
-    if (lang.eq_ignore_ascii_case("rust") || lang.eq_ignore_ascii_case("rs"))
-        && edge.specifier.contains("::")
-    {
-        return resolve_rust_specifier(&edge.specifier, from_file, known_files_vec);
-    }
     None
 }
 
@@ -328,34 +333,179 @@ fn resolve_rust_specifier(
     known_files: &[String],
 ) -> Option<String> {
     let mut segments: Vec<&str> = specifier.split("::").filter(|s| !s.is_empty()).collect();
-    while matches!(segments.first().copied(), Some("crate") | Some("self") | Some("super")) {
-        segments.remove(0);
+    let first = segments.first().copied()?;
+    let is_anchored = matches!(first, "crate" | "self" | "super");
+    if !is_anchored {
+        // Bare identifier — could be an external crate OR a submodule that
+        // the current file declared via `mod <name>;`. We can't inspect the
+        // from-file's AST here, so use a safe file-system heuristic: only
+        // accept a local match if a sibling file or directory with that
+        // stem exists in the **from-file's own directory** (not anywhere
+        // in the project — that was the old stem-match false-positive).
+        return resolve_rust_bare_sibling(&segments, from_file, known_files);
+    }
+
+    // Walk off leading anchor keywords, accumulating how many `super::`s we
+    // saw so we can step up the module tree the corresponding number of
+    // times. `self::` and `crate::` each consume one segment without
+    // changing depth; `super::` consumes one segment and also pops one
+    // module level off the from-file path.
+    let mut super_steps = 0usize;
+    let mut has_crate = false;
+    let mut has_self = false;
+    while let Some(seg) = segments.first().copied() {
+        match seg {
+            "crate" => {
+                has_crate = true;
+                segments.remove(0);
+            }
+            "self" => {
+                has_self = true;
+                segments.remove(0);
+            }
+            "super" => {
+                super_steps += 1;
+                segments.remove(0);
+            }
+            _ => break,
+        }
     }
     if segments.is_empty() {
         return None;
     }
-    // Try the most specific → least specific match so `a::b::c` prefers
-    // `a/b/c.rs` over `a.rs` when both exist.
+
+    // Compute the module directory (inside the crate source tree) from
+    // which to resolve the remaining path.
+    let base_dir = if has_crate {
+        crate_root_of(from_file)?
+    } else if has_self {
+        // `self::X` from `foo.rs` or `foo/mod.rs` looks in the module's own
+        // submodule directory. For `foo/mod.rs` that's `foo/`. For
+        // `foo/bar.rs` (where bar is already a submodule) it's `foo/bar/`.
+        self_module_dir(from_file)?
+    } else if super_steps > 0 {
+        // `super::X` from `foo/bar.rs` looks at the parent module `foo`,
+        // whose siblings live in `foo/`. From `foo/mod.rs` it looks at
+        // `foo`'s parent module instead.
+        let mut dir = parent_module_dir(from_file)?;
+        for _ in 1..super_steps {
+            dir = parent_dir_string(&dir)?;
+        }
+        dir
+    } else {
+        return None;
+    };
+
+    // Try longest → shortest match so `a::b::c` prefers `a/b/c.rs` over
+    // `a.rs` when both exist. Each candidate is anchored at `base_dir`.
     for take in (1..=segments.len()).rev() {
-        let sub = &segments[..take];
+        let sub: Vec<&str> = segments[..take].to_vec();
         let joined = sub.join("/");
-        let candidates = [format!("{joined}.rs"), format!("{joined}/mod.rs")];
+        let candidates = if base_dir.is_empty() {
+            [format!("{joined}.rs"), format!("{joined}/mod.rs")]
+        } else {
+            [
+                format!("{base_dir}/{joined}.rs"),
+                format!("{base_dir}/{joined}/mod.rs"),
+            ]
+        };
         for cand in &candidates {
-            if let Some(hit) = known_files.iter().find(|f| {
-                f.as_str() == cand
-                    || f.ends_with(&format!("/{cand}"))
-                    || f.ends_with(&format!("src/{cand}"))
-            }) && hit.as_str() != from_file
-            {
-                return Some(hit.clone());
+            if known_files.iter().any(|f| f == cand) && cand.as_str() != from_file {
+                return Some(cand.clone());
             }
         }
     }
-    // Last-segment stem fallback (covers flat projects): `models` → `models.rs`.
-    let last = segments.last()?.to_string();
-    resolve_imports_to_files(&[last], known_files, from_file)
-        .into_iter()
-        .next()
+    None
+}
+
+/// Bare-identifier resolver for `use foo::X` style imports where `foo` is a
+/// submodule declared in the current file (`mod foo;`). We don't have the
+/// declaring file's AST here, so we check the from-file's own directory for
+/// a sibling `foo.rs` or `foo/mod.rs` — if present, treat it as local.
+/// Returns None for unambiguously external crate names.
+fn resolve_rust_bare_sibling(
+    segments: &[&str],
+    from_file: &str,
+    known_files: &[String],
+) -> Option<String> {
+    let first = *segments.first()?;
+    let dir = parent_dir_string(from_file)?;
+    // Candidate files the first segment could refer to, anchored at the
+    // from-file's directory only (not the whole project — that was the old
+    // false-positive trap).
+    let candidates = [
+        format!("{dir}/{first}.rs"),
+        format!("{dir}/{first}/mod.rs"),
+    ];
+    let first_hit = candidates
+        .iter()
+        .find(|c| known_files.iter().any(|f| f == *c))?;
+    if segments.len() == 1 {
+        return Some(first_hit.clone());
+    }
+    // Extend the match with any remaining segments as nested path lookups
+    // under the newly-found module directory.
+    let submodule_dir = if first_hit.ends_with("/mod.rs") {
+        first_hit.trim_end_matches("/mod.rs").to_string()
+    } else {
+        first_hit.trim_end_matches(".rs").to_string()
+    };
+    let rest = &segments[1..];
+    for take in (1..=rest.len()).rev() {
+        let joined = rest[..take].join("/");
+        for cand in &[
+            format!("{submodule_dir}/{joined}.rs"),
+            format!("{submodule_dir}/{joined}/mod.rs"),
+        ] {
+            if known_files.iter().any(|f| f == cand) && cand.as_str() != from_file {
+                return Some(cand.clone());
+            }
+        }
+    }
+    // Couldn't find a deeper match — return the first-segment hit so that
+    // the edge at least points at the right sibling module.
+    Some(first_hit.clone())
+}
+
+/// Return the "crate root" — the path prefix up to and including the last
+/// `src/` component in `from_file`. For `crates/x/src/a/b.rs` this returns
+/// `crates/x/src`. If no `src/` is found, returns the empty string so the
+/// resolver falls back to repo-root-relative lookups.
+fn crate_root_of(from_file: &str) -> Option<String> {
+    let parts: Vec<&str> = from_file.split('/').collect();
+    let src_idx = parts.iter().rposition(|p| *p == "src")?;
+    let prefix: Vec<&str> = parts[..=src_idx].to_vec();
+    Some(prefix.join("/"))
+}
+
+/// Return the directory where siblings of `from_file`'s module live.
+/// - `foo/bar.rs`       → `foo`
+/// - `foo/mod.rs`       → parent of `foo` (one level up)
+/// - `src/foo.rs`       → `src`
+fn parent_module_dir(from_file: &str) -> Option<String> {
+    if from_file.ends_with("/mod.rs") {
+        let parent = &from_file[..from_file.len() - "/mod.rs".len()];
+        return parent_dir_string(parent);
+    }
+    parent_dir_string(from_file)
+}
+
+/// Return the directory where submodules of `from_file`'s module live.
+/// - `foo/mod.rs` → `foo`
+/// - `foo/bar.rs` → `foo/bar` (where submodules of `bar` live in 2018+ style)
+/// - `src/foo.rs` → `src/foo`
+fn self_module_dir(from_file: &str) -> Option<String> {
+    if from_file.ends_with("/mod.rs") {
+        let parent = &from_file[..from_file.len() - "/mod.rs".len()];
+        return Some(parent.to_string());
+    }
+    let stripped = from_file.strip_suffix(".rs")?;
+    Some(stripped.to_string())
+}
+
+fn parent_dir_string(path: &str) -> Option<String> {
+    let idx = path.rfind('/')?;
+    Some(path[..idx].to_string())
 }
 
 #[cfg(test)]
@@ -367,21 +517,21 @@ mod rust_resolve_tests {
     }
 
     #[test]
-    fn crate_prefix_resolves_to_mod_file() {
+    fn crate_prefix_resolves_under_src_root() {
         let known = files(&["src/lib.rs", "src/models.rs"]);
         let got = resolve_rust_specifier("crate::models", "src/lib.rs", &known);
         assert_eq!(got.as_deref(), Some("src/models.rs"));
     }
 
     #[test]
-    fn nested_path_prefers_longest_match() {
+    fn nested_crate_path_prefers_longest_match() {
         let known = files(&["src/lib.rs", "src/a/b.rs"]);
         let got = resolve_rust_specifier("crate::a::b", "src/lib.rs", &known);
         assert_eq!(got.as_deref(), Some("src/a/b.rs"));
     }
 
     #[test]
-    fn mod_rs_candidate_matches() {
+    fn crate_mod_rs_candidate_matches() {
         let known = files(&["src/lib.rs", "src/a/mod.rs"]);
         let got = resolve_rust_specifier("crate::a", "src/lib.rs", &known);
         assert_eq!(got.as_deref(), Some("src/a/mod.rs"));
@@ -392,5 +542,117 @@ mod rust_resolve_tests {
         let known = files(&["src/lib.rs", "src/models.rs"]);
         assert!(resolve_rust_specifier("serde", "src/lib.rs", &known).is_none());
         assert!(resolve_rust_specifier("std::collections", "src/lib.rs", &known).is_none());
+    }
+
+    #[test]
+    fn bare_crate_name_does_not_false_match_local_file() {
+        let known = files(&["src/framework/laravel/regex.rs", "src/lib.rs"]);
+        assert!(resolve_rust_specifier("regex", "src/lib.rs", &known).is_none());
+    }
+
+    #[test]
+    fn super_resolves_to_sibling_in_same_dir() {
+        // Regression: `super::render` from `laravel/provider.rs` must NOT
+        // match `nuxt/render.rs` — it must anchor at the current file's
+        // module dir (`laravel/`).
+        let known = files(&[
+            "src/framework/laravel/provider.rs",
+            "src/framework/laravel/render.rs",
+            "src/framework/nuxt/render.rs",
+        ]);
+        let got = resolve_rust_specifier(
+            "super::render",
+            "src/framework/laravel/provider.rs",
+            &known,
+        );
+        assert_eq!(got.as_deref(), Some("src/framework/laravel/render.rs"));
+    }
+
+    #[test]
+    fn super_super_walks_two_levels_up() {
+        let known = files(&[
+            "src/framework/laravel/provider.rs",
+            "src/framework/shared.rs",
+        ]);
+        let got = resolve_rust_specifier(
+            "super::super::shared",
+            "src/framework/laravel/provider.rs",
+            &known,
+        );
+        assert_eq!(got.as_deref(), Some("src/framework/shared.rs"));
+    }
+
+    #[test]
+    fn super_from_mod_rs_steps_out_of_module() {
+        // `super::sibling` from `foo/mod.rs` should resolve in `foo/`'s
+        // parent directory (one level above `foo/`).
+        let known = files(&["src/framework/laravel/mod.rs", "src/framework/nuxt.rs"]);
+        let got = resolve_rust_specifier(
+            "super::nuxt",
+            "src/framework/laravel/mod.rs",
+            &known,
+        );
+        assert_eq!(got.as_deref(), Some("src/framework/nuxt.rs"));
+    }
+
+    #[test]
+    fn self_from_mod_rs_stays_in_module() {
+        let known = files(&["src/a/mod.rs", "src/a/inner.rs"]);
+        let got = resolve_rust_specifier("self::inner", "src/a/mod.rs", &known);
+        assert_eq!(got.as_deref(), Some("src/a/inner.rs"));
+    }
+
+    #[test]
+    fn bare_sibling_submodule_resolves_locally() {
+        // `use resolve::X` from `indexing/imports/mod.rs` where `resolve.rs`
+        // is declared `mod resolve;` in that same file. The sibling file
+        // exists in the from-file's own directory, so the edge resolves.
+        let known = files(&[
+            "src/indexing/imports/mod.rs",
+            "src/indexing/imports/resolve.rs",
+            "src/framework/laravel/resolve.rs", // decoy — should NOT be picked
+        ]);
+        let got = resolve_rust_specifier(
+            "resolve::resolve_specifier",
+            "src/indexing/imports/mod.rs",
+            &known,
+        );
+        assert_eq!(got.as_deref(), Some("src/indexing/imports/resolve.rs"));
+    }
+
+    #[test]
+    fn bare_non_sibling_still_rejected() {
+        // `use regex::Regex` from `nextjs/middleware.rs`: there's no
+        // `nextjs/regex.rs`, so even though `laravel/regex.rs` exists
+        // elsewhere, the specifier stays external.
+        let known = files(&[
+            "src/framework/nextjs/middleware.rs",
+            "src/framework/laravel/regex.rs",
+        ]);
+        assert!(
+            resolve_rust_specifier(
+                "regex",
+                "src/framework/nextjs/middleware.rs",
+                &known
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn crate_root_from_workspace_crate_uses_its_own_src() {
+        // A workspace-member file's `crate::` prefix must resolve inside
+        // that member's `src/`, not the outer repo's `src/`.
+        let known = files(&[
+            "src/main.rs",
+            "crates/cs-storage/src/lib.rs",
+            "crates/cs-storage/src/db.rs",
+        ]);
+        let got = resolve_rust_specifier(
+            "crate::db",
+            "crates/cs-storage/src/lib.rs",
+            &known,
+        );
+        assert_eq!(got.as_deref(), Some("crates/cs-storage/src/db.rs"));
     }
 }

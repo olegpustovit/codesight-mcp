@@ -193,6 +193,10 @@ pub struct InspectGraphArgs {
     /// For `resolve_fqn` mode: fully-qualified name.
     #[serde(default)]
     pub fqn: Option<String>,
+    /// Optional token budget for the serialized `edges`/`nodes` in
+    /// `dependencies` (≈4 bytes/token). Alias `token_budget`.
+    #[serde(default, alias = "token_budget")]
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
