@@ -301,12 +301,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn drain_aborts_when_exceeded() {
         // Spawn a task directly into a JoinSet, run drain phase inline, and
-        // assert the drain timeout + abort path runs inside budget. This
-        // exercises Phase 2 of `run_dispatch_loop` without needing a slow
-        // fake handler (keeps the test deterministic and fast).
+        // assert the drain timeout + abort path runs inside budget. With
+        // `start_paused`, tokio uses virtual time so the 30s sleep + 1s drain
+        // timeout resolve instantly; we still assert on `Instant::now()`
+        // (wall clock) to verify the abort path finishes promptly in real time.
         let mut join_set: JoinSet<()> = JoinSet::new();
         join_set.spawn(async {
             tokio::time::sleep(Duration::from_secs(30)).await;

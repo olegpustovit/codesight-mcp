@@ -71,11 +71,12 @@ mod tests {
     use super::super::helpers::{ToolError, ToolErrorCategory};
     use super::run_with_deadline;
 
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn elapsed_deadline_returns_transient_timeout() {
-        // `run_with_deadline` truncates sub-second precision (it takes whole
-        // seconds), so give the test ~1s of budget and push the slow work to
-        // ~3s. The test finishes in ~1s of wall-clock time.
+        // `run_with_deadline` takes whole-second budgets, so give the test 1 s
+        // budget and push the slow work past it. `start_paused` makes tokio
+        // use virtual time — `sleep` auto-advances whenever no real I/O is
+        // pending, so the test finishes in microseconds of wall-clock time.
         let slow = async {
             tokio::time::sleep(Duration::from_secs(3)).await;
             Ok(json!({}))

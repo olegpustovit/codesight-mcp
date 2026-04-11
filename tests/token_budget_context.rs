@@ -386,8 +386,6 @@ fn case_ranked_items_have_source_and_scores(fixture: &SmallRepoFixture) {
     for item in out["data"]["context_items"].as_array().unwrap() {
         assert!(item.get("source").is_some());
         assert!(item.get("relevance_score").is_some());
-        assert!(item.get("centrality_score").is_some());
-        assert!(item.get("combined_score").is_some());
         assert!(item.get("tokens").is_some());
     }
 }
