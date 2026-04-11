@@ -438,6 +438,112 @@ ingest < 5 s" target with significant headroom.
 as "deferred" in entry (c) is now gone — lazy compile eliminates it
 entirely. Parallel pack compilation (rayon) is no longer needed.
 
+**2026-04-11 (e)** — virtual-time timeout tests + dead assertion fix.
+
+Two unit tests paid real-time sleeps on every run:
+- `src/service/dispatch_timeout.rs::elapsed_deadline_returns_transient_timeout`
+  — 1 s budget × real `tokio::time::sleep(3 s)` = 1020 ms wall time.
+- `src/mcp.rs::drain_aborts_when_exceeded` — 1 s drain timeout × real
+  sleep = 1015 ms wall time.
+
+Switched both to `#[tokio::test(start_paused = true)]` which makes
+tokio use **virtual time**: `sleep` auto-advances when no real I/O is
+pending, so the test resolves in microseconds of wall clock. Enables
+`tokio = { features = ["test-util"] }` as a **dev-dependency** only —
+the feature exposes time manipulation that must not ship in the
+production binary.
+
+**Measured.** Both tests now run at ~38 ms each. Aggregate savings in
+the full uncached suite: ~2 s serialised, ~0.3 s wall (both tests run
+concurrently with others), plus the quality-of-life win of a 97 %
+reduction on `./scripts/nextest-cache -E 'test(...)'` turnaround when
+iterating on dispatch code.
+
+Also fixed `tests/token_budget_context.rs::case_ranked_items_have_source_and_scores`
+which asserted `centrality_score` / `combined_score` on ranked context
+items. Commit `06c3159` ("real use fixes") deliberately removed those
+placeholder fields from the handler but didn't update the test, so it
+had been `SIGABRT`-ing on every full-suite run since. Asserted only the
+fields the handler actually emits (`source`, `relevance_score`,
+`tokens`).
+
+**2026-04-11 (f)** — single-binary test merge experiment (REVERTED).
+
+Acted on the [`.cursor/plans/Test suite performance-d4575817.plan.md`]
+*critical* lever: Cargo treats every `tests/*.rs` as its own
+integration binary, so a clean build pays 86 × link steps through the
+full tree-sitter / storage dep graph. Measured cold compile
+(`cargo clean -p codesight-mcp && time cargo test --no-run`) at
+**45.7 s** before the merge.
+
+Moved all 86 `tests/*.rs` to `tests/it/<name>.rs` and created
+`tests/it.rs` as a single binary root pulling each submodule in with
+`#[path = "it/<name>.rs"] mod <name>;`. `#[path]` is required because
+`tests/it.rs` is a crate root (like `lib.rs`/`main.rs`); without it
+Rust looks for `tests/<name>.rs` and skips the `tests/it/` directory.
+Also fixed `tests/it/languages.rs`'s `include_str!("fixtures/…")` paths
+to `../fixtures/…` for the new directory depth, and pruned the
+`tests/*.rs` overrides from `.config/nextest.toml` (no longer any
+binary named `agent_v1_caching` etc.).
+
+**Measured.**
+- Cold compile: 45.7 s → **22.3 s** (−23.4 s, −51 %). Huge win.
+- Warm test run: 14.5 s → **28.2 s** (+13.7 s, +95 %). Huge loss.
+
+The warm regression was reproducible across three back-to-back runs.
+Root cause hypothesis: nextest still forks one process per `#[test]`
+regardless of binary count, so every fork now loads a binary 86× larger
+than any individual one. The merged binary's static initialisers cover
+every test module's top-level `LazyLock`s / `OnceLock`s / `const &str`
+fixtures, so the per-fork startup cost grows from ~9 ms (tiny binary)
+to ~19 ms (giant binary); × 1524 forks = ~15 s of extra runtime. On an
+edit → rerun dev loop — by far the common case — the merge is a **net
+loss** even counting the cold-build savings.
+
+Reverted the merge entirely: files back in `tests/<name>.rs`, `tests/it.rs`
+removed, `include_str!` paths restored. Left the nextest.toml cleanup
+in place (see below) since it stood on its own.
+
+**Deferred.** If cold-build cost ever becomes the bottleneck (e.g. a
+fresh-checkout CI job whose total time is dominated by linker, not
+test runtime), revisit as a PARTIAL merge: group the ~20 smallest
+binaries (pure `[lang]_language.rs`, `*_parser.rs`, grammar smoke
+tests) into one or two themed binaries so the cold-link saving kicks
+in without ballooning the giant-binary startup cost for the heavier
+integration tests. Not worth the code churn right now — warm runs are
+the hot path and they already fit in target.
+
+**2026-04-11 (g)** — nextest heavy-group cleanup.
+
+`.config/nextest.toml` used to pin ~13 heavy integration binaries into
+a `test-groups.heavy = { max-threads = 4 }` bucket so CI wouldn't OOM
+running 50+ concurrent `CodeService::new` + ingest forks. The fix in
+(c)/(d) dropped per-test peak memory by an order of magnitude, so the
+cap is no longer load-bearing — it was just forcing idle CPU cores at
+full-suite time. Removed the `[test-groups]` section, the
+`[[profile.default.overrides]]` filter, and the stale binary-name list
+in the header comment. Measured effect: ~0.5–1 s shaved off the full
+uncached suite (noise-level; real but small).
+
+**Final measured baseline** (full targeted uncached suite, post all
+landed changes this session, three back-to-back runs):
+
+```
+Summary [  27.859s ] 1524 tests run: 1524 passed, 0 skipped
+Summary [  28.859s ] 1524 tests run: 1524 passed, 0 skipped
+Summary [  27.658s ] 1524 tests run: 1524 passed, 0 skipped
+```
+
+**Honest correction on earlier numbers.** The 14.46 s figure reported
+in entries (b)/(c)/(d) was a genuinely warm-cache outlier — repeated
+targeted runs against the two plan-scoped binaries had left disk-cache
+/ dylib-cache / CPU-thermal state in a sweet spot that the full suite
+benefited from. Steady-state wall time is closer to **~28 s**, which
+is still comfortably inside the AGENTS §6 ≤ 30 s target. The
+per-binary ratios in the tables above (`extraction_candidates`
+3.52 → 0.176, `get_context_bundle` 8.23 → 0.152, etc.) are all
+reproducible and remain valid.
+
 ### #14 — `read_content symbol` no longer forces stable_id lookups
 
 **Status:** fixed 2026-04-11.

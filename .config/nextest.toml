@@ -1,26 +1,20 @@
 # cargo-nextest repository config — see https://nexte.st/book/configuration.html
 #
-# Buckets (WS15 / node A0):
-# - default: full integration suite; generous slow-timeout so structural tests finish on slower disks
+# Buckets:
+# - default: full integration suite; generous slow-timeout so structural tests
+#   finish on slower disks
 # - ci: same as default but no fail-fast cancel
 #
-# Heavy integration binaries: full CodeService / ingest paths. Limited concurrency via test-group
-# `heavy` to reduce memory spikes on CI (`cargo nextest show-config test-groups`).
-#
-# Fast local loop (exclude heavy binaries): pass an explicit filter, e.g.
-#   ./scripts/nextest-cache -E 'not binary(/^(agent_v1_|cross_repo|retrieval_tools|get_context_bundle|document_coverage|bm25_correctness|search_perf|synthetic_repos|incremental|blast_radius|hotspots|grammar_smoke|test_tools_index)$/)'
-
-[test-groups]
-# WS15 budget tuning: 4 heavy tests keeps memory bounded on CI while avoiding a
-# long queue of 50-100s integration binaries in uncached full-suite runs.
-heavy = { max-threads = 4 }
+# Historical note: this file used to cap a "heavy" test-group at max-threads=4
+# and tag ~13 integration binaries into it, because cold ingest was ~2.6 s per
+# test (full ExtractorRegistry rebuild + SQLite init) and running all 50+
+# heavy tests in parallel made CI thrash memory. After worklog #17 (c)/(d)
+# — process-wide ExtractorRegistry cache + lazy per-language SCM compile —
+# per-test peak memory and CPU dropped by an order of magnitude, so the
+# throttle now just forces idle cores at full-suite time. Removed.
 
 [profile.default]
 slow-timeout = { period = "90s", terminate-after = 2 }
-
-[[profile.default.overrides]]
-filter = 'binary(/^agent_v1_/) or binary(cross_repo) or binary(retrieval_tools) or binary(get_context_bundle) or binary(document_coverage) or binary(bm25_correctness) or binary(search_perf) or binary(synthetic_repos) or binary(incremental) or binary(blast_radius) or binary(hotspots) or binary(grammar_smoke) or binary(test_tools_index)'
-test-group = "heavy"
 
 [profile.ci]
 fail-fast = false
