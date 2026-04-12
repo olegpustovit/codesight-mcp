@@ -76,8 +76,7 @@ pub(super) fn collect_raw_captures(
     let mut standalone_docs = Vec::new();
     let mut matches = cursor.matches(&compiled.tags_query, tree.root_node(), source.as_bytes());
     while let Some(m) = matches.next() {
-        let mut props =
-            super::pattern::read_pattern_props(&compiled.tags_query, m.pattern_index);
+        let mut props = super::pattern::read_pattern_props(&compiled.tags_query, m.pattern_index);
 
         let mut def_start = 0usize;
         let mut def_end = 0usize;

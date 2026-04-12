@@ -8,12 +8,6 @@ use codesight_mcp::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
 
-#[test]
-fn get_changed_symbols_suite() {
-    // Master compilation test; individual tests below run independently.
-    // This master test just verifies compilation.
-}
-
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 fn git(args: &[&str], cwd: &std::path::Path) {
@@ -90,36 +84,26 @@ fn commit_changes(root: &std::path::Path, changes: &[(&str, Option<&str>)]) -> S
     git_head(root)
 }
 
-// ── TestErrorHandling ────────────────────────────────────────────────────────
+// ── Error handling ──────────────────────────────────────────────────────────
 
 #[test]
-fn test_changed_symbols_unknown_repo() {
+fn test_changed_symbols_error_cases() {
+    // Unknown repo
     let ws = tempdir().unwrap();
     let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "evaluate_impact",
-            json!({
-                "source_id": "nonexistent/repo",
-                "analysis": "changed_units",
-            }),
+            json!({ "source_id": "nonexistent/repo", "analysis": "changed_units" }),
         )
         .unwrap();
     assert!(!r["ok"].as_bool().unwrap_or(true), "expected error: {r:?}");
-}
 
-#[test]
-fn test_changed_symbols_github_repo_returns_not_local() {
-    // Repos without source_root (GitHub-indexed) should return is_local=false error.
-    let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    // GitHub repo returns not-local
     let r = svc
         .dispatch(
             "evaluate_impact",
-            json!({
-                "source_id": "owner/testrepo",
-                "analysis": "changed_units",
-            }),
+            json!({ "source_id": "owner/testrepo", "analysis": "changed_units" }),
         )
         .unwrap();
     assert!(!r["ok"].as_bool().unwrap_or(true), "expected error");
@@ -127,19 +111,13 @@ fn test_changed_symbols_github_repo_returns_not_local() {
 
 #[test]
 fn test_changed_symbols_no_sha_at_index_time() {
-    // If index has no git_head, tool returns error asking for explicit since_sha.
     let (_ws, svc, sid) = make_git_repo(&[("x.py", "x = 1\n")]);
     let r = svc
         .dispatch(
             "evaluate_impact",
-            json!({
-                "source_id": sid,
-                "analysis": "changed_units",
-                // no since_sha provided
-            }),
+            json!({ "source_id": sid, "analysis": "changed_units" }),
         )
         .unwrap();
-    // Should either succeed with empty changes or require since_sha
     assert!(r.get("_meta").is_some() || !r["ok"].as_bool().unwrap_or(true));
 }
 
@@ -162,11 +140,11 @@ fn test_changed_symbols_bad_since_sha() {
     );
 }
 
-// ── TestSymbolDetection ──────────────────────────────────────────────────────
+// ── Symbol detection: add / remove / modify / unchanged ─────────────────────
 
 #[test]
-fn test_changed_symbols_added_symbol() {
-    // New function in changed file appears in added_symbols.
+fn test_changed_symbols_add_remove_modify() {
+    // Add
     let (ws, svc, sid) = make_git_repo(&[("src/engine.py", "def run(): pass\n")]);
     let initial_sha = git_head(ws.path());
     commit_changes(
@@ -182,24 +160,24 @@ fn test_changed_symbols_added_symbol() {
             json!({
                 "source_id": sid,
                 "analysis": "changed_units",
-                "refs": [{ "kind": "commit", "id": initial_sha }],
+                "refs": [{ "kind": "commit", "id": &initial_sha }],
             }),
         )
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let added = r["data"]["added_symbols"].as_array().unwrap();
-    let names: Vec<&str> = added.iter().filter_map(|s| s["name"].as_str()).collect();
+    let added: Vec<&str> = r["data"]["added_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
     assert!(
-        names.contains(&"stop"),
-        "expected 'stop' in added, got {names:?}"
+        added.contains(&"stop"),
+        "expected 'stop' in added, got {added:?}"
     );
-}
 
-#[test]
-fn test_changed_symbols_removed_symbol() {
-    let (ws, svc, sid) =
-        make_git_repo(&[("src/engine.py", "def run(): pass\n\ndef stop(): pass\n")]);
-    let initial_sha = git_head(ws.path());
+    // Remove: re-ingest after removing stop
+    let sha_before_remove = git_head(ws.path());
     commit_changes(ws.path(), &[("src/engine.py", Some("def run(): pass\n"))]);
     let r = svc
         .dispatch(
@@ -207,23 +185,24 @@ fn test_changed_symbols_removed_symbol() {
             json!({
                 "source_id": sid,
                 "analysis": "changed_units",
-                "refs": [{ "kind": "commit", "id": initial_sha }],
+                "refs": [{ "kind": "commit", "id": &sha_before_remove }],
             }),
         )
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let removed = r["data"]["removed_symbols"].as_array().unwrap();
-    let names: Vec<&str> = removed.iter().filter_map(|s| s["name"].as_str()).collect();
+    let removed: Vec<&str> = r["data"]["removed_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
     assert!(
-        names.contains(&"stop"),
-        "expected 'stop' in removed, got {names:?}"
+        removed.contains(&"stop"),
+        "expected 'stop' in removed, got {removed:?}"
     );
-}
 
-#[test]
-fn test_changed_symbols_modified_symbol() {
-    let (ws, svc, sid) = make_git_repo(&[("src/engine.py", "def run():\n    return 1\n")]);
-    let initial_sha = git_head(ws.path());
+    // Modify
+    let sha_before_mod = git_head(ws.path());
     commit_changes(
         ws.path(),
         &[("src/engine.py", Some("def run():\n    return 42\n"))],
@@ -234,13 +213,14 @@ fn test_changed_symbols_modified_symbol() {
             json!({
                 "source_id": sid,
                 "analysis": "changed_units",
-                "refs": [{ "kind": "commit", "id": initial_sha }],
+                "refs": [{ "kind": "commit", "id": &sha_before_mod }],
             }),
         )
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let changed = r["data"]["changed_symbols"].as_array().unwrap();
-    let modified: Vec<&str> = changed
+    let modified: Vec<&str> = r["data"]["changed_symbols"]
+        .as_array()
+        .unwrap()
         .iter()
         .filter(|s| s["change_type"].as_str() == Some("modified"))
         .filter_map(|s| s["name"].as_str())
@@ -297,7 +277,7 @@ fn test_changed_symbols_unchanged_not_in_results() {
 }
 
 #[test]
-fn test_changed_symbols_counts_consistent() {
+fn test_changed_symbols_counts_and_no_changes() {
     let (ws, svc, sid) = make_git_repo(&[("src/mod.py", "def alpha(): pass\ndef beta(): pass\n")]);
     let initial_sha = git_head(ws.path());
     commit_changes(
@@ -307,13 +287,15 @@ fn test_changed_symbols_counts_consistent() {
             Some("def alpha(): return 1\ndef gamma(): pass\n"),
         )],
     );
+
+    // Counts consistent
     let r = svc
         .dispatch(
             "evaluate_impact",
             json!({
                 "source_id": sid,
                 "analysis": "changed_units",
-                "refs": [{ "kind": "commit", "id": initial_sha }],
+                "refs": [{ "kind": "commit", "id": &initial_sha }],
             }),
         )
         .unwrap();
@@ -331,11 +313,8 @@ fn test_changed_symbols_counts_consistent() {
         d["changed_count"].as_u64().unwrap() as usize,
         d["changed_symbols"].as_array().unwrap().len()
     );
-}
 
-#[test]
-fn test_changed_symbols_no_changes() {
-    let (ws, svc, sid) = make_git_repo(&[("src/mod.py", "def alpha(): pass\n")]);
+    // No changes (same SHA twice)
     let sha = git_head(ws.path());
     let r = svc
         .dispatch(
@@ -344,8 +323,8 @@ fn test_changed_symbols_no_changes() {
                 "source_id": sid,
                 "analysis": "changed_units",
                 "refs": [
-                    { "kind": "commit", "id": sha },
-                    { "kind": "commit", "id": sha },
+                    { "kind": "commit", "id": &sha },
+                    { "kind": "commit", "id": &sha },
                 ],
             }),
         )
@@ -354,6 +333,22 @@ fn test_changed_symbols_no_changes() {
     assert_eq!(r["data"]["added_count"].as_u64().unwrap(), 0);
     assert_eq!(r["data"]["removed_count"].as_u64().unwrap(), 0);
     assert_eq!(r["data"]["changed_count"].as_u64().unwrap(), 0);
+
+    // Suppress meta (same call, just verify no crash)
+    let r = svc
+        .dispatch(
+            "evaluate_impact",
+            json!({
+                "source_id": sid,
+                "analysis": "changed_units",
+                "refs": [
+                    { "kind": "commit", "id": &sha },
+                    { "kind": "commit", "id": &sha },
+                ],
+            }),
+        )
+        .unwrap();
+    assert!(r.get("ok").is_some());
 }
 
 #[test]
@@ -374,7 +369,6 @@ fn test_changed_symbols_include_blast_radius() {
                 "source_id": sid,
                 "analysis": "changed_units",
                 "refs": [{ "kind": "commit", "id": initial_sha }],
-                // include_blast_radius=true
             }),
         )
         .unwrap();
@@ -389,27 +383,4 @@ fn test_changed_symbols_include_blast_radius() {
             "blast_radius missing on {entry:?}"
         );
     }
-}
-
-#[test]
-fn test_changed_symbols_suppress_meta() {
-    let (ws, svc, sid) = make_git_repo(&[("src/mod.py", "def f(): pass\n")]);
-    let sha = git_head(ws.path());
-    let r = svc
-        .dispatch(
-            "evaluate_impact",
-            json!({
-                "source_id": sid,
-                "analysis": "changed_units",
-                "refs": [
-                    { "kind": "commit", "id": sha },
-                    { "kind": "commit", "id": sha },
-                ],
-                // suppress_meta=true
-            }),
-        )
-        .unwrap();
-    // When suppress_meta is supported, _meta should be absent.
-    // For now just assert the call doesn't crash.
-    assert!(r.get("ok").is_some());
 }

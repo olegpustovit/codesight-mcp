@@ -1,0 +1,196 @@
+use std::collections::HashSet;
+
+use serde_json::{Value, json};
+
+use crate::service::CodeService;
+use crate::service::agent_v1::args::InspectGraphArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::savings::MetaBuilder;
+
+impl CodeService {
+    pub(super) fn graph_find_references(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
+        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
+            Ok(s) => s,
+            Err(e) => return self.error_response(&MetaBuilder::new(0), e),
+        };
+
+        let ci_word_match = |body: &str, name: &str| -> bool {
+            let body_lc = body.to_lowercase();
+            let name_lc = name.to_lowercase();
+            crate::analysis::graph::word_match(&body_lc, &name_lc)
+        };
+
+        if let Some(identifiers) = &args.identifiers {
+            return self.find_references_batch(&store, identifiers, &ci_word_match);
+        }
+
+        let Some(identifier) = args.identifier.as_deref() else {
+            return self.error_response(
+                &MetaBuilder::new(0),
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "INVALID_REQUEST",
+                    message: "find_references mode requires identifier.".into(),
+                    detail: json!({}),
+                },
+            );
+        };
+
+        self.find_references_single(&store, identifier, args, &ci_word_match)
+    }
+
+    fn find_references_batch(
+        &self,
+        store: &crate::storage::IndexStore,
+        identifiers: &[String],
+        ci_word_match: &dyn Fn(&str, &str) -> bool,
+    ) -> anyhow::Result<Value> {
+        let sym_infos = store.all_symbols_with_source()?;
+        let all_contents = store.all_file_contents().unwrap_or_default();
+        let mut results: Vec<Value> = Vec::new();
+        for ident in identifiers {
+            let mut file_refs: Vec<Value> = Vec::new();
+            let mut seen_files: HashSet<String> = HashSet::new();
+            for sym in &sym_infos {
+                if sym.name.eq_ignore_ascii_case(ident) {
+                    continue;
+                }
+                if ci_word_match(&sym.source, ident) && seen_files.insert(sym.file.clone()) {
+                    file_refs.push(json!({
+                        "symbol_id": sym.id,
+                        "name": sym.name,
+                        "file": sym.file,
+                        "line": sym.line,
+                    }));
+                }
+            }
+            for (file, content) in &all_contents {
+                if seen_files.contains(file) {
+                    continue;
+                }
+                if ci_word_match(content, ident) {
+                    seen_files.insert(file.clone());
+                    file_refs.push(json!({
+                        "file": file,
+                        "name": ident,
+                        "line": 0,
+                        "kind": "text_match",
+                    }));
+                }
+            }
+            results.push(json!({
+                "identifier": ident,
+                "reference_count": file_refs.len(),
+                "references": file_refs,
+            }));
+        }
+        self.success_response_with_meta_extra(
+            &MetaBuilder::new(0),
+            json!({
+                "graph": "find_references",
+                "results": results,
+            }),
+            Vec::new(),
+            [(
+                "tip".to_string(),
+                json!("Use check_references for import-only checks."),
+            )],
+        )
+    }
+
+    fn find_references_single(
+        &self,
+        store: &crate::storage::IndexStore,
+        identifier: &str,
+        args: &InspectGraphArgs,
+        ci_word_match: &dyn Fn(&str, &str) -> bool,
+    ) -> anyhow::Result<Value> {
+        let sym_infos = store.all_symbols_with_source()?;
+        let all_contents = store.all_file_contents().unwrap_or_default();
+        let include_call_chain = args.include_call_chain.unwrap_or(false);
+
+        let mut file_map: std::collections::BTreeMap<String, Vec<Value>> =
+            std::collections::BTreeMap::new();
+        let mut seen_files: HashSet<String> = HashSet::new();
+        for sym in &sym_infos {
+            if sym.name.eq_ignore_ascii_case(identifier) {
+                continue;
+            }
+            if ci_word_match(&sym.source, identifier) {
+                seen_files.insert(sym.file.clone());
+                file_map.entry(sym.file.clone()).or_default().push(json!({
+                    "symbol_id": sym.id,
+                    "name": sym.name,
+                    "line": sym.line,
+                    "kind": sym.kind,
+                }));
+            }
+        }
+
+        for (file, content) in &all_contents {
+            if seen_files.contains(file) {
+                continue;
+            }
+            if ci_word_match(content, identifier) {
+                seen_files.insert(file.clone());
+                file_map.entry(file.clone()).or_default().push(json!({
+                    "name": identifier,
+                    "line": 0,
+                    "kind": "text_match",
+                }));
+            }
+        }
+
+        let _call_edges = if include_call_chain {
+            Some(crate::analysis::graph::build_call_edges(&sym_infos))
+        } else {
+            None
+        };
+
+        let mut refs: Vec<Value> = Vec::new();
+        for (file, matches) in &file_map {
+            let mut file_ref = json!({
+                "file": file,
+                "matches": matches,
+            });
+            if include_call_chain {
+                let file_syms: Vec<&crate::analysis::graph::SymbolInfo> =
+                    sym_infos.iter().filter(|s| &s.file == file).collect();
+                let mut calling_symbols: Vec<Value> = Vec::new();
+                for fs in &file_syms {
+                    if fs.name.eq_ignore_ascii_case(identifier) {
+                        continue;
+                    }
+                    if ci_word_match(&fs.source, identifier) {
+                        calling_symbols.push(json!({
+                            "id": fs.id,
+                            "name": fs.name,
+                            "kind": fs.kind,
+                            "line": fs.line,
+                        }));
+                    }
+                }
+                if !calling_symbols.is_empty() {
+                    file_ref["calling_symbols"] = json!(calling_symbols);
+                }
+            }
+            refs.push(file_ref);
+        }
+
+        let total_count: usize = file_map.values().map(|m| m.len()).sum();
+        self.success_response_with_meta_extra(
+            &MetaBuilder::new(0),
+            json!({
+                "graph": "find_references",
+                "identifier": identifier,
+                "reference_count": total_count,
+                "references": refs,
+            }),
+            Vec::new(),
+            [(
+                "tip".to_string(),
+                json!("Use check_references for import-only checks."),
+            )],
+        )
+    }
+}

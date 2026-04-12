@@ -50,13 +50,17 @@ fn backdate_index(cfg: &AppConfig, source_id: &str, days: i64) {
         .unwrap();
 }
 
-fn run_demo_file_outline_language_no_symbols() {
+// ── Merged: structure + catalog (read-only, shared fixture) ──
+
+#[test]
+fn case_structure_and_catalog() {
     let workspace = tempdir().unwrap();
     let root = setup_demo_repo(workspace.path());
     let cfg = AppConfig::new(workspace.path().join("idx"));
     let svc = CodeService::new(cfg).unwrap();
     let sid = ingest_code(&svc, &root);
 
+    // file_outline: language tag present, no symbols for .h
     let fo = svc
         .dispatch(
             "inspect_structure",
@@ -71,20 +75,8 @@ fn run_demo_file_outline_language_no_symbols() {
     assert_eq!(fo["data"]["language"].as_str(), Some("cpp"));
     assert_eq!(fo["data"]["symbol_count"].as_u64(), Some(0));
     assert_eq!(fo["data"]["items"].as_array().unwrap().len(), 0);
-}
 
-#[test]
-fn case_demo_file_outline_language_no_symbols() {
-    run_demo_file_outline_language_no_symbols();
-}
-
-fn run_demo_repository_rollup_counts() {
-    let workspace = tempdir().unwrap();
-    let root = setup_demo_repo(workspace.path());
-    let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
+    // repository_rollup: file counts + language breakdown
     let roll = svc
         .dispatch(
             "inspect_structure",
@@ -99,47 +91,8 @@ fn run_demo_repository_rollup_counts() {
     let dirs = roll["data"]["directories"].as_object().unwrap();
     assert_eq!(dirs.get("include/"), Some(&json!(1)));
     assert_eq!(dirs.get("src/"), Some(&json!(1)));
-}
 
-#[test]
-fn case_demo_repository_rollup_counts() {
-    run_demo_repository_rollup_counts();
-}
-
-fn run_catalog_staleness_after_backdate() {
-    let workspace = tempdir().unwrap();
-    let root = setup_demo_repo(workspace.path());
-    let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg.clone()).unwrap();
-    let sid = ingest_code(&svc, &root);
-    backdate_index(&cfg, &sid, 8);
-
-    let cat = svc.dispatch("catalog_sources", json!({})).unwrap();
-    assert!(cat["ok"].as_bool().unwrap());
-    let sources = cat["data"]["sources"].as_array().unwrap();
-    let entry = sources
-        .iter()
-        .find(|s| s["source_id"].as_str() == Some(sid.as_str()));
-    assert!(entry.is_some(), "{cat:?}");
-    let warn = entry.unwrap()["staleness_warning"].as_str().unwrap();
-    assert!(
-        warn.contains("8") && warn.contains("days"),
-        "staleness_warning={warn:?}"
-    );
-}
-
-#[test]
-fn case_catalog_staleness_after_backdate() {
-    run_catalog_staleness_after_backdate();
-}
-
-fn run_catalog_fresh_no_staleness_warning() {
-    let workspace = tempdir().unwrap();
-    let root = setup_demo_repo(workspace.path());
-    let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
+    // catalog_sources: freshly indexed → no staleness warning
     let cat = svc.dispatch("catalog_sources", json!({})).unwrap();
     let sources = cat["data"]["sources"].as_array().unwrap();
     let entry = sources
@@ -149,18 +102,17 @@ fn run_catalog_fresh_no_staleness_warning() {
     assert!(entry.unwrap().get("staleness_warning").is_none());
 }
 
-#[test]
-fn case_catalog_fresh_no_staleness_warning() {
-    run_catalog_fresh_no_staleness_warning();
-}
+// ── Merged: search variants (read-only, shared fixture) ──
 
-fn run_search_todo_context_and_ordering() {
+#[test]
+fn case_search_variants() {
     let workspace = tempdir().unwrap();
     let root = setup_demo_repo(workspace.path());
     let cfg = AppConfig::new(workspace.path().join("idx"));
     let svc = CodeService::new(cfg).unwrap();
     let sid = ingest_code(&svc, &root);
 
+    // context + ordering: both TODO hits with before/after lines
     let res = svc
         .dispatch(
             "search_catalog",
@@ -196,20 +148,8 @@ fn run_search_todo_context_and_ordering() {
         m["after"].as_array().unwrap(),
         &vec![json!("    return FLAG")]
     );
-}
 
-#[test]
-fn case_search_todo_context_and_ordering() {
-    run_search_todo_context_and_ordering();
-}
-
-fn run_search_todo_truncated_meta() {
-    let workspace = tempdir().unwrap();
-    let root = setup_demo_repo(workspace.path());
-    let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
+    // truncated meta: limit=1 → truncated=true
     let res = svc
         .dispatch(
             "search_catalog",
@@ -230,20 +170,8 @@ fn run_search_todo_truncated_meta() {
         Some("include/no_symbols.h")
     );
     assert_eq!(res["data"]["truncated"].as_bool(), Some(true));
-}
 
-#[test]
-fn case_search_todo_truncated_meta() {
-    run_search_todo_truncated_meta();
-}
-
-fn run_search_respects_scope_pattern() {
-    let workspace = tempdir().unwrap();
-    let root = setup_demo_repo(workspace.path());
-    let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
+    // scope: scope="src/*.py" → only Python hit
     let res = svc
         .dispatch(
             "search_catalog",
@@ -262,20 +190,8 @@ fn run_search_respects_scope_pattern() {
     let items = res["data"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["ref"]["path"].as_str(), Some("src/main.py"));
-}
 
-#[test]
-fn case_search_respects_scope_pattern() {
-    run_search_respects_scope_pattern();
-}
-
-fn run_search_context_clamped() {
-    let workspace = tempdir().unwrap();
-    let root = setup_demo_repo(workspace.path());
-    let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
-    let sid = ingest_code(&svc, &root);
-
+    // context clamped: context_lines=999 → same as full file
     let res = svc
         .dispatch(
             "search_catalog",
@@ -306,12 +222,35 @@ fn run_search_context_clamped() {
     );
 }
 
+// ── Standalone: staleness needs DB mutation ──
+
 #[test]
-fn case_search_context_clamped() {
-    run_search_context_clamped();
+fn case_catalog_staleness_after_backdate() {
+    let workspace = tempdir().unwrap();
+    let root = setup_demo_repo(workspace.path());
+    let cfg = AppConfig::new(workspace.path().join("idx"));
+    let svc = CodeService::new(cfg.clone()).unwrap();
+    let sid = ingest_code(&svc, &root);
+    backdate_index(&cfg, &sid, 8);
+
+    let cat = svc.dispatch("catalog_sources", json!({})).unwrap();
+    assert!(cat["ok"].as_bool().unwrap());
+    let sources = cat["data"]["sources"].as_array().unwrap();
+    let entry = sources
+        .iter()
+        .find(|s| s["source_id"].as_str() == Some(sid.as_str()));
+    assert!(entry.is_some(), "{cat:?}");
+    let warn = entry.unwrap()["staleness_warning"].as_str().unwrap();
+    assert!(
+        warn.contains("8") && warn.contains("days"),
+        "staleness_warning={warn:?}"
+    );
 }
 
-fn run_search_skips_unreadable_file() {
+// ── Standalone: removes file post-index ──
+
+#[test]
+fn case_search_skips_unreadable_file() {
     let workspace = tempdir().unwrap();
     let root = setup_demo_repo(workspace.path());
     let cfg = AppConfig::new(workspace.path().join("idx"));
@@ -337,12 +276,10 @@ fn run_search_skips_unreadable_file() {
     assert_eq!(items[0]["ref"]["path"].as_str(), Some("src/main.py"));
 }
 
-#[test]
-fn case_search_skips_unreadable_file() {
-    run_search_skips_unreadable_file();
-}
+// ── Standalone: adds extra files + removes ──
 
-fn run_read_file_slices_and_missing() {
+#[test]
+fn case_read_file_slices_and_missing() {
     let workspace = tempdir().unwrap();
     let root = setup_demo_repo(workspace.path());
     fs::write(root.join("empty.py"), "").unwrap();
@@ -411,12 +348,10 @@ fn run_read_file_slices_and_missing() {
     assert_eq!(err["error"]["code"].as_str(), Some("NOT_FOUND"));
 }
 
-#[test]
-fn case_read_file_slices_and_missing() {
-    run_read_file_slices_and_missing();
-}
+// ── Standalone: different fixture (2 .py files, no .h) ──
 
-fn run_file_outline_batch_empty_and_conflict() {
+#[test]
+fn case_file_outline_batch_empty_and_conflict() {
     let workspace = tempdir().unwrap();
     let mini = workspace.path().join("batch_repo");
     fs::create_dir_all(mini.join("src")).unwrap();
@@ -473,19 +408,8 @@ fn run_file_outline_batch_empty_and_conflict() {
     assert_eq!(bad["ok"], false);
 }
 
-#[test]
-fn case_file_outline_batch_empty_and_conflict() {
-    run_file_outline_batch_empty_and_conflict();
-}
-/// SHA at index time differs from the current git HEAD.
-///
-/// The Rust implementation does not store `git_head` in the index. Staleness
-/// is determined by file-stat changes (mtime) and index age, not git SHA
-/// comparison. The behavioral intent (detect out-of-date indexes) is covered
-/// by the existing staleness_warning tests via `backdate_index`.
-///
-/// This test verifies that file-based staleness detection works: after modifying
-/// a file post-indexing, the index should report as stale via repo_health.
+// ── Standalone: different fixture, detects file-stat staleness ──
+
 #[test]
 fn case_sha_staleness_in_meta() {
     use std::{thread, time::Duration};
@@ -508,11 +432,9 @@ fn case_sha_staleness_in_meta() {
     assert!(r["ok"].as_bool().unwrap());
     let sid = r["data"]["source_id"].as_str().unwrap();
 
-    // Modify a file after indexing
     thread::sleep(Duration::from_millis(50));
     std::fs::write(root.join("app.py"), "def main():\n    print('updated')\n").unwrap();
 
-    // Check staleness via evaluate_quality repo_health
     let health = svc
         .dispatch(
             "evaluate_quality",
@@ -523,9 +445,5 @@ fn case_sha_staleness_in_meta() {
         )
         .unwrap();
     assert!(health["ok"].as_bool().unwrap(), "{health:?}");
-    // The index should detect staleness (file changed after indexing).
-    // The response includes the expected analysis field at minimum.
     assert_eq!(health["data"]["analysis"], "repo_health");
-    // Note: whether is_stale is true depends on filesystem mtime resolution.
-    // The behavioral intent of detecting out-of-date indexes is covered.
 }

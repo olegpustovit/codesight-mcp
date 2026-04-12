@@ -39,7 +39,7 @@ pub fn is_outline_noise(path: &str) -> bool {
 impl IndexStore {
     pub fn class_index_rows(&self) -> anyhow::Result<Vec<ClassIndexRow>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"
             SELECT id, name, file_path, start_line, source_text
             FROM symbols
@@ -63,7 +63,7 @@ impl IndexStore {
     pub fn symbol_record(&self, id: &str) -> anyhow::Result<Option<SymbolRecord>> {
         let conn = self.open_read_only()?;
         let root_path = self.root_path()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"
             SELECT id, kind, extraction_tier, file_path, start_line, end_line, start_byte, end_byte, source_hash, source_text, file_size_bytes
             FROM symbols
@@ -152,7 +152,7 @@ impl IndexStore {
 
     pub fn symbol_metadata(&self, id: &str) -> anyhow::Result<Option<SymbolMetadata>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"
             SELECT id, file_path, file_size_bytes, LENGTH(source_text)
             FROM symbols
@@ -180,8 +180,9 @@ impl IndexStore {
 
     pub fn file_list(&self) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
-        let mut stmt =
-            conn.prepare("SELECT file_path, language, size_bytes FROM files ORDER BY file_path")?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT file_path, language, size_bytes FROM files ORDER BY file_path",
+        )?;
         let rows = stmt.query_map([], |row| {
             Ok(serde_json::json!({
                 "path": row.get::<_, String>(0)?,
@@ -195,7 +196,7 @@ impl IndexStore {
     /// File paths with language, size, and live symbol counts (for `inspect_structure` file_tree).
     pub fn file_tree_rows(&self) -> anyhow::Result<Vec<(String, String, i64, u64)>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"
             SELECT f.file_path, f.language, f.size_bytes,
                    (SELECT COUNT(*) FROM symbols s WHERE s.file_path = f.file_path)
@@ -228,7 +229,7 @@ impl IndexStore {
 
     pub fn repo_outline(&self) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT file_path, id, kind, extraction_tier, name, signature, start_line FROM symbols ORDER BY file_path, start_line",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -257,7 +258,7 @@ impl IndexStore {
 
     pub fn file_outline(&self, file_path: &str) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, kind, extraction_tier, name, signature, start_line, end_line FROM symbols WHERE file_path = ?1 ORDER BY start_line",
         )?;
         let rows = stmt.query_map([file_path], |row| {
@@ -286,7 +287,7 @@ impl IndexStore {
         }
         let conn = self.open_read_only()?;
         let lim = limit.clamp(1, 50) as i64;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"SELECT id, kind, name, file_path, start_line
                 FROM symbols
                 WHERE id != ?1 AND instr(source_text, ?2) > 0
@@ -306,7 +307,8 @@ impl IndexStore {
 
     pub fn symbol_names_by_id(&self, id: &str) -> anyhow::Result<Option<(String, String)>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare("SELECT name, qualified_name FROM symbols WHERE id = ?1")?;
+        let mut stmt =
+            conn.prepare_cached("SELECT name, qualified_name FROM symbols WHERE id = ?1")?;
         let row = stmt
             .query_row([id], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))

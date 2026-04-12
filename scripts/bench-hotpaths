@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$ROOT/target/release/codesight-mcp"
+
+if [[ ! -x "$BIN" ]]; then
+  echo "Building release binary..."
+  cargo build --release --manifest-path "$ROOT/Cargo.toml" 2>&1 | tail -1
+fi
+
+export CODESIGHT_STORAGE_DIR
+CODESIGHT_STORAGE_DIR=$(mktemp -d)
+trap 'rm -rf "$CODESIGHT_STORAGE_DIR"' EXIT
+
+ts() { python3 -c "import time; print(time.monotonic())"; }
+
+echo "=== Cold full ingest (target: < 5 s) ==="
+T0=$(ts)
+INGEST_JSON=$("$BIN" ingest "$ROOT" --domains code 2>/dev/null)
+T1=$(ts)
+ELAPSED=$(python3 -c "print(f'{$T1 - $T0:.3f}s')")
+echo "$INGEST_JSON" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f'  files={d[\"data\"][\"file_count\"]}  symbols={d[\"data\"][\"symbol_count\"]}')
+"
+echo "  elapsed: $ELAPSED"
+echo
+
+SID=$(echo "$INGEST_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['source_id'])")
+echo "source_id: $SID"
+echo
+
+echo "=== Keyword search ==="
+T0=$(ts)
+SEARCH_JSON=$("$BIN" search "$SID" "IndexStore" --domain code 2>/dev/null)
+T1=$(ts)
+ELAPSED=$(python3 -c "print(f'{$T1 - $T0:.3f}s')")
+echo "$SEARCH_JSON" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f'  items={len(d[\"data\"][\"items\"])}  timing={d[\"_meta\"][\"timing_ms\"]:.1f}ms')
+"
+echo "  elapsed: $ELAPSED"
+echo
+
+echo "=== Delta reindex after touch (target: < 100 ms) ==="
+touch "$ROOT/src/lib.rs"
+T0=$(ts)
+DELTA_JSON=$("$BIN" ingest "$ROOT" --domains code 2>/dev/null)
+T1=$(ts)
+ELAPSED=$(python3 -c "print(f'{$T1 - $T0:.3f}s')")
+echo "$DELTA_JSON" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f'  files={d[\"data\"][\"file_count\"]}  symbols={d[\"data\"][\"symbol_count\"]}')
+"
+echo "  elapsed: $ELAPSED"

@@ -30,10 +30,19 @@ pub struct DocFileUpdate {
     pub source: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DocStore {
     pub(super) db_path: PathBuf,
     pub(super) cached_total_bytes: std::sync::Arc<std::sync::OnceLock<u64>>,
+    pub(super) ro_conn: std::sync::Arc<db::RoConnCache>,
+}
+
+impl std::fmt::Debug for DocStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DocStore")
+            .field("db_path", &self.db_path)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -91,6 +100,7 @@ impl DocStore {
         let store = Self {
             db_path,
             cached_total_bytes: Default::default(),
+            ro_conn: Default::default(),
         };
         let conn = store.open_connection()?;
         apply_doc_index_migrations(&conn)?;
@@ -104,10 +114,13 @@ impl DocStore {
         let store = Self {
             db_path,
             cached_total_bytes: Default::default(),
+            ro_conn: Default::default(),
         };
-        let conn = store.open_read_only()?;
-        conn.query_row("SELECT COUNT(*) FROM repo_info", [], |_| Ok(()))
-            .context("repo_info missing from existing doc index")?;
+        {
+            let conn = store.open_read_only()?;
+            conn.query_row("SELECT COUNT(*) FROM repo_info", [], |_| Ok(()))
+                .context("repo_info missing from existing doc index")?;
+        }
         Ok(Some(store))
     }
 
@@ -124,8 +137,8 @@ impl DocStore {
         Ok(db::open_rw(&self.db_path)?)
     }
 
-    pub(super) fn open_read_only(&self) -> anyhow::Result<Connection> {
-        Ok(db::open_ro(&self.db_path)?)
+    pub(super) fn open_read_only(&self) -> anyhow::Result<db::RoConn<'_>> {
+        Ok(db::open_cached_ro(&self.ro_conn, &self.db_path)?)
     }
 }
 

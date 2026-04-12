@@ -30,6 +30,7 @@ impl IndexStore {
         let store = Self {
             db_path,
             cached_total_bytes: Default::default(),
+            ro_conn: Default::default(),
         };
         let conn = db::open_rw(&store.db_path)?;
         migrations::apply_code_index_migrations(&conn)?;
@@ -43,10 +44,13 @@ impl IndexStore {
         let store = Self {
             db_path,
             cached_total_bytes: Default::default(),
+            ro_conn: Default::default(),
         };
-        let conn = store.open_read_only()?;
-        conn.query_row("SELECT COUNT(*) FROM repo_info", [], |_| Ok(()))
-            .context("repo_info missing from existing index")?;
+        {
+            let conn = store.open_read_only()?;
+            conn.query_row("SELECT COUNT(*) FROM repo_info", [], |_| Ok(()))
+                .context("repo_info missing from existing index")?;
+        }
         Ok(Some(store))
     }
 
@@ -78,7 +82,7 @@ impl IndexStore {
         &self,
     ) -> anyhow::Result<std::collections::HashMap<String, FileFingerprint>> {
         let conn = self.open_connection()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT file_path, language, size_bytes, modified_ns, content_hash FROM files",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -145,19 +149,21 @@ impl IndexStore {
         }
 
         // Replace dependency edges for updated files
-        for file in updated_files {
-            tx.execute(
-                "DELETE FROM dependency_edges WHERE source_file = ?1",
-                [&file.file_path],
-            )?;
+        {
+            let mut del =
+                tx.prepare_cached("DELETE FROM dependency_edges WHERE source_file = ?1")?;
+            for file in updated_files {
+                del.execute([&file.file_path])?;
+            }
         }
-        for (source, target, quality) in dep_edges {
-            let q = quality.as_str();
-            tx.execute(
+        {
+            let mut ins = tx.prepare_cached(
                 "INSERT INTO dependency_edges (source_file, target_file, import_fact_quality) VALUES (?1, ?2, ?3)
                  ON CONFLICT(source_file, target_file) DO UPDATE SET import_fact_quality = excluded.import_fact_quality",
-                params![source, target, q],
             )?;
+            for (source, target, quality) in dep_edges {
+                ins.execute(params![source, target, quality.as_str()])?;
+            }
         }
 
         tx.execute("DELETE FROM repo_info", [])?;
@@ -241,21 +247,26 @@ impl IndexStore {
         Ok(conn)
     }
 
-    pub(crate) fn open_read_only(&self) -> anyhow::Result<Connection> {
-        Ok(db::open_ro(&self.db_path)?)
+    pub(crate) fn open_read_only(&self) -> anyhow::Result<db::RoConn<'_>> {
+        Ok(db::open_cached_ro(&self.ro_conn, &self.db_path)?)
     }
 
     pub(crate) fn delete_removed_files(
         tx: &Transaction<'_>,
         removed_files: &[String],
     ) -> anyhow::Result<()> {
+        if removed_files.is_empty() {
+            return Ok(());
+        }
+        let mut del_symbols = tx.prepare_cached("DELETE FROM symbols WHERE file_path = ?1")?;
+        let mut del_deps = tx.prepare_cached(
+            "DELETE FROM dependency_edges WHERE source_file = ?1 OR target_file = ?1",
+        )?;
+        let mut del_files = tx.prepare_cached("DELETE FROM files WHERE file_path = ?1")?;
         for file_path in removed_files {
-            tx.execute("DELETE FROM symbols WHERE file_path = ?1", [file_path])?;
-            tx.execute(
-                "DELETE FROM dependency_edges WHERE source_file = ?1 OR target_file = ?1",
-                [file_path],
-            )?;
-            tx.execute("DELETE FROM files WHERE file_path = ?1", [file_path])?;
+            del_symbols.execute([file_path])?;
+            del_deps.execute([file_path])?;
+            del_files.execute([file_path])?;
         }
         Ok(())
     }
@@ -264,17 +275,20 @@ impl IndexStore {
         tx: &Transaction<'_>,
         touched_files: &[FileFingerprint],
     ) -> anyhow::Result<()> {
+        if touched_files.is_empty() {
+            return Ok(());
+        }
+        let mut stmt = tx.prepare_cached(
+            "UPDATE files SET language = ?1, size_bytes = ?2, modified_ns = ?3, content_hash = ?4 WHERE file_path = ?5",
+        )?;
         for file in touched_files {
-            tx.execute(
-                "UPDATE files SET language = ?1, size_bytes = ?2, modified_ns = ?3, content_hash = ?4 WHERE file_path = ?5",
-                params![
-                    file.language,
-                    to_i64_u64(file.size_bytes)?,
-                    to_i64_u64(file.modified_ns)?,
-                    file.content_hash,
-                    file.file_path
-                ],
-            )?;
+            stmt.execute(params![
+                file.language,
+                to_i64_u64(file.size_bytes)?,
+                to_i64_u64(file.modified_ns)?,
+                file.content_hash,
+                file.file_path
+            ])?;
         }
         Ok(())
     }
@@ -283,21 +297,20 @@ impl IndexStore {
         tx: &Transaction<'_>,
         file: &IndexedFileUpdate,
     ) -> anyhow::Result<()> {
-        tx.execute(
-            "DELETE FROM symbols WHERE file_path = ?1",
-            [&file.file_path],
-        )?;
-        tx.execute("DELETE FROM files WHERE file_path = ?1", [&file.file_path])?;
-        tx.execute(
+        tx.prepare_cached("DELETE FROM symbols WHERE file_path = ?1")?
+            .execute([&file.file_path])?;
+        tx.prepare_cached("DELETE FROM files WHERE file_path = ?1")?
+            .execute([&file.file_path])?;
+        tx.prepare_cached(
             "INSERT INTO files (file_path, language, size_bytes, modified_ns, content_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                file.file_path,
-                file.language,
-                to_i64_u64(file.size_bytes)?,
-                to_i64_u64(file.modified_ns)?,
-                file.content_hash
-            ],
-        )?;
+        )?
+        .execute(params![
+            file.file_path,
+            file.language,
+            to_i64_u64(file.size_bytes)?,
+            to_i64_u64(file.modified_ns)?,
+            file.content_hash
+        ])?;
         // Deduplicate IDs: if two symbols share an ID (e.g., inner class
         // re-defines __init__), keep the first one seen.
         let mut seen_ids = std::collections::HashSet::new();
@@ -310,7 +323,7 @@ impl IndexStore {
     }
 
     pub(crate) fn insert_symbol(tx: &Transaction<'_>, symbol: &StoredSymbol) -> anyhow::Result<()> {
-        tx.execute(
+        tx.prepare_cached(
             r#"
             INSERT INTO symbols (
                 id, file_path, language, extraction_tier, kind, qualified_name, name, signature,
@@ -318,25 +331,25 @@ impl IndexStore {
                 file_size_bytes
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
         "#,
-            params![
-                symbol.id,
-                symbol.file_path,
-                symbol.language,
-                symbol.extraction_tier.as_str(),
-                symbol.kind.as_str(),
-                symbol.qualified_name,
-                symbol.name,
-                symbol.signature,
-                symbol.summary,
-                symbol.source_text,
-                symbol.start_line,
-                symbol.end_line,
-                to_i64_usize(symbol.start_byte)?,
-                to_i64_usize(symbol.end_byte)?,
-                symbol.source_hash,
-                to_i64_u64(symbol.file_size_bytes)?
-            ],
-        )?;
+        )?
+        .execute(params![
+            symbol.id,
+            symbol.file_path,
+            symbol.language,
+            symbol.extraction_tier.as_str(),
+            symbol.kind.as_str(),
+            symbol.qualified_name,
+            symbol.name,
+            symbol.signature,
+            symbol.summary,
+            symbol.source_text,
+            symbol.start_line,
+            symbol.end_line,
+            to_i64_usize(symbol.start_byte)?,
+            to_i64_usize(symbol.end_byte)?,
+            symbol.source_hash,
+            to_i64_u64(symbol.file_size_bytes)?
+        ])?;
         Ok(())
     }
 
@@ -356,7 +369,7 @@ impl IndexStore {
         &self,
         conn: &Connection,
     ) -> anyhow::Result<BTreeMap<String, usize>> {
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT language, COUNT(*) AS count FROM files GROUP BY language ORDER BY language",
         )?;
         let rows = stmt.query_map([], |row| {

@@ -39,7 +39,7 @@ impl IndexStore {
     pub fn kind_distribution(&self) -> anyhow::Result<BTreeMap<String, usize>> {
         let conn = self.open_read_only()?;
         let mut stmt =
-            conn.prepare("SELECT kind, COUNT(*) FROM symbols GROUP BY kind ORDER BY kind")?;
+            conn.prepare_cached("SELECT kind, COUNT(*) FROM symbols GROUP BY kind ORDER BY kind")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -61,7 +61,7 @@ impl IndexStore {
     ) -> anyhow::Result<Vec<(String, String, String)>> {
         let conn = self.open_read_only()?;
         let lim = limit.clamp(1, 64) as i64;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"SELECT name, kind, file_path FROM symbols
                WHERE kind IN ('function','method','class','struct','trait','interface','enum')
                ORDER BY file_path, name
@@ -84,7 +84,7 @@ impl IndexStore {
     /// Return all symbols with basic metadata needed for dead-code / hotspot analyses.
     pub fn all_symbols_for_analysis(&self) -> anyhow::Result<Vec<AnalysisSymbol>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"SELECT id, kind, name, file_path, start_line, end_line, source_text
                FROM symbols
                ORDER BY file_path, start_line"#,
@@ -114,7 +114,7 @@ impl IndexStore {
             return Ok((0, Vec::new()));
         }
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"SELECT DISTINCT file_path
                FROM symbols
                WHERE id != ?1 AND instr(source_text, ?2) > 0"#,
@@ -146,7 +146,7 @@ impl IndexStore {
     pub fn python_most_imported_files(&self, limit: usize) -> anyhow::Result<Vec<(String, usize)>> {
         let root = self.root_path()?;
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare("SELECT file_path FROM files")?;
+        let mut stmt = conn.prepare_cached("SELECT file_path FROM files")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
 
         let mut stem_to_path: HashMap<String, String> = HashMap::new();
@@ -248,5 +248,22 @@ impl IndexStore {
             }
         }
         Ok(results)
+    }
+
+    pub fn file_max_end_lines(&self) -> anyhow::Result<HashMap<String, u64>> {
+        let conn = self.open_read_only()?;
+        let mut stmt =
+            conn.prepare_cached("SELECT file_path, MAX(end_line) FROM symbols GROUP BY file_path")?;
+        let rows = stmt.query_map([], |row| {
+            let path: String = row.get(0)?;
+            let end_line: i64 = row.get(1)?;
+            Ok((path, end_line as u64))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (path, end_line) = row?;
+            map.insert(path, end_line);
+        }
+        Ok(map)
     }
 }

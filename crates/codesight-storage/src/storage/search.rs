@@ -35,7 +35,7 @@ impl IndexStore {
         let row_limit = (max_results.clamp(1, 25) * 6) as i64;
 
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"
             SELECT
                 s.id,
@@ -144,7 +144,7 @@ impl IndexStore {
         let lim = max_results.clamp(1, 100) as i64;
 
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"
             SELECT
                 s.id,
@@ -220,7 +220,7 @@ impl IndexStore {
         let scope_contains = scope_value.as_ref().map(|value| format!("%{value}%"));
 
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"
             SELECT
                 s.id,

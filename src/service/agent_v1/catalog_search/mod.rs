@@ -11,8 +11,8 @@ use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
 use crate::service::savings::MetaBuilder;
 use crate::service::{CodeService, MAX_QUERY_LEN};
-use crate::storage::IndexStore;
 use crate::storage::DocStore;
+use crate::storage::IndexStore;
 
 use semantic::{SemanticMode, apply_semantic};
 
@@ -265,11 +265,19 @@ impl CodeService {
 
         let scope = args.scope.clone().or(args.file_pattern.clone());
         let lim = args.limit.clamp(1, 50);
-        let domain = args
-            .domain
+        let query_mode_effective = args
+            .query_mode
             .clone()
-            .unwrap_or_else(|| "hybrid".to_string())
+            .unwrap_or_else(|| "keyword".to_string())
             .to_ascii_lowercase();
+        let domain_explicit = args.domain.is_some();
+        let domain = match args.domain.clone() {
+            Some(d) => d.to_ascii_lowercase(),
+            None => match query_mode_effective.as_str() {
+                "natural_language" => "hybrid".to_string(),
+                _ => "code".to_string(),
+            },
+        };
 
         let flags = KindFlags::from_args(&args, &domain);
 
@@ -292,7 +300,14 @@ impl CodeService {
 
         if let Some(ref store) = code_store {
             raw_bytes = raw_bytes.max(store.repo_total_bytes()?);
-            match self.search_code_side(store, &args, scope.as_ref(), &flags, per_kind_cap, &mut items) {
+            match self.search_code_side(
+                store,
+                &args,
+                scope.as_ref(),
+                &flags,
+                per_kind_cap,
+                &mut items,
+            ) {
                 Ok(more) => more_file_hits_exist = more,
                 Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
             }
@@ -337,8 +352,15 @@ impl CodeService {
         if limit_truncated && let Value::Object(ref mut map) = data {
             map.insert("truncated".to_string(), json!(true));
         }
-        let mut extra: Vec<(String, Value)> =
-            vec![("truncated".to_string(), json!(meta_truncated))];
+        let mut extra: Vec<(String, Value)> = vec![
+            ("truncated".to_string(), json!(meta_truncated)),
+            ("domain_effective".to_string(), json!(domain)),
+            (
+                "query_mode_effective".to_string(),
+                json!(query_mode_effective),
+            ),
+            ("domain_explicit".to_string(), json!(domain_explicit)),
+        ];
         if semantic_enabled || semantic_only {
             extra.push(("search_mode".to_string(), json!(search_mode.as_str())));
         }

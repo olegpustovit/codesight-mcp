@@ -51,6 +51,7 @@ pub fn hotspots_payload(
     top_n: usize,
 ) -> anyhow::Result<Value> {
     let all_symbols = store.all_symbols_for_analysis()?;
+    let file_lines = store.file_max_end_lines().unwrap_or_default();
     let root_path = store.root_path().ok();
     let git_available = root_path
         .as_ref()
@@ -99,11 +100,13 @@ pub fn hotspots_payload(
             "low"
         };
 
+        let file_line_count = file_lines.get(&symbol.file_path).copied().unwrap_or(0);
         hotspots.push(json!({
             "symbol_id": symbol.id,
             "name": symbol.name,
             "file": symbol.file_path,
             "line": symbol.start_line,
+            "file_line_count": file_line_count,
             "cyclomatic": cyclomatic,
             "churn": churn,
             "hotspot_score": hotspot_score,

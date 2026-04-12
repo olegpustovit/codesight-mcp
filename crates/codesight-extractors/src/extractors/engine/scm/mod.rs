@@ -115,9 +115,7 @@ impl ScmExtractor {
             self.injections_source.as_deref(),
             self.language_name,
         )
-        .unwrap_or_else(|err| {
-            panic!("lazy SCM compile failed for {}: {err}", self.language_name)
-        });
+        .unwrap_or_else(|err| panic!("lazy SCM compile failed for {}: {err}", self.language_name));
         // Race-safe: if another thread beat us, its pack is equivalent.
         let _ = self.compiled.set(pack);
         self.compiled.get().expect("just set")

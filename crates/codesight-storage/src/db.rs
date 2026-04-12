@@ -1,10 +1,52 @@
 //! Shared SQLite helpers for IndexStore and DocStore.
 
-use std::{collections::HashSet, fs, path::Path, time::Duration};
+use std::{
+    collections::HashSet,
+    fs,
+    ops::Deref,
+    path::Path,
+    sync::{Mutex, MutexGuard},
+    time::Duration,
+};
 
 use rusqlite::{Connection, OpenFlags};
 
 use crate::error::StorageResult;
+
+/// Per-store read-only connection cache. First call lazily opens via
+/// `db::open_ro`; subsequent calls within the same store instance reuse it.
+/// Reentrant or contended callers fall through to a fresh connection via
+/// `try_lock`, so the mutex never deadlocks on nested reads. Lifetime is the
+/// store instance — RO WAL readers pick up writers' commits on every
+/// implicit `SELECT` transaction, so no explicit invalidation is needed.
+pub type RoConnCache = Mutex<Option<Connection>>;
+
+pub enum RoConn<'a> {
+    Cached(MutexGuard<'a, Option<Connection>>),
+    Fresh(Connection),
+}
+
+impl Deref for RoConn<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        match self {
+            RoConn::Cached(g) => g.as_ref().expect("RoConn::Cached primed by open_cached_ro"),
+            RoConn::Fresh(c) => c,
+        }
+    }
+}
+
+pub fn open_cached_ro<'a>(cache: &'a RoConnCache, path: &Path) -> StorageResult<RoConn<'a>> {
+    match cache.try_lock() {
+        Ok(mut guard) => {
+            if guard.is_none() {
+                *guard = Some(open_ro(path)?);
+            }
+            Ok(RoConn::Cached(guard))
+        }
+        Err(_) => Ok(RoConn::Fresh(open_ro(path)?)),
+    }
+}
 
 /// Shared `repo_info` DDL for code and documentation SQLite stores.
 pub const REPO_INFO_DDL: &str = r#"CREATE TABLE IF NOT EXISTS repo_info (
@@ -57,12 +99,14 @@ pub fn open_ro(path: &Path) -> StorageResult<Connection> {
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     conn.busy_timeout(Duration::from_millis(5000))?;
+    conn.set_prepared_statement_cache_capacity(32);
     Ok(conn)
 }
 
 pub fn open_rw(path: &Path) -> StorageResult<Connection> {
     let conn = Connection::open(path)?;
     apply_rw_pragmas(&conn)?;
+    conn.set_prepared_statement_cache_capacity(32);
     Ok(conn)
 }
 
@@ -104,7 +148,7 @@ pub fn check_staleness(
     }
 
     let select_sql = format!("SELECT file_path, size_bytes, modified_ns FROM {file_table}");
-    let mut stmt = conn.prepare(&select_sql)?;
+    let mut stmt = conn.prepare_cached(&select_sql)?;
     let mut indexed_paths = HashSet::new();
     let rows = stmt.query_map([], |row| {
         Ok((

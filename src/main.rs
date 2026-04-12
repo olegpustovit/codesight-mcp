@@ -175,7 +175,9 @@ fn run() -> anyhow::Result<()> {
         "codesight-mcp starting"
     );
     let config = AppConfig::load();
-    let service = Arc::new(CodeService::new(config)?);
+    let service = CodeService::new(config)?;
+    service.enable_background_watch();
+    let service = Arc::new(service);
     run_stdio(service)
 }
 

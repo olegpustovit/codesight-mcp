@@ -3,6 +3,7 @@ mod args;
 mod code_tools;
 pub mod dispatch_timeout;
 mod doc_tools;
+pub(crate) mod file_watcher;
 mod helpers;
 pub mod savings;
 
@@ -35,10 +36,9 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
 pub struct CodeService {
     config: AppConfig,
     ledger: SavingsLedger,
-    /// Serializes read-modify-write access to the savings ledger so that
-    /// concurrent dispatch tasks do not clobber each other's updates.
     ledger_guard: Mutex<()>,
     reindex_states: Arc<ReindexStateManager>,
+    watchers: file_watcher::WatcherManager,
 }
 
 impl CodeService {
@@ -60,7 +60,12 @@ impl CodeService {
             ledger,
             ledger_guard: Mutex::new(()),
             reindex_states,
+            watchers: file_watcher::WatcherManager::new(),
         })
+    }
+
+    pub fn enable_background_watch(&self) {
+        self.watchers.enable();
     }
 
     /// Run `f` with the savings-ledger mutex held. Poison is recovered

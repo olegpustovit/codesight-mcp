@@ -21,24 +21,24 @@ impl DocStore {
         let mut conn = self.open_connection()?;
         let tx = conn.transaction()?;
 
-        for file_path in removed_files {
-            tx.execute("DELETE FROM sections WHERE file_path = ?1", [file_path])?;
-            tx.execute("DELETE FROM doc_files WHERE file_path = ?1", [file_path])?;
+        if !removed_files.is_empty() {
+            let mut del_sec = tx.prepare_cached("DELETE FROM sections WHERE file_path = ?1")?;
+            let mut del_doc = tx.prepare_cached("DELETE FROM doc_files WHERE file_path = ?1")?;
+            for file_path in removed_files {
+                del_sec.execute([file_path])?;
+                del_doc.execute([file_path])?;
+            }
         }
 
         for file in updated_files {
-            tx.execute(
-                "DELETE FROM sections WHERE file_path = ?1",
-                [&file.file_path],
-            )?;
-            tx.execute(
-                "DELETE FROM doc_files WHERE file_path = ?1",
-                [&file.file_path],
-            )?;
-            tx.execute(
+            tx.prepare_cached("DELETE FROM sections WHERE file_path = ?1")?
+                .execute([&file.file_path])?;
+            tx.prepare_cached("DELETE FROM doc_files WHERE file_path = ?1")?
+                .execute([&file.file_path])?;
+            tx.prepare_cached(
                 "INSERT INTO doc_files (file_path, format, size_bytes, modified_ns, content_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![file.file_path, file.format, file.size_bytes as i64, file.modified_ns as i64, file.content_hash],
-            )?;
+            )?
+            .execute(params![file.file_path, file.format, file.size_bytes as i64, file.modified_ns as i64, file.content_hash])?;
             for section in &file.sections {
                 Self::insert_section(&tx, section, &file.source)?;
             }
@@ -57,27 +57,27 @@ impl DocStore {
         let content_text = source
             .get(section.start_byte..section.end_byte)
             .unwrap_or("");
-        tx.execute(
+        tx.prepare_cached(
             r#"INSERT INTO sections (
                 id, file_path, heading, heading_path, level, summary, content_text,
                 start_line, end_line, start_byte, end_byte, content_hash, file_size_bytes
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"#,
-            params![
-                section.id,
-                section.file_path,
-                section.heading,
-                section.heading_path,
-                section.level as i64,
-                section.summary,
-                content_text,
-                section.start_line,
-                section.end_line,
-                section.start_byte as i64,
-                section.end_byte as i64,
-                section.content_hash,
-                source.len() as i64,
-            ],
-        )?;
+        )?
+        .execute(params![
+            section.id,
+            section.file_path,
+            section.heading,
+            section.heading_path,
+            section.level as i64,
+            section.summary,
+            content_text,
+            section.start_line,
+            section.end_line,
+            section.start_byte as i64,
+            section.end_byte as i64,
+            section.content_hash,
+            source.len() as i64,
+        ])?;
         Ok(())
     }
 }

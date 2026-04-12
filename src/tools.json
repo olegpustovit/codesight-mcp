@@ -39,14 +39,18 @@
   },
   {
     "name": "search_catalog",
-    "description": "Unified search over symbols, sections, and file text.",
+    "description": "Unified search over symbols, sections, and file text. When `domain` is omitted, defaults to `code` for `keyword`/`regex` query modes and `hybrid` for `natural_language`. The effective values are echoed back in `_meta.domain_effective` and `_meta.query_mode_effective`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "query"],
       "properties": {
         "source_id": { "type": "string" },
         "query": { "type": "string" },
-        "domain": { "type": "string", "enum": ["code", "docs", "hybrid"] },
+        "domain": {
+          "type": "string",
+          "enum": ["code", "docs", "hybrid"],
+          "description": "When omitted, defaults to `code` for keyword/regex and `hybrid` for natural_language. Pass explicitly to override."
+        },
         "unit_kinds": {
           "type": "array",
           "items": { "type": "string" }

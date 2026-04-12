@@ -248,3 +248,104 @@ fn to_repo_relative(path: &Path, root: &Path) -> anyhow::Result<String> {
     let relative = path.strip_prefix(root)?;
     Ok(relative.to_string_lossy().replace('\\', "/"))
 }
+
+#[derive(Debug, Clone)]
+pub struct DeltaReindexStats {
+    pub files_processed: usize,
+    pub files_removed: usize,
+    pub symbols_extracted: usize,
+}
+
+pub fn reindex_files(
+    _config: &AppConfig,
+    root: &Path,
+    repo: &str,
+    store: &IndexStore,
+    extractors: &ExtractorRegistry,
+    changed_paths: &[std::path::PathBuf],
+) -> anyhow::Result<DeltaReindexStats> {
+    let index_version = store.current_index_version()?.saturating_add(1);
+    let extractor_version =
+        codesight_extractors::extractors::engine::catalogs::builtin_extractor_version_stamp();
+
+    let mut updated_files = Vec::new();
+    let mut removed_files = Vec::new();
+    let mut graph_sources: Vec<(String, String)> = Vec::new();
+    let mut symbols_extracted = 0usize;
+
+    for abs_path in changed_paths {
+        let relative_path = match to_repo_relative(abs_path, root) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        if !abs_path.exists() {
+            removed_files.push(relative_path);
+            continue;
+        }
+
+        let metadata = match fs::metadata(abs_path) {
+            Ok(m) if m.is_file() => m,
+            _ => continue,
+        };
+
+        let Some(extractor) = extractors.extractor_for_path(abs_path) else {
+            continue;
+        };
+
+        let size_bytes = metadata.len();
+        let mod_ns = modified_ns(&metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH));
+
+        let bytes = match fs::read(abs_path) {
+            Ok(b) => b,
+            Err(err) => {
+                tracing::warn!(path = %abs_path.display(), error = %err, "failed to read");
+                continue;
+            }
+        };
+        let content_hash = blake3::hash(&bytes).to_hex().to_string();
+        let source = String::from_utf8_lossy(&bytes).into_owned();
+        graph_sources.push((relative_path.clone(), source.clone()));
+
+        let symbols = match extractor.extract(&relative_path, &source) {
+            Ok(s) => s,
+            Err(err) => {
+                tracing::warn!(path = %abs_path.display(), error = format!("{err:#}"), "extraction failed");
+                continue;
+            }
+        };
+
+        symbols_extracted += symbols.len();
+        updated_files.push(IndexedFileUpdate {
+            file_path: relative_path,
+            language: extractor.language_name().to_string(),
+            size_bytes,
+            modified_ns: mod_ns,
+            content_hash,
+            symbols,
+        });
+    }
+
+    let alias_map = crate::indexing::imports::load_tsconfig_aliases(&root.to_string_lossy());
+    let alias_ref = (!alias_map.is_empty()).then_some(&alias_map);
+    let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(&graph_sources, alias_ref);
+
+    let indexed_at = chrono::Utc::now().to_rfc3339();
+    store.apply_index_with_deps(
+        repo,
+        root,
+        &indexed_at,
+        index_version,
+        &[],
+        &updated_files,
+        &removed_files,
+        &dep_edges,
+        extractor_version,
+    )?;
+
+    Ok(DeltaReindexStats {
+        files_processed: updated_files.len(),
+        files_removed: removed_files.len(),
+        symbols_extracted,
+    })
+}

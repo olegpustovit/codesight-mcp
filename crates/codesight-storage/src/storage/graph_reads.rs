@@ -35,14 +35,14 @@ impl IndexStore {
         let mut adj: std::collections::HashMap<String, Vec<(String, FactQuality)>> =
             std::collections::HashMap::new();
         {
-            let mut stmt = conn.prepare("SELECT file_path FROM files")?;
+            let mut stmt = conn.prepare_cached("SELECT file_path FROM files")?;
             let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
             for row in rows {
                 adj.entry(row?).or_default();
             }
         }
         {
-            let mut stmt = conn.prepare(
+            let mut stmt = conn.prepare_cached(
                 "SELECT source_file, target_file, import_fact_quality FROM dependency_edges",
             )?;
             let rows = stmt.query_map([], |row| {
@@ -83,7 +83,7 @@ impl IndexStore {
         &self,
     ) -> anyhow::Result<Vec<crate::storage::SymbolSourceRecord>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, kind, extraction_tier, name, file_path, start_line, end_line, source_text FROM symbols ORDER BY file_path, start_line",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -107,7 +107,7 @@ impl IndexStore {
     /// List all indexed file paths.
     pub fn all_file_paths(&self) -> anyhow::Result<Vec<String>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare("SELECT file_path FROM files ORDER BY file_path")?;
+        let mut stmt = conn.prepare_cached("SELECT file_path FROM files ORDER BY file_path")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -126,7 +126,8 @@ impl IndexStore {
     /// Rollup stats for all indexed files (paths are repo-relative with `/`).
     pub fn repository_rollup(&self) -> anyhow::Result<Value> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare("SELECT file_path, language FROM files ORDER BY file_path")?;
+        let mut stmt =
+            conn.prepare_cached("SELECT file_path, language FROM files ORDER BY file_path")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
@@ -157,7 +158,7 @@ impl IndexStore {
     /// (`is_outline_noise`). Returns `(file_path, importer_count)` pairs.
     pub fn most_imported_files(&self, limit: usize) -> anyhow::Result<Vec<(String, usize)>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT target_file, COUNT(DISTINCT source_file) AS importers
              FROM dependency_edges
              WHERE target_file != source_file

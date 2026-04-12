@@ -140,7 +140,7 @@ the worklog's performance section.
 Tests are our **biggest technical debt** right now. Rules:
 
 - **Targeted by default.** Run the smallest scope that proves your change —
-  one test, one binary, one crate lib — via `./scripts/nextest-cache`.
+  one test, one binary, one crate lib — via `cargo nextest run`.
 - **Never** run the full suite unless the user asks or you're preparing an
   explicit merge gate.
 - **Evaluate every run.** If a test takes > 1 s, note it in the worklog's
@@ -199,20 +199,19 @@ CLI) stays in the root crate — don't smuggle it into middle crates.
 **Day-to-day (targeted, always):**
 
 ```bash
-./scripts/nextest-cache --lib                    # crate lib unit tests
-./scripts/nextest-cache --test <name>            # one integration binary
-./scripts/nextest-cache -p codesight-storage --lib
-./scripts/nextest-cache -E 'test(my_case)'
+cargo nextest run --lib                          # crate lib unit tests
+cargo nextest run --test <name>                  # one integration binary
+cargo nextest run -p codesight-storage --lib
+cargo nextest run -E 'test(my_case)'
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-Use `./scripts/nextest-cache` — not `cargo nextest run` directly. The
-wrapper skips repeated work when inputs are unchanged.
+`cargo nextest run` handles incremental compilation — rustc only
+rebuilds changed crates. No wrapper script needed.
 
-**Merge/release gate only (when the user asks):**
+**Full suite (merge gate or sanity check):**
 
 ```bash
-./scripts/nextest-cache                          # cached full suite
-./scripts/nextest-cache --no-cache               # authoritative run
+cargo nextest run                                # full suite
 ```

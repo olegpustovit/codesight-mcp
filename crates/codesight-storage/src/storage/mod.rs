@@ -21,10 +21,19 @@ pub use symbol_reads::is_outline_noise;
 pub use symbol_record::{SymbolMetadata, SymbolRecord};
 pub use types::{AnalysisSymbol, RetrievedSymbol, SearchSymbol, SymbolSourceRecord};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct IndexStore {
     pub(crate) db_path: PathBuf,
     pub(crate) cached_total_bytes: std::sync::Arc<std::sync::OnceLock<u64>>,
+    pub(crate) ro_conn: std::sync::Arc<crate::db::RoConnCache>,
+}
+
+impl std::fmt::Debug for IndexStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IndexStore")
+            .field("db_path", &self.db_path)
+            .finish()
+    }
 }
 
 pub fn list_repo_summaries(index_root: &Path) -> anyhow::Result<Vec<RepoMetadata>> {

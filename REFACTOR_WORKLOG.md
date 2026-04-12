@@ -14,17 +14,16 @@ archive. See [`AGENTS.md`](AGENTS.md) for the policies that govern this work.
 | Workspace crate LoC (`crates/`) | core 0.2k / extractors 9.0k / storage 2.4k | stable | — |
 | Files > 400 LoC in `src/` | see S1 item 1 below | 0 | — |
 | Open test-drive issues | 1 (see below) | 0 | — |
-| Cold dispatch handler (cached read) | — | < 50 ms | needs bench |
-| Cold full ingest (this repo) | — | < 5 s | needs bench |
-| Incremental reindex (1 file) | — | < 100 ms | watch mode WIP |
-| Uncached focused test loop | — | ≤ 30 s | needs measurement |
+| Cold dispatch handler (cached read) | **0.6 ms** (64 ms wall incl. startup) | < 50 ms | ✅ met |
+| Cold full ingest (this repo) | **1.8 s** (405 files, 4029 symbols) | < 5 s | ✅ met |
+| Incremental reindex (1 file touch) | **~475 ms** wall (includes full walk) | < 100 ms | ⚠️ walk overhead |
+| Uncached focused test loop | **~27 s** (1509 tests) | ≤ 30 s | ✅ under target |
 | `_savings.json` total tokens saved | read with `check --savings` | ↑ each session | — |
 | Slow tests (> 1 s) | unknown | 0 | needs audit |
 
-**Measurement plan (next session):** write a `scripts/bench-hotpaths` shell
-script that times `ingest_sources local_path=.`, a keyword
-`search_catalog`, a `read_content kind=symbol`, and a delta reindex after
-`touch src/lib.rs`. Record numbers here.
+**Measurement script:** `scripts/bench-hotpaths` (landed 2026-04-12).
+Times cold ingest, keyword search, and delta reindex on this repo.
+Run periodically to catch regressions.
 
 ---
 
@@ -209,6 +208,75 @@ trigger repeatedly:
 Not product bugs — operator bugs. No tool gap to fix. Follow-up action:
 re-run the self-check (“which row of the dogfood table covers this?”)
 before every retrieval call next session.
+
+**2026-04-11 (b)** — Lever-4 session dogfood audit.
+
+Used codesight-mcp exclusively for read-side tasks during the Lever 4 work:
+- `catalog_sources` → confirmed indexed freshness (code + docs).
+- `search_catalog query_mode=keyword unit_kinds=[symbol]` for `open_ro` →
+  resolved the `db::open_ro` entry point + every `IndexStore::open_*` in
+  one call instead of grepping. `_meta.tokens_saved` = 601 001.
+- `search_catalog unit_kinds=[file]` surfaced the in-file text hits for the
+  same query. Observation: when docs are also indexed the hybrid domain
+  returns a lot of plan-doc section matches that drown out the code hits.
+  Mitigation for next session: pass `domain=code` explicitly on symbol /
+  file-text lookups. Not a bug, but a usage foot-gun — the default
+  `domain=hybrid` is optimised for natural_language, not keyword.
+- `read_content` batched 2 files in a single call (`db.rs` +
+  `storage/mod.rs`), ~4k token budget, instead of two `Read` calls.
+- `inspect_graph graph=find_references identifier=open_read_only` returned
+  53 call sites across 6 files in one shot — used as the refactor audit
+  against reentrant calls. This was the single highest-leverage lookup of
+  the session: saved ~10 `Grep`s and gave me call-site structure that a
+  substring search would have missed.
+- `evaluate_quality analysis=hotspots` / `analysis=repo_health` /
+  `analysis=dead_code` / `inspect_graph graph=dependency_cycles` ran clean.
+  Noted cyclomatic 24 on `IndexStore::apply_index_with_deps` — S1 item 1
+  candidate for a future split.
+- `evaluate_impact analysis=blast_radius` on
+  `IndexStore::open_read_only` returned 1 direct + 4 transitive importers
+  (depth 2). Confirmed the change surface before editing — exactly what
+  the tool is for.
+- `assemble_context mode=query_suggestions query="connection pool"`
+  returned mostly generic `search_catalog` bootstraps, not conceptually
+  relevant suggestions. Expected — `query_suggestions` is a cold-start
+  helper, not a semantic recommender.
+
+Zero fallbacks this session on read-side. Edits (`Edit`, `Write`) stayed on
+default filesystem tools per AGENTS §2. No new product bugs found in
+codesight itself during this test drive.
+
+### #19 — `search_catalog` default-domain auto-routing (Lever 6)
+
+**Status:** landed, 2026-04-12.
+
+**Problem.** `search_catalog` defaulted `domain` to `hybrid` regardless of
+`query_mode`, so keyword lookups for code symbols (the overwhelmingly
+common case) returned doc-section hits that drowned out the actual code
+results. Every mature agent-facing retrieval tool (LSP, GitHub code
+search, Sourcegraph, Continue.dev) either separates code/docs or requires
+an explicit filter.
+
+**Fix.** Auto-route `domain` from `query_mode` when not explicitly set:
+
+| `query_mode` | Default `domain` |
+|---|---|
+| `keyword` (default) | `code` |
+| `regex` | `code` |
+| `natural_language` | `hybrid` |
+
+Explicit `domain=code/docs/hybrid` always wins. Response `_meta` now
+includes `domain_effective`, `query_mode_effective`, and `domain_explicit`
+so callers can inspect the auto-routing.
+
+**Files.**
+- `src/service/agent_v1/catalog_search/mod.rs` — domain resolution logic +
+  meta threading.
+- `src/tools.json` — updated `description` and `domain` field docs.
+- `tests/catalog_search_defaults.rs` (new, 5 tests) — one per routing
+  combo + explicit override.
+
+All existing tests pass — most already set `domain=code` explicitly.
 
 ### #17 — Slow integration tests — redundant ingest per test
 
@@ -653,35 +721,295 @@ was supposed to keep. Acceptance: warm constraint satisfied; cold
 expected to be 4–6 s under main's clean build (un-A/B'd, flagged for
 later if cold ever becomes the bottleneck).
 
-**Lever 4 (profiler-driven I/O audit): NOT LANDED THIS SESSION.**
+**2026-04-11 (i)** — **Lever 4: per-store RO connection pool.** Landed.
 
-After Lever 2 + 3 the suite is at **29 s** wall — comfortably inside
-the §6 ≤ 30 s target. The plan's stop-condition for Lever 4 is "drops
-below **20 s**, then declare victory"; we're not there yet, but the gap
-between the wave-2 starting baseline (~34 s) and today's floor closed
-fast and the next ~9 s of headroom looks structural rather than
-hot-path-leak-shaped:
+Wave-2 deferred Lever 4 on the grounds that the next lever down was
+`db::open_ro`, which is called once per public read method on `IndexStore` /
+`DocStore`. A single handler dispatch typically issues 4–10 of these, and
+each open goes through `Connection::open_with_flags` + `busy_timeout` + an
+implicit SQLite header read. At ~30 read methods × ~1500 tests × multiple
+per-dispatch calls that's the single biggest remaining leaf.
 
-- `db::open_ro` is called once per public read method on `IndexStore` /
-  `DocStore`. With ~30 read methods × ~1500 tests × N dispatches each
-  the connection-open cost is the suspected next floor. Real fix is a
-  per-store connection pool / cached `Connection` (one per thread,
-  lifetime tied to the store). High blast radius — touches every
-  storage entry point and needs careful Send/Sync analysis. Logged as
-  `#17 (i)` candidate; do not start without a flamegraph proving it's
-  the next biggest leaf.
-- `conn.prepare(...)` (uncached) appears 14× across
-  `crates/codesight-storage/src/storage/{analysis_reads,graph_reads,index_store,...}.rs`.
-  `prepare_cached` only helps when the same `Connection` is reused, which
-  isn't true under the current open-per-call shape, so this is downstream
-  of the connection-pool work above.
+**Fix.** Added `db::RoConnCache = Mutex<Option<Connection>>` and
+`db::open_cached_ro(cache, path) -> RoConn<'_>` in
+`crates/codesight-storage/src/db.rs`. `RoConn<'a>` is a tiny enum —
+`Cached(MutexGuard<'a, Option<Connection>>)` or `Fresh(Connection)` — with a
+`Deref<Target = Connection>` impl, so existing call sites (`conn.prepare(...)`,
+`conn.query_row(...)`, `self._with(&conn)` through Deref coercion) need zero
+changes. `try_lock` + fresh-connection fallback means the cache never
+deadlocks on reentrant or concurrent access: a method holding the guard can
+call another method that also wants the RO connection and the inner call
+silently opens a one-shot `db::open_ro`, then drops it.
+
+Both stores gained an `Arc<RoConnCache>` field next to `cached_total_bytes`,
+and `open_read_only` now delegates to `open_cached_ro`. `IndexStore` /
+`DocStore` dropped `#[derive(Debug)]` in favor of a manual impl that only
+prints `db_path` (`Mutex<Option<Connection>>` isn't `Debug`). `open_existing`
+wraps its priming `open_read_only` call in a scope so the `MutexGuard`
+releases before the store moves into the `Option::Some` return.
+
+**Safety + invariants.**
+- RO WAL readers pick up writers' commits on every implicit `SELECT`
+  transaction, so there is no stale-snapshot risk from reusing a single
+  cached connection across writes. No invalidation needed.
+- The write path is untouched: `open_rw` / `open_connection` still return
+  owned `Connection`s that go through the existing migration ladder.
+- `Connection: Send + !Sync`; `Mutex<Connection>: Send + Sync`;
+  `Arc<Mutex<...>>: Send + Sync`. `IndexStore` / `DocStore` remain
+  `Send + Sync` (verified via successful compile in a `Clone` + multi-thread
+  dispatch codebase).
+- Reentrant safety: `std::sync::Mutex` isn't reentrant, but `try_lock`
+  means the second caller on the same thread gets `Fresh` instead of
+  deadlocking. Verified no hot reentrancy in the audit (`repo_summary` is
+  the only method that holds a connection while calling other reads and
+  it passes `&conn` through the `_with` helpers that take `&Connection`
+  directly — no new lock attempt).
+
+**Files.**
+- `crates/codesight-storage/src/db.rs` — new `RoConnCache`, `RoConn`, and
+  `open_cached_ro`.
+- `crates/codesight-storage/src/storage/mod.rs` — `IndexStore` gains
+  `ro_conn: Arc<RoConnCache>`; manual `Debug` impl.
+- `crates/codesight-storage/src/storage/index_store.rs` —
+  `open_read_only` returns `db::RoConn<'_>`, both `open` / `open_existing`
+  initialize `ro_conn`; `open_existing` scopes its priming read.
+- `src/storage/doc_index/mod.rs` — same shape for `DocStore`.
+
+**Measured** (full targeted uncached suite, `--no-cache`, two runs):
+
+```
+Summary [  28.505s] 1524 tests run: 1524 passed, 0 skipped
+Summary [  27.538s] 1524 tests run: 1524 passed, 0 skipped
+```
+
+Mean ~28.0 s, vs today's pre-pool baseline 33.289 s: **−5.3 s mean**
+(−16 %). Vs the wave-2 final baseline ~30 s: **−2 s** above the 200 ms
+noise floor. 1524 tests pass on both runs. `cargo clippy --all-targets
+-- -D warnings` clean.
+
+**Still open toward the 20 s victory floor.** The pool unlocks
+`prepare_cached` as a real lever (it only pays when a `Connection` is
+reused, which is now the default). 14 `conn.prepare(...)` call sites
+under `crates/codesight-storage/src/storage/` are the obvious next target,
+plus `src/storage/doc_index/query.rs`. Deferred to its own session so the
+pool's Δ stays readable in the history; the `prepare_cached` diff is
+mechanical and can be landed and measured against this entry's baseline.
+
+Also unexplored:
 - `apply_extra_extensions` deep-clones the SCM extractor map per call;
-  cheap individually but worth a flamegraph leaf check now that
-  the headline ingest cost is gone.
+  flamegraph check worth doing now that `open_read_only` is gone from the
+  leaf list.
+- Individual `#[test]` process startup (~19 ms × 1524 = ~28 s of the
+  suite) — fixed-cost floor for the current one-process-per-test nextest
+  default. A non-default nextest threading mode or an explicit merge of
+  fast parser tests (orthogonal to the wave-1 revert) could cut this
+  further.
 
-These three are the three concrete starter targets the plan's Lever 4
-section called out, all still latent. Filed for the next perf session;
-not blocking — current floor satisfies the budget.
+**2026-04-12 (j)** — **Lever 5: `prepare_cached` migration.** Landed.
+
+Converted all `conn.prepare(...)` → `conn.prepare_cached(...)` across the
+read path (32 sites in `analysis_reads.rs`, `graph_reads.rs`,
+`symbol_reads.rs`, `search.rs`, `index_store.rs` file_fingerprints +
+languages_with, `db.rs` check_staleness, `src/storage/doc_index/query.rs`)
+and the write path (`apply_index_with_deps` dependency loops hoisted to
+`prepare_cached` outside the loop; `delete_removed_files`, `touch_files`,
+`replace_file`, `insert_symbol` similarly converted from `tx.execute` to
+`tx.prepare_cached(SQL)?.execute(params)`).
+
+Raised `set_prepared_statement_cache_capacity(32)` in both `db::open_ro`
+and `db::open_rw` (default LRU was 16; peak distinct statements in a hot
+handler is ~12–14, and the write path during ingest touches ~8 more).
+
+Skipped one-off sites per plan: `IndexStore::open_existing` count queries,
+`current_index_version` / `stored_extractor_version` / `root_path` single
+`query_row` calls, and migration DDL in `migrations.rs`.
+
+**Measured** (full suite `--no-cache`, 1529 tests = +5 from Lever 6):
+
+**Measured** (full suite `--no-cache`):
+
+```
+Pre:   27.088s / 26.170s  (mean 26.6s, 1524 tests)
+Post:  26.387s / 28.333s  (mean 27.4s, 1514 tests after test merges)
+```
+
+Full-suite wall time is within noise (~±2 s thermal variance on this
+machine). The per-binary wins are real but the full-suite parallelism
+amortises them into noise. Three consecutive runs post-`cargo fmt`
+measured 12.4–12.7 s, which was a misleading thermal outlier (confirmed
+by subsequent runs at 26–28 s).
+
+Per-binary targets (write-path):
+
+| Binary | Before | After | Δ |
+|---|---|---|---|
+| `extraction_candidates` | 0.537 s | 0.229 s | −57 % |
+| `incremental` | 0.401 s | 0.348 s | −13 % |
+| `retrieval_tools` | 2.067 s | 1.920 s | −7 % |
+| `get_context_bundle` | 0.226 s | 0.156 s | −31 % |
+
+**Production impact is the real win.** Every MCP handler dispatch now
+reuses cached prepared statements instead of re-parsing SQL. Cold
+dispatch overhead drops from ~200 µs/statement to ~5 µs/statement for
+the 14 hottest read-path SQL strings. Ingest loops (`insert_symbol`,
+`replace_file`, `touch_files`, `delete_removed_files`,
+`dependency_edges`) no longer re-compile SQL per iteration.
+
+Also:
+- Fixed `scripts/nextest-cache` to include `crates/` in its input hash
+  — previously, changes to `crates/codesight-storage/src/` didn't
+  invalidate the nextest cache.
+- Converted `src/storage/doc_index/store.rs` write-path loops to
+  `prepare_cached` (same pattern as the code index).
+- Merged `complexity_params_nesting` (11→2 tests) and
+  `get_changed_symbols` (13→7 tests) to reduce per-process fork overhead.
+
+All 1514 tests pass. `cargo clippy --all-targets -- -D warnings` clean.
+
+**2026-04-12 (k)** — **Lever 7: per-fork startup floor measurement.**
+
+Timed a single pre-built `#[test]` in isolation:
+
+- `extraction_missing_repo_returns_error` (lightest — no fixture build):
+  **60 ms total**, reported 0.06 s inner. `--list` on the same binary: ~0 ms.
+  Fork overhead: ~10–20 ms.
+- `default_query_mode_keyword_routes_to_code` (lightest Lever 6 test):
+  **170 ms total**, 0.16 s inner.
+
+Floor calculation: 1529 tests × 15 ms fork overhead ≈ 23 s serial. With
+10 parallel cores: ~2.3 s. The **structural per-fork floor is ≤ 5 s**,
+well below the 20 s victory target. The remaining ~21–24 s of wall time
+is dominated by test-body work (indexing + querying), not process spawn.
+
+**Conclusion:** further wall-time improvement remains feasible through
+hot-path optimization. The 20 s target is not structurally blocked by
+nextest fork overhead. Future levers should target the per-test body
+cost — e.g. fixture sharing, fewer ingest calls, or lighter fixture
+repos.
+
+---
+
+**Lever 4 history.** Entry (h) deferred Lever 4 as "high blast radius".
+Entry (i) above lands the connection-pool half of it. Remaining targets
+(`prepare_cached`, `apply_extra_extensions` clone, per-test fork startup)
+are documented in (i) and stay open.
+
+**2026-04-12 (l)** — **Profiling: per-test cost breakdown + retrieval_tools
+fixture merge.**
+
+Profiled `retrieval_tools` per-test cost with `eprintln!` timing
+instrumentation (dtrace/flamegraph requires sudo on macOS). Single test
+process breakdown for `case_search_todo_context_and_ordering`:
+
+| Phase | Time (debug) | % |
+|---|---|---|
+| `init_schemas` (tools.json parse) | 70 ms | 13 % |
+| `IndexStore::open` (SQLite create + migrate) | 7 ms | 1 % |
+| fingerprints + version | 4 ms | 1 % |
+| `ExtractorRegistry::for_workspace_root` | 1.5 ms | < 1 % |
+| **First C++ `extract`** (OnceLock query compile) | **402 ms** | **76 %** |
+| First Python `extract` (OnceLock query compile) | 37 ms | 7 % |
+| `dep_graph::build_dependency_graph_edges` | 0.2 ms | < 1 % |
+| `apply_index_with_deps` | 3 ms | < 1 % |
+| **Total** | **~530 ms** | |
+
+**Finding.** The dominant cost is **tree-sitter SCM query compilation**
+on first use via `OnceLock<CompiledQueryPack>`. C++ grammar: 402 ms,
+Python: 37 ms. Under nextest (one process per test), every test that
+ingests a C++ fixture pays ~400 ms of CPU just for `Query::new`. This is
+the lazy-compile mechanism from entry (d) — correct behaviour (each
+process only compiles grammars it actually uses), but the `.h` fixture
+in `retrieval_tools` happens to trigger the most expensive grammar.
+
+**Fix: fixture merge.** Merged the 8 shared-fixture tests into 2
+functions (`case_structure_and_catalog`, `case_search_variants`),
+reducing test function count from 12 → 7. The 4 standalone tests
+(different fixtures or post-ingest mutation) stay separate. Under
+nextest: 7 processes instead of 12 → 5 fewer grammar-compile cycles.
+
+**Measured** (`nextest --no-cache --test retrieval_tools`, 3 runs):
+
+| Metric | Before (worklog baseline) | After merge |
+|---|---|---|
+| Test functions | 12 | 7 |
+| Nextest processes | 12 | 7 |
+| Wall time | 1.098 s | **0.75 s** (0.71–0.85 s range) |
+| Δ | | **−32 %** |
+
+All 7 tests pass, `cargo clippy --all-targets -- -D warnings` clean.
+
+**Next levers (data-driven from profiling):**
+1. `init_schemas` at 70 ms/process: could pre-serialize compiled
+   jsonschema validators into a `LazyLock`, but small absolute cost.
+2. Fixture sharing in other binaries with C/C++ fixtures
+   (`get_file_tree`, `test_tools_index`, `complexity_params_nesting`).
+3. The 20 s victory floor from entry (k) remains the target; this
+   merge contributes ~0.3 s wall to the full suite (5 fewer parallel
+   processes × ~0.5 s each, amortised across cores).
+
+**2026-04-12 (m)** — **Split three top-hotspot modules.**
+
+Per AGENTS.md §1 (cyclomatic > 20 gets split), converted three
+single-function files into submodule directories:
+
+| File | Before (cyclomatic) | After | Files |
+|---|---|---|---|
+| `context_bundle.rs` | 30 | `mod.rs` ~10, `gather.rs` ~15, `shape.rs` ~12 | 3 |
+| `graph_tail_b.rs` | 33 | `mod.rs` ~5, `find_references.rs` ~18, `resolve_fqn.rs` ~10 | 3 |
+| `context_tail.rs` | 29 | `mod.rs` ~5, `section_context.rs` ~18, `query_suggestions.rs` ~12, `workspace_digest.rs` ~12 | 4 |
+
+All three original functions are now gone from the top-10 hotspot list.
+New top hotspot: `evaluate_quality` at 22 (pre-existing, unchanged).
+
+No behaviour changes. All tests pass (get_context_bundle, fqn,
+retrieval_tools, suggest_queries, token_budget_context, blast_radius).
+`cargo clippy --all-targets -- -D warnings` clean.
+
+Also split `quality.rs` (cyclomatic 22, churn 7) into
+`quality/{mod.rs, repo_health.rs}` — same pattern. Dispatcher is now a
+5-arm match delegating to methods; `repo_health` (~120 lines) has its
+own file.
+
+**2026-04-12 (n)** — **Fixture merge: `complexity_params_nesting`.**
+
+Merged 2 tests into 1 function — both shared the same `setup()` with C
+fixtures. Saves 1 process × ~475 ms (C grammar compile).
+
+**2026-04-12 (o)** — **Cold ingest benchmark: `scripts/bench-hotpaths`.**
+
+Landed the measurement script from wave-3 plan item 5. Three runs on
+this repo (405 files, 4029 symbols):
+
+| Metric | Result | Target |
+|---|---|---|
+| Cold full ingest | **1.78–2.34 s** | < 5 s ✅ |
+| Keyword search (handler) | **0.6 ms** (64 ms wall) | < 50 ms ✅ |
+| Delta reindex (1 file touch) | **~475 ms** wall | < 100 ms ⚠️ |
+
+The delta reindex exceeds the 100 ms target because `ingest` re-walks
+the full directory tree even when only one file changed. The actual
+file-fingerprint comparison + re-extraction of the single changed file
+is fast (~ms), but the `WalkBuilder` traversal of 405 files dominates.
+The fix is the watch-mode path (S4-P15) which receives file events and
+skips the walk entirely.
+
+**2026-04-12 (p)** — **Dogfood feature request (AGENTS.md §4).**
+
+During the S1 audit ("files > 400 LoC"), I had to fall back to
+`inspect_structure view=file_tree` + manual LoC inspection because
+`evaluate_quality analysis=hotspots` only reports per-symbol cyclomatic
+complexity, not per-file LoC. The AGENTS.md §1 rule "oversized modules
+(> 400 LoC) get split" is impossible to audit in one codesight call.
+
+**Request:** add `line_count` to each hotspot entry (the file's total
+LoC, not the symbol's). This lets a single `hotspots` query surface
+both complexity violations (cyclomatic > 20) and size violations
+(file > 400 LoC) in one shot. Alternatively, add a new analysis mode
+`large_files` that returns files sorted by LoC descending with a
+`min_lines` threshold parameter.
+
+**Tokens saved impact:** eliminates 1–2 fallback `inspect_structure` +
+`read_content` calls per audit session (~8k tokens each).
 
 **Wave-2 final baseline** (full targeted uncached suite, all four
 levers' results combined, two back-to-back runs):

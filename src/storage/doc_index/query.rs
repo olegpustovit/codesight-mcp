@@ -15,7 +15,7 @@ use super::{DocStore, SearchSection, SectionRecord};
 impl DocStore {
     pub fn file_fingerprints(&self) -> anyhow::Result<HashMap<String, FileFingerprint>> {
         let conn = self.open_connection()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT file_path, format, size_bytes, modified_ns, content_hash FROM doc_files",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -54,7 +54,7 @@ impl DocStore {
         let row_limit = (max_results.clamp(1, 25) * 6) as i64;
 
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"
             SELECT
                 s.id, s.heading, s.heading_path, s.level, s.file_path,
@@ -106,7 +106,7 @@ impl DocStore {
     pub fn section_record(&self, id: &str) -> anyhow::Result<Option<SectionRecord>> {
         let conn = self.open_read_only()?;
         let root_path = self.root_path()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"SELECT id, file_path, heading, level, start_line, end_line,
                       start_byte, end_byte, content_hash, content_text, file_size_bytes
                FROM sections WHERE id = ?1"#,
@@ -161,10 +161,7 @@ impl DocStore {
         self.repo_total_bytes_with(&conn)
     }
 
-    pub(super) fn repo_total_bytes_with(
-        &self,
-        conn: &rusqlite::Connection,
-    ) -> anyhow::Result<u64> {
+    pub(super) fn repo_total_bytes_with(&self, conn: &rusqlite::Connection) -> anyhow::Result<u64> {
         if let Some(&bytes) = self.cached_total_bytes.get() {
             return Ok(bytes);
         }
@@ -193,7 +190,8 @@ impl DocStore {
         let total_bytes = self.repo_total_bytes_with(&conn)?;
 
         let mut formats: BTreeMap<String, usize> = BTreeMap::new();
-        let mut stmt = conn.prepare("SELECT format, COUNT(*) FROM doc_files GROUP BY format")?;
+        let mut stmt =
+            conn.prepare_cached("SELECT format, COUNT(*) FROM doc_files GROUP BY format")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -225,14 +223,15 @@ impl DocStore {
 
     pub fn distinct_doc_formats(&self) -> anyhow::Result<Vec<String>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare("SELECT DISTINCT format FROM doc_files ORDER BY format")?;
+        let mut stmt =
+            conn.prepare_cached("SELECT DISTINCT format FROM doc_files ORDER BY format")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     pub fn sections_for_file(&self, file_path: &str) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"SELECT id, heading, heading_path, level, start_line, end_line, summary
                 FROM sections WHERE file_path = ?1 ORDER BY start_line"#,
         )?;
@@ -252,7 +251,7 @@ impl DocStore {
 
     pub fn toc(&self) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, file_path, heading, heading_path, level, start_line FROM sections ORDER BY file_path, start_line",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -271,7 +270,7 @@ impl DocStore {
     pub fn all_sections(&self) -> anyhow::Result<Vec<SectionRecord>> {
         let conn = self.open_read_only()?;
         let root_path = self.root_path()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             r#"SELECT id, file_path, heading, level, start_line, end_line,
                       start_byte, end_byte, content_hash, content_text, file_size_bytes
                FROM sections ORDER BY file_path, start_line"#,
@@ -297,7 +296,7 @@ impl DocStore {
 
     pub fn all_doc_files(&self) -> anyhow::Result<Vec<String>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare("SELECT file_path FROM doc_files ORDER BY file_path")?;
+        let mut stmt = conn.prepare_cached("SELECT file_path FROM doc_files ORDER BY file_path")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }

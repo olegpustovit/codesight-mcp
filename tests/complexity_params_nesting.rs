@@ -1,4 +1,4 @@
-//! Integration tests: complexity params nesting.
+//! Integration tests: complexity params + nesting depth.
 
 use std::fs;
 
@@ -7,20 +7,54 @@ use codesight_mcp::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+fn setup() -> (CodeService, String, tempfile::TempDir) {
+    let ws = tempdir().unwrap();
+    let src = ws.path().join("src");
+    fs::create_dir_all(&src).unwrap();
 
-fn ingest(svc: &CodeService, root: &std::path::Path) -> String {
+    fs::write(src.join("p_none.py"), "def foo_none():\n    pass\n").unwrap();
+    fs::write(src.join("p_one.py"), "def foo_one(x):\n    pass\n").unwrap();
+    fs::write(
+        src.join("p_multi.py"),
+        "def foo_multi(x, y, z):\n    pass\n",
+    )
+    .unwrap();
+    fs::write(
+        src.join("p_generic.py"),
+        "def foo_generic(x: dict[str, int], y: int):\n    pass\n",
+    )
+    .unwrap();
+
+    fs::write(src.join("c_void.c"), "void foo_c_void(void) { }\n").unwrap();
+    fs::write(src.join("c_ptr.c"), "void foo_c_ptr(void *ptr) { }\n").unwrap();
+    fs::write(
+        src.join("c_multi.c"),
+        "void foo_c_multi(void *a, int b) { }\n",
+    )
+    .unwrap();
+
+    fs::write(src.join("n_flat.py"), "def foo_flat():\n    return 1\n").unwrap();
+    fs::write(
+        src.join("n_one.js"),
+        "function foo_one_if() { if (x) { return 1; } }\n",
+    )
+    .unwrap();
+    fs::write(
+        src.join("n_deep.js"),
+        "function foo_deep() { { { { return 1; } } } }\n",
+    )
+    .unwrap();
+
+    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",
-            json!({
-                "path": root.to_string_lossy(),
-                "domains": "code",
-            }),
+            json!({ "path": src.to_string_lossy(), "domains": "code" }),
         )
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "ingest failed: {r:?}");
-    r["data"]["source_id"].as_str().unwrap().to_string()
+    let sid = r["data"]["source_id"].as_str().unwrap().to_string();
+    (svc, sid, ws)
 }
 
 fn find_symbol_id(svc: &CodeService, sid: &str, name: &str) -> String {
@@ -45,203 +79,57 @@ fn find_symbol_id(svc: &CodeService, sid: &str, name: &str) -> String {
     panic!("symbol {name:?} not found");
 }
 
-fn complexity_param_count(svc: &CodeService, sid: &str, sym_id: &str) -> u64 {
+fn param_count(svc: &CodeService, sid: &str, name: &str) -> u64 {
+    let sym = find_symbol_id(svc, sid, name);
     let r = svc
         .dispatch(
             "evaluate_quality",
             json!({
                 "source_id": sid,
                 "analysis": "complexity",
-                "refs": [{ "kind": "symbol", "stable_id": sym_id }],
+                "refs": [{ "kind": "symbol", "stable_id": sym }],
             }),
         )
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     r["data"]["findings"][0]["evidence"]["param_count"]
         .as_u64()
-        .expect("missing param_count in evidence")
+        .expect("missing param_count")
 }
 
-fn complexity_max_nesting(svc: &CodeService, sid: &str, sym_id: &str) -> u64 {
+fn max_nesting(svc: &CodeService, sid: &str, name: &str) -> u64 {
+    let sym = find_symbol_id(svc, sid, name);
     let r = svc
         .dispatch(
             "evaluate_quality",
             json!({
                 "source_id": sid,
                 "analysis": "complexity",
-                "refs": [{ "kind": "symbol", "stable_id": sym_id }],
+                "refs": [{ "kind": "symbol", "stable_id": sym }],
             }),
         )
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     r["data"]["findings"][0]["evidence"]["max_nesting"]
         .as_u64()
-        .expect("missing max_nesting in evidence")
-}
-
-// ── TestCountParams ──────────────────────────────────────────────────────────
-
-#[test]
-
-fn count_params_no_params() {
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(src.join("p.py"), "def foo():\n    pass\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert_eq!(complexity_param_count(&svc, &sid, &sym), 0);
+        .expect("missing max_nesting")
 }
 
 #[test]
+fn complexity_params_and_nesting() {
+    let (svc, sid, _ws) = setup();
 
-fn count_params_one_param() {
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(src.join("p.py"), "def foo(x):\n    pass\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert_eq!(complexity_param_count(&svc, &sid, &sym), 1);
-}
+    // param counts
+    assert_eq!(param_count(&svc, &sid, "foo_none"), 0, "no params");
+    assert_eq!(param_count(&svc, &sid, "foo_one"), 1, "one param");
+    assert_eq!(param_count(&svc, &sid, "foo_multi"), 3, "multiple params");
+    assert_eq!(param_count(&svc, &sid, "foo_generic"), 2, "nested generic");
+    assert_eq!(param_count(&svc, &sid, "foo_c_void"), 0, "c void = zero");
+    assert_eq!(param_count(&svc, &sid, "foo_c_ptr"), 1, "c void* = one");
+    assert_eq!(param_count(&svc, &sid, "foo_c_multi"), 2, "c void* + int");
 
-#[test]
-
-fn count_params_multiple_params() {
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(src.join("p.py"), "def foo(x, y, z):\n    pass\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert_eq!(complexity_param_count(&svc, &sid, &sym), 3);
-}
-
-#[test]
-
-fn count_params_nested_generic() {
-    // Generic type: dict[str, int] shouldn't split on inner comma
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(
-        src.join("p.py"),
-        "def foo(x: dict[str, int], y: int):\n    pass\n",
-    )
-    .unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert_eq!(complexity_param_count(&svc, &sid, &sym), 2);
-}
-
-#[test]
-
-fn count_params_empty_string() {
-    // Edge case: empty body should yield 0 params
-    // This tests the parser's handling of degenerate input
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    // Cannot actually index an empty file easily; the behavioral expectation
-    // is that the complexity engine returns 0 for functions with no params.
-    fs::write(src.join("p.py"), "def foo():\n    pass\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert_eq!(complexity_param_count(&svc, &sid, &sym), 0);
-}
-
-#[test]
-
-fn count_params_c_void_zero_params() {
-    // C convention: void foo(void) means zero parameters
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(src.join("p.c"), "void foo(void) { }\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert_eq!(complexity_param_count(&svc, &sid, &sym), 0);
-}
-
-#[test]
-
-fn count_params_c_void_pointer_not_zero() {
-    // void* is a parameter type — should NOT be zero
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(src.join("p.c"), "void foo(void *ptr) { }\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert_eq!(complexity_param_count(&svc, &sid, &sym), 1);
-}
-
-#[test]
-
-fn count_params_c_void_pointer_multi() {
-    // void* among multiple params
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(src.join("p.c"), "void foo(void *a, int b) { }\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert_eq!(complexity_param_count(&svc, &sid, &sym), 2);
-}
-
-// ── TestMaxNestingDepth ──────────────────────────────────────────────────────
-
-#[test]
-fn nesting_flat_code() {
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(src.join("n.py"), "def foo():\n    return 1\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert_eq!(complexity_max_nesting(&svc, &sid, &sym), 0);
-}
-
-#[test]
-
-fn nesting_one_level_deep() {
-    // Bracket-based nesting: function with one if
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(
-        src.join("n.js"),
-        "function foo() { if (x) { return 1; } }\n",
-    )
-    .unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert!(complexity_max_nesting(&svc, &sid, &sym) >= 1);
-}
-
-#[test]
-
-fn nesting_deeply_nested() {
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    fs::write(
-        src.join("n.js"),
-        "function foo() { { { { return 1; } } } }\n",
-    )
-    .unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, &src);
-    let sym = find_symbol_id(&svc, &sid, "foo");
-    assert!(complexity_max_nesting(&svc, &sid, &sym) >= 3);
+    // nesting depth
+    assert_eq!(max_nesting(&svc, &sid, "foo_flat"), 0, "flat");
+    assert!(max_nesting(&svc, &sid, "foo_one_if") >= 1, "one-level");
+    assert!(max_nesting(&svc, &sid, "foo_deep") >= 3, "deeply nested");
 }

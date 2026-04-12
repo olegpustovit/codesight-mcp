@@ -225,6 +225,10 @@ impl CodeService {
         }
 
         reindex_guard.mark_done();
+
+        self.watchers
+            .ensure_watching(&source_id, path_for_index, self.config.clone());
+
         self.success_response_with_warnings(&timer, data, warnings)
     }
 }
