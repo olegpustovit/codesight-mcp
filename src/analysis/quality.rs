@@ -58,23 +58,10 @@ pub fn hotspots_payload(
         .map(|root| root.join(".git").exists())
         .unwrap_or(false);
 
-    let mut file_churn = std::collections::HashMap::<String, u64>::new();
-    if git_available
-        && let Some(ref root) = root_path
-        && let Ok(output) = std::process::Command::new("git")
-            .args(["log", "--format=", "--name-only"])
-            .current_dir(root)
-            .output()
-        && output.status.success()
-    {
-        let text = String::from_utf8_lossy(&output.stdout);
-        for line in text.lines() {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                *file_churn.entry(trimmed.to_string()).or_default() += 1;
-            }
-        }
-    }
+    let file_churn = root_path
+        .as_ref()
+        .map(|root| crate::analysis::quality_signal::compute_file_churn(root))
+        .unwrap_or_default();
 
     let mut hotspots = Vec::new();
     for symbol in &all_symbols {

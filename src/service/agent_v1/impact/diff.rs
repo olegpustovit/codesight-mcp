@@ -6,6 +6,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::agent_v1::util_graph::simple_text_diff;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -55,10 +56,7 @@ impl CodeService {
                 },
             );
         };
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
         let ra = store.symbol_record(&id_a)?;
         let rb = store.symbol_record(&id_b)?;
         let (Some(ra), Some(rb)) = (ra, rb) else {

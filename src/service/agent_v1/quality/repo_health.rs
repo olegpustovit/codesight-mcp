@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
 
-use crate::analysis::{dead_code, quality};
+use crate::analysis::{dead_code, quality, quality_signal};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -11,10 +12,7 @@ impl CodeService {
         args: &EvaluateQualityArgs,
         timer: &MetaBuilder,
     ) -> anyhow::Result<Value> {
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         let mut meta = store.repo_metadata()?;
         if let Ok(root) = store.root_path() {
             let extractors = self.extractors_for_root(&root);
@@ -64,6 +62,26 @@ impl CodeService {
             "evidence": evidence,
             "related_refs": [],
         })];
+
+        // Embed full governance signal (structural + agent readiness)
+        if let Ok(gov) = quality_signal::compute_governance_signal(&store) {
+            let suggestion =
+                quality_signal::suggestion_for_bottleneck(gov.bottleneck, &gov.structural.coverage);
+            let evidence = quality_signal::governance_signal_json(&gov, &suggestion);
+            findings.push(json!({
+                "finding_id": "repo_health:quality_signal",
+                "analysis": "repo_health",
+                "severity": "info",
+                "confidence": 1.0,
+                "summary": format!(
+                    "Governance score: {}/10000. Structural: {}. Agent readiness: {}. Bottleneck: {}.",
+                    gov.score, gov.structural_score, gov.agent_readiness_score, gov.bottleneck
+                ),
+                "evidence": evidence,
+                "related_refs": [],
+            }));
+        }
+
         if dead_code_pct >= 20.0 {
             let severity = if dead_code_pct >= 50.0 {
                 "error"

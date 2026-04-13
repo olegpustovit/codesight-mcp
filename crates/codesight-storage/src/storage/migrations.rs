@@ -12,7 +12,7 @@ use crate::error::StorageResult;
 use super::schema::INDEX_STORE_INIT_SQL;
 
 /// Bump when adding a migration; keep in sync with [`apply_code_index_migrations`].
-pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 3;
+pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 4;
 
 /// Apply migrations so `PRAGMA user_version == CODE_INDEX_TARGET_USER_VERSION`.
 #[instrument(level = "debug", skip(conn), fields(kind = "migrate_code_index"))]
@@ -31,6 +31,36 @@ pub fn apply_code_index_migrations(conn: &Connection) -> StorageResult<()> {
     if v < 3 {
         add_extractor_version_column_if_missing(conn)?;
         conn.execute("PRAGMA user_version = 3", [])?;
+    }
+    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if v < 4 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS quality_snapshots (
+                source_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                score INTEGER NOT NULL,
+                structural_score INTEGER NOT NULL,
+                agent_readiness_score INTEGER NOT NULL,
+                modularity REAL,
+                acyclicity REAL,
+                depth REAL,
+                equality REAL,
+                redundancy REAL,
+                discoverability REAL,
+                test_backstop REAL,
+                change_locality REAL,
+                cycle_count INTEGER NOT NULL,
+                dead_count INTEGER NOT NULL,
+                dup_count INTEGER NOT NULL,
+                file_count INTEGER NOT NULL,
+                symbol_count INTEGER NOT NULL,
+                confidence TEXT NOT NULL,
+                avg_complexity REAL NOT NULL,
+                PRIMARY KEY (source_id, name)
+            );",
+        )?;
+        conn.execute("PRAGMA user_version = 4", [])?;
     }
     Ok(())
 }

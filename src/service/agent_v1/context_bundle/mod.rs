@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::AssembleContextArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -63,10 +64,7 @@ impl CodeService {
             Some(bs_raw.to_ascii_lowercase())
         };
 
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
 
         let rows = match self.gather_bundle_rows(&store, &sym_refs, timer)? {
             Ok(rows) => rows,

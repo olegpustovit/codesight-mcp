@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -14,10 +15,7 @@ impl CodeService {
         args: &EvaluateImpactArgs,
     ) -> anyhow::Result<Value> {
         let timer = MetaBuilder::new(0);
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
         let depth = args.depth.unwrap_or(2);
         let include_depth_scores = args.include_depth_scores.unwrap_or(false);
 

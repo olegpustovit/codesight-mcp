@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -27,10 +28,7 @@ impl CodeService {
                 );
             }
         };
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&MetaBuilder::new(0), e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
         if !store.file_exists(&module_path)? {
             return self.error_response(
                 &MetaBuilder::new(0),
@@ -69,10 +67,7 @@ impl CodeService {
     ) -> anyhow::Result<Value> {
         let rules = args.rules.clone().unwrap_or_default();
         if rules.is_empty() {
-            let _store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-                Ok(s) => s,
-                Err(e) => return self.error_response(&MetaBuilder::new(0), e),
-            };
+            let _store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
             return self.success_response(
                 &MetaBuilder::new(0),
                 json!({
@@ -85,10 +80,7 @@ impl CodeService {
                 }),
             );
         }
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&MetaBuilder::new(0), e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
         let adj = store.dependency_graph_strict()?;

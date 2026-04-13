@@ -8,6 +8,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::ContentRef;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -30,10 +31,7 @@ impl CodeService {
         let args: Args = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
 
-        let store = match self.ensure_repo_store(&args.source_id, None) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, None, &timer);
 
         if args.identifier.is_some() && args.identifiers.is_some() {
             return self.error_response(

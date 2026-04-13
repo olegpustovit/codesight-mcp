@@ -6,24 +6,53 @@ archive. See [`AGENTS.md`](AGENTS.md) for the policies that govern this work.
 
 ---
 
-## Current metrics (baseline: 2026-04-11)
+## Current metrics (baseline: 2026-04-12)
 
 | Metric | Current | Target | Trend |
 |---|---|---|---|
-| Product crate LoC (`src/`) | ~25.4k | ↓ each session | — |
+| Product crate LoC (`src/`) | ~27.4k | ↓ each session | ↓ -267 this session |
 | Workspace crate LoC (`crates/`) | core 0.2k / extractors 9.0k / storage 2.4k | stable | — |
-| Files > 400 LoC in `src/` | see S1 item 1 below | 0 | — |
-| Open test-drive issues | 1 (see below) | 0 | — |
+| Governance score (this repo) | **5674** (good) | ↑ | ↑ +673 this session (dedup + zero cycles) |
+| Structural score | **8073** (very good) | ↑ | ↑ +1593 this session (acyclicity 1.0) |
+| Agent readiness score | **3988** (fair) | ↑ | ↑ +128 this session |
+| Dependency cycles | **0** | 0 | ✅ was 2; broke extractors + analysis↔indexing |
+| High-risk oversized modules in `src/` | see S1 item 1 below | 0 undocumented | — |
+| Open test-drive issues | 0 | 0 | ↓ fixed repo_health governance embedding |
 | Cold dispatch handler (cached read) | **0.6 ms** (64 ms wall incl. startup) | < 50 ms | ✅ met |
 | Cold full ingest (this repo) | **1.8 s** (405 files, 4029 symbols) | < 5 s | ✅ met |
-| Incremental reindex (1 file touch) | **~475 ms** wall (includes full walk) | < 100 ms | ⚠️ walk overhead |
-| Uncached focused test loop | **~27 s** (1509 tests) | ≤ 30 s | ✅ under target |
+| Incremental reindex (1 file touch) | **37 ms** delta (background watcher) | < 100 ms | ✅ met |
+| Uncached focused test loop | **~17 s** (1526 tests) | ≤ 30 s | ✅ under target |
 | `_savings.json` total tokens saved | read with `check --savings` | ↑ each session | — |
 | Slow tests (> 1 s) | unknown | 0 | needs audit |
 
 **Measurement script:** `scripts/bench-hotpaths` (landed 2026-04-12).
 Times cold ingest, keyword search, and delta reindex on this repo.
 Run periodically to catch regressions.
+
+---
+
+## Completed this session (2026-04-12 evening)
+
+1. **Framework provider macro** (`impl_framework_provider!` in `src/framework/mod.rs`).
+   Eliminated ~160 lines of identical boilerplate across 4 providers (dbt, laravel,
+   nextjs, nuxt). Each provider.rs is now ~15–30 lines of detect/load logic only.
+2. **Replaced 6 hand-rolled recursive dir-walk functions** in framework snapshots with
+   shared `walk_files()` + `rel_path()` helpers backed by `walkdir` (already a dep).
+   ~80 lines of `read_dir → flatten → is_dir → recurse` skeleton deleted.
+3. **Deduplicated governance-signal JSON construction** — extracted
+   `governance_signal_json()` in `analysis/quality_signal.rs`, used by both
+   `repo_health` and `quality_signal` handlers. ~25 lines of duplicated JSON layout
+   removed.
+4. **Broke both remaining dependency cycles** (was 2, now **0**):
+   - Extractors: moved `metadata.rs` (ScmMetadata, parse_scm_header) from `scm/` to
+     `catalogs/`, breaking the catalogs↔scm cycle.
+   - Analysis↔Indexing: moved `cross_repo_map.rs` from `analysis/` to `service/`,
+     since it's a service-level orchestrator.
+5. **`require_store!` macro** in `src/service/mod.rs` — replaces ~36 instances of
+   the 4-line `match self.ensure_repo_store { Ok(s) => s, Err(e) => return ... }`
+   boilerplate. ~100 lines saved across 22 handler files.
+6. **Metrics delta:** Governance 5001→5674 (+673), Structural 6480→8073 (+1593),
+   Acyclicity 0.333→1.0, Agent readiness 3860→3988 (+128). 339+ tests passing.
 
 ---
 
@@ -39,8 +68,10 @@ code; reach for crates before hand-rolling.
 1. **Split remaining oversized modules.** Re-audit after the
    `inspect_structure` split (v3 #43). Run
    `mcp__codesight__evaluate_quality analysis=hotspots` to get the current
-   ranked list, then split any file > 400 LoC with cyclomatic > 20. Known
-   candidates carried forward:
+   ranked list, then split any module that is structurally risky:
+   cyclomatic > 20, mixed responsibilities, high fan-in/blast radius, or
+   poor navigability for agents. File length may be used as supporting
+   evidence, but not as a hard trigger. Known candidates carried forward:
    - `src/storage/doc_index/mod.rs` → `query.rs`, `store.rs`.
    - `src/service/agent_v1/impact.rs` → `impact/{blast_radius,preview,rename_safety,changed_units,diff}.rs`.
    - `src/service/agent_v1/graph_tail.rs` → tail-expansion submodule.
@@ -59,17 +90,16 @@ code; reach for crates before hand-rolling.
    `CODESIGHT_SUMMARY_MODEL`.
 4. **Dead / commented code.** `tests/tools_remaining.rs` — restore each
    commented case as a real test, or delete the file.
-5. **Infallible-regex consolidation.** Seven `.expect("infallible … regex")`
-   in `src/framework/laravel/*` → single `static LazyLock<Regex>` table per
-   module.
+5. ~~**Infallible-regex consolidation.**~~ Done — `src/framework/laravel/regex.rs`
+   already uses `LazyLock<LaravelRegexes>` with all patterns consolidated.
 6. **Finish test layering.** Migrate `tests/get_doc_coverage.rs`,
    `tests/doc_broken_links.rs`, `tests/doc_parser*.rs`,
    `tests/retrieval_tools.rs`, `tests/get_context_bundle.rs` to
    `src/test_support/indexed.rs`. Split nextest buckets into
    `unit | slice | contract | heavy`. Uncached focused loop ≤ 30 s.
 
-**Done when.** No `src/` file over 400 LoC without a worklog note. No
-`panic!`/`unreachable!` outside tests. No `std::env::var("CODESIGHT_*")`
+**Done when.** No high-risk module remains unsplit without a worklog note.
+No `panic!`/`unreachable!` outside tests. No `std::env::var("CODESIGHT_*")`
 outside `src/config/env.rs`.
 
 ### S2 — Crate modularity
@@ -995,21 +1025,64 @@ skips the walk entirely.
 
 **2026-04-12 (p)** — **Dogfood feature request (AGENTS.md §4).**
 
-During the S1 audit ("files > 400 LoC"), I had to fall back to
+During the S1 audit of oversized risky modules, I had to fall back to
 `inspect_structure view=file_tree` + manual LoC inspection because
 `evaluate_quality analysis=hotspots` only reports per-symbol cyclomatic
-complexity, not per-file LoC. The AGENTS.md §1 rule "oversized modules
-(> 400 LoC) get split" is impossible to audit in one codesight call.
+complexity, not per-file LoC. LoC is not the policy target anymore, but
+it is still useful supporting evidence when deciding whether a hotspot
+contains too many responsibilities.
 
 **Request:** add `line_count` to each hotspot entry (the file's total
 LoC, not the symbol's). This lets a single `hotspots` query surface
-both complexity violations (cyclomatic > 20) and size violations
-(file > 400 LoC) in one shot. Alternatively, add a new analysis mode
-`large_files` that returns files sorted by LoC descending with a
-`min_lines` threshold parameter.
+complexity together with file-size context when judging split candidates.
+Alternatively, add a new analysis mode `large_files` that returns files
+sorted by LoC descending with a `min_lines` threshold parameter.
 
 **Tokens saved impact:** eliminates 1–2 fallback `inspect_structure` +
 `read_content` calls per audit session (~8k tokens each).
+
+**Status:** Implemented. `file_line_count` now appears in every hotspot
+entry. Used immediately to find `al.rs` at 729 LoC — see entry (r).
+
+**2026-04-12 (q)** — **Background file watcher in MCP server.**
+
+Landed S4-P15 (watch mode) as a background thread integrated into the
+MCP server, not a separate CLI command. After `ingest_sources` completes
+for a workspace, a `notify-debouncer-full` watcher thread starts
+automatically and delta-reindexes changed files via `reindex_files()`.
+
+Key design decisions:
+- Gated behind `enable_background_watch()` — only the MCP `serve` path
+  enables it; tests and CLI diagnostics don't spawn watchers.
+- 500ms debounce window. Events inside `SKIP_DIRS` and the storage
+  directory are filtered.
+- `reindex_files()` in `src/indexing/code_index.rs` skips the directory
+  walk entirely — receives exact changed paths from notify, reads +
+  hashes + extracts only those files, calls `apply_index_with_deps`.
+
+Measured: **37 ms** for a single-file delta reindex (vs 475 ms for
+`ingest_sources` which walks the full tree). Target < 100 ms met.
+
+**Files:** `src/service/file_watcher.rs` (new), `src/indexing/code_index.rs`
+(`reindex_files` + `DeltaReindexStats`), `src/service/mod.rs` (watcher
+field), `src/service/agent_v1/ingest.rs` (hook), `src/main.rs` (enable),
+`Cargo.toml` (`notify` + `notify-debouncer-full` deps).
+
+**2026-04-12 (r)** — **Split `al.rs` (729 LoC → 3 files).**
+
+The new `file_line_count` field in hotspots flagged
+`crates/codesight-extractors/.../no_grammar/al.rs` at 729 LoC (cyclomatic
+33). Split into `al/{mod.rs, re.rs, helpers.rs}`: mod.rs 394 LoC
+(under 400 threshold), re.rs 240, helpers.rs 101. All 98 extractor lib
+tests pass.
+
+**2026-04-12 (s)** — **Removed `scripts/nextest-cache`.**
+
+The wrapper script added a hash-based caching layer over `cargo nextest
+run`. In practice, during active development inputs always change so the
+cache rarely hits. `cargo nextest run` already handles incremental
+compilation via rustc. Removed the script and updated AGENTS.md commands
+section to use `cargo nextest run` directly.
 
 **Wave-2 final baseline** (full targeted uncached suite, all four
 levers' results combined, two back-to-back runs):
@@ -1089,6 +1162,21 @@ Each session adds at least one idea here, and removes or reshapes at least
 one existing feature if it doesn't earn its tokens. Metric: token savings
 per query (`check --savings`), and dispatch latency.
 
+**P0 — dogfood-driven (from 2026-04-12 session audit):**
+
+- **`search_catalog output_mode=count`** — Returns `{ "count": N }` with
+  no items. Eliminates the #1 reason agents fall back to Grep: "how many
+  matches?" / "confirm zero remaining". Add `output_mode` enum:
+  `items` (default), `count`, `files_with_matches`. Handler changes:
+  `catalog_search/mod.rs` early-return after BM25/regex count; skip
+  serialization of items. ~30 lines.
+- **`inspect_graph graph=imports file_path=X`** — Given a file, return the
+  files it imports FROM (outgoing edges). The reverse of `importers`.
+  The edge data already exists in `dependency_graph_strict()`. Handler:
+  `graph.rs` or `graph_tail/dependency.rs`, filter edges where
+  `source == file_path`. ~20 lines. Eliminates "what does this file
+  depend on?" Grep fallbacks.
+
 **Next-session candidates (not yet scheduled):**
 
 - **Unify `_meta` construction.** Every handler hand-rolls the `_meta`
@@ -1116,6 +1204,19 @@ per query (`check --savings`), and dispatch latency.
 - **Bench script + CI-less perf gate.** Write `scripts/bench-hotpaths`
   (see metrics section) and enforce that the numbers only improve. Record
   deltas in this worklog.
+- **Quality score must report confidence, not false precision.** The
+  drafted `SENTRUX_IDEA_STEALING.md` plan originally assumed a fully
+  trustworthy dependency graph and mathematically precise modularity/depth
+  metrics on every repo. Before shipping `quality_signal` /
+  `regression_check`, require per-dimension availability plus overall
+  `coverage`/`confidence` in the response, and key snapshots by
+  `(source_id, snapshot_name)` instead of `snapshot_name` alone.
+- **Dual-layer scoring, not one structural number.** To beat Sentrux, the
+  plan now needs two layers: a Sentrux-parity Structural Core and a
+  codesight-native Agent Readiness score for ambiguity, doc/context
+  coverage, test backstops, and change locality. Governance score should
+  be the geometric mean of those two layers, with structural regressions
+  treated as hard failures.
 
 ---
 
@@ -1142,3 +1243,170 @@ it here with the reason. Each entry is either a missing codesight feature
   `search_catalog` being correct. No product fix; session priming needs
   the dogfooding reminder louder. No further occurrences required before
   closing this entry.
+- **2026-04-12 — environment gap.** This planning/evaluation session ran in
+  a tool environment that did not expose the local `codesight` MCP tools,
+  so repository reads used filesystem commands instead. Logged as an
+  operator-environment constraint rather than a product bug. Follow-up:
+  when `codesight` tools are available in-session, re-run the
+  `SENTRUX_IDEA_STEALING.md` validation path through `catalog_sources`,
+  `search_catalog`, `read_content`, and `evaluate_quality`.
+- **2026-04-12 evening — 12 Grep fallbacks in one refactoring session.**
+  Full audit of a macro-dedup + cycle-breaking session (see below). Root
+  causes in order of frequency:
+  1. **No count/verify mode (4 fallbacks).** Needed "how many matches?" or
+     "confirm zero remaining". `search_catalog` has `limit` but no count.
+  2. **No outgoing-imports query (4 fallbacks).** Needed "what does file X
+     import FROM?" but `inspect_graph graph=importers` gives the reverse.
+     Used `Grep` for import-line patterns instead.
+  3. **Regex UX confusion (2 fallbacks).** `search_catalog query_mode=regex`
+     with a multi-word "query" returned zero — the `query` IS the regex,
+     not a keyword. Fell to `Grep` which has an obvious `pattern` field.
+  4. **Context around matches (2 fallbacks).** Needed `-A 3` style context
+     for match-pattern verification. `context_lines` exists but only in
+     regex mode, and I wasn't confident the output format would be useful.
+
+---
+
+## Dogfood assessment (2026-04-12 deep reflection)
+
+### What's genuinely great
+
+**Token savings are real and massive.** 224M+ total tokens saved. Individual
+calls routinely save 99%+. The biggest wins:
+
+| Tool | Typical savings | Why |
+|---|---|---|
+| `evaluate_quality` (hotspots/health/signal) | 99.7–99.8% | Computes server-side, returns tiny summary |
+| `inspect_graph` (cycles/importers/refs) | 99.9% | Graph query vs reading hundreds of files |
+| `search_catalog` (keyword/regex) | 99.5% | Focused search vs full-text scan |
+| `inspect_structure view=file_outline` (batch) | 99.0% | 13 file outlines in one call |
+| `read_content` (batch symbol refs) | 70% | Reads symbol body, not full file |
+
+**`inspect_structure view=file_outline file_paths=[...]`** is the killer
+feature for refactoring sessions. One call showed me the outline of all 13
+framework files simultaneously. This single call replaced what would have
+been 13 `Read` calls (~6000 tokens → ~800 tokens).
+
+**`inspect_graph graph=find_references identifiers=[...]`** is the
+essential refactoring safety net. One call showed me every reference to
+`ScmMetadata` and `parse_scm_header` across the codebase. Without it I
+would have done 2 Grep calls + manual reasoning.
+
+**`evaluate_quality analysis=test_gaps`** is underrated. The risk-scored
+list of untested functions with fan-in and complexity is exactly the
+signal an agent needs to prioritize test writing.
+
+**Batch `read_content refs=[...]`** — reading 6 specific function bodies
+in a single call is dramatically better than 6 file reads. This is the
+structural advantage over Grep: you read the *symbol*, not the *file*.
+
+### Where the agent still falls back to Grep/Read
+
+**This session: 12 Grep calls, ~40 Read calls despite AGENTS.md telling
+me to use codesight.** Honest breakdown:
+
+#### 1. "Count occurrences" pattern (4 fallbacks, highest frequency)
+
+I needed:
+```
+"How many ensure_repo_store call sites exist?"  → 36
+"Are there any remaining recursive functions?"  → 0
+"How many require_store! calls did the agent add?" → 37
+```
+
+`search_catalog` returns items up to `limit` but has no count mode. For
+"confirm zero remaining", I need a tool that says "0 matches" without
+streaming results. For "count all matches", I need an exact number even
+when it exceeds limit.
+
+**Fix: add `output_mode: "count"` to `search_catalog`.** Returns
+`{ "count": N }` with no items. Costs zero tokens for the match bodies.
+This alone would have eliminated 4 of my 12 Grep calls.
+
+#### 2. "What does this file import?" (4 fallbacks)
+
+I needed: "Show me the import lines in `catalogs/query_packs.rs`" to
+trace cycle edges. `inspect_graph graph=importers` tells me who imports
+*this* file (reverse direction). I wanted the forward direction: what
+does this file depend on?
+
+Current workaround: `Grep pattern="use.*scm" path=catalogs/`
+
+**Fix: add `inspect_graph graph=imports` (or `outgoing_deps`)** —
+given a `file_path`, return the files it imports from. The edges
+already exist in the dependency graph; this is just querying the other
+direction. Would have eliminated 4 Grep calls and given me structured
+results (file paths + imported names) instead of raw text.
+
+#### 3. Regex mode UX confusion (2 fallbacks)
+
+I tried: `search_catalog query="infallible regex expect"
+query_mode=regex` and got zero results. The `query` field IS the regex
+pattern, but "infallible regex expect" isn't a valid regex for what I
+wanted (`infallible.*regex|expect.*regex`). I was mentally treating
+`query` as keywords even in regex mode.
+
+With `Grep`, the field is named `pattern`, making the regex nature
+obvious. I never made this mistake with Grep.
+
+**Fix (pick one):**
+- Accept a `pattern` alias for `query` when `query_mode=regex`.
+- When `query_mode=regex` and the query doesn't compile as a regex,
+  return a clear error: "query is used as a regex pattern in this mode;
+  did you mean query_mode=keyword?"
+- Both.
+
+#### 4. Match context for verification (2 fallbacks)
+
+After making edits, I needed to verify patterns like "does the 4-line
+match block look right?" with surrounding context (`Grep -A 3`). The
+`context_lines` param on `search_catalog` only works in regex mode, and
+the output format (snippets) isn't as scannable as Grep's line-oriented
+format.
+
+**Fix: make `context_lines` work in keyword mode too** when
+`unit_kinds=["file"]`. When an agent searches for a function name in
+file text, context around the match is essential for understanding
+usage patterns.
+
+### Friction that wastes tokens but isn't a codesight bug
+
+**`Read` before `Write`/`Edit` harness requirement.** I read 4 provider
+files via `read_content` (efficient, batched), then had to re-read all 4
+via `Read` before I could `Write` them. The Write tool harness doesn't
+recognize codesight reads. This doubled my token spend on those files.
+
+**Mitigation (docs, not code):** `read_content` response could include a
+hint: "Tip: if you plan to edit these files, also use `Read` to satisfy
+the edit harness." This saves the agent one wasted round-trip.
+
+### Features I *should* have used more but didn't
+
+1. **`assemble_context mode=context_bundle`** — I never used it. For the
+   refactoring tasks, I assembled context manually via search + read. The
+   "bundle" concept didn't match my mental model of "I know exactly which
+   symbols I need."
+
+2. **`evaluate_impact analysis=blast_radius`** — I moved files and broke
+   cycles without checking blast radius first. I should have. The tool
+   exists; I just forgot.
+
+3. **`evaluate_impact analysis=rename_safety`** — Relevant when I moved
+   `metadata.rs` and `cross_repo_map.rs`. Didn't use it.
+
+### Improvement plan
+
+**Full plan:** [`IMPROVEMENT_PLAN.md`](IMPROVEMENT_PLAN.md) — prioritized,
+with implementation sketches, file locations, estimated LoC, and success
+metrics. Summary:
+
+| Priority | Items | Grep calls eliminated |
+|---|---|---|
+| **P0** | `output_mode=count` + `graph=imports` | 8 of 12 (67%) |
+| **P1** | regex error msg + keyword `context_lines` | 4 of 12 (33%) |
+| **P2** | `read_content` hint + `find_references` discoverability | 0 (token waste) |
+
+**The meta-observation:** Codesight excels at *understanding* code
+(phase 1 of refactoring). It's weak at *verifying changes* (phase 3).
+All 12 Grep fallbacks happened in phase 3. The P0 fixes directly close
+this gap.

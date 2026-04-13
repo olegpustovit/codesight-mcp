@@ -8,15 +8,42 @@ use crate::indexing::imports::{extract_imports, language_for_path, package_refer
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 use crate::storage::{IndexStore, list_repo_summaries};
 
 impl CodeService {
-    pub(super) fn graph_importers(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&MetaBuilder::new(0), e),
+    /// `graph=imports` — outgoing dependencies: what does this file import FROM?
+    pub(super) fn graph_imports(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
+        let Some(file_path) = args.file_path.as_deref() else {
+            return self.error_response(
+                &MetaBuilder::new(0),
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "INVALID_REQUEST",
+                    message: "imports mode requires file_path.".into(),
+                    detail: json!({}),
+                },
+            );
         };
+        let adj = store.dependency_graph()?;
+        let imports: Vec<&String> = adj
+            .get(file_path)
+            .map(|deps| deps.iter().collect())
+            .unwrap_or_default();
+        let data = json!({
+            "graph": "imports",
+            "file_path": file_path,
+            "import_count": imports.len(),
+            "imports": imports,
+            "has_imports": !imports.is_empty(),
+        });
+        self.success_response(&MetaBuilder::new(0), data)
+    }
+
+    pub(super) fn graph_importers(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
         let Some(file_path) = args.file_path.as_deref() else {
             return self.error_response(
                 &MetaBuilder::new(0),

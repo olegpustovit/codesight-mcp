@@ -84,7 +84,16 @@
           "type": "integer",
           "description": "Optional Levenshtein cutoff on a normalized compare key; pairs within this distance may match even when trigram similarity is low."
         },
-        "repo_path": { "type": "string" }
+        "repo_path": { "type": "string" },
+        "output_mode": {
+          "type": "string",
+          "enum": ["items", "count", "files_with_matches"],
+          "description": "items (default): full results. count: {count, files} only. files_with_matches: [{file, count}]."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Alias for query when query_mode=regex. Cannot be set together with query."
+        }
       }
     }
   },
@@ -186,6 +195,7 @@
           "enum": [
             "references",
             "related",
+            "imports",
             "importers",
             "calls",
             "dependencies",
@@ -207,7 +217,7 @@
         },
         "file_path": {
           "type": "string",
-          "description": "importers: required — file path whose importers to enumerate."
+          "description": "imports/importers: required — file path whose imports (outgoing) or importers (incoming) to enumerate."
         },
         "identifier": {
           "type": "string",
@@ -293,7 +303,7 @@
   },
   {
     "name": "evaluate_quality",
-    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links.",
+    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links, quality_signal, regression_check, test_gaps.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
@@ -308,7 +318,10 @@
             "hotspots",
             "doc_coverage",
             "broken_links",
-            "extraction_candidates"
+            "extraction_candidates",
+            "quality_signal",
+            "regression_check",
+            "test_gaps"
           ]
         },
         "refs": {
@@ -348,6 +361,10 @@
         "token_budget": {
           "type": "integer",
           "description": "Alias for max_tokens."
+        },
+        "snapshot_name": {
+          "type": "string",
+          "description": "regression_check: baseline snapshot name (default \"session\")."
         },
         "repo_path": { "type": "string" }
       }
@@ -406,10 +423,11 @@
       "type": "object",
       "required": ["action", "source_id"],
       "properties": {
-        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status"] },
+        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status", "snapshot_quality"] },
         "source_id": { "type": "string", "description": "Required. The source the action targets, as returned by `catalog_sources`." },
         "root_hint": { "type": "string", "description": "Filesystem path; required for `rebuild`." },
-        "domains": { "type": "string" }
+        "domains": { "type": "string" },
+        "snapshot_name": { "type": "string", "description": "snapshot_quality: logical name for the snapshot (default \"session\"). Overwrites existing." }
       }
     }
   }

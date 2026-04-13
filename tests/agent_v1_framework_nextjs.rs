@@ -258,7 +258,7 @@ fn nextjs_snapshot_exposes_file_context_without_provider() {
     std::fs::write(root.join("app/page.tsx"), "<Home />").unwrap();
 
     let snapshot = NextjsSnapshot::load(root);
-    let ctx = snapshot.file_context("app/page.tsx").expect("page context");
+    let ctx = render_file_context(&snapshot, "app/page.tsx").expect("page context");
     assert!(ctx.tags.contains(&"nextjs-page".to_string()));
     assert_eq!(snapshot.stats().page_routes, 1);
 }

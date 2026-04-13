@@ -15,7 +15,6 @@ mod docs;
 mod extract;
 mod injections;
 mod load;
-mod metadata;
 mod pattern;
 mod postprocess;
 mod scope;
@@ -23,8 +22,7 @@ mod scope;
 #[cfg(test)]
 mod tests;
 
-pub use super::catalogs::QUERY_FILES;
-pub use metadata::{ScmMetadata, parse_scm_header};
+pub use super::catalogs::{QUERY_FILES, ScmMetadata, parse_scm_header};
 
 use std::sync::OnceLock;
 

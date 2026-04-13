@@ -1,15 +1,22 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::framework::{ExtraImport, FileContext};
+use crate::framework::{ExtraImport, FileContext, rel_path, walk_files};
 
-use super::imports::compute_extra_imports;
 use super::migrations::parse_migration;
 use super::models::{guess_table, parse_model};
-use super::provider::LaravelStats;
-use super::render;
 use super::routes::parse_routes_dir;
 use super::types::{MigrationInfo, ModelInfo, RouteInfo};
+
+#[derive(Debug, Clone, Default)]
+pub struct LaravelStats {
+    pub models: usize,
+    pub migration_tables: usize,
+    pub routes: usize,
+    pub blade_files: usize,
+    pub route_files_with_imports: usize,
+    pub blade_files_with_imports: usize,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct LaravelSnapshot {
@@ -19,7 +26,7 @@ pub struct LaravelSnapshot {
     pub(crate) blade_files: Vec<String>,
     pub(crate) file_contexts: HashMap<String, FileContext>,
     pub(crate) has_inertia: bool,
-    pub(crate) extra_imports: HashMap<String, Vec<ExtraImport>>,
+    pub extra_imports: HashMap<String, Vec<ExtraImport>>,
 }
 
 impl LaravelSnapshot {
@@ -30,7 +37,6 @@ impl LaravelSnapshot {
         snapshot.scan_migrations(root);
         snapshot.scan_routes(root);
         snapshot.scan_blade_files(root);
-        snapshot.extra_imports = compute_extra_imports(&snapshot, root);
         snapshot
     }
 
@@ -43,14 +49,6 @@ impl LaravelSnapshot {
             route_files_with_imports: usize::from(!self.routes.is_empty()),
             blade_files_with_imports: self.blade_files.len(),
         }
-    }
-
-    pub fn file_context(&self, rel_path: &str) -> Option<FileContext> {
-        render::render_file_context(self, rel_path)
-    }
-
-    pub fn metadata(&self) -> HashMap<String, serde_json::Value> {
-        render::metadata(self)
     }
 
     pub fn extra_imports(&self) -> HashMap<String, Vec<ExtraImport>> {
@@ -77,22 +75,15 @@ impl LaravelSnapshot {
         if !models_dir.exists() {
             return;
         }
-        let entries = match std::fs::read_dir(&models_dir) {
-            Ok(entries) => entries,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
+        for path in walk_files(&models_dir) {
             if path.extension().is_none_or(|ext| ext != "php") {
                 continue;
             }
-            let rel = match path.strip_prefix(root) {
-                Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
-                Err(_) => continue,
+            let Some(rel) = rel_path(&path, root) else {
+                continue;
             };
-            let content = match std::fs::read_to_string(&path) {
-                Ok(content) => content,
-                Err(_) => continue,
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
             };
             let model_info = parse_model(&content);
             let model_name = path
@@ -119,12 +110,7 @@ impl LaravelSnapshot {
         if !migrations_dir.exists() {
             return;
         }
-        let entries = match std::fs::read_dir(&migrations_dir) {
-            Ok(entries) => entries,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
+        for path in walk_files(&migrations_dir) {
             if path.extension().is_none_or(|ext| ext != "php") {
                 continue;
             }
@@ -152,32 +138,16 @@ impl LaravelSnapshot {
 
     fn scan_blade_files(&mut self, root: &Path) {
         let views_dir = root.join("resources/views");
-        if views_dir.exists() {
-            self.scan_blade_recursive(&views_dir, root);
+        if !views_dir.exists() {
+            return;
         }
-    }
-
-    fn scan_blade_recursive(&mut self, dir: &Path, root: &Path) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                self.scan_blade_recursive(&path, root);
-                continue;
-            }
-            let file_name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("");
+        for path in walk_files(&views_dir) {
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if !file_name.ends_with(".blade.php") {
                 continue;
             }
-            let rel = match path.strip_prefix(root) {
-                Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
-                Err(_) => continue,
+            let Some(rel) = rel_path(&path, root) else {
+                continue;
             };
             self.blade_files.push(rel.clone());
             self.file_contexts.insert(

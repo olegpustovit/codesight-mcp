@@ -87,6 +87,12 @@ pub struct SearchCatalogArgs {
     /// Sort-by mode: "relevance" (default), "centrality", etc.
     #[serde(default)]
     pub sort_by: Option<String>,
+    /// Output mode: "items" (default), "count", or "files_with_matches".
+    #[serde(default)]
+    pub output_mode: Option<String>,
+    /// Accept `pattern` as alias for `query` in regex mode.
+    #[serde(default)]
+    pub pattern: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -257,6 +263,9 @@ pub struct EvaluateQualityArgs {
     /// `token_budget`.
     #[serde(default, alias = "token_budget")]
     pub max_tokens: Option<u32>,
+    // regression_check fields
+    #[serde(default)]
+    pub snapshot_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -308,4 +317,6 @@ pub struct ManageIndexesArgs {
     pub root_hint: Option<String>,
     #[serde(default)]
     pub domains: Option<String>,
+    #[serde(default)]
+    pub snapshot_name: Option<String>,
 }

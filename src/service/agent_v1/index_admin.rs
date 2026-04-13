@@ -9,6 +9,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::{IngestSourcesArgs, ManageIndexesArgs};
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -134,6 +135,7 @@ impl CodeService {
                     },
                 )
             }
+            "snapshot_quality" => self.manage_snapshot_quality(&args, &timer),
             _ => self.error_response(
                 &timer,
                 ToolError {
@@ -144,6 +146,64 @@ impl CodeService {
                 },
             ),
         }
+    }
+
+    fn manage_snapshot_quality(
+        &self,
+        args: &ManageIndexesArgs,
+        timer: &MetaBuilder,
+    ) -> anyhow::Result<Value> {
+        let Some(ref sid) = args.source_id else {
+            return self.error_response(
+                timer,
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "INVALID_REQUEST",
+                    message: "source_id required for snapshot_quality.".to_string(),
+                    detail: json!({}),
+                },
+            );
+        };
+        let store = require_store!(repo: self, sid, args.root_hint.as_deref(), timer);
+        let gov = crate::analysis::quality_signal::compute_governance_signal(&store)?;
+        let snapshot_name = args.snapshot_name.as_deref().unwrap_or("session");
+        let snap = crate::storage::QualitySnapshot {
+            source_id: sid.clone(),
+            name: snapshot_name.to_string(),
+            created_at: String::new(), // filled by DEFAULT in SQLite
+            score: gov.score,
+            structural_score: gov.structural_score,
+            agent_readiness_score: gov.agent_readiness_score,
+            modularity: gov.structural.root_causes.modularity,
+            acyclicity: Some(gov.structural.root_causes.acyclicity),
+            depth: gov.structural.root_causes.depth,
+            equality: Some(gov.structural.root_causes.equality),
+            redundancy: Some(gov.structural.root_causes.redundancy),
+            discoverability: Some(gov.agent.discoverability),
+            test_backstop: Some(gov.agent.test_backstop),
+            change_locality: Some(gov.agent.change_locality),
+            cycle_count: gov.structural.coverage.cycle_count as u32,
+            dead_count: gov.structural.coverage.dead_files as u32,
+            dup_count: gov.structural.coverage.duplicate_functions as u32,
+            file_count: gov.structural.coverage.graph_files as u32,
+            symbol_count: gov.structural.coverage.functions_with_source as u32,
+            confidence: gov.confidence.to_string(),
+            avg_complexity: 0.0, // not tracked separately
+        };
+        store.save_snapshot(&snap)?;
+        self.success_response(
+            timer,
+            json!({
+                "action": "snapshot_quality",
+                "source_id": sid,
+                "snapshot_name": snapshot_name,
+                "score": gov.score,
+                "structural_score": gov.structural_score,
+                "agent_readiness_score": gov.agent_readiness_score,
+                "confidence": gov.confidence,
+                "stored": true,
+            }),
+        )
     }
 
     // ── embed_repo ─────────────────────────────────────────────────────────
@@ -168,10 +228,7 @@ impl CodeService {
             });
         };
 
-        let store = match self.ensure_repo_store(&args.source_id, None) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, None, &timer);
 
         // Get all symbols for embedding
         let sym_infos = store.all_symbols_with_source()?;
@@ -259,10 +316,7 @@ impl CodeService {
         let args: Args = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
 
-        let store = match self.ensure_repo_store(&args.source_id, None) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, None, &timer);
 
         // Load context_metadata from meta table
         let meta_str = store.get_meta("context_metadata")?;

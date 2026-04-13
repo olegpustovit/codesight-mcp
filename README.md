@@ -47,7 +47,7 @@ For manual wiring (or if `claude mcp add` isn't available in your environment), 
 }
 ```
 
-`CODESIGHT_INDEX_DIR` is optional — it defaults to `$XDG_DATA_HOME/codesight` (or `~/.local/share/codesight`). `CODESIGHT_LOG_FORMAT=json` switches stderr output to structured JSON for log aggregators. The full list of env knobs lives in [`CONFIGURATION.md`](CONFIGURATION.md).
+`CODESIGHT_INDEX_DIR` is optional — it defaults to `~/.code-index/codesight`. `CODESIGHT_LOG_FORMAT=json` switches stderr output to structured JSON for log aggregators. The full list of env knobs lives in [`CONFIGURATION.md`](CONFIGURATION.md).
 
 ## First run
 

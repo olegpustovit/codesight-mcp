@@ -431,9 +431,7 @@ fn dbt_snapshot_exposes_model_context_without_provider() {
     .unwrap();
 
     let snapshot = DbtSnapshot::load(root).expect("dbt snapshot");
-    let ctx = snapshot
-        .file_context("models/my_model.sql")
-        .expect("model context");
+    let ctx = render_file_context(&snapshot, "models/my_model.sql").expect("model context");
     assert!(ctx.description.contains("Example model"));
     assert_eq!(snapshot.stats().models_with_metadata, 1);
 }

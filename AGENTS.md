@@ -19,7 +19,11 @@ These override everything else. Every patch is measured against them.
 - Reach for `simplify`, `rust-modularity`, and `rust-design-patterns` **before**
   writing a new helper. One shared helper beats three copies; a trait + small
   registry beats a growing `match`; a maintained crate beats a hand-rolled util.
-- Oversized modules (> 400 LoC, or cyclomatic > 20) get split, not paved over.
+- Oversized or confused modules get split, not paved over. Primary triggers:
+  cyclomatic complexity > 20, multiple responsibilities, repeated internal
+  branching, high fan-in/blast radius, or poor navigability for agents. Line
+  count is a weak smell only — never split a module solely because it crossed
+  an arbitrary LoC threshold.
 - Refactor freely — **features and behavior stay, regressions don't.** No
   deletion of functionality under the guise of simplification.
 - Delete useless features aggressively. If a surface is a placeholder, an
@@ -38,7 +42,9 @@ typing the left column for a lookup, stop and use the right column instead.
 |---|---|---|
 | `Grep` for a symbol/function/type name | `search_catalog` | `query_mode=keyword`, `unit_kinds=["symbol"]`, optional `kind=function\|class\|...` |
 | `Grep` for a substring across files | `search_catalog` | `query_mode=keyword`, `unit_kinds=["file"]`, optional `file_pattern` / `scope` |
-| `Grep -E` raw regex over files | `search_catalog` | `query_mode=regex`, `unit_kinds=["file"]`, `context_lines=N` |
+| `Grep -E` raw regex over files | `search_catalog` | `query_mode=regex`, `context_lines=N` (or `pattern=` alias for `query`) |
+| `Grep pattern=X output_mode=count` | `search_catalog` | `output_mode=count` — returns `{count, files}` only |
+| `Grep pattern=X \| wc -l` (plan scope) | `search_catalog` | `output_mode=count` or `output_mode=files_with_matches` |
 | Fuzzy / "I'm not sure of the name" | `search_catalog` | `fuzzy=true` or `fuzzy_threshold=0.3` |
 | "What's this about?" / natural question | `search_catalog` | `query_mode=natural_language`, `domain=hybrid` (hits symbols + docs) |
 | `Glob` / `find` / `ls -R` tree walks | `inspect_structure` | `view=file_tree` (optional `path=` subtree) |
@@ -47,7 +53,8 @@ typing the left column for a lookup, stop and use the right column instead.
 | `Read` to see a function/class body | `read_content` | `refs=[{kind:"symbol", path, start_line}]` (or `stable_id`) |
 | Batch read N files/symbols | `read_content` | pass N items in `refs` — **one call, not N** |
 | File's top-level outline | `inspect_structure` | `view=file_outline`, `file_path=...` (or batch `file_paths`) |
-| "Where is X imported?" | `inspect_graph` | `graph=importers`, `file_path=...` |
+| "What does this file import?" | `inspect_graph` | `graph=imports`, `file_path=...` (outgoing deps) |
+| "Where is X imported?" | `inspect_graph` | `graph=importers`, `file_path=...` (incoming deps) |
 | "Where is symbol X referenced?" | `inspect_graph` | `graph=references`, `ref={...}` — or `find_references` with `identifier` |
 | "What does this function call?" | `inspect_graph` | `graph=calls`, `symbol_id=...` |
 | Cross-module deps / cycles | `inspect_graph` | `graph=dependencies` / `dependency_cycles` / `layer_violations` |

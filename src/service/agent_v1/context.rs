@@ -51,6 +51,8 @@ impl CodeService {
                     semantic_weight: None,
                     semantic_only: None,
                     sort_by: None,
+                    output_mode: None,
+                    pattern: None,
                 };
                 let search_res = self.search_catalog(serde_json::to_value(search_json)?)?;
                 let items = search_res["data"]["items"]
@@ -198,6 +200,8 @@ impl CodeService {
                     semantic_weight: None,
                     semantic_only: None,
                     sort_by: None,
+                    output_mode: None,
+                    pattern: None,
                 };
                 let search_res = self.search_catalog(serde_json::to_value(search_json)?)?;
                 if search_res.get("ok").and_then(|b| b.as_bool()) != Some(true) {

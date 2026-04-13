@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::AssembleContextArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -11,10 +12,7 @@ impl CodeService {
         args: &AssembleContextArgs,
         timer: &MetaBuilder,
     ) -> anyhow::Result<Value> {
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         let raw_bytes = store.repo_total_bytes().unwrap_or(0).max(1);
         let timer_overall = MetaBuilder::new(raw_bytes);
         let summary = match store.repo_summary() {

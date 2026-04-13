@@ -274,9 +274,9 @@ fn laravel_snapshot_exposes_context_and_imports_without_provider() {
     )
     .unwrap();
 
-    let snapshot = LaravelSnapshot::load(root);
-    let ctx = snapshot
-        .file_context("app/Http/Controllers/UserController.php")
+    let mut snapshot = LaravelSnapshot::load(root);
+    snapshot.extra_imports = compute_extra_imports(&snapshot, root);
+    let ctx = render_file_context(&snapshot, "app/Http/Controllers/UserController.php")
         .expect("controller context");
     assert!(ctx.tags.contains(&"controller".to_string()));
     let imports = snapshot.extra_imports();

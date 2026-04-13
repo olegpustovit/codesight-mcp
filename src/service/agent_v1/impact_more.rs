@@ -9,6 +9,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::agent_v1::util_graph::build_call_chain;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -17,10 +18,7 @@ impl CodeService {
         args: &EvaluateImpactArgs,
     ) -> anyhow::Result<Value> {
         let timer = MetaBuilder::new(0);
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
 
         // Accept `target` as the primary input, but also honor refs[0] so
         // callers can pass a symbol/file ref like every other evaluate_impact
@@ -212,10 +210,7 @@ impl CodeService {
         args: &EvaluateImpactArgs,
     ) -> anyhow::Result<Value> {
         let timer = MetaBuilder::new(0);
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
 
         // Accept symbol_id directly OR from refs[0]
         let sym_name_from_id = args.symbol_id.as_deref().unwrap_or("");
@@ -370,10 +365,7 @@ impl CodeService {
         args: &EvaluateImpactArgs,
     ) -> anyhow::Result<Value> {
         let timer = MetaBuilder::new(0);
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
 
         let r = args.refs.as_ref().and_then(|refs| refs.first());
 

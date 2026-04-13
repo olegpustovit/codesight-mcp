@@ -8,6 +8,7 @@ use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::agent_v1::util_graph::graph_ref_symbol_id;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 use crate::storage::SearchSymbol;
 
@@ -34,11 +35,7 @@ impl CodeService {
                         );
                     }
                 };
-                let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref())
-                {
-                    Ok(s) => s,
-                    Err(e) => return self.error_response(&MetaBuilder::new(0), e),
-                };
+                let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
                 let raw_bytes = store.repo_total_bytes()?;
                 let timer = MetaBuilder::new(raw_bytes);
                 let needle = match store.symbol_names_by_id(&sym_id)? {
@@ -105,11 +102,7 @@ impl CodeService {
                         );
                     }
                 };
-                let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref())
-                {
-                    Ok(s) => s,
-                    Err(e) => return self.error_response(&MetaBuilder::new(0), e),
-                };
+                let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
                 let Some((sym_name, _qn)) = store.symbol_names_by_id(&sym_id)? else {
                     return self.error_response(
                         &MetaBuilder::new(0),

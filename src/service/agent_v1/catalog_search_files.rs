@@ -32,14 +32,17 @@ impl CodeService {
                 Err(e) => {
                     return Ok(vec![json!({
                         "ref": {
-                            "id": format!("match::{}", results.len()),
-                            "stable_id": format!("text_match::{}", results.len()),
+                            "id": "regex_error",
+                            "stable_id": "regex_error",
                             "source_id": source_id,
                             "domain": "code",
                             "kind": "file",
                             "path": "",
                             "title": "regex_error",
-                            "summary": e.to_string(),
+                            "summary": format!(
+                                "`query` is used as a regex pattern in regex mode. Your query '{}' failed to compile: {}. Did you mean query_mode=keyword?",
+                                query, e
+                            ),
                         },
                     })]);
                 }

@@ -12,7 +12,28 @@ pub mod nuxt;
 pub mod profiles;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+// ── Shared walk helpers ───────────────────────────────────────────────────
+
+/// Recursively walk files under `dir`, yielding each regular file's path.
+/// Replaces hand-rolled `read_dir` + recurse loops across framework snapshots.
+pub(crate) fn walk_files(dir: &Path) -> impl Iterator<Item = PathBuf> {
+    walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+}
+
+/// Produce a forward-slash-normalized repo-relative path, or `None` on
+/// prefix mismatch. Centralises the `strip_prefix` + `replace('\\', "/")`
+/// pattern that was duplicated ~8 times across framework snapshots.
+pub(crate) fn rel_path(path: &Path, root: &Path) -> Option<String> {
+    path.strip_prefix(root)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+}
 
 // ── FileContext ────────────────────────────────────────────────────────────
 
@@ -102,6 +123,88 @@ pub struct ExtraImport {
     pub specifier: String,
     pub names: Vec<String>,
 }
+
+// ── Framework provider macro ──────────────────────────────────────────────
+
+/// Generate a framework provider struct + `FrameworkProvider` impl from only
+/// the parts that differ: name, detect, load, and optional extra_imports.
+/// Common boilerplate (struct, new, stats, Default, get_file_context,
+/// get_metadata) is emitted by the macro.
+///
+/// Each invocation site must have `render_file_context` and `metadata` in
+/// scope (via `use super::render::{metadata, render_file_context}`).
+macro_rules! impl_framework_provider {
+    (
+        provider: $Provider:ident,
+        snapshot: $Snapshot:ty,
+        stats: $Stats:ty,
+        name: $name:expr,
+        detect($det_root:ident) $detect_body:block,
+        load($load_self:ident, $load_root:ident) $load_body:block
+        $(, extra_imports($ei_self:ident) $ei_body:block)?
+    ) => {
+        pub struct $Provider {
+            snapshot: Option<$Snapshot>,
+        }
+
+        impl $Provider {
+            pub fn new() -> Self {
+                Self { snapshot: None }
+            }
+
+            pub fn stats(&self) -> $Stats {
+                self.snapshot
+                    .as_ref()
+                    .map(<$Snapshot>::stats)
+                    .unwrap_or_default()
+            }
+        }
+
+        impl Default for $Provider {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
+        impl $crate::framework::FrameworkProvider for $Provider {
+            fn name(&self) -> &str {
+                $name
+            }
+
+            fn detect(&self, $det_root: &std::path::Path) -> bool {
+                $detect_body
+            }
+
+            fn load(&mut $load_self, $load_root: &std::path::Path) -> anyhow::Result<()> {
+                $load_body
+            }
+
+            fn get_file_context(&self, rel_path: &str) -> Option<$crate::framework::FileContext> {
+                self.snapshot
+                    .as_ref()
+                    .and_then(|snapshot| render_file_context(snapshot, rel_path))
+            }
+
+            fn get_metadata(
+                &self,
+            ) -> std::collections::HashMap<String, serde_json::Value> {
+                self.snapshot.as_ref().map(metadata).unwrap_or_default()
+            }
+
+            $(
+                fn get_extra_imports(
+                    &$ei_self,
+                ) -> anyhow::Result<
+                    std::collections::HashMap<String, Vec<$crate::framework::ExtraImport>>,
+                > {
+                    $ei_body
+                }
+            )?
+        }
+    };
+}
+
+pub(crate) use impl_framework_provider;
 
 // ── FrameworkProvider trait ─────────────────────────────────────────────────
 

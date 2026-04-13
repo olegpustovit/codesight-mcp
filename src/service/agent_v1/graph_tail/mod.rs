@@ -26,6 +26,7 @@ impl CodeService {
             "layer_violations" => self.graph_layer_violations(args, mode),
             "calls" => self.graph_calls(args),
             "centrality" => self.graph_centrality(args),
+            "imports" => self.graph_imports(args),
             "importers" => self.graph_importers(args),
             tail => self.inspect_graph_tail_b(args, tail, limit, warnings),
         }

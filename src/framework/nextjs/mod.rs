@@ -10,6 +10,7 @@ mod render;
 mod routing;
 mod snapshot;
 
-pub use provider::{NextjsProvider, NextjsStats};
+pub use provider::NextjsProvider;
+pub use render::render_file_context;
 pub use routing::{next_api_methods_from_content, next_route_from_path};
-pub use snapshot::NextjsSnapshot;
+pub use snapshot::{NextjsSnapshot, NextjsStats};

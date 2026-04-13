@@ -340,3 +340,242 @@ fn read_content_clamps_excessive_context_lines() {
         "response should have a boolean ok field: {r}"
     );
 }
+
+// ── P0-A: search_catalog output_mode ───────────────────────────────────────
+
+fn ingest_fixture_repo(svc: &CodeService, dir: &tempfile::TempDir) -> String {
+    let root = dir.path().join("test-repo");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("main.py"),
+        "def hello():\n    return 'world'\n\ndef goodbye():\n    return hello()\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("utils.py"),
+        "from main import hello\n\ndef helper():\n    return hello()\n",
+    )
+    .unwrap();
+    let r = svc
+        .dispatch(
+            "ingest_sources",
+            json!({ "path": root.to_string_lossy(), "domains": "code" }),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "ingest failed: {r}");
+    r["data"]["source_id"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn search_catalog_output_mode_count() {
+    let dir = tempdir().unwrap();
+    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let sid = ingest_fixture_repo(&svc, &dir);
+    let r = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": &sid,
+                "query": "hello",
+                "query_mode": "regex",
+                "output_mode": "count",
+            }),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "count mode failed: {r}");
+    let count = r["data"]["count"].as_u64().unwrap();
+    assert!(count >= 1, "expected at least 1 match, got {count}");
+    let files = r["data"]["files"].as_u64().unwrap();
+    assert!(files >= 1, "expected at least 1 file, got {files}");
+    // count mode should NOT have an items array
+    assert!(
+        r["data"].get("items").is_none(),
+        "count mode should not return items"
+    );
+}
+
+#[test]
+fn search_catalog_output_mode_files_with_matches() {
+    let dir = tempdir().unwrap();
+    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let sid = ingest_fixture_repo(&svc, &dir);
+    let r = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": &sid,
+                "query": "hello",
+                "query_mode": "regex",
+                "output_mode": "files_with_matches",
+            }),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "files_with_matches failed: {r}");
+    let files = r["data"]["files"].as_array().unwrap();
+    assert!(!files.is_empty(), "expected at least 1 file entry");
+    // Each entry should have file and count
+    let first = &files[0];
+    assert!(
+        first.get("file").is_some(),
+        "entry should have file: {first}"
+    );
+    assert!(
+        first.get("count").is_some(),
+        "entry should have count: {first}"
+    );
+}
+
+#[test]
+fn search_catalog_output_mode_invalid() {
+    let (_dir, svc) = make_svc();
+    let r = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": "owner/repo",
+                "query": "test",
+                "output_mode": "invalid_mode",
+            }),
+        )
+        .unwrap();
+    assert_eq!(r["ok"], false, "invalid output_mode should fail: {r}");
+}
+
+// ── P1-A: pattern alias + regex error ──────────────────────────────────────
+
+#[test]
+fn search_catalog_pattern_alias_works() {
+    let dir = tempdir().unwrap();
+    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let sid = ingest_fixture_repo(&svc, &dir);
+    let r = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": &sid,
+                "query": "",
+                "pattern": "hello",
+                "query_mode": "regex",
+            }),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "pattern alias failed: {r}");
+}
+
+#[test]
+fn search_catalog_pattern_and_query_conflict() {
+    let dir = tempdir().unwrap();
+    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let sid = ingest_fixture_repo(&svc, &dir);
+    let r = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": &sid,
+                "query": "hello",
+                "pattern": "world",
+                "query_mode": "regex",
+            }),
+        )
+        .unwrap();
+    assert_eq!(r["ok"], false, "query+pattern should conflict: {r}");
+}
+
+#[test]
+fn search_catalog_regex_compile_error_message() {
+    let dir = tempdir().unwrap();
+    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let sid = ingest_fixture_repo(&svc, &dir);
+    let r = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": &sid,
+                "query": "[invalid regex",
+                "query_mode": "regex",
+            }),
+        )
+        .unwrap();
+    assert!(
+        r["ok"].as_bool().unwrap(),
+        "should succeed with error item: {r}"
+    );
+    let items = r["data"]["items"].as_array().unwrap();
+    assert!(!items.is_empty(), "should have an error item");
+    let summary = items[0]["ref"]["summary"].as_str().unwrap_or("");
+    assert!(
+        summary.contains("failed to compile")
+            && summary.contains("Did you mean query_mode=keyword"),
+        "error message should be helpful: {summary}"
+    );
+}
+
+// ── P0-B: inspect_graph graph=imports ──────────────────────────────────────
+
+#[test]
+fn inspect_graph_imports_returns_outgoing_deps() {
+    let dir = tempdir().unwrap();
+    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let sid = ingest_fixture_repo(&svc, &dir);
+    let r = svc
+        .dispatch(
+            "inspect_graph",
+            json!({
+                "source_id": &sid,
+                "graph": "imports",
+                "file_path": "utils.py",
+            }),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "imports mode failed: {r}");
+    assert_eq!(r["data"]["graph"], "imports");
+    assert!(
+        r["data"].get("imports").is_some(),
+        "should have imports array"
+    );
+    assert!(
+        r["data"].get("import_count").is_some(),
+        "should have import_count"
+    );
+}
+
+#[test]
+fn inspect_graph_imports_requires_file_path() {
+    let dir = tempdir().unwrap();
+    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let sid = ingest_fixture_repo(&svc, &dir);
+    let r = svc
+        .dispatch(
+            "inspect_graph",
+            json!({
+                "source_id": &sid,
+                "graph": "imports",
+            }),
+        )
+        .unwrap();
+    assert_eq!(r["ok"], false, "imports without file_path should fail: {r}");
+}
+
+// ── P2-A: read_content tip ─────────────────────────────────────────────────
+
+#[test]
+fn read_content_includes_tip() {
+    let dir = tempdir().unwrap();
+    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let sid = ingest_fixture_repo(&svc, &dir);
+    let r = svc
+        .dispatch(
+            "read_content",
+            json!({
+                "source_id": &sid,
+                "refs": [{ "kind": "file", "path": "main.py" }],
+            }),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "read_content failed: {r}");
+    let tip = r["_meta"]["tip"].as_str().unwrap_or("");
+    assert!(
+        tip.contains("Read tool"),
+        "should include tip about Read tool: {tip}"
+    );
+}

@@ -3,9 +3,9 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::analysis::cross_repo_map::{self, BuildCrossRepoOutcome};
 use crate::service::CodeService;
 use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::cross_repo_map::{self, BuildCrossRepoOutcome};
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::savings::MetaBuilder;
 

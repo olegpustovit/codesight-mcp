@@ -199,6 +199,14 @@ impl CodeService {
         }
 
         let timer = MetaBuilder::new(raw_bytes_total.max(1));
-        self.success_response(&timer, json!({ "items": items }))
+        self.success_response_with_meta_extra(
+            &timer,
+            json!({ "items": items }),
+            Vec::new(),
+            [(
+                "tip".to_string(),
+                json!("Use the Read tool if you plan to edit these files — the Claude Code harness tracks read state separately."),
+            )],
+        )
     }
 }

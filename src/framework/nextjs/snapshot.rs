@@ -1,12 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::framework::FileContext;
+use crate::framework::{rel_path, walk_files};
 
 use super::middleware::extract_middleware_matcher;
-use super::provider::NextjsStats;
-use super::render;
 use super::routing::{next_api_methods_from_content, next_route_from_path};
+
+#[derive(Debug, Clone, Default)]
+pub struct NextjsStats {
+    pub page_routes: usize,
+    pub api_routes: usize,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct NextjsSnapshot {
@@ -32,41 +36,22 @@ impl NextjsSnapshot {
         }
     }
 
-    pub fn file_context(&self, rel_path: &str) -> Option<FileContext> {
-        render::render_file_context(self, rel_path)
-    }
-
-    pub fn metadata(&self) -> HashMap<String, serde_json::Value> {
-        render::metadata(self)
-    }
-
     fn scan_app_dir(&mut self, root: &Path) {
         let app_dir = root.join("app");
         if !app_dir.exists() {
             return;
         }
-        self.scan_dir_recursive(&app_dir, root);
-    }
-
-    fn scan_dir_recursive(&mut self, dir: &Path, root: &Path) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(_) => return,
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                self.scan_dir_recursive(&path, root);
+        for path in walk_files(&app_dir) {
+            let Some(rel) = rel_path(&path, root) else {
                 continue;
-            }
-            let rel = match path.strip_prefix(root) {
-                Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
-                Err(_) => continue,
             };
-            let file_name = entry.file_name();
-            let file_name = file_name.to_string_lossy();
-            let stem = file_name.split('.').next().unwrap_or("");
+            let stem = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .split('.')
+                .next()
+                .unwrap_or("");
 
             match stem {
                 "page" => {

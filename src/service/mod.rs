@@ -1,6 +1,7 @@
 pub(crate) mod agent_v1;
 mod args;
 mod code_tools;
+pub(crate) mod cross_repo_map;
 pub mod dispatch_timeout;
 mod doc_tools;
 pub(crate) mod file_watcher;
@@ -20,6 +21,28 @@ use crate::{
     service::savings::{Meta, MetaBuilder, SavingsLedger},
 };
 use helpers::{ToolError, ToolErrorCategory, attach_meta};
+
+/// Unwrap a store-open result, returning an error response on failure.
+///
+/// Replaces the 4-line `let store = match self.ensure_*_store(...) { Ok(s) => s,
+/// Err(e) => return self.error_response(timer, e) };` pattern that appears ~35
+/// times across handler modules.
+macro_rules! require_store {
+    (repo: $self:expr, $source_id:expr, $repo_path:expr, $timer:expr) => {
+        match $self.ensure_repo_store($source_id, $repo_path) {
+            Ok(s) => s,
+            Err(e) => return $self.error_response($timer, e),
+        }
+    };
+    (doc: $self:expr, $source_id:expr, $repo_path:expr, $timer:expr) => {
+        match $self.ensure_doc_store($source_id, $repo_path) {
+            Ok(s) => s,
+            Err(e) => return $self.error_response($timer, e),
+        }
+    };
+}
+
+pub(crate) use require_store;
 
 const MAX_QUERY_LEN: usize = 1000;
 

@@ -1,11 +1,16 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::framework::{ExtraImport, FileContext};
+use crate::framework::{ExtraImport, rel_path, walk_files};
 
-use super::provider::NuxtStats;
-use super::render;
 use super::routing::{NuxtApiRoute, nuxt_api_route_from_path, nuxt_route_from_path};
+
+#[derive(Debug, Clone, Default)]
+pub struct NuxtStats {
+    pub page_routes: usize,
+    pub api_routes: usize,
+    pub auto_import_symbols: usize,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct NuxtSnapshot {
@@ -33,14 +38,6 @@ impl NuxtSnapshot {
         }
     }
 
-    pub fn file_context(&self, rel_path: &str) -> Option<FileContext> {
-        render::render_file_context(self, rel_path)
-    }
-
-    pub fn metadata(&self) -> HashMap<String, serde_json::Value> {
-        render::metadata(self)
-    }
-
     pub fn extra_imports(&self) -> HashMap<String, Vec<ExtraImport>> {
         self.extra_imports.clone()
     }
@@ -50,29 +47,14 @@ impl NuxtSnapshot {
         if !pages_dir.exists() {
             return;
         }
-        self.scan_pages_recursive(&pages_dir, root);
-    }
-
-    fn scan_pages_recursive(&mut self, dir: &Path, root: &Path) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                self.scan_pages_recursive(&path, root);
-                continue;
-            }
+        for path in walk_files(&pages_dir) {
             if path.extension().is_none_or(|ext| ext != "vue") {
                 continue;
             }
-            let rel = match path.strip_prefix(root) {
-                Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
-                Err(_) => continue,
-            };
-            let route = nuxt_route_from_path(&rel);
-            self.page_routes.insert(rel, route);
+            if let Some(rel) = rel_path(&path, root) {
+                let route = nuxt_route_from_path(&rel);
+                self.page_routes.insert(rel, route);
+            }
         }
     }
 
@@ -81,30 +63,15 @@ impl NuxtSnapshot {
         if !api_dir.exists() {
             return;
         }
-        self.scan_api_recursive(&api_dir, root);
-    }
-
-    fn scan_api_recursive(&mut self, dir: &Path, root: &Path) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                self.scan_api_recursive(&path, root);
-                continue;
-            }
-            let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+        for path in walk_files(&api_dir) {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if ext != "ts" && ext != "js" {
                 continue;
             }
-            let rel = match path.strip_prefix(root) {
-                Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
-                Err(_) => continue,
-            };
-            self.api_routes
-                .insert(rel.clone(), nuxt_api_route_from_path(&rel));
+            if let Some(rel) = rel_path(&path, root) {
+                self.api_routes
+                    .insert(rel.clone(), nuxt_api_route_from_path(&rel));
+            }
         }
     }
 
@@ -114,6 +81,7 @@ impl NuxtSnapshot {
             if !dir.exists() {
                 continue;
             }
+            // Only scan top-level files (not recursive).
             let entries = match std::fs::read_dir(&dir) {
                 Ok(entries) => entries,
                 Err(_) => continue,
@@ -123,23 +91,21 @@ impl NuxtSnapshot {
                 if path.is_dir() {
                     continue;
                 }
-                let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 if ext != "ts" && ext != "js" {
                     continue;
                 }
                 let stem = path
                     .file_stem()
-                    .and_then(|file_stem| file_stem.to_str())
+                    .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_string();
                 if stem.is_empty() {
                     continue;
                 }
-                let rel = match path.strip_prefix(root) {
-                    Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
-                    Err(_) => continue,
-                };
-                self.auto_import_map.insert(stem, rel);
+                if let Some(rel) = rel_path(&path, root) {
+                    self.auto_import_map.insert(stem, rel);
+                }
             }
         }
     }

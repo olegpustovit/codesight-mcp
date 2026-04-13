@@ -1,13 +1,18 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::framework::FileContext;
+use crate::framework::walk_files;
 
 use super::docs::{parse_doc_blocks, parse_doc_blocks_from_content};
 use super::project::detect_dbt_project;
-use super::provider::DbtStats;
-use super::render;
 use super::schema::{DbtModelMetadata, parse_yml_content, parse_yml_files};
+
+/// Stats for the dbt provider.
+#[derive(Debug, Clone, Default)]
+pub struct DbtStats {
+    pub doc_blocks: usize,
+    pub models_with_metadata: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct DbtSnapshot {
@@ -38,14 +43,6 @@ impl DbtSnapshot {
             doc_blocks: self.doc_blocks.len(),
             models_with_metadata: self.models.len(),
         }
-    }
-
-    pub fn file_context(&self, rel_path: &str) -> Option<FileContext> {
-        render::render_file_context(self, rel_path)
-    }
-
-    pub fn metadata(&self) -> HashMap<String, serde_json::Value> {
-        render::metadata(self)
     }
 
     pub(crate) fn is_in_model_dir(&self, rel_path: &str) -> bool {
@@ -86,7 +83,7 @@ impl DbtSnapshot {
         for model_path in &model_paths {
             let model_dir = self.dbt_root.join(model_path);
             if model_dir.exists() {
-                self.collect_doc_blocks_recursive(&model_dir);
+                self.collect_doc_blocks_under(&model_dir);
             }
         }
 
@@ -106,20 +103,13 @@ impl DbtSnapshot {
             }
 
             self.models.extend(parse_yml_files(&model_dir, &doc_blocks));
-            self.collect_yml_recursive_with_blocks(&model_dir, &doc_blocks);
+            self.collect_yml_with_blocks(&model_dir, &doc_blocks);
         }
     }
 
-    fn collect_doc_blocks_recursive(&mut self, dir: &Path) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                self.collect_doc_blocks_recursive(&path);
-            } else if path.extension().is_some_and(|ext| ext == "md")
+    fn collect_doc_blocks_under(&mut self, dir: &Path) {
+        for path in walk_files(dir) {
+            if path.extension().is_some_and(|ext| ext == "md")
                 && let Ok(content) = std::fs::read_to_string(&path)
             {
                 self.doc_blocks
@@ -128,26 +118,13 @@ impl DbtSnapshot {
         }
     }
 
-    fn collect_yml_recursive_with_blocks(
-        &mut self,
-        dir: &Path,
-        doc_blocks: &HashMap<String, String>,
-    ) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                self.collect_yml_recursive_with_blocks(&path, doc_blocks);
-            } else {
-                let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
-                if (ext == "yml" || ext == "yaml")
-                    && let Ok(content) = std::fs::read_to_string(&path)
-                {
-                    self.models.extend(parse_yml_content(&content, doc_blocks));
-                }
+    fn collect_yml_with_blocks(&mut self, dir: &Path, doc_blocks: &HashMap<String, String>) {
+        for path in walk_files(dir) {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if (ext == "yml" || ext == "yaml")
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                self.models.extend(parse_yml_content(&content, doc_blocks));
             }
         }
     }

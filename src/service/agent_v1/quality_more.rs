@@ -16,6 +16,7 @@ use crate::analysis::quality;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
@@ -30,6 +31,7 @@ impl CodeService {
             "extraction_candidates" => self.quality_extraction_candidates(args, timer),
             "broken_links" => self.quality_broken_links(args, timer),
             "doc_coverage" => self.quality_doc_coverage(args, timer),
+            "test_gaps" => self.quality_test_gaps(args, timer),
             _ => self.error_response(
                 timer,
                 ToolError {
@@ -47,10 +49,7 @@ impl CodeService {
         args: &EvaluateQualityArgs,
         timer: &MetaBuilder,
     ) -> anyhow::Result<Value> {
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         let min_complexity = args.min_complexity.unwrap_or(0);
         let top_n = args.top_n.unwrap_or(50);
 
@@ -74,10 +73,7 @@ impl CodeService {
         args: &EvaluateQualityArgs,
         timer: &MetaBuilder,
     ) -> anyhow::Result<Value> {
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(timer, e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         let Some(file_path) = args.file_path.as_deref() else {
             return self.error_response(
                 timer,
@@ -170,10 +166,8 @@ impl CodeService {
         args: &EvaluateQualityArgs,
         timer: &MetaBuilder,
     ) -> anyhow::Result<Value> {
-        let doc_store = match self.ensure_doc_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(timer, e),
-        };
+        let doc_store =
+            require_store!(doc: self, &args.source_id, args.repo_path.as_deref(), timer);
         let all_sections = doc_store.all_sections()?;
         let all_files: HashSet<String> = doc_store.all_doc_files()?.into_iter().collect();
 
@@ -215,10 +209,8 @@ impl CodeService {
         args: &EvaluateQualityArgs,
         timer: &MetaBuilder,
     ) -> anyhow::Result<Value> {
-        let doc_store = match self.ensure_doc_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(timer, e),
-        };
+        let doc_store =
+            require_store!(doc: self, &args.source_id, args.repo_path.as_deref(), timer);
 
         let mut symbol_ids: Vec<String> = args
             .refs
@@ -248,6 +240,20 @@ impl CodeService {
         }
         let data = quality::doc_coverage_payload(&doc_store, &symbol_ids)?;
         self.success_response(timer, data)
+    }
+
+    fn quality_test_gaps(
+        &self,
+        args: &EvaluateQualityArgs,
+        timer: &MetaBuilder,
+    ) -> anyhow::Result<Value> {
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
+        let raw_bytes = store.repo_total_bytes()?;
+        let timer = MetaBuilder::new(raw_bytes);
+        let top_n = args.top_n.unwrap_or(25);
+        let min_complexity = args.min_complexity.unwrap_or(3);
+        let data = crate::analysis::test_gaps::test_gap_payload(&store, top_n, min_complexity)?;
+        self.success_response(&timer, data)
     }
 }
 

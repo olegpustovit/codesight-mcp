@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use crate::indexing::imports::{extract_imports, language_for_path, package_reference_evidence};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 use crate::storage::{IndexStore, list_repo_summaries};
 
@@ -16,10 +17,7 @@ impl CodeService {
         args: &InspectGraphArgs,
         mode: &str,
     ) -> anyhow::Result<Value> {
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&MetaBuilder::new(0), e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
         let adj = store.dependency_graph_strict()?;
@@ -40,10 +38,7 @@ impl CodeService {
         args: &InspectGraphArgs,
         mode: &str,
     ) -> anyhow::Result<Value> {
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&MetaBuilder::new(0), e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
         let adj = store.dependency_graph_with_import_quality()?;

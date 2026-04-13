@@ -6,7 +6,8 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::adaptive_languages::project_query_pack_roots;
-use crate::extractors::engine::scm::{ScmMetadata, parse_scm_header};
+
+use super::metadata::{ScmMetadata, parse_scm_header};
 
 include!(concat!(env!("OUT_DIR"), "/builtin_query_packs.rs"));
 

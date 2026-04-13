@@ -9,6 +9,6 @@ mod render;
 mod routing;
 mod snapshot;
 
-pub use provider::{NuxtProvider, NuxtStats};
+pub use provider::NuxtProvider;
 pub use routing::{NuxtApiRoute, nuxt_api_route_from_path, nuxt_route_from_path};
-pub use snapshot::NuxtSnapshot;
+pub use snapshot::{NuxtSnapshot, NuxtStats};

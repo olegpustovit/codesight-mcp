@@ -5,14 +5,12 @@ use serde_json::{Value, json};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
     pub(super) fn graph_centrality(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
-        let store = match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(s) => s,
-            Err(e) => return self.error_response(&MetaBuilder::new(0), e),
-        };
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
         let algo = args.algorithm.as_deref().unwrap_or("pagerank");
         if algo != "pagerank" && algo != "degree" {
             return self.error_response(
