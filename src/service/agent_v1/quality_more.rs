@@ -28,7 +28,7 @@ impl CodeService {
     ) -> anyhow::Result<Value> {
         match analysis {
             "hotspots" => self.quality_hotspots(args, timer),
-            "extraction_candidates" => self.quality_extraction_candidates(args, timer),
+            "refactor_targets" => self.quality_refactor_targets(args, timer),
             "broken_links" => self.quality_broken_links(args, timer),
             "doc_coverage" => self.quality_doc_coverage(args, timer),
             "test_gaps" => self.quality_test_gaps(args, timer),
@@ -68,7 +68,7 @@ impl CodeService {
         )
     }
 
-    fn quality_extraction_candidates(
+    fn quality_refactor_targets(
         &self,
         args: &EvaluateQualityArgs,
         timer: &MetaBuilder,
@@ -80,7 +80,7 @@ impl CodeService {
                 ToolError {
                     category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
-                    message: "extraction_candidates requires file_path.".to_string(),
+                    message: "refactor_targets requires file_path.".to_string(),
                     detail: json!({}),
                 },
             );
@@ -154,7 +154,7 @@ impl CodeService {
         self.success_response(
             &timer,
             json!({
-                "analysis": "extraction_candidates",
+                "analysis": "refactor_targets",
                 "file": resolved_path,
                 "candidates": candidates,
             }),

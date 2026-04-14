@@ -1,5 +1,6 @@
 //! Analysis helpers used by `agent-v1` handlers (dead code, reference checks, quality).
 
+pub mod agent_readiness;
 pub mod complexity;
 pub mod dead_code;
 pub mod evidence;

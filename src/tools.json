@@ -201,7 +201,7 @@
             "dependencies",
             "dependency_cycles",
             "centrality",
-            "coupling_metrics",
+            "module_coupling",
             "layer_violations",
             "find_references",
             "resolve_fqn"
@@ -274,7 +274,7 @@
             "rename_safety",
             "changed_units",
             "diff",
-            "churn_rate"
+            "change_velocity"
           ]
         },
         "refs": {
@@ -303,7 +303,7 @@
   },
   {
     "name": "evaluate_quality",
-    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links, quality_signal, regression_check, test_gaps.",
+    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links, quality_signal, regression_check, test_gaps. `quality_signal` returns structural root causes plus 4 agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) and their sub-metrics; `regression_check` compares the same snapshot dimensions.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
@@ -318,7 +318,7 @@
             "hotspots",
             "doc_coverage",
             "broken_links",
-            "extraction_candidates",
+            "refactor_targets",
             "quality_signal",
             "regression_check",
             "test_gaps"
@@ -372,7 +372,7 @@
   },
   {
     "name": "assemble_context",
-    "description": "Bundle search+read, section neighbor context, suggestions, or workspace digest.",
+    "description": "Bundle search+read, section neighbor context, or suggestions.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "mode"],
@@ -380,7 +380,7 @@
         "source_id": { "type": "string" },
         "mode": {
           "type": "string",
-          "enum": ["bundle", "context_bundle", "section_context", "ranked", "query_suggestions", "workspace_digest"]
+          "enum": ["bundle", "context_bundle", "section_context", "ranked", "query_suggestions"]
         },
         "query": { "type": "string" },
         "refs": {

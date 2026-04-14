@@ -114,7 +114,7 @@ fn get_coupling(svc: &CodeService, sid: &str, module_path: &str) -> Value {
         "inspect_graph",
         json!({
             "source_id": sid,
-            "graph": "coupling_metrics",
+            "graph": "module_coupling",
             "module_path": module_path,
         }),
     )
@@ -263,7 +263,7 @@ fn arch_cycle_count_matches_cycles_list() {
     );
 }
 
-// ── coupling_metrics integration tests ─────────────────────────────────────
+// ── module_coupling integration tests ─────────────────────────────────────
 
 #[test]
 fn arch_coupling_result_shape() {
@@ -370,7 +370,7 @@ fn arch_coupling_unknown_repo_returns_error() {
             "inspect_graph",
             json!({
                 "source_id": "ghost/repo",
-                "graph": "coupling_metrics",
+                "graph": "module_coupling",
                 "module_path": "x.py",
             }),
         )

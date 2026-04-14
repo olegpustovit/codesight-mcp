@@ -27,10 +27,10 @@ fn run_all() {
     test_symbol_complexity_meta_confidence_level_present();
     test_symbol_complexity_meta_confidence_level_is_medium();
 
-    // TestGetChurnRateMeta (3 tests) — mapped to evaluate_impact churn_rate
-    test_churn_rate_meta_methodology_present_no_git();
-    test_churn_rate_methodology_field_name();
-    test_churn_rate_confidence_field_name();
+    // TestGetChurnRateMeta (3 tests) — mapped to evaluate_impact change_velocity
+    test_change_velocity_meta_methodology_present_no_git();
+    test_change_velocity_methodology_field_name();
+    test_change_velocity_confidence_field_name();
 
     // TestGetHotspotsMeta (3 tests)
     test_hotspots_meta_methodology_present();
@@ -317,11 +317,11 @@ fn test_symbol_complexity_meta_confidence_level_is_medium() {
 }
 
 // ── TestGetChurnRateMeta ─────────────────────────────────────────────────────
-// get_churn_rate → _meta.methodology == "git_log", confidence == "high"
-// Rust: churn_rate is not implemented yet.
+// get_change_velocity → _meta.methodology == "git_log", confidence == "high"
+// Rust: change_velocity is not implemented yet.
 
-fn test_churn_rate_meta_methodology_present_no_git() {
-    // churn_rate should carry methodology "git_log" and confidence "high" in _meta.
+fn test_change_velocity_meta_methodology_present_no_git() {
+    // change_velocity should carry methodology "git_log" and confidence "high" in _meta.
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
@@ -332,7 +332,7 @@ fn test_churn_rate_meta_methodology_present_no_git() {
             "evaluate_impact",
             json!({
                 "source_id": sid,
-                "analysis": "churn_rate",
+                "analysis": "change_velocity",
                 "target": "src/utils.py",
             }),
         )
@@ -342,7 +342,7 @@ fn test_churn_rate_meta_methodology_present_no_git() {
     assert!(r["_meta"]["timing_ms"].is_number(), "timing_ms missing");
 }
 
-fn test_churn_rate_methodology_field_name() {
+fn test_change_velocity_methodology_field_name() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
@@ -353,7 +353,7 @@ fn test_churn_rate_methodology_field_name() {
             "evaluate_impact",
             json!({
                 "source_id": sid,
-                "analysis": "churn_rate",
+                "analysis": "change_velocity",
                 "target": "src/utils.py",
             }),
         )
@@ -366,7 +366,7 @@ fn test_churn_rate_methodology_field_name() {
     );
 }
 
-fn test_churn_rate_confidence_field_name() {
+fn test_change_velocity_confidence_field_name() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
@@ -377,7 +377,7 @@ fn test_churn_rate_confidence_field_name() {
             "evaluate_impact",
             json!({
                 "source_id": sid,
-                "analysis": "churn_rate",
+                "analysis": "change_velocity",
                 "target": "src/utils.py",
             }),
         )

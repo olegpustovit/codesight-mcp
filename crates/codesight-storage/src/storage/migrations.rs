@@ -12,7 +12,7 @@ use crate::error::StorageResult;
 use super::schema::INDEX_STORE_INIT_SQL;
 
 /// Bump when adding a migration; keep in sync with [`apply_code_index_migrations`].
-pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 4;
+pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 5;
 
 /// Apply migrations so `PRAGMA user_version == CODE_INDEX_TARGET_USER_VERSION`.
 #[instrument(level = "debug", skip(conn), fields(kind = "migrate_code_index"))]
@@ -47,9 +47,10 @@ pub fn apply_code_index_migrations(conn: &Connection) -> StorageResult<()> {
                 depth REAL,
                 equality REAL,
                 redundancy REAL,
-                discoverability REAL,
-                test_backstop REAL,
-                change_locality REAL,
+                navigability REAL,
+                comprehensibility REAL,
+                verifiability REAL,
+                change_safety REAL,
                 cycle_count INTEGER NOT NULL,
                 dead_count INTEGER NOT NULL,
                 dup_count INTEGER NOT NULL,
@@ -61,6 +62,11 @@ pub fn apply_code_index_migrations(conn: &Connection) -> StorageResult<()> {
             );",
         )?;
         conn.execute("PRAGMA user_version = 4", [])?;
+    }
+    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if v < 5 {
+        rebuild_quality_snapshots_v5(conn)?;
+        conn.execute("PRAGMA user_version = 5", [])?;
     }
     Ok(())
 }
@@ -98,6 +104,88 @@ fn add_import_fact_quality_if_missing(conn: &Connection) -> StorageResult<()> {
     conn.execute(
         "ALTER TABLE dependency_edges ADD COLUMN import_fact_quality TEXT NOT NULL DEFAULT 'baseline_structural'",
         [],
+    )?;
+    Ok(())
+}
+
+fn rebuild_quality_snapshots_v5(conn: &Connection) -> StorageResult<()> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='quality_snapshots'",
+        [],
+        |row| row.get(0),
+    )?;
+    if exists == 0 {
+        conn.execute_batch(
+            "CREATE TABLE quality_snapshots (
+                source_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                score INTEGER NOT NULL,
+                structural_score INTEGER NOT NULL,
+                agent_readiness_score INTEGER NOT NULL,
+                modularity REAL,
+                acyclicity REAL,
+                depth REAL,
+                equality REAL,
+                redundancy REAL,
+                navigability REAL,
+                comprehensibility REAL,
+                verifiability REAL,
+                change_safety REAL,
+                cycle_count INTEGER NOT NULL,
+                dead_count INTEGER NOT NULL,
+                dup_count INTEGER NOT NULL,
+                file_count INTEGER NOT NULL,
+                symbol_count INTEGER NOT NULL,
+                confidence TEXT NOT NULL,
+                avg_complexity REAL NOT NULL,
+                PRIMARY KEY (source_id, name)
+            );",
+        )?;
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "ALTER TABLE quality_snapshots RENAME TO quality_snapshots_v4;
+         CREATE TABLE quality_snapshots (
+             source_id TEXT NOT NULL,
+             name TEXT NOT NULL,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             score INTEGER NOT NULL,
+             structural_score INTEGER NOT NULL,
+             agent_readiness_score INTEGER NOT NULL,
+             modularity REAL,
+             acyclicity REAL,
+             depth REAL,
+             equality REAL,
+             redundancy REAL,
+             navigability REAL,
+             comprehensibility REAL,
+             verifiability REAL,
+             change_safety REAL,
+             cycle_count INTEGER NOT NULL,
+             dead_count INTEGER NOT NULL,
+             dup_count INTEGER NOT NULL,
+             file_count INTEGER NOT NULL,
+             symbol_count INTEGER NOT NULL,
+             confidence TEXT NOT NULL,
+             avg_complexity REAL NOT NULL,
+             PRIMARY KEY (source_id, name)
+         );
+         INSERT INTO quality_snapshots (
+             source_id, name, created_at, score, structural_score, agent_readiness_score,
+             modularity, acyclicity, depth, equality, redundancy,
+             navigability, comprehensibility, verifiability, change_safety,
+             cycle_count, dead_count, dup_count, file_count, symbol_count,
+             confidence, avg_complexity
+         )
+         SELECT source_id, name, created_at, score, structural_score, agent_readiness_score,
+                modularity, acyclicity, depth, equality, redundancy,
+                NULL, NULL, NULL, NULL,
+                cycle_count, dead_count, dup_count, file_count, symbol_count,
+                confidence, avg_complexity
+         FROM quality_snapshots_v4;
+         DROP TABLE quality_snapshots_v4;",
     )?;
     Ok(())
 }

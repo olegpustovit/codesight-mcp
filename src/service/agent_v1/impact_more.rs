@@ -1,4 +1,4 @@
-//! Impact analyses (churn, preview, rename safety).
+//! Impact analyses (change velocity, preview, rename safety).
 
 use std::collections::HashSet;
 
@@ -13,7 +13,7 @@ use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
-    pub(in crate::service) fn evaluate_impact_churn_rate(
+    pub(in crate::service) fn evaluate_impact_change_velocity(
         &self,
         args: &EvaluateImpactArgs,
     ) -> anyhow::Result<Value> {
@@ -47,10 +47,10 @@ impl CodeService {
                 ToolError {
                     category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
-                    message: "churn_rate requires `target` (a file path or symbol id) or \
+                    message: "change_velocity requires `target` (a file path or symbol id) or \
                               at least one entry in `refs`."
                         .to_string(),
-                    detail: json!({ "analysis": "churn_rate" }),
+                    detail: json!({ "analysis": "change_velocity" }),
                 },
             );
         };
@@ -180,7 +180,7 @@ impl CodeService {
         let timer = MetaBuilder::new(raw_bytes);
 
         let mut data = json!({
-            "analysis": "churn_rate",
+            "analysis": "change_velocity",
             "target_type": target_type,
             "file": file_path,
             "commits": commits,

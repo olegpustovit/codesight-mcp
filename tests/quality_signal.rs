@@ -92,11 +92,13 @@ fn quality_signal_returns_all_fields() {
     assert!(data["agent_readiness_score"].is_number());
     assert!(data["assessment"].is_string());
     assert!(data["confidence"].is_string());
+    assert_eq!(data["type_annotation_method"], "measured");
     assert!(data["bottleneck"].is_string());
     assert!(data["bottleneck_layer"].is_string());
     assert!(data["suggestion"].is_string());
     assert!(data["structural_root_causes"].is_object());
-    assert!(data["agent_root_causes"].is_object());
+    assert!(data["agent_dimensions"].is_object());
+    assert!(data["agent_submetrics"].is_object());
     assert!(data["coverage"].is_object());
 }
 
@@ -142,7 +144,9 @@ fn repo_health_includes_quality_signal_finding() {
         "agent readiness missing"
     );
     assert!(ev["structural_root_causes"].is_object());
-    assert!(ev["agent_root_causes"].is_object());
+    assert!(ev["agent_dimensions"].is_object());
+    assert!(ev["agent_submetrics"].is_object());
+    assert_eq!(ev["type_annotation_method"], "measured");
 }
 
 #[test]

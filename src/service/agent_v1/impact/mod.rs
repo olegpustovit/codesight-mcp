@@ -20,7 +20,7 @@ impl CodeService {
             "diff" => self.evaluate_impact_diff(&args),
             "blast_radius" => self.evaluate_impact_blast_radius(&args),
             "changed_units" => self.evaluate_impact_changed_units(&args),
-            "churn_rate" => self.evaluate_impact_churn_rate(&args),
+            "change_velocity" => self.evaluate_impact_change_velocity(&args),
             "impact_preview" => self.evaluate_impact_impact_preview(&args),
             "rename_safety" => self.evaluate_impact_rename_safety(&args),
             _ => {

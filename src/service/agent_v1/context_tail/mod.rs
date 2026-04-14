@@ -1,7 +1,5 @@
 mod query_suggestions;
 mod section_context;
-mod workspace_digest;
-
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
@@ -20,7 +18,6 @@ impl CodeService {
             "section_context" => self.context_section(args, timer),
             "query_suggestions" => self.context_query_suggestions(args, timer),
             "context_bundle" => self.assemble_context_bundle(args, timer),
-            "workspace_digest" => self.context_workspace_digest(args, timer),
             _ => self.error_response(
                 timer,
                 ToolError {

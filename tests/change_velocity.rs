@@ -61,10 +61,10 @@ fn build_non_git_repo() -> (tempfile::TempDir, CodeService, String) {
     (ws, svc, sid)
 }
 
-fn churn_rate(svc: &CodeService, sid: &str, target: &str, extra: Value) -> Value {
+fn change_velocity(svc: &CodeService, sid: &str, target: &str, extra: Value) -> Value {
     let mut args = json!({
         "source_id": sid,
-        "analysis": "churn_rate",
+        "analysis": "change_velocity",
         "target": target,
     });
     if let Value::Object(map) = extra {
@@ -108,7 +108,7 @@ fn churn_errors_missing_repo_returns_error() {
             "evaluate_impact",
             json!({
                 "source_id": "no_such_repo",
-                "analysis": "churn_rate",
+                "analysis": "change_velocity",
                 "target": "utils.py",
             }),
         )
@@ -119,7 +119,7 @@ fn churn_errors_missing_repo_returns_error() {
 #[test]
 fn churn_errors_no_source_root_returns_error() {
     let (_ws, svc, sid) = build_non_git_repo();
-    let r = churn_rate(&svc, &sid, "utils.py", json!({}));
+    let r = change_velocity(&svc, &sid, "utils.py", json!({}));
     // Either an error (not a git repo) or valid result with commits=0
     let is_error = !r["ok"].as_bool().unwrap_or(true);
     let has_commits = r["data"]["commits"].is_number();
@@ -137,7 +137,7 @@ fn churn_structure_result_fields() {
         eprintln!("skipping: git not available");
         return;
     };
-    let r = churn_rate(&svc, &sid, "utils.py", json!({}));
+    let r = change_velocity(&svc, &sid, "utils.py", json!({}));
     if !r["ok"].as_bool().unwrap_or(false) {
         eprintln!("skipping: git error: {r:?}");
         return;
@@ -162,7 +162,7 @@ fn churn_structure_assessment_values() {
         eprintln!("skipping: git not available");
         return;
     };
-    let r = churn_rate(&svc, &sid, "utils.py", json!({}));
+    let r = change_velocity(&svc, &sid, "utils.py", json!({}));
     if !r["ok"].as_bool().unwrap_or(false) {
         return;
     }
@@ -179,7 +179,7 @@ fn churn_structure_file_target_type() {
         eprintln!("skipping: git not available");
         return;
     };
-    let r = churn_rate(&svc, &sid, "utils.py", json!({}));
+    let r = change_velocity(&svc, &sid, "utils.py", json!({}));
     if !r["ok"].as_bool().unwrap_or(false) {
         return;
     }
@@ -193,7 +193,7 @@ fn churn_structure_symbol_target_type() {
         return;
     };
     let sym_id = find_symbol_id(&svc, &sid, "helper");
-    let r = churn_rate(&svc, &sid, &sym_id, json!({}));
+    let r = change_velocity(&svc, &sid, &sym_id, json!({}));
     if !r["ok"].as_bool().unwrap_or(false) {
         return;
     }
@@ -207,7 +207,7 @@ fn churn_structure_timing_present() {
         eprintln!("skipping: git not available");
         return;
     };
-    let r = churn_rate(&svc, &sid, "utils.py", json!({}));
+    let r = change_velocity(&svc, &sid, "utils.py", json!({}));
     if !r["ok"].as_bool().unwrap_or(false) {
         return;
     }
@@ -220,7 +220,7 @@ fn churn_structure_days_param_respected() {
         eprintln!("skipping: git not available");
         return;
     };
-    let r = churn_rate(&svc, &sid, "utils.py", json!({ "days": 1 }));
+    let r = change_velocity(&svc, &sid, "utils.py", json!({ "days": 1 }));
     if !r["ok"].as_bool().unwrap_or(false) {
         return;
     }

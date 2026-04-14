@@ -22,7 +22,7 @@ impl CodeService {
         match mode {
             "dependency_cycles" => self.graph_dependency_cycles(args, mode),
             "dependencies" => self.graph_dependencies(args, mode),
-            "coupling_metrics" => self.graph_coupling_metrics(args, mode),
+            "module_coupling" => self.graph_module_coupling(args, mode),
             "layer_violations" => self.graph_layer_violations(args, mode),
             "calls" => self.graph_calls(args),
             "centrality" => self.graph_centrality(args),

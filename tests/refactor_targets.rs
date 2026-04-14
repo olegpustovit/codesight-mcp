@@ -85,10 +85,10 @@ fn build_repo() -> (TempDir, CodeService, String) {
     (ws, svc, sid)
 }
 
-fn extraction_candidates(svc: &CodeService, sid: &str, file_path: &str, extra: Value) -> Value {
+fn refactor_targets(svc: &CodeService, sid: &str, file_path: &str, extra: Value) -> Value {
     let mut args = json!({
         "source_id": sid,
-        "analysis": "extraction_candidates",
+        "analysis": "refactor_targets",
         "file_path": file_path,
     });
     if let Value::Object(map) = extra {
@@ -104,7 +104,7 @@ fn extraction_candidates(svc: &CodeService, sid: &str, file_path: &str, extra: V
 #[test]
 fn extraction_returns_candidates_structure() {
     let (svc, sid) = shared_repo();
-    let r = extraction_candidates(svc, sid, "utils.py", json!({}));
+    let r = refactor_targets(svc, sid, "utils.py", json!({}));
     assert!(r["ok"].as_bool().unwrap_or(false), "{r:?}");
     assert!(r["data"]["candidates"].is_array());
     assert!(r["data"]["file"].is_string());
@@ -113,7 +113,7 @@ fn extraction_returns_candidates_structure() {
 #[test]
 fn extraction_candidate_has_required_fields() {
     let (svc, sid) = shared_repo();
-    let r = extraction_candidates(
+    let r = refactor_targets(
         svc,
         sid,
         "utils.py",
@@ -134,13 +134,13 @@ fn extraction_candidate_has_required_fields() {
 #[test]
 fn extraction_min_complexity_filters() {
     let (svc, sid) = shared_repo();
-    let r_low = extraction_candidates(
+    let r_low = refactor_targets(
         svc,
         sid,
         "utils.py",
         json!({ "min_complexity": 1, "min_callers": 1 }),
     );
-    let r_high = extraction_candidates(
+    let r_high = refactor_targets(
         svc,
         sid,
         "utils.py",
@@ -155,13 +155,13 @@ fn extraction_min_complexity_filters() {
 #[test]
 fn extraction_min_callers_filters() {
     let (svc, sid) = shared_repo();
-    let r_low = extraction_candidates(
+    let r_low = refactor_targets(
         svc,
         sid,
         "utils.py",
         json!({ "min_complexity": 1, "min_callers": 1 }),
     );
-    let r_high = extraction_candidates(
+    let r_high = refactor_targets(
         svc,
         sid,
         "utils.py",
@@ -176,7 +176,7 @@ fn extraction_min_callers_filters() {
 #[test]
 fn extraction_results_sorted_by_score() {
     let (svc, sid) = shared_repo();
-    let r = extraction_candidates(
+    let r = refactor_targets(
         svc,
         sid,
         "utils.py",
@@ -203,7 +203,7 @@ fn extraction_missing_repo_returns_error() {
             "evaluate_quality",
             json!({
                 "source_id": "no_such_repo",
-                "analysis": "extraction_candidates",
+                "analysis": "refactor_targets",
                 "file_path": "utils.py",
             }),
         )
@@ -214,14 +214,14 @@ fn extraction_missing_repo_returns_error() {
 #[test]
 fn extraction_missing_file_returns_error() {
     let (svc, sid) = shared_repo();
-    let r = extraction_candidates(svc, sid, "nonexistent_xyz.py", json!({}));
+    let r = refactor_targets(svc, sid, "nonexistent_xyz.py", json!({}));
     assert!(!r["ok"].as_bool().unwrap_or(true), "expected error: {r:?}");
 }
 
 #[test]
 fn extraction_timing_present() {
     let (svc, sid) = shared_repo();
-    let r = extraction_candidates(svc, sid, "utils.py", json!({}));
+    let r = refactor_targets(svc, sid, "utils.py", json!({}));
     assert!(r["_meta"].is_object());
     assert!(r["_meta"]["timing_ms"].is_number());
 }

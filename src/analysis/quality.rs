@@ -2,6 +2,7 @@
 
 use serde_json::{Value, json};
 
+use crate::analysis::agent_readiness::{compute_file_churn, max_nesting_depth_for_file};
 use crate::analysis::complexity::{complexity_assessment, cyclomatic_complexity};
 use crate::storage::{IndexStore, doc_index::DocStore};
 
@@ -18,7 +19,7 @@ pub fn complexity_payload(store: &IndexStore, symbol_id: &str) -> anyhow::Result
     let branch_hints = cyclomatic.saturating_sub(1);
     let first_line = rec.stored_source.lines().next().unwrap_or("");
     let param_count = count_params(first_line);
-    let max_nesting = max_nesting_depth(&rec.stored_source);
+    let max_nesting = max_nesting_depth_for_file(&rec.stored_source, &rec.file_path);
     let assessment = complexity_assessment(cyclomatic);
     let repo_path = rec.root_path.to_string_lossy().to_string();
 
@@ -60,7 +61,7 @@ pub fn hotspots_payload(
 
     let file_churn = root_path
         .as_ref()
-        .map(|root| crate::analysis::quality_signal::compute_file_churn(root))
+        .map(|root| compute_file_churn(root))
         .unwrap_or_default();
 
     let mut hotspots = Vec::new();
@@ -76,7 +77,7 @@ pub fn hotspots_payload(
         }
 
         let churn = file_churn.get(&symbol.file_path).copied().unwrap_or(0);
-        let hotspot_score = cyclomatic as f64 * (1.0 + churn as f64).ln();
+        let hotspot_score = cyclomatic as f64 * (1.0f64 + churn as f64).ln();
         let assessment = if !git_available || churn == 0 {
             "low"
         } else if hotspot_score > 50.0 {
@@ -233,45 +234,10 @@ fn count_params(signature: &str) -> usize {
     params
 }
 
-/// Estimate nesting depth from braces first, then indentation for Python-like bodies.
-fn max_nesting_depth(body: &str) -> usize {
-    let mut max_depth = 0usize;
-    let mut depth = 0usize;
-    for ch in body.chars() {
-        match ch {
-            '{' => {
-                depth += 1;
-                max_depth = max_depth.max(depth);
-            }
-            '}' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-    if max_depth > 0 {
-        return max_depth;
-    }
-
-    let mut base_indent: Option<usize> = None;
-    let mut max_indent_depth = 0usize;
-    let mut skipped_signature = false;
-    for line in body.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        if !skipped_signature {
-            skipped_signature = true;
-            continue;
-        }
-        let indent = line.len() - line.trim_start().len();
-        let base = *base_indent.get_or_insert(indent);
-        max_indent_depth = max_indent_depth.max(indent.saturating_sub(base) / 4);
-    }
-    max_indent_depth
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{count_params, extract_symbol_name_from_id, max_nesting_depth};
+    use super::{count_params, extract_symbol_name_from_id};
+    use crate::analysis::agent_readiness::max_nesting_depth_for_file;
 
     #[test]
     fn extracts_symbol_name_from_stable_id() {
@@ -293,7 +259,11 @@ mod tests {
 
     #[test]
     fn computes_indentation_nesting_when_no_braces() {
+        // def run(x):         → depth 0 (base)
+        //     if x:           → depth 1
+        //         return 1    → depth 2
+        //     return 0        → depth 1
         let body = "def run(x):\n    if x:\n        return 1\n    return 0\n";
-        assert_eq!(max_nesting_depth(body), 1);
+        assert_eq!(max_nesting_depth_for_file(body, "test.py"), 2);
     }
 }

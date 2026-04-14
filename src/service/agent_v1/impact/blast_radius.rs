@@ -1,6 +1,6 @@
 //! `evaluate_impact analysis=blast_radius` — reverse-import BFS with optional call hierarchy.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 
@@ -8,6 +8,103 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
+use codesight_storage::storage::IndexStore;
+
+/// Build reverse adjacency (file → its importers) from forward dep graph.
+fn build_reverse_adj(adj: &HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
+    let mut reverse: HashMap<String, Vec<String>> = HashMap::new();
+    for (src, targets) in adj {
+        for tgt in targets {
+            reverse.entry(tgt.clone()).or_default().push(src.clone());
+        }
+    }
+    reverse
+}
+
+/// Resolve the file that contains the target symbol.
+fn resolve_symbol_file(
+    store: &IndexStore,
+    stable_id: &str,
+    symbol_name: &str,
+    all_files: &[String],
+) -> anyhow::Result<Option<String>> {
+    if !stable_id.is_empty()
+        && let Ok(Some(rec)) = store.symbol_record(stable_id)
+    {
+        return Ok(Some(rec.file_path));
+    }
+    if !symbol_name.is_empty() {
+        for file in all_files {
+            let outline = store.file_outline(file)?;
+            if outline
+                .iter()
+                .any(|sym| sym["name"].as_str() == Some(symbol_name))
+            {
+                return Ok(Some(file.clone()));
+            }
+        }
+    }
+    Ok(None)
+}
+
+struct BfsResult {
+    confirmed: Vec<Value>,
+    potential: Vec<Value>,
+    layers: Vec<(u64, Vec<String>)>,
+}
+
+/// BFS over reverse-import edges from `start_file`, up to `depth` layers.
+fn bfs_importers(
+    start_file: &str,
+    reverse_adj: &HashMap<String, Vec<String>>,
+    depth: u64,
+) -> BfsResult {
+    let mut layers = Vec::new();
+    let mut visited = HashSet::new();
+    let mut confirmed = Vec::new();
+    let mut potential = Vec::new();
+
+    visited.insert(start_file.to_string());
+    let mut frontier = vec![start_file.to_string()];
+
+    for d in 1..=depth {
+        let mut next_frontier = Vec::new();
+        let mut layer_files = Vec::new();
+        for f in &frontier {
+            if let Some(importers) = reverse_adj.get(f) {
+                for imp in importers {
+                    if visited.insert(imp.clone()) {
+                        next_frontier.push(imp.clone());
+                        layer_files.push(imp.clone());
+                        let entry = json!({
+                            "file": imp,
+                            "relation": if d == 1 { "direct_importer" } else { "transitive_importer" },
+                            "depth": d,
+                        });
+                        if d == 1 {
+                            &mut confirmed
+                        } else {
+                            &mut potential
+                        }
+                        .push(entry);
+                    }
+                }
+            }
+        }
+        if !layer_files.is_empty() {
+            layers.push((d, layer_files));
+        }
+        frontier = next_frontier;
+        if frontier.is_empty() {
+            break;
+        }
+    }
+    BfsResult {
+        confirmed,
+        potential,
+        layers,
+    }
+}
 
 impl CodeService {
     pub(super) fn evaluate_impact_blast_radius(
@@ -17,14 +114,7 @@ impl CodeService {
         let timer = MetaBuilder::new(0);
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
         let depth = args.depth.unwrap_or(2);
-        let include_depth_scores = args.include_depth_scores.unwrap_or(false);
 
-        // Accept either a stable symbol id (preferred — uses the direct
-        // symbol-id lookup) or a bare symbol name (falls back to walking
-        // file outlines). Previously the handler conflated the two: passing
-        // `refs[0].stable_id` ended up matching it against `sym.name`, which
-        // never hit, so blast_radius returned zero importers for every
-        // ref-based call.
         let stable_id = args
             .symbol_id
             .as_deref()
@@ -36,8 +126,6 @@ impl CodeService {
             })
             .unwrap_or("");
         let symbol_name = args.target.as_deref().unwrap_or_else(|| {
-            // Extract bare name from a stable_id of the form
-            // `path::Name#kind` — last segment after `::`, before `#`.
             stable_id
                 .rsplit("::")
                 .next()
@@ -46,132 +134,57 @@ impl CodeService {
         });
 
         let adj = store.dependency_graph()?;
-        let mut reverse_adj: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
-        for (src, targets) in &adj {
-            for tgt in targets {
-                reverse_adj
-                    .entry(tgt.clone())
-                    .or_default()
-                    .push(src.clone());
-            }
-        }
-
+        let reverse_adj = build_reverse_adj(&adj);
         let all_files = store.all_file_paths()?;
-        let mut symbol_file: Option<String> = None;
-        if !stable_id.is_empty()
-            && let Ok(Some(rec)) = store.symbol_record(stable_id)
-        {
-            symbol_file = Some(rec.file_path);
-        }
-        if symbol_file.is_none() && !symbol_name.is_empty() {
-            for file in &all_files {
-                let outline = store.file_outline(file)?;
-                for sym in &outline {
-                    if sym["name"].as_str() == Some(symbol_name) {
-                        symbol_file = Some(file.clone());
-                        break;
-                    }
-                }
-                if symbol_file.is_some() {
-                    break;
-                }
-            }
-        }
+        let symbol_file = resolve_symbol_file(&store, stable_id, symbol_name, &all_files)?;
 
-        let mut layers: Vec<(u64, Vec<String>)> = Vec::new();
-        let mut visited = HashSet::new();
-        let mut confirmed: Vec<Value> = Vec::new();
-        let mut potential: Vec<Value> = Vec::new();
+        let bfs = symbol_file
+            .as_deref()
+            .map(|f| bfs_importers(f, &reverse_adj, depth))
+            .unwrap_or_else(|| BfsResult {
+                confirmed: Vec::new(),
+                potential: Vec::new(),
+                layers: Vec::new(),
+            });
 
-        if let Some(start_file) = &symbol_file {
-            visited.insert(start_file.clone());
-            let mut frontier = vec![start_file.clone()];
-
-            for d in 1..=depth {
-                let mut next_frontier = Vec::new();
-                let mut layer_files = Vec::new();
-                for f in &frontier {
-                    if let Some(importers) = reverse_adj.get(f) {
-                        for imp in importers {
-                            if visited.insert(imp.clone()) {
-                                next_frontier.push(imp.clone());
-                                layer_files.push(imp.clone());
-                                if d == 1 {
-                                    confirmed.push(json!({
-                                        "file": imp,
-                                        "relation": "direct_importer",
-                                        "depth": d,
-                                    }));
-                                } else {
-                                    potential.push(json!({
-                                        "file": imp,
-                                        "relation": "transitive_importer",
-                                        "depth": d,
-                                    }));
-                                }
-                            }
-                        }
-                    }
-                }
-                if !layer_files.is_empty() {
-                    layers.push((d, layer_files));
-                }
-                frontier = next_frontier;
-                if frontier.is_empty() {
-                    break;
-                }
-            }
-        }
-
-        let total_impacted = confirmed.len() + potential.len();
+        let total_impacted = bfs.confirmed.len() + bfs.potential.len();
         let overall_risk = if total_impacted == 0 {
             0.0
         } else {
             (total_impacted as f64 / all_files.len().max(1) as f64).min(1.0)
         };
-        let direct_count = confirmed.len();
 
         let raw_bytes = store.repo_total_bytes().unwrap_or(0);
         let timer = MetaBuilder::new(raw_bytes);
 
+        let layer_findings: Vec<Value> = bfs
+            .layers
+            .iter()
+            .map(
+                |(d, files)| json!({ "depth": d, "files": files, "risk_score": 1.0 / (*d as f64) }),
+            )
+            .collect();
+
         let mut data = json!({
             "analysis": "blast_radius",
             "overall_risk_score": overall_risk,
-            "direct_dependents_count": direct_count,
+            "direct_dependents_count": bfs.confirmed.len(),
             "importer_count": total_impacted,
-            "confirmed": confirmed,
-            "potential": potential,
-            "confirmed_count": confirmed.len(),
-            "potential_count": potential.len(),
-            "findings": layers.iter().map(|(d, files)| {
-                json!({
-                    "depth": d,
-                    "files": files,
-                    "risk_score": 1.0 / (*d as f64),
-                })
-            }).collect::<Vec<_>>(),
+            "confirmed": bfs.confirmed,
+            "potential": bfs.potential,
+            "confirmed_count": bfs.confirmed.len(),
+            "potential_count": bfs.potential.len(),
+            "findings": layer_findings,
         });
 
-        if include_depth_scores {
-            let impact_by_depth: Vec<Value> = layers
-                .iter()
-                .map(|(d, files)| {
-                    json!({
-                        "depth": d,
-                        "files": files,
-                        "risk_score": 1.0 / (*d as f64),
-                    })
-                })
-                .collect();
-            data["impact_by_depth"] = json!(impact_by_depth);
+        if args.include_depth_scores.unwrap_or(false) {
+            data["impact_by_depth"] = json!(layer_findings);
         }
 
         let call_depth = args.call_depth.unwrap_or(0).min(3);
         if call_depth > 0 {
             let sym_infos = store.all_symbols_with_source()?;
-            let target_sym = sym_infos.iter().find(|s| s.name == symbol_name);
-            if let Some(target) = target_sym {
+            if let Some(target) = sym_infos.iter().find(|s| s.name == symbol_name) {
                 let call_edges = crate::analysis::graph::build_call_edges(&sym_infos);
                 let callers =
                     crate::analysis::graph::find_callers(&target.id, &call_edges, call_depth);
@@ -184,13 +197,12 @@ impl CodeService {
                         })
                     })
                     .collect();
-                data["callers"] = json!(callers_json);
                 data["caller_count"] = json!(callers_json.len());
+                data["callers"] = json!(callers_json);
             }
         }
 
-        let cross_repo = args.cross_repo.unwrap_or(self.config.cross_repo_default);
-        if cross_repo {
+        if args.cross_repo.unwrap_or(self.config.cross_repo_default) {
             data["cross_repo_key"] = json!(format!("blast_radius:{}", symbol_name));
         }
 

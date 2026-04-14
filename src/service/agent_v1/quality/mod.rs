@@ -190,25 +190,22 @@ impl CodeService {
         let d_agent = gov.agent_readiness_score as i64 - baseline.agent_readiness_score as i64;
 
         let s = &gov.structural.root_causes;
-        let a = &gov.agent;
+        let a = &gov.agent.dimensions;
         let b = &baseline;
-        let dim_deltas: [(&str, Option<f64>, Option<f64>); 8] = [
+        let dim_deltas: [(&str, Option<f64>, Option<f64>); 9] = [
             ("modularity", s.modularity, b.modularity),
             ("acyclicity", Some(s.acyclicity), b.acyclicity),
             ("depth", s.depth, b.depth),
             ("equality", Some(s.equality), b.equality),
             ("redundancy", Some(s.redundancy), b.redundancy),
+            ("navigability", Some(a.navigability), b.navigability),
             (
-                "discoverability",
-                Some(a.discoverability),
-                b.discoverability,
+                "comprehensibility",
+                Some(a.comprehensibility),
+                b.comprehensibility,
             ),
-            ("test_backstop", Some(a.test_backstop), b.test_backstop),
-            (
-                "change_locality",
-                Some(a.change_locality),
-                b.change_locality,
-            ),
+            ("verifiability", Some(a.verifiability), b.verifiability),
+            ("change_safety", Some(a.change_safety), b.change_safety),
         ];
 
         let mut degraded_dims = Vec::new();
@@ -260,11 +257,23 @@ impl CodeService {
                     "score": baseline.score,
                     "structural_score": baseline.structural_score,
                     "agent_readiness_score": baseline.agent_readiness_score,
+                    "agent_dimensions": {
+                        "navigability": baseline.navigability,
+                        "comprehensibility": baseline.comprehensibility,
+                        "verifiability": baseline.verifiability,
+                        "change_safety": baseline.change_safety,
+                    },
                 },
                 "current": {
                     "score": gov.score,
                     "structural_score": gov.structural_score,
                     "agent_readiness_score": gov.agent_readiness_score,
+                    "agent_dimensions": {
+                        "navigability": gov.agent.dimensions.navigability,
+                        "comprehensibility": gov.agent.dimensions.comprehensibility,
+                        "verifiability": gov.agent.dimensions.verifiability,
+                        "change_safety": gov.agent.dimensions.change_safety,
+                    },
                 },
                 "delta": delta_obj,
                 "degraded": degraded,

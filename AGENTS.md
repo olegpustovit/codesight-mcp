@@ -7,6 +7,74 @@ For onboarding see [`README.md`](README.md). For active work see
 
 ---
 
+## Product identity — how codesight is NOT prior-art
+
+codesight-mcp is an **independent, Rust-native alternative** to prior-art-mcp.
+We share the same problem space (structured code retrieval for AI agents) but
+our architecture, interface philosophy, and feature depth diverge. Every change
+must widen the gap, never narrow it.
+
+### Design principles that differentiate us
+
+| Axis | prior-art (Python) | codesight (Rust) |
+|---|---|---|
+| **Tool surface** | 30+ flat tools (`get_blast_radius`, `find_dead_code`, …) | **10 consolidated tools** with `view`/`analysis`/`graph` enum dispatch — fewer tool-call decisions for agents |
+| **Performance** | Python + SQLite; indexing I/O-bound | Rust + WAL SQLite; sub-millisecond dispatch, <2s cold ingest |
+| **Quality intelligence** | Hotspots + dead code (structural) | **Agent-readiness scoring** (navigability, comprehensibility, verifiability, change_safety) + quality regression snapshots + test gap analysis — *understands code quality, not just structure* |
+| **Doc-domain awareness** | Code-only (symbol + file text) | **Dual-domain**: code *and* docs (sections, TOC, document outlines) searched together via `domain=hybrid` |
+| **Graph depth** | Import graph + text heuristic calls | Import graph + AST calls + **FQN resolution** + **coupling metrics** + **layer violation enforcement** |
+| **Context assembly** | `get_context_bundle` (single symbol) | `assemble_context` with **4 modes**: bundle, section_context, ranked, query_suggestions |
+| **Regression detection** | None | `evaluate_quality analysis=regression_check` compares quality snapshots across sessions |
+
+### What we must NEVER copy
+
+- **Flat tool proliferation.** prior-art has `get_blast_radius`,
+  `get_impact_preview`, `get_changed_symbols`, `get_symbol_diff` as four
+  separate tools. We have one: `evaluate_impact` with `analysis=` enum.
+  This is a *strength*. Never split a consolidated tool into parallel names.
+- **Session-as-state.** prior-art's `plan_turn` / `get_session_context` /
+  `register_edit` make the server stateful per-conversation. We stay
+  **stateless per-request** — the agent owns its state. If we add session
+  awareness, it's an opt-in overlay, not a mandatory protocol.
+- **AI-provider coupling.** prior-art bundles Anthropic/Gemini/OpenAI
+  summarizer calls inside the MCP server. We never call an LLM from inside
+  codesight — the agent *is* the LLM. Summaries are the agent's job.
+
+### What we already have that prior-art doesn't (or does worse)
+
+- **`inspect_structure view=class_hierarchy`** — already supports class
+  hierarchy traversal. Extend to trait impls and interface bounds, not rebuild.
+- **`ingest_sources input_kind=single_file`** — already handles post-edit
+  reindexing of a single file. prior-art's `register_edit` is equivalent.
+- **`search_catalog semantic=true`** — local embedding support already exists
+  in `src/retrieval/semantic.rs`. prior-art requires external API keys.
+- **`run_watcher`** (`src/service/file_watcher.rs`) — built-in debounced file
+  watcher with delta reindex. prior-art needs a separate `watch-claude` command.
+- **`assemble_context mode=query_suggestions`** — opening-move suggestions
+  already exist. Improve it, don't rebuild it.
+
+### Where we must leapfrog (genuinely new features)
+
+1. **`evaluate_quality analysis=plan_turn`** — upgrade `query_suggestions`
+   into a full **ranked read-plan** with token estimates, confidence scores,
+   and concrete `read_content` refs ready to call. Zero-step-to-code instead
+   of hints. Ships as a new `analysis` enum value, not a new tool.
+
+2. **`manage_indexes action=audit_config`** — agent config auditor. Scans
+   instruction files for every major coding agent: `AGENTS.md` (open
+   standard / Codex / OpenCode), `CLAUDE.md`, `.cursorrules` +
+   `.cursor/rules/`, `.github/copilot-instructions.md` +
+   `.github/copilot/`, `.windsurfrules` + `.windsurf/rules/`. Finds stale
+   symbol refs, dead file paths, token waste. codesight is universal — not
+   tied to any one agent. prior-art hardcodes `CLAUDE.md`/`.cursorrules`
+   only; ours discovers all conventions.
+
+3. **`evaluate_quality analysis=ownership`** — code ownership via git blame +
+   CODEOWNERS. prior-art has nothing here. Critical for large-repo agentic
+   workflows ("who do I ask about this module?").
+
+---
+
 ## Non-negotiable policies
 
 These override everything else. Every patch is measured against them.

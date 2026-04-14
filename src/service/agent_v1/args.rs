@@ -160,7 +160,7 @@ pub struct InspectGraphArgs {
     pub limit: usize,
     #[serde(default)]
     pub repo_path: Option<String>,
-    /// For `coupling_metrics` graph mode: file to analyze.
+    /// For `module_coupling` graph mode: file to analyze.
     #[serde(default)]
     pub module_path: Option<String>,
     /// For `layer_violations` graph mode: layer rules.
@@ -254,7 +254,7 @@ pub struct EvaluateQualityArgs {
     pub min_complexity: Option<u64>,
     #[serde(default)]
     pub top_n: Option<usize>,
-    // extraction_candidates fields
+    // refactor_targets fields
     #[serde(default)]
     pub file_path: Option<String>,
     #[serde(default)]

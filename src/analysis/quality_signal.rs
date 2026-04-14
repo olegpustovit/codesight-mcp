@@ -1,10 +1,12 @@
 //! Structural quality signal: 5 root-cause metrics aggregated into a 0–10 000
 //! composite score via geometric mean. Designed for Sentrux parity.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
 
+use crate::analysis::agent_readiness::{
+    AgentReadinessSignal, compute_agent_readiness, is_fn_method,
+};
 use crate::analysis::complexity::cyclomatic_complexity;
 use crate::analysis::dead_code;
 use crate::analysis::graph::find_cycles;
@@ -40,13 +42,6 @@ pub struct SignalCoverage {
     pub cycle_count: usize,
 }
 
-/// Per-dimension [0.0, 1.0] scores for the 3 agent readiness dimensions.
-pub struct AgentReadinessScores {
-    pub discoverability: f64,
-    pub test_backstop: f64,
-    pub change_locality: f64,
-}
-
 /// Full triple-layer governance signal combining structural + agent readiness.
 pub struct GovernanceSignal {
     /// Top-line governance score (geometric mean of structural × agent readiness).
@@ -54,15 +49,11 @@ pub struct GovernanceSignal {
     pub structural_score: u32,
     pub agent_readiness_score: u32,
     pub structural: QualitySignal,
-    pub agent: AgentReadinessScores,
+    pub agent: AgentReadinessSignal,
     pub assessment: &'static str,
     pub confidence: &'static str,
     pub bottleneck: &'static str,
     pub bottleneck_layer: &'static str,
-}
-
-pub fn is_fn_method(kind: &str) -> bool {
-    kind.eq_ignore_ascii_case("function") || kind.eq_ignore_ascii_case("method")
 }
 
 fn score_assessment(score: u32) -> &'static str {
@@ -384,33 +375,6 @@ fn hash_normalized_body(source: &str) -> u64 {
     hasher.finish()
 }
 
-/// Compute per-file git commit counts. Shared by hotspots, agent readiness,
-/// and test gaps. Returns an empty map if git is unavailable.
-pub fn compute_file_churn(root: &Path) -> HashMap<String, u64> {
-    let mut churn = HashMap::<String, u64>::new();
-    if !root.join(".git").exists() {
-        return churn;
-    }
-    let Ok(output) = std::process::Command::new("git")
-        .args(["log", "--format=", "--name-only"])
-        .current_dir(root)
-        .output()
-    else {
-        return churn;
-    };
-    if !output.status.success() {
-        return churn;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            *churn.entry(trimmed.to_string()).or_default() += 1;
-        }
-    }
-    churn
-}
-
 /// Compute the full triple-layer governance signal.
 pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<GovernanceSignal> {
     let adj = store.dependency_graph_strict()?;
@@ -418,45 +382,23 @@ pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<Governanc
     let all_symbols = store.all_symbols_for_analysis()?;
 
     let structural = compute_quality_signal_precomputed(store, &adj, &cycles, &all_symbols)?;
-
-    let root = store.root_path().ok();
-    let churn = root
-        .as_ref()
-        .map(|r| compute_file_churn(r))
-        .unwrap_or_default();
-
-    let fan_in = compute_fan_in(&adj);
-
-    let discoverability = compute_discoverability(&all_symbols, &fan_in, &churn);
-    let test_backstop = compute_test_backstop(&all_symbols, &adj, &fan_in);
-    let change_locality = compute_change_locality(&adj, &fan_in, &churn);
-
-    let agent = AgentReadinessScores {
-        discoverability,
-        test_backstop,
-        change_locality,
-    };
-
-    let agent_dims = [discoverability, test_backstop, change_locality];
-
-    let product: f64 = agent_dims.iter().map(|v| v.max(0.01)).product();
-    let agent_readiness_score =
-        (product.powf(1.0 / agent_dims.len() as f64) * 10000.0).round() as u32;
+    let agent = compute_agent_readiness(&all_symbols, &adj, store.root_path().ok().as_deref());
+    let agent_readiness_score = agent.score;
 
     let structural_score = structural.score;
 
-    // Governance = geometric mean of structural and agent readiness
-    let governance_score = if structural_score > 0 && agent_readiness_score > 0 {
-        ((structural_score as f64 / 10000.0) * (agent_readiness_score as f64 / 10000.0)).sqrt()
-            * 10000.0
-    } else if structural_score > 0 {
-        structural_score as f64
-    } else {
-        agent_readiness_score as f64
-    };
-    let score = governance_score.round() as u32;
+    let score = (((structural_score as f64 / 10000.0) * (agent_readiness_score as f64 / 10000.0))
+        .sqrt()
+        * 10000.0)
+        .round() as u32;
 
-    let assessment = score_assessment(score);
+    let assessment = if score == 0
+        && (structural.assessment == "insufficient_data" || agent.confidence == "low")
+    {
+        "insufficient_data"
+    } else {
+        score_assessment(score)
+    };
 
     // Find overall bottleneck across both layers
     let all_dims: Vec<(f64, &str, &str)> = [
@@ -481,9 +423,26 @@ pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<Governanc
             "redundancy",
             "structural",
         ),
-        (Some(discoverability), "discoverability", "agent_readiness"),
-        (Some(test_backstop), "test_backstop", "agent_readiness"),
-        (Some(change_locality), "change_locality", "agent_readiness"),
+        (
+            Some(agent.dimensions.navigability),
+            "navigability",
+            "agent_readiness",
+        ),
+        (
+            Some(agent.dimensions.comprehensibility),
+            "comprehensibility",
+            "agent_readiness",
+        ),
+        (
+            Some(agent.dimensions.verifiability),
+            "verifiability",
+            "agent_readiness",
+        ),
+        (
+            Some(agent.dimensions.change_safety),
+            "change_safety",
+            "agent_readiness",
+        ),
     ]
     .into_iter()
     .filter_map(|(v, name, layer)| v.map(|val| (val, name, layer)))
@@ -495,9 +454,9 @@ pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<Governanc
         .map(|(_, name, layer)| (*name, *layer))
         .unwrap_or(("unknown", "unknown"));
 
-    let confidence = if structural.confidence == "high" {
+    let confidence = if structural.confidence == "high" && agent.confidence == "high" {
         "high"
-    } else if structural.confidence != "low" {
+    } else if structural.confidence != "low" && agent.confidence != "low" {
         "medium"
     } else {
         "low"
@@ -516,196 +475,6 @@ pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<Governanc
     })
 }
 
-/// Weighted name-ambiguity: how often do important symbols share names?
-fn compute_discoverability(
-    all_symbols: &[AnalysisSymbol],
-    fan_in: &HashMap<&str, usize>,
-    churn: &HashMap<String, u64>,
-) -> f64 {
-    let fns: Vec<&AnalysisSymbol> = all_symbols
-        .iter()
-        .filter(|s| {
-            let k = s.kind.to_ascii_lowercase();
-            k == "function" || k == "method" || k == "class"
-        })
-        .collect();
-
-    if fns.is_empty() {
-        return 1.0;
-    }
-
-    // Count name variants across files
-    let mut name_files: HashMap<&str, HashSet<&str>> = HashMap::new();
-    for sym in &fns {
-        name_files
-            .entry(sym.name.as_str())
-            .or_default()
-            .insert(sym.file_path.as_str());
-    }
-
-    let mut weighted_ambiguity_sum = 0.0;
-    let mut weight_sum = 0.0;
-
-    for sym in &fns {
-        let fi = *fan_in.get(sym.file_path.as_str()).unwrap_or(&0) as f64;
-        let ch = *churn.get(&sym.file_path).unwrap_or(&0) as f64;
-        let importance = 1.0 + (1.0 + fi).ln() + (1.0 + ch).ln();
-
-        let variants = name_files
-            .get(sym.name.as_str())
-            .map(|s| s.len())
-            .unwrap_or(1);
-        let ambiguity = (variants as f64 - 1.0).max(0.0);
-
-        weighted_ambiguity_sum += ambiguity * importance;
-        weight_sum += importance;
-    }
-
-    if weight_sum == 0.0 {
-        return 1.0;
-    }
-
-    let weighted_mean = weighted_ambiguity_sum / weight_sum;
-    (1.0 / (1.0 + weighted_mean)).clamp(0.0, 1.0)
-}
-
-/// Risk-weighted test coverage: what fraction of high-risk code has test coverage?
-fn compute_test_backstop(
-    all_symbols: &[AnalysisSymbol],
-    adj: &HashMap<String, Vec<String>>,
-    fan_in: &HashMap<&str, usize>,
-) -> f64 {
-    let tested = tested_file_set(all_symbols, adj);
-
-    let mut total_risk = 0.0;
-    let mut covered_risk = 0.0;
-
-    for sym in all_symbols {
-        if !is_fn_method(&sym.kind) {
-            continue;
-        }
-        if is_test_file(&sym.file_path) {
-            continue;
-        }
-
-        let cc = cyclomatic_complexity(&sym.source_text) as f64;
-        if cc < 2.0 {
-            continue;
-        }
-        let fi = *fan_in.get(sym.file_path.as_str()).unwrap_or(&0) as f64;
-        let risk = cc * (1.0 + fi);
-
-        total_risk += risk;
-        if tested.contains(&sym.file_path) {
-            covered_risk += risk;
-        }
-    }
-
-    if total_risk == 0.0 {
-        return 1.0;
-    }
-    (covered_risk / total_risk).clamp(0.0, 1.0)
-}
-
-/// Inverse weighted blast radius of high-centrality files.
-fn compute_change_locality(
-    adj: &HashMap<String, Vec<String>>,
-    fan_in: &HashMap<&str, usize>,
-    churn: &HashMap<String, u64>,
-) -> f64 {
-    if adj.is_empty() {
-        return 1.0;
-    }
-
-    // Weighted surface of hot files
-    let mut weighted_surface = 0.0;
-    let mut file_count = 0usize;
-
-    for file in adj.keys() {
-        let importers = *fan_in.get(file.as_str()).unwrap_or(&0) as f64;
-        let ch = *churn.get(file.as_str()).unwrap_or(&0) as f64;
-        if importers < 2.0 && ch < 5.0 {
-            continue; // skip low-centrality files
-        }
-        let surface = (1.0 + importers) * (1.0 + (1.0 + ch).ln());
-        weighted_surface += surface;
-        file_count += 1;
-    }
-
-    if file_count == 0 {
-        return 1.0;
-    }
-
-    let avg_surface = weighted_surface / file_count as f64;
-    (1.0 / (1.0 + avg_surface / 8.0)).clamp(0.0, 1.0)
-}
-
-/// Compute fan-in (in-degree) per file from the dependency graph.
-pub fn compute_fan_in(adj: &HashMap<String, Vec<String>>) -> HashMap<&str, usize> {
-    let mut fan_in: HashMap<&str, usize> = HashMap::new();
-    for targets in adj.values() {
-        for tgt in targets {
-            *fan_in.entry(tgt.as_str()).or_default() += 1;
-        }
-    }
-    fan_in
-}
-
-/// Build the set of files considered "tested".
-///
-/// Three signals:
-/// 1. Files that test files import (dep-graph edges).
-/// 2. Files containing inline test modules (`#[cfg(test)] mod tests`),
-///    detected by any symbol whose id contains `::tests.`.
-/// 3. Test files themselves are excluded from risk scoring via `is_test_file`.
-pub fn tested_file_set(
-    all_symbols: &[AnalysisSymbol],
-    adj: &HashMap<String, Vec<String>>,
-) -> HashSet<String> {
-    let mut tested: HashSet<String> = HashSet::new();
-
-    // 1. Dep-graph edges: files imported by test files
-    for (src, targets) in adj {
-        if is_test_file(src) {
-            for tgt in targets {
-                tested.insert(tgt.clone());
-            }
-        }
-    }
-
-    // 2. Files with inline test modules (symbol id contains "::tests.")
-    for sym in all_symbols {
-        if sym.id.contains("::tests.") {
-            tested.insert(sym.file_path.clone());
-        }
-    }
-
-    tested
-}
-
-pub fn is_test_file(path: &str) -> bool {
-    const DIR_MARKERS: &[&str] = &["/tests/", "/__tests__/", "/spec/", "/test/"];
-    const SUFFIXES: &[&str] = &[
-        "_test.rs",
-        "_test.py",
-        "_test.go",
-        "_test.ts",
-        "_test.js",
-        ".test.ts",
-        ".test.js",
-        ".test.tsx",
-        ".test.jsx",
-        "_spec.rb",
-        "_spec.ts",
-        "_spec.js",
-    ];
-    let lower = path.to_ascii_lowercase();
-    DIR_MARKERS.iter().any(|m| lower.contains(m))
-        || SUFFIXES.iter().any(|s| lower.ends_with(s))
-        || lower.starts_with("tests/")
-        || lower.starts_with("test/")
-}
-
 pub fn suggestion_for_bottleneck(bottleneck: &str, coverage: &SignalCoverage) -> String {
     match bottleneck {
         "acyclicity" => format!(
@@ -721,13 +490,13 @@ pub fn suggestion_for_bottleneck(bottleneck: &str, coverage: &SignalCoverage) ->
             "Remove {} dead file(s) and {} duplicate function(s)",
             coverage.dead_files, coverage.duplicate_functions
         ),
-        "discoverability" => {
-            "Collapse duplicate symbol names across modules or qualify with distinct prefixes"
-                .to_string()
+        "navigability" => {
+            "Reduce same-name ambiguity and narrow cross-file caller spread".to_string()
         }
-        "test_backstop" => "Add tests for high-complexity, high-fan-in untested code".to_string(),
-        "change_locality" => {
-            "Reduce importer count on hot files; extract stable interfaces".to_string()
+        "comprehensibility" => "Flatten nested code and split long functions".to_string(),
+        "verifiability" => "Add real types, remove type erasure, and add focused tests".to_string(),
+        "change_safety" => {
+            "Reduce fan-in on hot files and tighten visibility of internal APIs".to_string()
         }
         _ => "Investigate the lowest-scoring dimension".to_string(),
     }
@@ -750,12 +519,25 @@ pub fn governance_signal_json(gov: &GovernanceSignal, suggestion: &str) -> serde
             "equality": gov.structural.root_causes.equality,
             "redundancy": gov.structural.root_causes.redundancy,
         },
-        "agent_root_causes": {
-            "discoverability": gov.agent.discoverability,
-            "test_backstop": gov.agent.test_backstop,
-            "change_locality": gov.agent.change_locality,
+        "agent_dimensions": {
+            "navigability": gov.agent.dimensions.navigability,
+            "comprehensibility": gov.agent.dimensions.comprehensibility,
+            "verifiability": gov.agent.dimensions.verifiability,
+            "change_safety": gov.agent.dimensions.change_safety,
+        },
+        "agent_submetrics": {
+            "symbol_uniqueness": gov.agent.submetrics.symbol_uniqueness,
+            "structural_localization": gov.agent.submetrics.structural_localization,
+            "nesting_depth_health": gov.agent.submetrics.nesting_depth_health,
+            "function_length_health": gov.agent.submetrics.function_length_health,
+            "type_annotation_density": gov.agent.submetrics.type_annotation_density,
+            "test_oracle_quality": gov.agent.submetrics.test_oracle_quality,
+            "change_locality": gov.agent.submetrics.change_locality,
+            "interface_encapsulation": gov.agent.submetrics.interface_encapsulation,
+            "hotspot_containment": gov.agent.submetrics.hotspot_containment,
         },
         "confidence": gov.confidence,
+        "type_annotation_method": gov.agent.type_annotation_method,
         "bottleneck": gov.bottleneck,
         "bottleneck_layer": gov.bottleneck_layer,
         "suggestion": suggestion,
@@ -859,47 +641,5 @@ mod tests {
             make_sym("c", "fn c() {}"), // too short
         ];
         assert_eq!(duplicate_function_count(&syms), 1);
-    }
-
-    #[test]
-    fn tested_file_set_detects_inline_tests() {
-        let make_sym = |id: &str, file: &str| AnalysisSymbol {
-            id: id.to_string(),
-            kind: "function".to_string(),
-            name: "f".to_string(),
-            file_path: file.to_string(),
-            start_line: 1,
-            end_line: 10,
-            source_text: String::new(),
-        };
-        let syms = vec![
-            make_sym("src/foo.rs::do_work#function", "src/foo.rs"),
-            make_sym("src/foo.rs::tests.test_do_work#function", "src/foo.rs"),
-            make_sym("src/bar.rs::handle#function", "src/bar.rs"),
-        ];
-        let adj = HashMap::new();
-        let tested = tested_file_set(&syms, &adj);
-        assert!(
-            tested.contains("src/foo.rs"),
-            "file with inline tests should be tested"
-        );
-        assert!(
-            !tested.contains("src/bar.rs"),
-            "file without tests should not be tested"
-        );
-    }
-
-    #[test]
-    fn tested_file_set_detects_dep_graph_edges() {
-        let syms = vec![];
-        let adj = HashMap::from([(
-            "tests/integration.rs".to_string(),
-            vec!["src/lib.rs".to_string()],
-        )]);
-        let tested = tested_file_set(&syms, &adj);
-        assert!(
-            tested.contains("src/lib.rs"),
-            "file imported by test should be tested"
-        );
     }
 }

@@ -5,10 +5,10 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 
-use crate::analysis::complexity::cyclomatic_complexity;
-use crate::analysis::quality_signal::{
+use crate::analysis::agent_readiness::{
     compute_fan_in, compute_file_churn, is_fn_method, is_test_file, tested_file_set,
 };
+use crate::analysis::complexity::cyclomatic_complexity;
 use crate::storage::{AnalysisSymbol, IndexStore};
 
 pub struct TestGap {
@@ -79,7 +79,7 @@ pub fn test_gap_payload(
 fn compute_gaps(
     all_symbols: &[AnalysisSymbol],
     tested: &HashSet<String>,
-    fan_in: &HashMap<&str, usize>,
+    fan_in: &HashMap<String, usize>,
     churn: &HashMap<String, u64>,
     min_complexity: u64,
 ) -> Vec<TestGap> {
@@ -101,7 +101,7 @@ fn compute_gaps(
             continue;
         }
 
-        let fi = *fan_in.get(sym.file_path.as_str()).unwrap_or(&0);
+        let fi = *fan_in.get(&sym.file_path).unwrap_or(&0);
         let ch = *churn.get(&sym.file_path).unwrap_or(&0);
         let risk = cc as f64 * (1.0 + fi as f64) * (1.0 + (1.0 + ch as f64).ln());
 

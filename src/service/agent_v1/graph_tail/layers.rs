@@ -9,7 +9,7 @@ use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
-    pub(super) fn graph_coupling_metrics(
+    pub(super) fn graph_module_coupling(
         &self,
         args: &InspectGraphArgs,
         mode: &str,
@@ -22,7 +22,7 @@ impl CodeService {
                     ToolError {
                         category: ToolErrorCategory::InvalidArgument,
                         code: "INVALID_REQUEST",
-                        message: "coupling_metrics requires module_path.".to_string(),
+                        message: "module_coupling requires module_path.".to_string(),
                         detail: json!({}),
                     },
                 );
