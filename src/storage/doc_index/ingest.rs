@@ -9,6 +9,8 @@ use std::{
 
 use walkdir::{DirEntry, WalkDir};
 
+use codesight_storage::storage::vector_index::OwnedVectorRow;
+
 use crate::{
     repo_id::normalize_repo_id,
     retrieval::sections::{extract_sections, is_doc_file},
@@ -25,6 +27,17 @@ pub struct DocIndexSummary {
 }
 
 pub fn index_local_docs(db_path: PathBuf, root: &Path) -> anyhow::Result<DocIndexSummary> {
+    index_local_docs_with_section_vectors(db_path, root, |_, _| Ok(Vec::new()))
+}
+
+pub fn index_local_docs_with_section_vectors<F>(
+    db_path: PathBuf,
+    root: &Path,
+    build_section_vectors: F,
+) -> anyhow::Result<DocIndexSummary>
+where
+    F: FnOnce(&str, &[DocFileUpdate]) -> anyhow::Result<Vec<OwnedVectorRow>>,
+{
     let repo = normalize_repo_id(root);
     let store = DocStore::open(db_path)?;
     let index_version = store.current_index_version()?.saturating_add(1);
@@ -103,6 +116,7 @@ pub fn index_local_docs(db_path: PathBuf, root: &Path) -> anyhow::Result<DocInde
 
     let indexed_at = chrono::Utc::now().to_rfc3339();
     let file_count = seen_files.len();
+    let section_vectors = build_section_vectors(&repo, &updated_files)?;
     store.apply_index(
         &repo,
         root,
@@ -110,6 +124,7 @@ pub fn index_local_docs(db_path: PathBuf, root: &Path) -> anyhow::Result<DocInde
         index_version,
         &updated_files,
         &removed_files,
+        &section_vectors,
     )?;
     // Report the total section count in the docs index after apply_index,
     // not just the sections touched by this run. The previous behavior

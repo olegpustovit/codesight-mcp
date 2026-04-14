@@ -23,10 +23,7 @@ pub use schema::EMBEDDING_DIM;
 pub use snapshot_store::QualitySnapshot;
 pub use symbol_reads::is_outline_noise;
 pub use symbol_record::{SymbolMetadata, SymbolRecord};
-pub use types::{
-    AnalysisSymbol, RetrievedSymbol, SearchSymbol, SectionEmbeddingInput, SymbolEmbeddingInput,
-    SymbolSourceRecord,
-};
+pub use types::{AnalysisSymbol, RetrievedSymbol, SearchSymbol, SymbolSourceRecord};
 
 #[derive(Clone)]
 pub struct IndexStore {

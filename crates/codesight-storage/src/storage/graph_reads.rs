@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::core::symbols::FactQuality;
 
-use super::{IndexStore, SymbolEmbeddingInput};
+use super::IndexStore;
 
 impl IndexStore {
     fn parse_import_edge_quality(value: &str) -> FactQuality {
@@ -99,30 +99,6 @@ impl IndexStore {
                 end_line: row.get::<_, u32>(6)?,
                 source: row.get(7)?,
                 extraction_tier,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    /// Dense-embedding feed: `(id, kind, name, signature, summary, source_text)`
-    /// for every symbol, streamed in a single query. The text-assembly
-    /// policy lives in the root crate (`retrieval::embedder`); storage
-    /// only shovels rows.
-    pub fn all_symbol_embedding_inputs(
-        &self,
-    ) -> anyhow::Result<Vec<SymbolEmbeddingInput>> {
-        let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare_cached(
-            "SELECT id, kind, name, signature, summary, source_text FROM symbols ORDER BY row_id",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(SymbolEmbeddingInput {
-                id: row.get(0)?,
-                kind: row.get(1)?,
-                name: row.get(2)?,
-                signature: row.get(3)?,
-                summary: row.get(4)?,
-                source_text: row.get(5)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

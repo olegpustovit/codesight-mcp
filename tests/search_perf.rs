@@ -91,6 +91,21 @@ fn search(svc: &CodeService, source_id: &str, query: &str, limit: usize) -> Valu
     .unwrap()
 }
 
+fn semantic_search(svc: &CodeService, source_id: &str, query: &str, limit: usize) -> Value {
+    svc.dispatch(
+        "search_catalog",
+        json!({
+            "source_id": source_id,
+            "query": query,
+            "domain": "code",
+            "unit_kinds": ["symbol"],
+            "semantic": true,
+            "limit": limit,
+        }),
+    )
+    .unwrap()
+}
+
 fn symbol_names(data: &Value) -> Vec<String> {
     data["data"]["items"]
         .as_array()
@@ -155,9 +170,12 @@ fn run_all(repo: &PerfRepo) {
     case_results_stable_across_two_calls(repo);
     case_relevant_symbol_appears_in_results(repo);
     case_query_returns_nonempty_results(repo);
+    case_semantic_query_returns_nonempty_results(repo);
     case_cold_search_within_budget(repo);
     case_warm_search_within_budget(repo);
+    case_warm_semantic_search_within_budget(repo);
     case_warm_faster_than_cold(repo);
+    case_semantic_warm_faster_than_cold(repo);
     case_timing_meta_reported(repo);
 }
 
@@ -202,6 +220,14 @@ fn case_query_returns_nonempty_results(p: &PerfRepo) {
     }
 }
 
+/// Semantic queries should return relevant symbol hits on the shared fixture.
+fn case_semantic_query_returns_nonempty_results(p: &PerfRepo) {
+    let r = semantic_search(&p.svc, &p.source_id, "function that parses files", 10);
+    assert!(r["ok"].as_bool().unwrap(), "semantic query errored: {r:?}");
+    let items = r["data"]["items"].as_array().unwrap();
+    assert!(!items.is_empty(), "semantic query returned no results");
+}
+
 // ---------------------------------------------------------------------------
 // T14 -- Latency budgets (in-process benchmarks)
 // ---------------------------------------------------------------------------
@@ -236,6 +262,22 @@ fn case_warm_search_within_budget(p: &PerfRepo) {
     );
 }
 
+/// Warm semantic search on the already-indexed fixture should complete
+/// within 1000 ms. This includes query embedding plus sqlite-vec KNN.
+fn case_warm_semantic_search_within_budget(p: &PerfRepo) {
+    let _ = semantic_search(&p.svc, &p.source_id, "function that parses files", 10);
+
+    let start = Instant::now();
+    let r = semantic_search(&p.svc, &p.source_id, "function that parses files", 10);
+    let elapsed_ms = start.elapsed().as_millis();
+
+    assert!(r["ok"].as_bool().unwrap());
+    assert!(
+        elapsed_ms < 1000,
+        "Warm semantic search took {elapsed_ms}ms -- exceeds 1000ms budget"
+    );
+}
+
 /// Warm search should not be significantly slower than cold search.
 fn case_warm_faster_than_cold(p: &PerfRepo) {
     let svc2 = p.fresh_service();
@@ -252,6 +294,24 @@ fn case_warm_faster_than_cold(p: &PerfRepo) {
     assert!(
         warm_ms < cold_ms * 10 || warm_ms < 500,
         "Warm ({warm_ms}ms) unexpectedly much slower than cold ({cold_ms}ms)"
+    );
+}
+
+/// Warm semantic search should not be materially slower than the cold
+/// semantic path once the embedder is initialized.
+fn case_semantic_warm_faster_than_cold(p: &PerfRepo) {
+    let svc2 = p.fresh_service();
+    let start = Instant::now();
+    let _ = semantic_search(&svc2, &p.source_id, "function that parses files", 10);
+    let cold_ms = start.elapsed().as_millis();
+
+    let start = Instant::now();
+    let _ = semantic_search(&svc2, &p.source_id, "function that parses files", 10);
+    let warm_ms = start.elapsed().as_millis();
+
+    assert!(
+        warm_ms < cold_ms * 2 || warm_ms < 1000,
+        "Warm semantic ({warm_ms}ms) unexpectedly much slower than cold ({cold_ms}ms)"
     );
 }
 

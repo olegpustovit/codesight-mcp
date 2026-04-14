@@ -11,7 +11,11 @@ fn crate_dependency_graph_is_frozen() {
 
     // Exactly 4 workspace members
     let names: Vec<&str> = workspace_members.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(names.len(), 4, "expected 4 workspace crates, got: {names:?}");
+    assert_eq!(
+        names.len(),
+        4,
+        "expected 4 workspace crates, got: {names:?}"
+    );
     for expected in [
         "codesight-mcp",
         "codesight-core",

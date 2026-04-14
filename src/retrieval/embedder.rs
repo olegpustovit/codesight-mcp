@@ -5,19 +5,33 @@
 //! fallible and cached: one `OnceLock` per `CodeService`, surfacing
 //! `SEMANTIC_FALLBACK` when the model can't be reached.
 //!
-//! Model resolution order, all optional:
-//! 1. `CODESIGHT_EMBEDDING_MODEL_PATH` — local folder with
-//!    `tokenizer.json` + `model.safetensors` + `config.json`.
-//! 2. `CODESIGHT_EMBEDDING_MODEL_REPO` — HuggingFace repo id.
-//! 3. Fall back to `minishlab/potion-base-8M` (the canonical 256-d
-//!    model pinned in `codesight_storage::EMBEDDING_DIM`).
+//! The canonical `minishlab/potion-base-8M` model is vendored into the
+//! repository and embedded into the binary with `include_bytes!`. On first
+//! use we materialize it into a shared local cache dir because
+//! `model2vec-rs` currently only supports loading from real files.
 
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use codesight_storage::EMBEDDING_DIM;
 use model2vec_rs::model::StaticModel;
 
-const DEFAULT_REPO: &str = "minishlab/potion-base-8M";
+use crate::config::BUILD_SHA;
+
+const MODEL_ID: &str = "potion-base-8M";
+const CONFIG_JSON: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/embedder/potion-base-8M/config.json"
+));
+const TOKENIZER_JSON: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/embedder/potion-base-8M/tokenizer.json"
+));
+const MODEL_SAFETENSORS: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/embedder/potion-base-8M/model.safetensors"
+));
 
 /// Opaque embedder handle. `Arc<Embedder>` is the shared form held on
 /// `CodeService`; callers go through [`encode`] / [`encode_query`].
@@ -26,21 +40,14 @@ pub struct Embedder {
 }
 
 impl Embedder {
-    /// Load the embedder, consulting env then defaults. Pure function —
-    /// no disk writes. The caller is expected to cache success into a
-    /// `OnceLock` so repeated retrievals don't re-hit hf-hub.
+    /// Load the built-in embedder by materializing the vendored model to a
+    /// shared cache directory and pointing `model2vec-rs` at that folder.
     pub fn load() -> anyhow::Result<Self> {
-        let (handle, where_from): (String, &'static str) =
-            if let Ok(p) = std::env::var("CODESIGHT_EMBEDDING_MODEL_PATH") {
-                (p, "path")
-            } else if let Ok(r) = std::env::var("CODESIGHT_EMBEDDING_MODEL_REPO") {
-                (r, "repo")
-            } else {
-                (DEFAULT_REPO.to_string(), "default")
-            };
-        tracing::debug!(where_from, handle, "loading model2vec embedder");
-        let model = StaticModel::from_pretrained(&handle, None, None, None)
-            .map_err(|e| anyhow::anyhow!("model2vec load failed ({where_from}={handle}): {e}"))?;
+        let model_dir = materialize_model_bundle()?;
+        tracing::debug!(path = %model_dir.display(), "loading built-in model2vec embedder");
+        let model = StaticModel::from_pretrained(&model_dir, None, None, None).map_err(|e| {
+            anyhow::anyhow!("model2vec load failed from {}: {e}", model_dir.display())
+        })?;
         Ok(Self { inner: model })
     }
 
@@ -149,5 +156,64 @@ impl EmbedderSlot {
 impl Default for EmbedderSlot {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn materialize_model_bundle() -> anyhow::Result<PathBuf> {
+    let root = dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("codesight")
+        .join("embedded-model")
+        .join(format!("{MODEL_ID}-{BUILD_SHA}"));
+    fs::create_dir_all(&root)?;
+    ensure_asset(&root.join("config.json"), CONFIG_JSON)?;
+    ensure_asset(&root.join("tokenizer.json"), TOKENIZER_JSON)?;
+    ensure_asset(&root.join("model.safetensors"), MODEL_SAFETENSORS)?;
+    Ok(root)
+}
+
+fn ensure_asset(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let existing_len = path.metadata().ok().map(|meta| meta.len() as usize);
+    if existing_len == Some(bytes.len()) {
+        return Ok(());
+    }
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    fs::write(&tmp, bytes)?;
+    fs::rename(&tmp, path).or_else(|rename_error| {
+        let already_materialized =
+            path.metadata().ok().map(|meta| meta.len() as usize) == Some(bytes.len());
+        let _ = fs::remove_file(&tmp);
+        if already_materialized {
+            Ok(())
+        } else {
+            Err(rename_error)
+        }
+    })?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::OnceLock;
+
+    fn shared_embedder() -> &'static Embedder {
+        static SHARED: OnceLock<Embedder> = OnceLock::new();
+        SHARED.get_or_init(|| Embedder::load().unwrap())
+    }
+
+    #[test]
+    fn materializes_embedded_model_bundle() {
+        let root = materialize_model_bundle().unwrap();
+        assert!(root.join("config.json").is_file());
+        assert!(root.join("tokenizer.json").is_file());
+        assert!(root.join("model.safetensors").is_file());
+    }
+
+    #[test]
+    fn bundled_model_encodes_expected_dimension() {
+        let embedder = shared_embedder();
+        let vector = embedder.encode_query("hello world").unwrap();
+        assert_eq!(vector.len(), EMBEDDING_DIM);
     }
 }

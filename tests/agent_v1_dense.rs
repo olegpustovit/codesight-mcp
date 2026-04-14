@@ -1,34 +1,28 @@
 //! Dense-retrieval lane — the IDF replacement surface.
 //!
 //! Covers the public guarantees in `IDF_REPLACEMENT.md` §4:
-//!   - `semantic=true` never hard-fails when the model is absent;
-//!     the request succeeds with a `SEMANTIC_FALLBACK` warning.
-//!   - `query_mode=natural_language` implies semantic; same fallback rule.
-//!   - Pure lexical paths (`semantic=false`) do not emit the warning.
-//!
-//! We deliberately point the embedder at a non-existent local path so the
-//! test does not rely on network access to HuggingFace.
+//!   - `semantic=true` uses the built-in model without config.
+//!   - `query_mode=natural_language` implies semantic.
+//!   - Pure lexical paths (`semantic=false`) do not emit semantic warnings.
 
 use std::fs;
+use std::sync::OnceLock;
 
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::service::CodeService;
 use serde_json::{Value, json};
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
 
-fn force_embedder_missing() {
-    // `CODESIGHT_EMBEDDING_MODEL_PATH` is consulted first and treated as a
-    // local folder. A non-existent folder triggers the load-error path
-    // without attempting a network fetch.
-    unsafe {
-        std::env::set_var(
-            "CODESIGHT_EMBEDDING_MODEL_PATH",
-            "/tmp/codesight-nonexistent-embedding-model",
-        );
-    }
+/// Shared read-only fixture for dense search tests. These cases all hit the
+/// same indexed Python file and only differ in search args, so re-ingesting
+/// and re-embedding per test just burns ~1s of cold setup each time.
+fn shared_dense_repo() -> (&'static CodeService, &'static str) {
+    static SHARED: OnceLock<(TempDir, CodeService, String)> = OnceLock::new();
+    let (_ws, svc, sid) = SHARED.get_or_init(build_service_with_code);
+    (svc, sid.as_str())
 }
 
-fn build_service_with_code() -> (CodeService, tempfile::TempDir, String) {
+fn build_service_with_code() -> (TempDir, CodeService, String) {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
@@ -50,7 +44,7 @@ fn build_service_with_code() -> (CodeService, tempfile::TempDir, String) {
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "ingest failed: {r:?}");
     let sid = r["data"]["source_id"].as_str().unwrap().to_string();
-    (svc, ws, sid)
+    (ws, svc, sid)
 }
 
 fn warnings(r: &Value) -> Vec<&Value> {
@@ -61,15 +55,12 @@ fn warnings(r: &Value) -> Vec<&Value> {
 }
 
 fn has_fallback_warning(r: &Value) -> bool {
-    warnings(r)
-        .iter()
-        .any(|w| w["code"] == "SEMANTIC_FALLBACK")
+    warnings(r).iter().any(|w| w["code"] == "SEMANTIC_FALLBACK")
 }
 
 #[test]
-fn semantic_true_without_model_emits_fallback_warning_not_error() {
-    force_embedder_missing();
-    let (svc, _ws, sid) = build_service_with_code();
+fn semantic_true_uses_built_in_model_without_fallback() {
+    let (svc, sid) = shared_dense_repo();
     let r = svc
         .dispatch(
             "search_catalog",
@@ -78,25 +69,20 @@ fn semantic_true_without_model_emits_fallback_warning_not_error() {
         .unwrap();
     assert!(
         r["ok"].as_bool().unwrap(),
-        "semantic=true must NOT hard-fail when model is missing: {r:?}"
+        "semantic=true must succeed with the bundled model: {r:?}"
     );
     assert!(
-        has_fallback_warning(&r),
-        "expected SEMANTIC_FALLBACK warning; got warnings={:?}",
-        warnings(&r)
+        !has_fallback_warning(&r),
+        "bundled model should avoid fallback: {r:?}"
     );
     // Lexical items should still surface.
     let items = r["data"]["items"].as_array().unwrap();
-    assert!(
-        !items.is_empty(),
-        "lexical fallback must still produce items"
-    );
+    assert!(!items.is_empty(), "semantic path must still produce items");
 }
 
 #[test]
-fn natural_language_without_model_emits_fallback_warning() {
-    force_embedder_missing();
-    let (svc, _ws, sid) = build_service_with_code();
+fn natural_language_query_uses_built_in_model_without_fallback() {
+    let (svc, sid) = shared_dense_repo();
     let r = svc
         .dispatch(
             "search_catalog",
@@ -110,16 +96,14 @@ fn natural_language_without_model_emits_fallback_warning() {
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "request must succeed: {r:?}");
     assert!(
-        has_fallback_warning(&r),
-        "query_mode=natural_language must imply semantic; got warnings={:?}",
-        warnings(&r)
+        !has_fallback_warning(&r),
+        "bundled model should avoid fallback: {r:?}"
     );
 }
 
 #[test]
 fn lexical_only_request_does_not_emit_fallback_warning() {
-    force_embedder_missing();
-    let (svc, _ws, sid) = build_service_with_code();
+    let (svc, sid) = shared_dense_repo();
     let r = svc
         .dispatch(
             "search_catalog",
@@ -139,8 +123,7 @@ fn deleted_args_semantic_only_and_weight_are_rejected_silently() {
     // validate stack accepts unknown keys gracefully (#[serde(default)] on
     // listed fields only). This test locks in that passing them is
     // harmless — not an error, not a validation failure.
-    force_embedder_missing();
-    let (svc, _ws, sid) = build_service_with_code();
+    let (svc, sid) = shared_dense_repo();
     let r = svc
         .dispatch(
             "search_catalog",
@@ -156,5 +139,45 @@ fn deleted_args_semantic_only_and_weight_are_rejected_silently() {
     assert!(
         r["ok"].as_bool().unwrap(),
         "deleted knobs must be ignored, not fail validation: {r:?}"
+    );
+}
+
+#[test]
+fn file_only_semantic_request_warns_but_succeeds() {
+    let (svc, sid) = shared_dense_repo();
+    let r = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": sid,
+                "query": "greetings",
+                "semantic": true,
+                "unit_kinds": ["file"],
+                "limit": 5,
+            }),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "request must succeed: {r:?}");
+    let warnings = warnings(&r);
+    assert!(
+        warnings
+            .iter()
+            .any(|w| { w["code"] == "SEMANTIC_FALLBACK" && w["detail"]["reason"] == "files_only" }),
+        "file-only semantic path must warn with files_only fallback: {warnings:?}"
+    );
+}
+
+#[test]
+fn tools_json_exposes_semantic_flag() {
+    let tools: Value = serde_json::from_str(include_str!("../src/tools.json")).unwrap();
+    let search_catalog = tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "search_catalog")
+        .unwrap();
+    assert!(
+        search_catalog["inputSchema"]["properties"]["semantic"].is_object(),
+        "search_catalog schema must expose the semantic flag"
     );
 }

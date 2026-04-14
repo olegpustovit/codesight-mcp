@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 
 use crate::config::BYTES_PER_TOKEN;
-use crate::storage::SearchSymbol;
+use crate::storage::{SearchSection, SearchSymbol};
 
 /// Round a ranker score to 3 decimal places for JSON serialization so f64
 /// round-trip artifacts (e.g. `0.5299999999999999`) don't leak into the
@@ -45,6 +45,24 @@ pub(in crate::service) fn search_hit_symbol(source_id: &str, s: &SearchSymbol) -
         hit.insert("edit_distance".to_string(), json!(v));
     }
     Value::Object(hit)
+}
+
+pub(in crate::service) fn search_hit_section(source_id: &str, s: &SearchSection) -> Value {
+    json!({
+        "ref": {
+            "id": s.id,
+            "stable_id": s.id,
+            "source_id": source_id,
+            "domain": "docs",
+            "kind": "section",
+            "path": s.file,
+            "title": s.heading,
+            "summary": s.summary,
+        },
+        "snippet": s.heading_path,
+        "score": round_score(s.score),
+        "line": s.line,
+    })
 }
 
 /// Rough token count for ranked `total_tokens` / budget checks (`BYTES_PER_TOKEN` bytes ≈ one token).

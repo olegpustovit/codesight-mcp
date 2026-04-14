@@ -85,6 +85,10 @@
           "description": "Optional Levenshtein cutoff on a normalized compare key; pairs within this distance may match even when trigram similarity is low."
         },
         "repo_path": { "type": "string" },
+        "semantic": {
+          "type": "boolean",
+          "description": "Augment symbol/section retrieval with dense embeddings. `query_mode=natural_language` implies this automatically; when dense retrieval is unavailable or the request only targets files, the response succeeds with a `SEMANTIC_FALLBACK` warning."
+        },
         "output_mode": {
           "type": "string",
           "enum": ["items", "count", "files_with_matches"],

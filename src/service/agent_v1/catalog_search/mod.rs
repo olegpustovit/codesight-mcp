@@ -14,21 +14,78 @@ use crate::service::{CodeService, MAX_QUERY_LEN};
 use crate::storage::DocStore;
 use crate::storage::IndexStore;
 
-use semantic::run_dense_lane;
+use semantic::{DenseRankedHit, run_dense_lane, semantic_fallback_warning};
 
 /// Fuse the already-ranked lexical items with the dense lane's id lists
 /// via RRF. Symbol and section lanes fuse separately; file-text hits
 /// (which the dense lane never produces) pass through unchanged.
-fn fuse_items_with_dense(
+fn dense_similarity(distance: f64) -> f64 {
+    1.0 / (1.0 + distance.max(0.0))
+}
+
+fn materialize_dense_symbol_items(
+    source_id: &str,
+    store: Option<&IndexStore>,
+    dense_hits: &[DenseRankedHit],
+) -> Result<std::collections::HashMap<String, Value>, ToolError> {
+    let Some(store) = store else {
+        return Ok(std::collections::HashMap::new());
+    };
+    let ids: Vec<String> = dense_hits.iter().map(|hit| hit.id.clone()).collect();
+    let scores: std::collections::HashMap<&str, f64> = dense_hits
+        .iter()
+        .map(|hit| (hit.id.as_str(), dense_similarity(hit.distance)))
+        .collect();
+    let rows = store.search_symbols_by_ids(&ids).map_err(index_error)?;
+    Ok(rows
+        .into_iter()
+        .map(|mut row| {
+            row.score = *scores.get(row.id.as_str()).unwrap_or(&0.0);
+            let id = row.id.clone();
+            (id, search_hit_symbol(source_id, &row))
+        })
+        .collect())
+}
+
+fn materialize_dense_section_items(
+    source_id: &str,
+    store: Option<&DocStore>,
+    dense_hits: &[DenseRankedHit],
+) -> Result<std::collections::HashMap<String, Value>, ToolError> {
+    let Some(store) = store else {
+        return Ok(std::collections::HashMap::new());
+    };
+    let ids: Vec<String> = dense_hits.iter().map(|hit| hit.id.clone()).collect();
+    let scores: std::collections::HashMap<&str, f64> = dense_hits
+        .iter()
+        .map(|hit| (hit.id.as_str(), dense_similarity(hit.distance)))
+        .collect();
+    let rows = store.search_sections_by_ids(&ids).map_err(index_error)?;
+    Ok(rows
+        .into_iter()
+        .map(|mut row| {
+            row.score = *scores.get(row.id.as_str()).unwrap_or(&0.0);
+            let id = row.id.clone();
+            (id, search_hit_section(source_id, &row))
+        })
+        .collect())
+}
+
+fn merge_dense_ranked_items(
     items: Vec<Value>,
-    dense_symbol_ids: &[String],
-    dense_section_ids: &[String],
+    dense_symbol_hits: &[DenseRankedHit],
+    dense_section_hits: &[DenseRankedHit],
+    mut dense_symbol_items: std::collections::HashMap<String, Value>,
+    mut dense_section_items: std::collections::HashMap<String, Value>,
 ) -> Vec<Value> {
     // Partition: symbols, sections, others (file hits). Preserve input
     // order inside each partition so RRF sees the lexical ranking.
     let mut lex_symbols: Vec<String> = Vec::new();
     let mut lex_sections: Vec<String> = Vec::new();
-    let mut by_id: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    let mut symbol_items: std::collections::HashMap<String, Value> =
+        std::collections::HashMap::new();
+    let mut section_items: std::collections::HashMap<String, Value> =
+        std::collections::HashMap::new();
     let mut others: Vec<Value> = Vec::new();
     for item in items {
         let id = item
@@ -44,36 +101,47 @@ fn fuse_items_with_dense(
         match (id, kind) {
             (Some(i), "symbol") => {
                 lex_symbols.push(i.clone());
-                by_id.insert(i, item);
+                symbol_items.insert(i, item);
             }
             (Some(i), "section") => {
                 lex_sections.push(i.clone());
-                by_id.insert(i, item);
+                section_items.insert(i, item);
             }
             _ => others.push(item),
         }
     }
 
-    let fused_symbols =
-        crate::retrieval::fusion::rrf(lex_symbols, dense_symbol_ids.iter().cloned());
-    let fused_sections =
-        crate::retrieval::fusion::rrf(lex_sections, dense_section_ids.iter().cloned());
+    let fused_symbols = crate::retrieval::fusion::rrf(
+        lex_symbols,
+        dense_symbol_hits.iter().map(|hit| hit.id.clone()),
+    );
+    let fused_sections = crate::retrieval::fusion::rrf(
+        lex_sections,
+        dense_section_hits.iter().map(|hit| hit.id.clone()),
+    );
 
-    let mut out: Vec<Value> = Vec::with_capacity(others.len() + by_id.len());
-    out.extend(others);
+    let mut out: Vec<Value> = Vec::with_capacity(
+        others.len()
+            + symbol_items.len()
+            + section_items.len()
+            + dense_symbol_items.len()
+            + dense_section_items.len(),
+    );
     for (id, _score) in fused_symbols {
-        if let Some(item) = by_id.remove(&id) {
+        if let Some(item) = symbol_items.remove(&id) {
+            out.push(item);
+        } else if let Some(item) = dense_symbol_items.remove(&id) {
             out.push(item);
         }
     }
     for (id, _score) in fused_sections {
-        if let Some(item) = by_id.remove(&id) {
+        if let Some(item) = section_items.remove(&id) {
+            out.push(item);
+        } else if let Some(item) = dense_section_items.remove(&id) {
             out.push(item);
         }
     }
-    // Any items the dense lane surfaced but the lexical lane didn't
-    // produce are dropped — we don't yet materialize records from
-    // bare IDs in this path. Follow-up work.
+    out.extend(others);
     out
 }
 
@@ -411,21 +479,7 @@ impl CodeService {
             .search_sections(effective_query, scope.map(String::as_str), per_kind_cap)
             .map_err(index_error)?;
         for sec in sections {
-            items.push(json!({
-                "ref": {
-                    "id": sec.id,
-                    "stable_id": sec.id,
-                    "source_id": args.source_id,
-                    "domain": "docs",
-                    "kind": "section",
-                    "path": sec.file,
-                    "title": sec.heading,
-                    "summary": sec.summary,
-                },
-                "snippet": sec.heading_path,
-                "score": crate::service::agent_v1::util::round_score(sec.score),
-                "line": sec.line,
-            }));
+            items.push(search_hit_section(&args.source_id, &sec));
         }
         Ok(())
     }
@@ -507,9 +561,14 @@ impl CodeService {
             }
         }
 
-        let semantic_requested = args.semantic.unwrap_or(false)
-            || query_mode_effective == "natural_language";
-        if semantic_requested && (flags.want_symbol || flags.want_section) {
+        let semantic_requested =
+            args.semantic.unwrap_or(false) || query_mode_effective == "natural_language";
+        if semantic_requested && !(flags.want_symbol || flags.want_section) {
+            warnings.push(semantic_fallback_warning(
+                "files_only",
+                "request only targets lexical file hits".to_string(),
+            ));
+        } else if semantic_requested && (flags.want_symbol || flags.want_section) {
             let dense = run_dense_lane(
                 self,
                 &args.query,
@@ -520,7 +579,29 @@ impl CodeService {
             if let Some(w) = dense.warning {
                 warnings.push(w);
             } else {
-                items = fuse_items_with_dense(items, &dense.symbol_ids, &dense.section_ids);
+                let dense_symbol_items = match materialize_dense_symbol_items(
+                    &args.source_id,
+                    code_store.as_ref(),
+                    &dense.symbol_hits,
+                ) {
+                    Ok(items) => items,
+                    Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
+                };
+                let dense_section_items = match materialize_dense_section_items(
+                    &args.source_id,
+                    doc_store.as_ref(),
+                    &dense.section_hits,
+                ) {
+                    Ok(items) => items,
+                    Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
+                };
+                items = merge_dense_ranked_items(
+                    items,
+                    &dense.symbol_hits,
+                    &dense.section_hits,
+                    dense_symbol_items,
+                    dense_section_items,
+                );
                 if items.len() > lim {
                     items.truncate(lim);
                 }
@@ -547,5 +628,50 @@ impl CodeService {
             more_file_hits_exist,
         };
         format_output(self, &fmt_ctx, items, &timer, warnings, extra)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn symbol_item(id: &str) -> Value {
+        json!({
+            "ref": { "id": id, "kind": "symbol" },
+            "snippet": "sig",
+        })
+    }
+
+    fn file_item(path: &str) -> Value {
+        json!({
+            "ref": { "path": path, "kind": "file" },
+            "snippet": "body",
+        })
+    }
+
+    #[test]
+    fn dense_only_hits_are_materialized_and_files_are_appended() {
+        let merged = merge_dense_ranked_items(
+            vec![file_item("src/main.rs"), symbol_item("lex")],
+            &[
+                DenseRankedHit {
+                    id: "dense".to_string(),
+                    distance: 0.1,
+                },
+                DenseRankedHit {
+                    id: "lex".to_string(),
+                    distance: 0.2,
+                },
+            ],
+            &[],
+            std::collections::HashMap::from([("dense".to_string(), symbol_item("dense"))]),
+            std::collections::HashMap::new(),
+        );
+        let ids: Vec<&str> = merged
+            .iter()
+            .filter_map(|item| item.pointer("/ref/id").and_then(Value::as_str))
+            .collect();
+        assert_eq!(ids, vec!["lex", "dense"]);
+        assert_eq!(merged.last().unwrap()["ref"]["kind"], "file");
     }
 }

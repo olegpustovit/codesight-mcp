@@ -16,6 +16,20 @@ pub struct VectorRow<'a> {
     pub embedding: &'a [f32],
 }
 
+pub struct OwnedVectorRow {
+    pub stable_id: String,
+    pub embedding: Vec<f32>,
+}
+
+impl OwnedVectorRow {
+    pub fn borrowed(&self) -> VectorRow<'_> {
+        VectorRow {
+            stable_id: &self.stable_id,
+            embedding: &self.embedding,
+        }
+    }
+}
+
 /// Which domain a vec operation targets. Drives table names + the FK
 /// column that joins back to the lexical row.
 #[derive(Clone, Copy)]
@@ -63,8 +77,9 @@ pub fn upsert_vectors(
     let (lex, vec, pk) = domain.tables();
     let mut id_stmt = conn.prepare_cached(&format!("SELECT row_id FROM {lex} WHERE id = ?1"))?;
     let mut del_stmt = conn.prepare_cached(&format!("DELETE FROM {vec} WHERE {pk} = ?1"))?;
-    let mut ins_stmt =
-        conn.prepare_cached(&format!("INSERT INTO {vec}({pk}, embedding) VALUES (?1, ?2)"))?;
+    let mut ins_stmt = conn.prepare_cached(&format!(
+        "INSERT INTO {vec}({pk}, embedding) VALUES (?1, ?2)"
+    ))?;
     let mut written = 0usize;
     for row in rows {
         let Ok(row_id) = id_stmt.query_row(params![row.stable_id], |r| r.get::<_, i64>(0)) else {
@@ -160,8 +175,14 @@ mod tests {
             &conn,
             Domain::Symbol,
             &[
-                VectorRow { stable_id: "a", embedding: &a },
-                VectorRow { stable_id: "b", embedding: &b },
+                VectorRow {
+                    stable_id: "a",
+                    embedding: &a,
+                },
+                VectorRow {
+                    stable_id: "b",
+                    embedding: &b,
+                },
             ],
         )
         .unwrap();

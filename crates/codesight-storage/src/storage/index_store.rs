@@ -113,6 +113,7 @@ impl IndexStore {
         touched_files: &[FileFingerprint],
         updated_files: &[IndexedFileUpdate],
         removed_files: &[String],
+        symbol_vectors: &[super::vector_index::OwnedVectorRow],
     ) -> anyhow::Result<()> {
         self.apply_index_with_deps(
             repo,
@@ -122,6 +123,7 @@ impl IndexStore {
             touched_files,
             updated_files,
             removed_files,
+            symbol_vectors,
             &[],
             "",
         )
@@ -137,6 +139,7 @@ impl IndexStore {
         touched_files: &[FileFingerprint],
         updated_files: &[IndexedFileUpdate],
         removed_files: &[String],
+        symbol_vectors: &[super::vector_index::OwnedVectorRow],
         dep_edges: &[(String, String, FactQuality)],
         extractor_version: &str,
     ) -> anyhow::Result<()> {
@@ -146,6 +149,13 @@ impl IndexStore {
         Self::touch_files(&tx, touched_files)?;
         for file in updated_files {
             Self::replace_file(&tx, file)?;
+        }
+        if !symbol_vectors.is_empty() {
+            let rows: Vec<_> = symbol_vectors
+                .iter()
+                .map(super::vector_index::OwnedVectorRow::borrowed)
+                .collect();
+            super::vector_index::upsert_vectors(&tx, super::vector_index::Domain::Symbol, &rows)?;
         }
 
         // Replace dependency edges for updated files
@@ -241,44 +251,8 @@ impl IndexStore {
         Ok(PathBuf::from(value))
     }
 
-    /// Replace dense-embedding rows for the given (stable_id, vector) pairs
-    /// in a single transaction. Unknown stable ids are silently skipped —
-    /// the lexical insert is the source of truth. Returns the number of
-    /// rows written.
-    pub fn write_symbol_vectors(
-        &self,
-        rows: &[super::vector_index::VectorRow<'_>],
-    ) -> anyhow::Result<usize> {
-        let mut conn = self.open_connection()?;
-        let tx = conn.transaction()?;
-        let n = super::vector_index::upsert_vectors(
-            &tx,
-            super::vector_index::Domain::Symbol,
-            rows,
-        )?;
-        tx.commit()?;
-        Ok(n)
-    }
-
-    /// Delete dense-embedding rows by stable id.
-    pub fn delete_symbol_vectors_by_id(&self, ids: &[&str]) -> anyhow::Result<usize> {
-        let mut conn = self.open_connection()?;
-        let tx = conn.transaction()?;
-        let n = super::vector_index::delete_vectors(
-            &tx,
-            super::vector_index::Domain::Symbol,
-            ids,
-        )?;
-        tx.commit()?;
-        Ok(n)
-    }
-
     /// KNN over code-symbol embeddings. Returns `(stable_id, distance)` pairs.
-    pub fn query_symbol_knn(
-        &self,
-        query: &[f32],
-        k: usize,
-    ) -> anyhow::Result<Vec<(String, f64)>> {
+    pub fn query_symbol_knn(&self, query: &[f32], k: usize) -> anyhow::Result<Vec<(String, f64)>> {
         let conn = self.open_read_only()?;
         Ok(super::vector_index::query_knn(
             &conn,
@@ -311,6 +285,7 @@ impl IndexStore {
         )?;
         let mut del_files = tx.prepare_cached("DELETE FROM files WHERE file_path = ?1")?;
         for file_path in removed_files {
+            Self::delete_symbol_vectors_for_file(tx, file_path)?;
             del_symbols.execute([file_path])?;
             del_deps.execute([file_path])?;
             del_files.execute([file_path])?;
@@ -344,6 +319,7 @@ impl IndexStore {
         tx: &Transaction<'_>,
         file: &IndexedFileUpdate,
     ) -> anyhow::Result<()> {
+        Self::delete_symbol_vectors_for_file(tx, &file.file_path)?;
         tx.prepare_cached("DELETE FROM symbols WHERE file_path = ?1")?
             .execute([&file.file_path])?;
         tx.prepare_cached("DELETE FROM files WHERE file_path = ?1")?
@@ -366,6 +342,15 @@ impl IndexStore {
                 Self::insert_symbol(tx, symbol)?;
             }
         }
+        Ok(())
+    }
+
+    fn delete_symbol_vectors_for_file(tx: &Transaction<'_>, file_path: &str) -> anyhow::Result<()> {
+        tx.execute(
+            "DELETE FROM vec_symbol_embeddings
+             WHERE symbol_rowid IN (SELECT row_id FROM symbols WHERE file_path = ?1)",
+            [file_path],
+        )?;
         Ok(())
     }
 

@@ -132,6 +132,35 @@ impl DocStore {
         Ok(record)
     }
 
+    pub fn search_sections_by_ids(&self, ids: &[String]) -> anyhow::Result<Vec<SearchSection>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT id, heading, heading_path, level, file_path, start_line, summary
+             FROM sections
+             WHERE id IN ({placeholders})"
+        );
+        let conn = self.open_read_only()?;
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |row| {
+            Ok(SearchSection {
+                id: row.get(0)?,
+                heading: row.get(1)?,
+                heading_path: row.get(2)?,
+                level: row.get::<_, i64>(3)? as u8,
+                file: row.get(4)?,
+                line: row.get::<_, u32>(5)?,
+                summary: row.get(6)?,
+                score: 0.0,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     pub fn section_file_size(&self, id: &str) -> anyhow::Result<Option<u64>> {
         let conn = self.open_read_only()?;
         let result: Option<i64> = conn

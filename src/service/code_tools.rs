@@ -1,6 +1,7 @@
 use std::fs;
 
 use anyhow::Context;
+use codesight_storage::storage::vector_index::OwnedVectorRow;
 use serde_json::{Value, json};
 use tracing::info;
 
@@ -8,11 +9,19 @@ use super::args::*;
 use super::helpers::{slice_file_lines, *};
 use super::{CodeService, MAX_QUERY_LEN};
 use crate::{
+    core::pipeline::IndexedFileUpdate,
     indexing::{code_index, imports::language_for_path},
     repo_id::normalize_repo_id,
     savings::MetaBuilder,
     storage::{self, IndexStore, RetrievedSymbol, SearchSymbol},
 };
+
+fn semantic_embed_warning(message: impl Into<String>) -> Value {
+    json!({
+        "code": "SEMANTIC_EMBED_SKIPPED",
+        "message": message.into(),
+    })
+}
 
 impl CodeService {
     /// Index a local folder, returning the result plus any warnings generated
@@ -27,7 +36,18 @@ impl CodeService {
         &self,
         root: &std::path::Path,
     ) -> anyhow::Result<(IndexResult, Vec<Value>)> {
-        let outcome = code_index::index_workspace(&self.config, root)?;
+        let mut embed_warning = None;
+        let outcome = code_index::index_workspace_with_symbol_vectors(
+            &self.config,
+            root,
+            |_source_id, updated_files| match self.symbol_vectors_for_updates(updated_files) {
+                Ok(rows) => Ok(rows),
+                Err(message) => {
+                    embed_warning = Some(semantic_embed_warning(message));
+                    Ok(Vec::new())
+                }
+            },
+        )?;
         let mut warnings: Vec<Value> = outcome
             .warnings
             .into_iter()
@@ -38,11 +58,7 @@ impl CodeService {
                 })
             })
             .collect();
-
-        // Dense embeddings: re-encode the repo's symbols and write vec rows.
-        // Any failure is downgraded to a warning — lexical ingest already
-        // succeeded and `search_catalog` has a lexical-only fallback path.
-        if let Some(embed_warning) = self.embed_repo_symbols(&outcome.summary.repo) {
+        if let Some(embed_warning) = embed_warning {
             warnings.push(embed_warning);
         }
 
@@ -61,80 +77,28 @@ impl CodeService {
         ))
     }
 
-    /// Encode every symbol for `source_id` and upsert vec rows. Returns
-    /// `Some(warning_json)` on failure so the caller can forward it. On
-    /// success, returns `None` (silent success — ingest meta already
-    /// includes symbol_count).
-    fn embed_repo_symbols(&self, source_id: &str) -> Option<Value> {
-        let store = match self.ensure_repo_store(source_id, None) {
-            Ok(s) => s,
-            Err(e) => {
-                return Some(json!({
-                    "code": "SEMANTIC_EMBED_SKIPPED",
-                    "message": format!("failed to open index for embedding: {e}"),
-                }));
-            }
-        };
-        let inputs = match store.all_symbol_embedding_inputs() {
-            Ok(v) => v,
-            Err(e) => {
-                return Some(json!({
-                    "code": "SEMANTIC_EMBED_SKIPPED",
-                    "message": format!("failed to read symbols for embedding: {e}"),
-                }));
-            }
-        };
-        if inputs.is_empty() {
-            return None;
-        }
-        let embedder = match self.embedder() {
-            Ok(e) => e.clone(),
-            Err(reason) => {
-                return Some(json!({
-                    "code": "SEMANTIC_EMBED_SKIPPED",
-                    "message": format!("embedder unavailable: {reason}"),
-                }));
-            }
-        };
-        let texts: Vec<String> = inputs
+    fn symbol_vectors_for_updates(
+        &self,
+        updated_files: &[IndexedFileUpdate],
+    ) -> Result<Vec<OwnedVectorRow>, String> {
+        let chunks: Vec<(String, String)> = updated_files
             .iter()
-            .map(|s| {
-                crate::retrieval::embedder::symbol_chunk_text(
-                    &s.kind,
-                    &s.name,
-                    &s.signature,
-                    &s.summary,
-                    &s.source_text,
-                )
+            .flat_map(|file| {
+                file.symbols.iter().map(|symbol| {
+                    (
+                        symbol.id.clone(),
+                        crate::retrieval::embedder::symbol_chunk_text(
+                            symbol.kind.as_str(),
+                            &symbol.name,
+                            &symbol.signature,
+                            &symbol.summary,
+                            &symbol.source_text,
+                        ),
+                    )
+                })
             })
             .collect();
-        let vectors = match embedder.encode(&texts) {
-            Ok(v) => v,
-            Err(e) => {
-                return Some(json!({
-                    "code": "SEMANTIC_EMBED_SKIPPED",
-                    "message": format!("encoder error: {e}"),
-                }));
-            }
-        };
-        let rows: Vec<codesight_storage::storage::vector_index::VectorRow<'_>> = inputs
-            .iter()
-            .zip(vectors.iter())
-            .map(|(inp, vec)| codesight_storage::storage::vector_index::VectorRow {
-                stable_id: &inp.id,
-                embedding: vec.as_slice(),
-            })
-            .collect();
-        match store.write_symbol_vectors(&rows) {
-            Ok(n) => {
-                info!(source_id, written = n, "wrote symbol embeddings");
-                None
-            }
-            Err(e) => Some(json!({
-                "code": "SEMANTIC_EMBED_SKIPPED",
-                "message": format!("vec write failed: {e}"),
-            })),
-        }
+        self.encode_chunks(chunks)
     }
 
     pub(super) fn get_file_content(&self, args: FileContentArgs) -> anyhow::Result<Value> {

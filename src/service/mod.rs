@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde_json::{Value, json};
 use tracing::instrument;
 
+use codesight_storage::storage::vector_index::OwnedVectorRow;
+
 use crate::{
     config::AppConfig,
     extractors::ExtractorRegistry,
@@ -92,9 +94,7 @@ impl CodeService {
     /// Lazy-init access to the dense embedder. `Err` means the model could
     /// not be loaded in this session — callers translate to
     /// `SEMANTIC_FALLBACK` warnings rather than erroring the request.
-    pub fn embedder(
-        &self,
-    ) -> Result<&std::sync::Arc<crate::retrieval::embedder::Embedder>, &str> {
+    pub fn embedder(&self) -> Result<&std::sync::Arc<crate::retrieval::embedder::Embedder>, &str> {
         self.embedder.get()
     }
 
@@ -133,6 +133,23 @@ impl CodeService {
 
     pub fn config(&self) -> &AppConfig {
         &self.config
+    }
+
+    fn encode_chunks(&self, chunks: Vec<(String, String)>) -> Result<Vec<OwnedVectorRow>, String> {
+        if chunks.is_empty() {
+            return Ok(Vec::new());
+        }
+        let embedder = self.embedder().map_err(str::to_string)?.clone();
+        let (stable_ids, texts): (Vec<_>, Vec<_>) = chunks.into_iter().unzip();
+        let vectors = embedder.encode(&texts).map_err(|e| e.to_string())?;
+        Ok(stable_ids
+            .into_iter()
+            .zip(vectors)
+            .map(|(stable_id, embedding)| OwnedVectorRow {
+                stable_id,
+                embedding,
+            })
+            .collect())
     }
 
     #[instrument(level = "info", skip(self, arguments), fields(tool = tool_name))]

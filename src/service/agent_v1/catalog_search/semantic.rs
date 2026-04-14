@@ -9,14 +9,20 @@ use serde_json::{Value, json};
 use crate::service::CodeService;
 use crate::storage::{DocStore, IndexStore};
 
+#[derive(Clone, Debug)]
+pub(super) struct DenseRankedHit {
+    pub(super) id: String,
+    pub(super) distance: f64,
+}
+
 /// Result of asking the dense lane for ids. Warnings mirror §4.1 of the plan.
 pub(super) struct DenseHits {
-    pub(super) symbol_ids: Vec<String>,
-    pub(super) section_ids: Vec<String>,
+    pub(super) symbol_hits: Vec<DenseRankedHit>,
+    pub(super) section_hits: Vec<DenseRankedHit>,
     pub(super) warning: Option<Value>,
 }
 
-fn fallback(reason: &'static str, detail: String) -> Value {
+pub(super) fn semantic_fallback_warning(reason: &'static str, detail: String) -> Value {
     json!({
         "code": "SEMANTIC_FALLBACK",
         "message": "Semantic retrieval unavailable; returning lexical results only.",
@@ -37,9 +43,12 @@ pub(super) fn run_dense_lane(
         Ok(e) => e.clone(),
         Err(reason) => {
             return DenseHits {
-                symbol_ids: Vec::new(),
-                section_ids: Vec::new(),
-                warning: Some(fallback("model_load_failed", reason.to_string())),
+                symbol_hits: Vec::new(),
+                section_hits: Vec::new(),
+                warning: Some(semantic_fallback_warning(
+                    "model_load_failed",
+                    reason.to_string(),
+                )),
             };
         }
     };
@@ -47,29 +56,34 @@ pub(super) fn run_dense_lane(
         Ok(v) => v,
         Err(e) => {
             return DenseHits {
-                symbol_ids: Vec::new(),
-                section_ids: Vec::new(),
-                warning: Some(fallback("encoder_error", e.to_string())),
+                symbol_hits: Vec::new(),
+                section_hits: Vec::new(),
+                warning: Some(semantic_fallback_warning("encoder_error", e.to_string())),
             };
         }
     };
 
-    let mut symbol_ids = Vec::new();
-    let mut section_ids = Vec::new();
+    let mut symbol_hits = Vec::new();
+    let mut section_hits = Vec::new();
     let mut missing: Vec<&'static str> = Vec::new();
 
     if let Some(store) = code_store {
         match store.query_symbol_knn(&qvec, k) {
-            Ok(hits) => symbol_ids = hits.into_iter().map(|(id, _)| id).collect(),
+            Ok(hits) => {
+                symbol_hits = hits
+                    .into_iter()
+                    .map(|(id, distance)| DenseRankedHit { id, distance })
+                    .collect()
+            }
             Err(e) => {
                 let msg = e.to_string();
                 if msg.contains("no such table") || msg.contains("vec_symbol_embeddings") {
                     missing.push("code");
                 } else {
                     return DenseHits {
-                        symbol_ids: Vec::new(),
-                        section_ids: Vec::new(),
-                        warning: Some(fallback("knn_error", msg)),
+                        symbol_hits: Vec::new(),
+                        section_hits: Vec::new(),
+                        warning: Some(semantic_fallback_warning("knn_error", msg)),
                     };
                 }
             }
@@ -77,24 +91,29 @@ pub(super) fn run_dense_lane(
     }
     if let Some(store) = doc_store {
         match store.query_section_knn(&qvec, k) {
-            Ok(hits) => section_ids = hits.into_iter().map(|(id, _)| id).collect(),
+            Ok(hits) => {
+                section_hits = hits
+                    .into_iter()
+                    .map(|(id, distance)| DenseRankedHit { id, distance })
+                    .collect()
+            }
             Err(e) => {
                 let msg = e.to_string();
                 if msg.contains("no such table") || msg.contains("vec_section_embeddings") {
                     missing.push("docs");
                 } else {
                     return DenseHits {
-                        symbol_ids: Vec::new(),
-                        section_ids: Vec::new(),
-                        warning: Some(fallback("knn_error", msg)),
+                        symbol_hits: Vec::new(),
+                        section_hits: Vec::new(),
+                        warning: Some(semantic_fallback_warning("knn_error", msg)),
                     };
                 }
             }
         }
     }
 
-    let warning = if !missing.is_empty() && symbol_ids.is_empty() && section_ids.is_empty() {
-        Some(fallback(
+    let warning = if !missing.is_empty() && symbol_hits.is_empty() && section_hits.is_empty() {
+        Some(semantic_fallback_warning(
             "vectors_missing",
             format!("no vec rows in: {}", missing.join(", ")),
         ))
@@ -103,8 +122,8 @@ pub(super) fn run_dense_lane(
     };
 
     DenseHits {
-        symbol_ids,
-        section_ids,
+        symbol_hits,
+        section_hits,
         warning,
     }
 }

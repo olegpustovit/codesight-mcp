@@ -17,6 +17,7 @@ impl DocStore {
         index_version: u32,
         updated_files: &[DocFileUpdate],
         removed_files: &[String],
+        section_vectors: &[codesight_storage::storage::vector_index::OwnedVectorRow],
     ) -> anyhow::Result<()> {
         let mut conn = self.open_connection()?;
         let tx = conn.transaction()?;
@@ -25,12 +26,14 @@ impl DocStore {
             let mut del_sec = tx.prepare_cached("DELETE FROM sections WHERE file_path = ?1")?;
             let mut del_doc = tx.prepare_cached("DELETE FROM doc_files WHERE file_path = ?1")?;
             for file_path in removed_files {
+                Self::delete_section_vectors_for_file(&tx, file_path)?;
                 del_sec.execute([file_path])?;
                 del_doc.execute([file_path])?;
             }
         }
 
         for file in updated_files {
+            Self::delete_section_vectors_for_file(&tx, &file.file_path)?;
             tx.prepare_cached("DELETE FROM sections WHERE file_path = ?1")?
                 .execute([&file.file_path])?;
             tx.prepare_cached("DELETE FROM doc_files WHERE file_path = ?1")?
@@ -42,6 +45,17 @@ impl DocStore {
             for section in &file.sections {
                 Self::insert_section(&tx, section, &file.source)?;
             }
+        }
+        if !section_vectors.is_empty() {
+            let rows: Vec<_> = section_vectors
+                .iter()
+                .map(codesight_storage::storage::vector_index::OwnedVectorRow::borrowed)
+                .collect();
+            codesight_storage::storage::vector_index::upsert_vectors(
+                &tx,
+                codesight_storage::storage::vector_index::Domain::Section,
+                &rows,
+            )?;
         }
 
         tx.execute("DELETE FROM repo_info", [])?;
@@ -78,6 +92,18 @@ impl DocStore {
             section.content_hash,
             source.len() as i64,
         ])?;
+        Ok(())
+    }
+
+    fn delete_section_vectors_for_file(
+        tx: &Transaction<'_>,
+        file_path: &str,
+    ) -> anyhow::Result<()> {
+        tx.execute(
+            "DELETE FROM vec_section_embeddings
+             WHERE section_rowid IN (SELECT row_id FROM sections WHERE file_path = ?1)",
+            [file_path],
+        )?;
         Ok(())
     }
 }

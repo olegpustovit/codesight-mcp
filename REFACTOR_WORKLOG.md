@@ -6,13 +6,50 @@ archive. See [`AGENTS.md`](AGENTS.md) for the policies that govern this work.
 
 ---
 
+## 2026-04-14 — IDF replacement verification follow-up
+
+Verified the `IDF_REPLACEMENT.md` rollout against the live code and fixed the
+remaining drift in the dense lane:
+
+- **Dense results now survive lexical misses.** `search_catalog` no longer
+  drops dense-only symbol/section hits during RRF merge; dense materialization
+  happens from stable ids, and file hits stay appended after the fused
+  symbol/section lanes as specified.
+- **Public contract restored.** `src/tools.json` again exposes
+  `search_catalog.semantic`, and file-only semantic requests now return the
+  required `SEMANTIC_FALLBACK` warning with `reason=files_only`.
+- **Incremental embedding narrowed.** Post-ingest embedding now re-encodes
+  only updated code/doc files instead of the whole store. Replaced/removed
+  files also clear their vec rows before lexical deletion so vec tables do not
+  accumulate stale rowids across incremental ingests.
+- **Lexical + vec writes are now atomic.** Code/doc ingest builds embeddings
+  before commit and writes lexical rows plus `vec_*_embeddings` rows inside the
+  same SQLite transaction. The second-phase reopen/requery/write path is gone,
+  along with the old storage-only embedding-input helpers.
+- **Bundled model, zero config.** `potion-base-8M` now ships inside the
+  binary via vendored assets under `assets/embedder/`; runtime extracts the
+  three required files into a shared local cache dir for `model2vec-rs`.
+  The `CODESIGHT_EMBEDDING_MODEL_PATH` / `CODESIGHT_EMBEDDING_MODEL_REPO`
+  knobs are gone.
+- **Dense test hotpath trimmed.** `tests/agent_v1_dense.rs` now shares one
+  indexed fixture across the read-only cases, and the embedder unit tests
+  reuse one loaded model. That removes repeated cold ingest/model-load work
+  from the test code while preserving coverage.
+- **Warm semantic perf guardrail added.** `tests/search_perf.rs` now covers
+  semantic result presence plus warm semantic latency on the shared indexed
+  fixture, so portability-friendly CPU inference still has an explicit budget.
+- **Verification.** `cargo nextest run --test agent_v1_dense`,
+  `cargo nextest run -p codesight-mcp --lib`,
+  `cargo nextest run -p codesight-storage --lib`, and
+  `cargo check -p codesight-storage --benches`.
+
 ## 2026-04-14 — TF-IDF → dense embeddings (IDF_REPLACEMENT.md)
 
 Landed the full IDF replacement across WS0–WS6. Outcomes:
 
 - **Deleted.** `src/retrieval/semantic.rs` (29 symbols),
   `tests/agent_v1_semantic.rs`, `embed_repo` registry entry + handler,
-  `AppConfig::embedding_path`, `CODESIGHT_EMBED_MODEL` env,
+  runtime embedder model-path/repo config knobs,
   `SearchCatalogArgs::{semantic_only, semantic_weight}`. Net deletion.
 - **Added.** `src/retrieval/embedder.rs` (model2vec-rs wrapper, lazy
   `EmbedderSlot`), `src/retrieval/fusion.rs` (RRF), storage-side
@@ -159,24 +196,12 @@ ensures it's paid once. No perf regression on hot paths.
 
 **Files with raw `std::env::var` outside `env.rs`:**
 
-1. `src/retrieval/semantic.rs:37-49` — uses raw string literals:
-   `"GOOGLE_API_KEY"`, `"GOOGLE_EMBED_MODEL"`, `"OPENAI_API_KEY"`,
-   `"OPENAI_EMBED_MODEL"`. Add these as consts to `src/config/env.rs`:
-   ```rust
-   pub const GOOGLE_API_KEY: &str = "GOOGLE_API_KEY";
-   pub const GOOGLE_EMBED_MODEL: &str = "GOOGLE_EMBED_MODEL";
-   pub const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
-   pub const OPENAI_EMBED_MODEL: &str = "OPENAI_EMBED_MODEL";
-   ```
-   Then replace `std::env::var("GOOGLE_API_KEY")` →
-   `std::env::var(crate::config::env::GOOGLE_API_KEY)` etc.
-
-2. `src/retrieval/summarizer.rs:93` — has a local `env_opt(key)` helper.
+1. `src/retrieval/summarizer.rs:93` — has a local `env_opt(key)` helper.
    Replace with `crate::config::env::opt_bool` or similar. The keys used
    inside should already be in `env.rs` (`SUMMARIZER_PROVIDER`,
    `SUMMARIZER_MODEL`). If the summarizer reads other keys, add them.
 
-3. `src/server_support/path_map.rs:71` — uses `std::env::var(ENV_VAR)` where
+2. `src/server_support/path_map.rs:71` — uses `std::env::var(ENV_VAR)` where
    `ENV_VAR` is a local `const ENV_VAR: &str = "CODESIGHT_PATH_MAP"`. Delete
    the local const; use `crate::config::env::PATH_MAP` which already exists.
 

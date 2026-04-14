@@ -62,28 +62,6 @@ pub struct SymbolSourceRecord {
     pub extraction_tier: crate::core::symbols::ExtractionTier,
 }
 
-/// Inputs to build a code-symbol dense embedding. Owned copies — intended
-/// for single-pass ingestion, not long-term storage in-memory.
-#[derive(Debug, Clone)]
-pub struct SymbolEmbeddingInput {
-    pub id: String,
-    pub kind: String,
-    pub name: String,
-    pub signature: String,
-    pub summary: String,
-    pub source_text: String,
-}
-
-/// Inputs to build a doc-section dense embedding.
-#[derive(Debug, Clone)]
-pub struct SectionEmbeddingInput {
-    pub id: String,
-    pub heading: String,
-    pub heading_path: String,
-    pub summary: String,
-    pub content_text: String,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct SearchCandidate {
     pub(crate) result: SearchSymbol,

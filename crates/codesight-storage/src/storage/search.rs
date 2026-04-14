@@ -207,6 +207,49 @@ impl IndexStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Materialize search-shaped symbol rows for a specific id set.
+    pub fn search_symbols_by_ids(&self, ids: &[String]) -> anyhow::Result<Vec<SearchSymbol>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT id, kind, name, file_path, start_line, signature, summary
+             FROM symbols
+             WHERE id IN ({placeholders})"
+        );
+        let conn = self.open_read_only()?;
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |row| {
+            let kind_str: String = row.get(1)?;
+            let kind = SymbolKind::from_db(&kind_str).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::other(format!(
+                        "unknown symbol kind {kind_str}"
+                    ))),
+                )
+            })?;
+            Ok(SearchSymbol {
+                id: row.get(0)?,
+                kind,
+                name: row.get(2)?,
+                file: row.get(3)?,
+                line: row.get::<_, u32>(4)?,
+                signature: row.get(5)?,
+                summary: row.get(6)?,
+                score: 0.0,
+                match_type: None,
+                fuzzy_similarity: None,
+                edit_distance: None,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Bounded scan of symbols for fuzzy / relatedness tooling (not BM25-ranked).
     pub fn symbols_light_scan(
         &self,

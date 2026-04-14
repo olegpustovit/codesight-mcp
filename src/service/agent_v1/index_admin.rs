@@ -1,6 +1,5 @@
 //! Index lifecycle + column search.
 
-
 use serde::Deserialize;
 use serde_json::{Value, json};
 

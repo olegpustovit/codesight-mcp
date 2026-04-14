@@ -10,6 +10,8 @@ use std::{
 use ignore::WalkBuilder;
 use tracing::instrument;
 
+use codesight_storage::storage::vector_index::OwnedVectorRow;
+
 use crate::{
     analysis::graph as dep_graph,
     config::{AppConfig, GITIGNORE_WARNING_FILE_THRESHOLD},
@@ -49,6 +51,17 @@ pub struct CodeIndexOutcome {
     fields(root = %root.display())
 )]
 pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIndexOutcome> {
+    index_workspace_with_symbol_vectors(config, root, |_, _| Ok(Vec::new()))
+}
+
+pub fn index_workspace_with_symbol_vectors<F>(
+    config: &AppConfig,
+    root: &Path,
+    build_symbol_vectors: F,
+) -> anyhow::Result<CodeIndexOutcome>
+where
+    F: FnOnce(&str, &[IndexedFileUpdate]) -> anyhow::Result<Vec<OwnedVectorRow>>,
+{
     let repo = normalize_repo_id(root);
     let store = IndexStore::open(config.repo_db_path(&repo))?;
     let index_version = store.current_index_version()?.saturating_add(1);
@@ -202,6 +215,7 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
     let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(&graph_sources, alias_ref);
 
     let indexed_at = chrono::Utc::now().to_rfc3339();
+    let symbol_vectors = build_symbol_vectors(&repo, &updated_files)?;
     store.apply_index_with_deps(
         &repo,
         root,
@@ -210,6 +224,7 @@ pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIn
         &touched_files,
         &updated_files,
         &removed_files,
+        &symbol_vectors,
         &dep_edges,
         extractor_version,
     )?;
@@ -339,6 +354,7 @@ pub fn reindex_files(
         &[],
         &updated_files,
         &removed_files,
+        &[],
         &dep_edges,
         extractor_version,
     )?;

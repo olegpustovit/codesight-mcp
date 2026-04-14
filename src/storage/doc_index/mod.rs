@@ -5,7 +5,7 @@ mod migrations;
 mod query;
 mod store;
 
-pub use ingest::{DocIndexSummary, index_local_docs};
+pub use ingest::{DocIndexSummary, index_local_docs, index_local_docs_with_section_vectors};
 pub use migrations::{DOC_INDEX_TARGET_USER_VERSION, apply_doc_index_migrations};
 
 use std::{
@@ -141,47 +141,8 @@ impl DocStore {
         Ok(db::open_cached_ro(&self.ro_conn, &self.db_path)?)
     }
 
-    /// Dense-embedding feed: `(id, heading, heading_path, summary, content_text)`
-    /// for every section, streamed in a single query.
-    pub fn all_section_embedding_inputs(
-        &self,
-    ) -> anyhow::Result<Vec<codesight_storage::storage::SectionEmbeddingInput>> {
-        let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare_cached(
-            "SELECT id, heading, heading_path, summary, content_text FROM sections ORDER BY row_id",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(codesight_storage::storage::SectionEmbeddingInput {
-                id: row.get(0)?,
-                heading: row.get(1)?,
-                heading_path: row.get(2)?,
-                summary: row.get(3)?,
-                content_text: row.get(4)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(anyhow::Error::from)
-    }
-
-    /// Replace dense-embedding rows for the given (stable_id, vector) pairs.
-    pub fn write_section_vectors(
-        &self,
-        rows: &[codesight_storage::storage::vector_index::VectorRow<'_>],
-    ) -> anyhow::Result<usize> {
-        use codesight_storage::storage::vector_index::{Domain, upsert_vectors};
-        let mut conn = self.open_connection()?;
-        let tx = conn.transaction()?;
-        let n = upsert_vectors(&tx, Domain::Section, rows)?;
-        tx.commit()?;
-        Ok(n)
-    }
-
     /// KNN over section embeddings.
-    pub fn query_section_knn(
-        &self,
-        query: &[f32],
-        k: usize,
-    ) -> anyhow::Result<Vec<(String, f64)>> {
+    pub fn query_section_knn(&self, query: &[f32], k: usize) -> anyhow::Result<Vec<(String, f64)>> {
         use codesight_storage::storage::vector_index::{Domain, query_knn};
         let conn = self.open_read_only()?;
         Ok(query_knn(&conn, Domain::Section, query, k)?)

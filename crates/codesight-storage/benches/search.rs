@@ -87,6 +87,7 @@ fn build_fixture() -> (TempDir, IndexStore) {
             &files,
             &updates,
             &[],
+            &[],
         )
         .expect("apply_index");
 
