@@ -4,7 +4,11 @@ use std::sync::LazyLock;
 
 use crate::db;
 
-const INDEX_STORE_INIT_SQL_TAIL: &str = r#"
+/// Dense-embedding dimension. Matches `potion-base-8M` (model2vec static).
+/// Changing this invalidates existing vec tables — bump the migration version.
+pub const EMBEDDING_DIM: usize = 256;
+
+const INDEX_STORE_INIT_SQL_TAIL_PREFIX: &str = r#"
 CREATE TABLE IF NOT EXISTS files (
     file_path TEXT PRIMARY KEY,
     language TEXT NOT NULL,
@@ -78,5 +82,11 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 "#;
 
-pub(crate) static INDEX_STORE_INIT_SQL: LazyLock<String> =
-    LazyLock::new(|| format!("{}{}", db::REPO_INFO_DDL, INDEX_STORE_INIT_SQL_TAIL));
+pub(crate) static INDEX_STORE_INIT_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "{}{}\nCREATE VIRTUAL TABLE IF NOT EXISTS vec_symbol_embeddings USING vec0(symbol_rowid INTEGER PRIMARY KEY, embedding FLOAT[{dim}]);\n",
+        db::REPO_INFO_DDL,
+        INDEX_STORE_INIT_SQL_TAIL_PREFIX,
+        dim = EMBEDDING_DIM,
+    )
+});

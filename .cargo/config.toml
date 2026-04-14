@@ -1,0 +1,13 @@
+# Nix-darwin: `sqlite-vec` build.rs emits `-liconv`, which isn't on the default
+# linker search path inside the Nix shell. Point rustc at the libiconv the Nix
+# libSystem stubs actually ship. Outside Nix this path is a no-op: cc falls
+# back to the SDK's own libiconv.
+[target.aarch64-apple-darwin]
+rustflags = ["-L", "/nix/store/pb4vbsfgdik0qizna8vrdzk0jv746rgy-libiconv-99/lib"]
+
+# cc-rs picks up the Nix g++ by default but passes clang-style flags
+# (`-stdlib=libc++`), which g++ rejects. Force Xcode clang so C++ build
+# scripts (tokenizers → esaxx-rs, onig_sys) compile cleanly.
+[env]
+CC = "/usr/bin/clang"
+CXX = "/usr/bin/clang++"

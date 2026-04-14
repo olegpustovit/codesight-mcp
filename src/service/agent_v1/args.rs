@@ -75,15 +75,11 @@ pub struct SearchCatalogArgs {
     pub max_edit_distance: Option<u32>,
     #[serde(default)]
     pub repo_path: Option<String>,
-    /// Enable semantic (embedding) search.
+    /// Enable dense-embedding retrieval as an RRF-fused augmentation to BM25.
+    /// When semantic fails (model unavailable, vectors missing) the response
+    /// still succeeds and includes a `SEMANTIC_FALLBACK` warning.
     #[serde(default)]
     pub semantic: Option<bool>,
-    /// Blend weight for semantic vs BM25 (0.0 = pure BM25, 1.0 = pure semantic).
-    #[serde(default)]
-    pub semantic_weight: Option<f64>,
-    /// If true, skip BM25 entirely and use only semantic similarity.
-    #[serde(default)]
-    pub semantic_only: Option<bool>,
     /// Sort-by mode: "relevance" (default), "centrality", etc.
     #[serde(default)]
     pub sort_by: Option<String>,

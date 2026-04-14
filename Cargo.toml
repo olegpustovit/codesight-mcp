@@ -19,6 +19,8 @@ codesight-extractors = { path = "crates/codesight-extractors" }
 codesight-storage = { path = "crates/codesight-storage" }
 dirs = "6.0.0"
 rusqlite = { version = "0.39.0", features = ["bundled", "chrono"] }
+sqlite-vec = "0.1"
+model2vec-rs = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 strum = { version = "0.26", features = ["derive"] }

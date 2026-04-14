@@ -14,7 +14,68 @@ use crate::service::{CodeService, MAX_QUERY_LEN};
 use crate::storage::DocStore;
 use crate::storage::IndexStore;
 
-use semantic::{SemanticMode, apply_semantic};
+use semantic::run_dense_lane;
+
+/// Fuse the already-ranked lexical items with the dense lane's id lists
+/// via RRF. Symbol and section lanes fuse separately; file-text hits
+/// (which the dense lane never produces) pass through unchanged.
+fn fuse_items_with_dense(
+    items: Vec<Value>,
+    dense_symbol_ids: &[String],
+    dense_section_ids: &[String],
+) -> Vec<Value> {
+    // Partition: symbols, sections, others (file hits). Preserve input
+    // order inside each partition so RRF sees the lexical ranking.
+    let mut lex_symbols: Vec<String> = Vec::new();
+    let mut lex_sections: Vec<String> = Vec::new();
+    let mut by_id: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    let mut others: Vec<Value> = Vec::new();
+    for item in items {
+        let id = item
+            .get("ref")
+            .and_then(|r| r.get("id"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let kind = item
+            .get("ref")
+            .and_then(|r| r.get("kind"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        match (id, kind) {
+            (Some(i), "symbol") => {
+                lex_symbols.push(i.clone());
+                by_id.insert(i, item);
+            }
+            (Some(i), "section") => {
+                lex_sections.push(i.clone());
+                by_id.insert(i, item);
+            }
+            _ => others.push(item),
+        }
+    }
+
+    let fused_symbols =
+        crate::retrieval::fusion::rrf(lex_symbols, dense_symbol_ids.iter().cloned());
+    let fused_sections =
+        crate::retrieval::fusion::rrf(lex_sections, dense_section_ids.iter().cloned());
+
+    let mut out: Vec<Value> = Vec::with_capacity(others.len() + by_id.len());
+    out.extend(others);
+    for (id, _score) in fused_symbols {
+        if let Some(item) = by_id.remove(&id) {
+            out.push(item);
+        }
+    }
+    for (id, _score) in fused_sections {
+        if let Some(item) = by_id.remove(&id) {
+            out.push(item);
+        }
+    }
+    // Any items the dense lane surfaced but the lexical lane didn't
+    // produce are dropped — we don't yet materialize records from
+    // bare IDs in this path. Follow-up work.
+    out
+}
 
 struct KindFlags {
     want_symbol: bool,
@@ -74,18 +135,6 @@ fn validate_presearch(args: &SearchCatalogArgs) -> Result<(), ToolError> {
                 detail: json!({ "sort_by": sort_by }),
             });
         }
-    }
-    let semantic_enabled = args.semantic.unwrap_or(false);
-    let semantic_only = args.semantic_only.unwrap_or(false);
-    if (semantic_enabled || semantic_only)
-        && crate::retrieval::semantic::detect_embedding_provider().is_none()
-    {
-        return Err(ToolError {
-            category: ToolErrorCategory::InvalidArgument,
-            code: "no_embedding_provider",
-            message: "No embedding provider configured. Set CODESIGHT_EMBED_MODEL, or OPENAI_API_KEY+OPENAI_EMBED_MODEL, or GOOGLE_API_KEY+GOOGLE_EMBED_MODEL.".into(),
-            detail: json!({}),
-        });
     }
     Ok(())
 }
@@ -392,10 +441,6 @@ impl CodeService {
             return self.error_response(&MetaBuilder::new(0), e);
         }
 
-        let semantic_enabled = args.semantic.unwrap_or(false);
-        let semantic_only = args.semantic_only.unwrap_or(false);
-        let search_mode = SemanticMode::resolve(semantic_enabled, semantic_only);
-
         let scope = args.scope.clone().or(args.file_pattern.clone());
         let counting = output_mode == "count" || output_mode == "files_with_matches";
         let lim = if counting {
@@ -462,22 +507,36 @@ impl CodeService {
             }
         }
 
-        if (semantic_enabled || semantic_only) && flags.want_symbol {
-            apply_semantic(self, &args, lim, &search_mode, &mut items);
+        let semantic_requested = args.semantic.unwrap_or(false)
+            || query_mode_effective == "natural_language";
+        if semantic_requested && (flags.want_symbol || flags.want_section) {
+            let dense = run_dense_lane(
+                self,
+                &args.query,
+                code_store.as_ref(),
+                doc_store.as_ref(),
+                lim,
+            );
+            if let Some(w) = dense.warning {
+                warnings.push(w);
+            } else {
+                items = fuse_items_with_dense(items, &dense.symbol_ids, &dense.section_ids);
+                if items.len() > lim {
+                    items.truncate(lim);
+                }
+            }
         }
 
         let timer = MetaBuilder::new(raw_bytes.max(1));
-        let mut extra: Vec<(String, Value)> = vec![
+        let extra: Vec<(String, Value)> = vec![
             ("domain_effective".to_string(), json!(domain)),
             (
                 "query_mode_effective".to_string(),
                 json!(query_mode_effective),
             ),
             ("domain_explicit".to_string(), json!(domain_explicit)),
+            ("semantic_applied".to_string(), json!(semantic_requested)),
         ];
-        if semantic_enabled || semantic_only {
-            extra.push(("search_mode".to_string(), json!(search_mode.as_str())));
-        }
 
         let fmt_ctx = FormatCtx {
             output_mode: &output_mode,

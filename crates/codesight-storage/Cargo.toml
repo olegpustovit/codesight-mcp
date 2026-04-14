@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1"
 codesight-core = { path = "../codesight-core" }
 rusqlite = { version = "0.39.0", features = ["bundled", "chrono"] }
+sqlite-vec = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

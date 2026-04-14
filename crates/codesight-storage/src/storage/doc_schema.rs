@@ -11,8 +11,9 @@ use tracing::instrument;
 
 use crate::db;
 use crate::error::StorageResult;
+use crate::storage::schema::EMBEDDING_DIM;
 
-const DOC_STORE_INIT_SQL_TAIL: &str = r#"
+const DOC_STORE_INIT_SQL_TAIL_PREFIX: &str = r#"
 CREATE TABLE IF NOT EXISTS doc_files (
     file_path TEXT PRIMARY KEY,
     format TEXT NOT NULL,
@@ -68,11 +69,17 @@ CREATE TRIGGER IF NOT EXISTS sections_au AFTER UPDATE ON sections BEGIN
 END;
 "#;
 
-pub static DOC_STORE_INIT_SQL: LazyLock<String> =
-    LazyLock::new(|| format!("{}{}", db::REPO_INFO_DDL, DOC_STORE_INIT_SQL_TAIL));
+pub static DOC_STORE_INIT_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "{}{}\nCREATE VIRTUAL TABLE IF NOT EXISTS vec_section_embeddings USING vec0(section_rowid INTEGER PRIMARY KEY, embedding FLOAT[{dim}]);\n",
+        db::REPO_INFO_DDL,
+        DOC_STORE_INIT_SQL_TAIL_PREFIX,
+        dim = EMBEDDING_DIM,
+    )
+});
 
 /// Bump when adding a doc-index migration.
-pub const DOC_INDEX_TARGET_USER_VERSION: i32 = 1;
+pub const DOC_INDEX_TARGET_USER_VERSION: i32 = 2;
 
 /// Apply forward-only migrations so `PRAGMA user_version == DOC_INDEX_TARGET_USER_VERSION`.
 #[instrument(level = "debug", skip(conn), fields(kind = "migrate_doc_index"))]
@@ -81,6 +88,13 @@ pub fn apply_doc_index_migrations(conn: &Connection) -> StorageResult<()> {
     if v < 1 {
         conn.execute_batch(DOC_STORE_INIT_SQL.as_str())?;
         conn.execute("PRAGMA user_version = 1", [])?;
+    }
+    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if v < 2 {
+        conn.execute_batch(&format!(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS vec_section_embeddings USING vec0(section_rowid INTEGER PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIM}]);"
+        ))?;
+        conn.execute("PRAGMA user_version = 2", [])?;
     }
     Ok(())
 }

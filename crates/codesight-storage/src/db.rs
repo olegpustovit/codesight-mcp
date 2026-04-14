@@ -5,13 +5,30 @@ use std::{
     fs,
     ops::Deref,
     path::Path,
-    sync::{Mutex, MutexGuard},
+    sync::{Mutex, MutexGuard, Once},
     time::Duration,
 };
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, ffi};
 
 use crate::error::StorageResult;
+
+/// Register `sqlite-vec` as an auto-extension so every subsequent
+/// `Connection::open*` gets `vec0` virtual-table support without manual
+/// loading. Idempotent — the `Once` guard makes double-registration cheap
+/// across parallel test binaries.
+fn ensure_sqlite_vec_registered() {
+    type AutoExt = unsafe extern "C" fn(
+        *mut ffi::sqlite3,
+        *mut *mut std::os::raw::c_char,
+        *const ffi::sqlite3_api_routines,
+    ) -> std::os::raw::c_int;
+    static REGISTER: Once = Once::new();
+    REGISTER.call_once(|| unsafe {
+        let entry: AutoExt = std::mem::transmute(sqlite_vec::sqlite3_vec_init as *const ());
+        ffi::sqlite3_auto_extension(Some(entry));
+    });
+}
 
 /// Per-store read-only connection cache. First call lazily opens via
 /// `db::open_ro`; subsequent calls within the same store instance reuse it.
@@ -94,6 +111,7 @@ fn apply_rw_pragmas(conn: &Connection) -> StorageResult<()> {
 /// Read-only open: cannot switch `journal_mode` (requires write). Assumes writers already
 /// enabled WAL; still set busy timeout so concurrent readers wait on checkpoints.
 pub fn open_ro(path: &Path) -> StorageResult<Connection> {
+    ensure_sqlite_vec_registered();
     let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -104,6 +122,7 @@ pub fn open_ro(path: &Path) -> StorageResult<Connection> {
 }
 
 pub fn open_rw(path: &Path) -> StorageResult<Connection> {
+    ensure_sqlite_vec_registered();
     let conn = Connection::open(path)?;
     apply_rw_pragmas(&conn)?;
     conn.set_prepared_statement_cache_capacity(32);

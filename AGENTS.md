@@ -256,8 +256,17 @@ CLI) stays in the root crate — don't smuggle it into middle crates.
 
 1. `agent-v1` + `src/tools.json` is the only public MCP surface. Extensibility
    goes through `view`/`analysis` enums — never parallel tool names.
-2. **No backwards compatibility.** No shims, no aliases, no dual code paths.
-   When behavior changes, `tools.json` + tests move in the same patch.
+2. **No backwards compatibility.** **Zero.** No shims, no aliases, no
+   dual code paths, no `pub type OldName = NewName` re-exports, no
+   one-line wrapper functions that forward to the new API, no
+   `#[deprecated]` attributes, no "// removed" comments where deleted
+   code used to live. When behavior or a name changes, the old
+   identifier disappears in the same patch and every caller is renamed.
+   Same rule for enum variant renames, struct field renames, module
+   moves, and tool-argument renames. If you catch yourself adding a
+   thin wrapper "to keep call sites readable," stop — rename the
+   callers instead. `tools.json`, tests, and worklog all move in the
+   same patch.
 3. Structural parsers (tree-sitter, `.scm` queries, injections) before string
    scanning. Heuristics live at the edges.
 4. New languages land as `runtime/queries/<lang>/tags.scm`. Reach for a Rust

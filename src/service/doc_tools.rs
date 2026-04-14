@@ -15,12 +15,56 @@ impl CodeService {
     pub(crate) fn do_index_local(&self, root: &std::path::Path) -> anyhow::Result<DocIndexResult> {
         let summary =
             doc_index::index_local_docs(self.config.doc_db_path(&normalize_repo_id(root)), root)?;
+        // Dense embeddings for doc sections. Failure downgrades to a
+        // tracing warning — doc ingest has already succeeded and
+        // `search_catalog` falls back to lexical retrieval.
+        if let Err(e) = self.embed_repo_sections(&summary.repo) {
+            tracing::warn!(repo = %summary.repo, error = %e, "section embedding skipped");
+        }
         Ok(DocIndexResult {
             repo: summary.repo,
             indexed_at: summary.indexed_at,
             file_count: summary.file_count,
             section_count: summary.section_count,
         })
+    }
+
+    /// Encode every section for `source_id` and upsert vec rows.
+    fn embed_repo_sections(&self, source_id: &str) -> anyhow::Result<()> {
+        let store = self.ensure_doc_store(source_id, None).map_err(|e| {
+            anyhow::anyhow!("doc store open failed: {}", e.message)
+        })?;
+        let inputs = store.all_section_embedding_inputs()?;
+        if inputs.is_empty() {
+            return Ok(());
+        }
+        let embedder = self
+            .embedder()
+            .map_err(|r| anyhow::anyhow!("embedder unavailable: {r}"))?
+            .clone();
+        let texts: Vec<String> = inputs
+            .iter()
+            .map(|s| {
+                crate::retrieval::embedder::section_chunk_text(
+                    &s.heading,
+                    &s.heading_path,
+                    &s.summary,
+                    &s.content_text,
+                )
+            })
+            .collect();
+        let vectors = embedder.encode(&texts)?;
+        let rows: Vec<codesight_storage::storage::vector_index::VectorRow<'_>> = inputs
+            .iter()
+            .zip(vectors.iter())
+            .map(|(inp, vec)| codesight_storage::storage::vector_index::VectorRow {
+                stable_id: &inp.id,
+                embedding: vec.as_slice(),
+            })
+            .collect();
+        let written = store.write_section_vectors(&rows)?;
+        info!(source_id, written, "wrote section embeddings");
+        Ok(())
     }
 
     pub(super) fn get_section(&self, args: GetSectionArgs) -> anyhow::Result<Value> {

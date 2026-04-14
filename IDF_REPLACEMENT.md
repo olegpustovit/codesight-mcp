@@ -1,463 +1,917 @@
 # IDF_REPLACEMENT.md
 
-Replace the hand-rolled TF-IDF "semantic" engine with **Model2Vec static
-embeddings + sqlite-vec** for real semantic retrieval, hybrid-ranked with the
-existing FTS5/BM25 path. Net effect: `query_mode=natural_language` and
-`semantic=true` stop being aspirational and start working — with a **smaller
-codebase, a single binary, and sub-20 ms hybrid queries**.
+Replace the hand-rolled TF-IDF "semantic" path with dense static embeddings
+backed by `model2vec-rs` and `sqlite-vec`, while keeping the public MCP
+surface smaller than it is today.
 
-> Scope: one contiguous refactor. No backwards compatibility, no dual code
-> paths, no deprecation window. `tools.json` changes ship in the same patch.
+This is not a 1:1 port of the old feature. It is a cleanup and replacement:
 
----
+- delete TF-IDF
+- delete provider/env-var plumbing
+- delete hidden embedding tools and knobs
+- keep one simple semantic switch in the public API
+- make `query_mode=natural_language` actually useful
 
-## 1. Why we're doing this
+The implementation must respect the real storage layout in this repo:
 
-The current TF-IDF path (`src/retrieval/semantic.rs`, 392 LoC) is:
+- code index DB: `repos/<source>/index.sqlite3`
+- docs index DB: `docs/<source>/doc_index.sqlite3`
+- no fake "single DB per workspace" story
 
-- **Redundant with FTS5.** TF-IDF and BM25 both rank by lexical overlap; we
-  already have BM25 inside SQLite FTS5. The "semantic" flag returns
-  essentially the same signal as `query_mode=keyword` — validated by direct
-  comparison in session 2026-04-13.
-- **Not semantic.** No synonym bridging, no concept mapping. The exemplar
-  failure: query *"what happens when a file changes on disk"* misses
-  `file_watcher`, `debounce`, and delta reindex entirely.
-- **Parallel storage.** JSON vector store at `embedding_path()` duplicates
-  what should live in the same SQLite DB as everything else. Breaks the
-  "one DB per workspace" invariant.
-- **Dead provider detection.** `detect_embedding_provider()` plumbs
-  `sentence_transformers`/`gemini`/`openai` env vars that nobody wires; pure
-  aspirational code.
-
-Per AGENTS.md "shrink the code, always" and "delete useless features
-aggressively" — this is the textbook candidate.
+We ship code and docs semantic retrieval in the same overall feature, but the
+work is split into separate workstreams so the implementation is reviewable and
+the ownership boundaries stay clean.
 
 ---
 
-## 2. Chosen stack
+## 1. Frozen decisions
 
-| Layer | Crate | Role | Size impact |
-|---|---|---|---|
-| Embedding | `model2vec-rs` | Static-embedding inference (pure Rust, no ONNX/Metal/CUDA) | ~200 KB code |
-| Model | `potion-base-32M` (or `potion-base-8M`) | Pretrained distilled model, baked into binary | ~30 MB (or ~15 MB) |
-| Vector store | `sqlite-vec` (statically linked) | `vec0` virtual table, KNN on cosine | ~400 KB compiled |
-| BM25 | existing FTS5 | Unchanged lexical retrieval | 0 |
-| Fusion | new ~40-line module | Reciprocal Rank Fusion (RRF) over FTS5 ∪ KNN | — |
+These are now fixed.
 
-Why these specifically:
-- **Pure Rust + static linking** keeps the "single binary" property intact.
-  No ONNX runtime (rules out fastembed-rs), no Metal (rules out candle/mlx),
-  no Python shim.
-- **Static embeddings** = token-lookup + mean-pool, sub-millisecond query
-  encode on CPU. Satisfies the <50 ms cached / <200 ms cold budget with
-  headroom.
-- **sqlite-vec** lives in the same DB file as symbols and FTS5. One
-  connection, one transaction, one backup. Matches the existing invariant
-  enforced by `codesight_storage::db::open_rw/open_ro`.
+### 1.1 Product behavior
+
+- `query_mode=natural_language` implies semantic retrieval.
+- `semantic=true` remains as the explicit expert override for non-natural
+  queries.
+- If semantic retrieval is unavailable at request time, the request falls back
+  to lexical retrieval and returns a warning. It must not hard-fail.
+- `semantic_only` is deleted.
+- `semantic_weight` is deleted.
+- Hidden `embed_repo` is deleted.
+- Provider selection via `CODESIGHT_EMBED_MODEL`, `OPENAI_*`, and `GOOGLE_*`
+  is deleted.
+
+### 1.2 Architecture
+
+- Code and docs semantic retrieval ship together, in the same branch, but as
+  separate implementation workstreams.
+- The root crate owns:
+  - model loading
+  - chunk-text assembly
+  - batching
+  - fallback/warning policy
+  - MCP orchestration
+- `codesight-storage` owns:
+  - SQLite DDL
+  - vec table helpers
+  - vector insert/delete/query helpers
+  - no model code
+- We do not add a new crate. The crate graph stays frozen.
+
+### 1.3 Storage strategy
+
+- Vector rows are keyed by the existing integer row IDs in the code and docs
+  stores, not by stable string IDs.
+- Stable string IDs remain the product-level identity.
+- Embedding payloads are computed in the root crate and passed into storage
+  keyed by stable ID; storage resolves those stable IDs to row IDs inside the
+  write transaction before inserting vec rows.
+- We keep one vec table per domain store:
+  - code DB: `vec_symbol_embeddings`
+  - docs DB: `vec_section_embeddings`
+
+### 1.4 Upgrade strategy
+
+- No in-place backfill.
+- No compatibility mode for old TF-IDF artifacts.
+- No "migrate old index and keep serving" path.
+- Existing incompatible indexes are invalidated and reingested.
+- Incremental ingest remains the single unified update path: when a file or doc
+  changes, lexical and vector indexes update together.
 
 ---
 
-## 3. Code-reduction target
+## 2. Why the current path must go
 
-**Delete (≈1,100 LoC):**
+The current TF-IDF path is the wrong abstraction and the wrong maintenance
+burden.
 
-| File | LoC | Action |
+- It duplicates lexical ranking that FTS5/BM25 already provides.
+- It is not actually semantic.
+- It stores sidecar state in `embeddings.json`.
+- It relies on provider/env detection that is mostly aspirational.
+- It creates runtime/spec drift because hidden semantic behavior exists outside
+  `src/tools.json`.
+
+Concretely, the old path spans:
+
+- `src/retrieval/semantic.rs`
+- `src/service/agent_v1/catalog_search/semantic.rs`
+- hidden `embed_repo` dispatch in `src/service/agent_v1/registry.rs`
+- TF-IDF management logic in `src/service/agent_v1/index_admin.rs`
+- undocumented semantic args in `src/service/agent_v1/args.rs`
+
+The replacement should reduce code and reduce decision surface at the same
+time.
+
+---
+
+## 3. Chosen stack
+
+### 3.1 Runtime components
+
+| Layer | Choice | Notes |
 |---|---|---|
-| `src/retrieval/semantic.rs` | 392 | delete entirely |
-| `src/service/agent_v1/catalog_search/semantic.rs` | 130 | rewrite (~60 LoC — net -70) |
-| `tests/agent_v1_semantic.rs` | 574 | delete; replace with ~150 LoC targeting the new engine |
-| `src/service/agent_v1/index_admin.rs` (TF-IDF block ~L220–300) | ~80 | delete; embedding is automatic during ingest |
-| `detect_embedding_provider`, `EMBED_MODEL` env var, `OPENAI_*`/`GOOGLE_*` provider stubs | ~40 | delete |
-| `src/config/app.rs::embedding_path` (JSON file location) | ~5 | delete — vectors live in SQLite now |
+| Dense encoder | `model2vec-rs` | Pure Rust static embeddings |
+| Vector index | `sqlite-vec` | Lives in the same SQLite DB as each domain store |
+| Lexical retrieval | existing FTS5/BM25 | Unchanged |
+| Fusion | RRF | No score-scale tuning |
 
-**Add (≈500 LoC):**
+### 3.2 Model policy
 
-| File | LoC | Role |
-|---|---|---|
-| `src/retrieval/embedder.rs` | ~80 | Model2Vec loader, `Embedder::embed(&str) -> Vec<f32>` |
-| `crates/codesight-storage/src/storage/vector_index.rs` | ~140 | vec0 schema init, insert/delete/knn helpers |
-| `crates/codesight-storage/src/storage/migrations.rs` (new migration) | ~25 | CREATE VIRTUAL TABLE + backfill |
-| `src/service/agent_v1/catalog_search/semantic.rs` (rewrite) | ~60 | apply_semantic using embedder + vec0 + RRF |
-| `src/retrieval/fusion.rs` | ~40 | RRF over two ranked lists |
-| `tests/semantic_hybrid.rs` | ~150 | end-to-end hybrid search correctness |
-| indexing hook in ingest path | ~30 | embed on symbol insert/update, delete on prune |
+Start with `potion-base-8M` for the compatibility spike. Do not hard-freeze the
+final bundled model until M0 proves:
 
-**Net: approximately −600 LoC**, one fewer on-disk format, one fewer
-aspirational provider layer, one real retrieval capability.
+- the current Rust API is workable in this codebase
+- binary size is acceptable
+- query quality on this repo is good enough
+
+If M0 fails on size or quality, we can still switch models without changing the
+rest of the architecture.
+
+### 3.3 Why row IDs are the right vec keys
+
+Both stores already use integer row IDs as the FTS content row ID:
+
+- code symbols: `symbols.row_id`
+- doc sections: `sections.row_id`
+
+That makes row IDs the best join key for dense retrieval too:
+
+- aligns with the existing SQLite shape
+- matches sqlite-vec examples and hot-path usage
+- keeps vector joins integer-based
+- avoids making vec tables carry text primary keys in the hot path
+
+Stable IDs still matter, but only at the product layer. Storage can resolve
+stable ID -> row ID inside the transaction and then write the vec rows.
 
 ---
 
-## 4. Architecture
+## 4. Public MCP contract after the change
 
-### 4.1 Indexing (eager, during ingest)
+Keep the interface simple.
 
-Every symbol insert/update/delete inside
-`crates/codesight-storage` gets a matching embedding write. No separate
-`manage_indexes action=embed_symbols` step — that tool surface is deleted.
-Embedding runs synchronously in the ingest transaction so freshness is
-guaranteed (no "embeddings are stale" state).
+### 4.1 `search_catalog`
 
-```text
-ingest_sources
-    ├── tree-sitter extract → SymbolRecord
-    ├── FTS5 insert          (unchanged)
-    └── vec_symbols insert   ← new: embedder.embed(chunk_text)
-```
+Keep:
 
-**Chunk text** (what we embed per symbol):
+- `semantic: boolean`
+- `query_mode=keyword|natural_language|regex`
 
-```
-{kind} {name}
-{signature}
-{leading_doc_comment}
-{body_first_N_chars}   // N = 512 for functions/methods, 256 for types
-```
+Delete:
 
-No file-path padding, no synthetic metadata. Let the model see real code.
-If the symbol has no body (e.g. a trait method signature), embed just
-signature + doc.
+- `semantic_only`
+- `semantic_weight`
 
-**Doc sections** get the same treatment on the docs side — embed
-`heading_path + summary + body_first_512_chars`. Unlocks
-`domain=hybrid` as a real cross-corpus semantic search, not just a union
-of two BM25 indexes.
+Behavior:
 
-### 4.2 Query path
+- `query_mode=natural_language` behaves as if `semantic=true`.
+- `semantic=true` means "augment lexical search with dense retrieval where
+  available."
+- If dense retrieval is unavailable, the response still succeeds and includes a
+  warning such as:
 
-```rust
-// src/service/agent_v1/catalog_search/semantic.rs (new, ~60 LoC)
-pub(super) fn apply_semantic(
-    service: &CodeService,
-    args: &SearchCatalogArgs,
-    limit: usize,
-    mode: &SemanticMode,
-    items: &mut Vec<Value>,
-) {
-    let Some(embedder) = service.embedder() else { return };          // singleton
-    let Ok(store) = service.ensure_repo_store(&args.source_id, ..) else { return };
-
-    let qvec = embedder.embed(&args.query);
-    let knn = store.vec_knn(&qvec, limit * 2)?;                       // sqlite-vec KNN
-    match mode {
-        SemanticMode::Only => {
-            items.clear();
-            items.extend(knn.into_iter().map(|h| to_item(&args.source_id, h)));
-        }
-        SemanticMode::Hybrid => {
-            // RRF over (existing BM25 items) ∪ (knn)
-            *items = fusion::rrf_merge(items.drain(..), knn, /*k=*/60, limit);
-        }
-        SemanticMode::Bm25 => {}                                      // no-op
-    }
+```json
+{
+  "code": "SEMANTIC_FALLBACK",
+  "message": "Semantic retrieval unavailable; returning lexical results only.",
+  "detail": {
+    "reason": "model_load_failed | vectors_missing | index_rebuild_required"
+  }
 }
 ```
 
-### 4.3 Fusion: RRF not weighted sum
+### 4.2 `manage_indexes`
 
-The user-provided spec proposed `score = α·cosine + (1-α)·bm25`. **Reject
-this** — BM25 scores and cosine similarities live on incommensurate scales;
-α-tuning is per-corpus. Use **Reciprocal Rank Fusion** (Cormack et al.
-2009) as the default:
+Do not add new actions.
 
-```rust
-// src/retrieval/fusion.rs
-pub fn rrf_merge(a: impl Iterator<Item=Hit>, b: Vec<Hit>, k: usize, top: usize) -> Vec<Hit> {
-    let mut scores: HashMap<String, f64> = HashMap::new();
-    for (rank, hit) in a.enumerate()      { *scores.entry(hit.id.clone()).or_default() += 1.0 / (k + rank + 1) as f64; }
-    for (rank, hit) in b.iter().enumerate() { *scores.entry(hit.id.clone()).or_default() += 1.0 / (k + rank + 1) as f64; }
-    // resolve to items, sort by score desc, truncate to `top`
-}
-```
+Keep:
 
-RRF is parameter-free (k=60 is the field default), score-scale-agnostic,
-and consistently outperforms weighted sums on hybrid IR benchmarks. We
-keep `semantic_weight` in `tools.json` **only** as an advanced override
-that switches to weighted-sum mode; default stays RRF.
+- `invalidate`
+- `delete`
+- `rebuild`
+- `status`
+- `snapshot_quality`
+
+Delete hidden embedding lifecycle entirely. `ingest_sources` is the only write
+path that updates lexical and vector indexes.
+
+### 4.3 Hidden/internal cleanup
+
+Delete:
+
+- `embed_repo` from the registry
+- TF-IDF-only tests
+- TF-IDF-only env vars
+- TF-IDF-only config paths
+
+The public surface should end smaller than what exists today, not larger.
 
 ---
 
-## 5. SQLite schema
+## 5. Ownership split
 
-New migration in
-`crates/codesight-storage/src/storage/migrations.rs` — bumps
-`CODE_INDEX_TARGET_USER_VERSION`:
+This is the boundary that keeps the plan implementable.
+
+### 5.1 Root crate responsibilities
+
+New root-crate modules:
+
+- `src/retrieval/embedder.rs`
+- `src/retrieval/fusion.rs`
+
+Root crate responsibilities:
+
+- load the embedder once in `CodeService`
+- assemble chunk text for code symbols and doc sections
+- batch-encode updated entities
+- decide whether to fall back and attach warnings
+- orchestrate per-domain search and merge
+
+### 5.2 Storage crate responsibilities
+
+New or extended storage-side code:
+
+- `crates/codesight-storage/src/db.rs`
+- `crates/codesight-storage/src/storage/schema.rs`
+- `crates/codesight-storage/src/storage/doc_schema.rs`
+- `crates/codesight-storage/src/storage/vector_index.rs` or equivalent storage
+  helpers
+
+Storage responsibilities:
+
+- ensure sqlite-vec is registered on open
+- create vec tables for fresh stores
+- resolve stable IDs to row IDs during writes
+- insert/delete vec rows transactionally
+- execute KNN queries and return row IDs
+
+Storage does not know how to build embeddings.
+
+---
+
+## 6. Actual storage plan
+
+### 6.1 Code store
+
+Fresh code-store DDL grows one vec table:
 
 ```sql
--- Migration N: add vector index
--- Requires sqlite-vec loaded via sqlite3_auto_extension at open_rw/open_ro.
-CREATE VIRTUAL TABLE vec_symbols USING vec0(
-    symbol_id TEXT PRIMARY KEY,            -- same stable_id as symbols table
-    embedding FLOAT[DIM]                   -- DIM = model output dim (e.g. 256)
-);
-
-CREATE VIRTUAL TABLE vec_sections USING vec0(
-    section_id TEXT PRIMARY KEY,
+CREATE VIRTUAL TABLE IF NOT EXISTS vec_symbol_embeddings USING vec0(
+    symbol_rowid INTEGER PRIMARY KEY,
     embedding FLOAT[DIM]
 );
 ```
 
-- **DIM is a compile-time constant** driven by the baked-in model. Changing
-  models = new migration + reindex. No on-the-fly reshape.
-- **No backfill of existing indexes.** Per AGENTS.md "no backwards
-  compatibility": bump `user_version`, on open detect version skew, force a
-  reindex. Users re-run `ingest_sources` once. Documented in worklog.
-- `vec_sections` only gets populated when the docs store exists.
+Join-back path:
 
-### Loading sqlite-vec statically
+- KNN query returns `symbol_rowid`
+- storage joins `symbols.row_id = symbol_rowid`
+- root crate turns those rows into MCP items
 
-In `crates/codesight-storage/src/storage/db.rs` (modify `open_rw`/`open_ro`):
+### 6.2 Docs store
 
-```rust
-use rusqlite::ffi::sqlite3_auto_extension;
-use sqlite_vec::sqlite3_vec_init;
+Fresh docs-store DDL grows one vec table:
 
-fn ensure_vec_extension() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| unsafe {
-        sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
-    });
-}
+```sql
+CREATE VIRTUAL TABLE IF NOT EXISTS vec_section_embeddings USING vec0(
+    section_rowid INTEGER PRIMARY KEY,
+    embedding FLOAT[DIM]
+);
 ```
 
-Called exactly once before the first `Connection::open`. No runtime
-`.so`/`.dylib` lookup, no `load_extension` permission bit.
+Join-back path:
+
+- KNN query returns `section_rowid`
+- storage joins `sections.row_id = section_rowid`
+
+### 6.3 Existing incompatible indexes
+
+We do not mutate old indexes into the new shape.
+
+Instead:
+
+- detect schema/version mismatch
+- mark the index invalid
+- wipe code + docs DBs for that source on rebuild
+- reingest from source using the unified lexical+vector path
+
+This is simpler and safer than trying to backfill old stores.
 
 ---
 
-## 6. Model packaging
+## 7. Chunk text policy
 
-```toml
-# Cargo.toml (root)
-[dependencies]
-model2vec-rs = "0.1"
-sqlite-vec   = "0.1"
-rust-embed   = { version = "8", optional = true }
+The chunk-text policy belongs in the root crate, not storage.
 
-[features]
-default       = ["bundled-model"]
-bundled-model = ["rust-embed"]    # bakes potion-base-32M into the binary
+### 7.1 Code symbols
+
+Embed this shape:
+
+```text
+{kind} {name}
+{signature}
+{summary}
+{source_prefix}
 ```
 
-```rust
-// src/retrieval/embedder.rs
-#[cfg(feature = "bundled-model")]
-#[derive(rust_embed::RustEmbed)]
-#[folder = "models/potion-base-32M/"]
-struct BundledModel;
+Rules:
 
-pub struct Embedder { inner: model2vec_rs::Model }
+- `summary` comes from stored summary/doc-comment text when present
+- `source_prefix` is a bounded prefix of the symbol source
+- do not pad with file paths or synthetic metadata
+- keep the text short enough for fast incremental embedding
 
-impl Embedder {
-    pub fn load() -> anyhow::Result<Self> {
-        #[cfg(feature = "bundled-model")] {
-            let bytes = BundledModel::get("model.safetensors").unwrap();
-            let tok   = BundledModel::get("tokenizer.json").unwrap();
-            Self::from_bytes(&bytes.data, &tok.data)
-        }
-        #[cfg(not(feature = "bundled-model"))] {
-            let path = std::env::var("CODESIGHT_MODEL_PATH")
-                .unwrap_or_else(|_| "~/.codesight/models/potion-base-32M".into());
-            Self::from_path(path)
-        }
-    }
+Initial limits:
 
-    pub fn embed(&self, text: &str) -> Vec<f32> {
-        self.inner.embed(text)              // ~0.3–0.8 ms for <2 KB text
-    }
+- functions/methods: first 512 chars of source
+- types/traits/structs/enums: first 256 chars of source
 
-    pub fn dim(&self) -> usize { self.inner.dim() }
-}
+### 7.2 Doc sections
+
+Embed this shape:
+
+```text
+{heading}
+{heading_path}
+{summary}
+{content_prefix}
 ```
 
-**Singleton.** `Embedder::load()` is called once at service construction
-(`CodeService::new`) and stored behind an `Arc`. No per-request allocation.
+Rules:
 
-### Binary size math
+- `content_prefix` is a bounded prefix of section text
+- do not dump whole documents into embeddings
 
-| Variant | Binary (LTO + strip + panic=abort) |
-|---|---|
-| Current codesight-mcp | ~18 MB |
-| + model2vec-rs + sqlite-vec (no model) | ~19 MB |
-| + potion-base-8M baked in | **~34 MB** |
-| + potion-base-32M baked in | **~48 MB** |
+Initial limit:
 
-Recommendation: **ship `potion-base-8M` as the bundled default** (34 MB
-is still a very reasonable single binary). Document `--no-default-features`
-+ `CODESIGHT_MODEL_PATH` for users who want potion-base-32M or a custom
-code-distilled model.
+- docs sections: first 512 chars of content
+
+These limits are deliberately small to protect incremental performance.
 
 ---
 
-## 7. `tools.json` contract change
+## 8. Query behavior
 
-Ship in the same patch — no shim, no alias.
+### 8.1 Domain behavior
 
-```diff
-  "search_catalog": {
-    "properties": {
--     "semantic":        { "type": "boolean", "description": "..." },
--     "semantic_only":   { "type": "boolean", "description": "..." },
--     "semantic_weight": { "type": "number",  "description": "α in [0,1]" },
-+     "semantic":        { "type": "boolean", "description": "Hybrid: merge dense embedding KNN with BM25 via RRF." },
-+     "semantic_only":   { "type": "boolean", "description": "Replace BM25 with embedding KNN entirely." },
-+     "semantic_weight": { "type": "number",  "description": "Advanced: switch to weighted-sum fusion with α = this value. Default is RRF (parameter-free)." }
-    }
-  }
-```
+Dense retrieval applies only to units that have embeddings:
 
-And — critically — **`query_mode=natural_language` now auto-enables
-`semantic=true`.** Today it only flips `domain=hybrid` (useless alone).
-After this change:
+- code symbols
+- doc sections
 
-```rust
-// catalog_search/mod.rs
-let semantic_enabled =
-    args.semantic.unwrap_or(false) ||
-    query_mode_effective == "natural_language";
-```
+File-text hits remain lexical-only.
 
-This is the single most impactful line in the whole refactor. It makes the
-mode name honest.
+That means:
 
-Also delete these args that only existed for TF-IDF plumbing:
-- any `rebuild_embeddings` action on `manage_indexes` (embedding is now
-  automatic during `ingest_sources`)
-- `CODESIGHT_EMBED_MODEL`, `OPENAI_API_KEY`/`OPENAI_EMBED_MODEL`,
-  `GOOGLE_API_KEY`/`GOOGLE_EMBED_MODEL` references
+- `unit_kinds=["file"]` stays pure lexical
+- `unit_kinds=["symbol"]` can use lexical + dense
+- `unit_kinds=["section"]` can use lexical + dense
+- `domain=hybrid` runs both domain lanes, then merges results
+
+### 8.2 Fusion behavior
+
+Use Reciprocal Rank Fusion.
+
+Do not keep weighted-sum mode.
+
+RRF lanes:
+
+- code symbols: `RRF(symbol_bm25, symbol_knn)`
+- doc sections: `RRF(section_bm25, section_knn)`
+
+Then merge the already-fused code and docs lanes using the existing domain cap
+behavior.
+
+File-text hits are appended from the lexical lane only and are never fed into
+vector fusion.
+
+### 8.3 Fallback behavior
+
+Semantic requests fall back to lexical search with warnings when:
+
+- the model failed to load
+- vec tables are missing
+- the index is invalid and rebuild is required
+- the current request only targets file hits
+
+Fallback is response-success, not response-error.
+
+### 8.4 Natural-language honesty
+
+The current code makes `natural_language` mean "default to hybrid domain."
+That is not enough.
+
+After this refactor:
+
+- `query_mode=natural_language` implies semantic search
+- if semantic is available, use it
+- if semantic is unavailable, warn and fall back
+
+That makes the mode name honest without making the system brittle.
 
 ---
 
-## 8. Performance budget & verification
+## 9. Unified ingest and invalidation
 
-| Operation | Target | How measured |
+This is the most important implementation rule.
+
+There is one write path:
+
+- `ingest_sources`
+
+Every update must keep lexical and vector state in sync.
+
+### 9.1 Full ingest
+
+For a fresh or invalidated source:
+
+1. index code into the code DB
+2. index docs into the docs DB
+3. batch-embed code symbols and write code vec rows
+4. batch-embed doc sections and write docs vec rows
+5. mark both stores fresh together
+
+### 9.2 Incremental ingest
+
+For a touched file or doc:
+
+1. re-extract the updated units
+2. replace lexical rows
+3. delete vec rows for removed units
+4. embed only the updated units
+5. write new vec rows in the same operation
+
+There is no detached embedding phase.
+
+### 9.3 Invalid index handling
+
+If a source is opened and one of the domain stores is incompatible:
+
+- treat the source as needing rebuild
+- do not partially serve stale semantic state as if it were current
+- `search_catalog` falls back with warning until reingest happens
+- `ingest_sources` rebuilds the invalidated stores
+
+Code and docs semantic support ship together, so invalidation logic must think
+in terms of the source, not just a single DB file.
+
+---
+
+## 10. Workstreams
+
+Both code and docs ship together, but the work is decomposed so the branch can
+land as a sequence of clean commits.
+
+### WS0 - Compatibility spike
+
+Goal: prove the dependencies are workable before restructuring the code.
+
+Deliverables:
+
+- add `model2vec-rs`
+- add `sqlite-vec`
+- register sqlite-vec from `crates/codesight-storage/src/db.rs`
+- prove one local KNN query against a temp SQLite DB
+- prove one local embedding call from the current Rust API
+- record binary size and a first query latency number
+
+Gate:
+
+- if this fails, stop and revise stack choice before touching the search path
+
+### WS1 - Root embedder and fusion
+
+Goal: establish the root-crate orchestration layer.
+
+Deliverables:
+
+- `src/retrieval/embedder.rs`
+- `src/retrieval/fusion.rs`
+- `CodeService` owns a singleton embedder
+- helper APIs for chunk assembly and batched encode
+
+Gate:
+
+- no storage writes yet
+
+### WS2 - Code-store vector path
+
+Goal: make code semantic retrieval real.
+
+Deliverables:
+
+- extend code-store DDL with `vec_symbol_embeddings`
+- add storage helpers:
+  - delete symbol vec rows for removed symbols
+  - resolve stable IDs to `symbols.row_id`
+  - insert symbol vec rows
+  - query symbol KNN
+- extend code ingest path so updated symbols write lexical + vector state
+
+Gate:
+
+- code symbols work end to end before docs land
+
+### WS3 - Docs-store vector path
+
+Goal: ship docs semantic retrieval in the same feature without entangling it
+with the code store.
+
+Deliverables:
+
+- extend docs-store DDL with `vec_section_embeddings`
+- add storage helpers mirroring the code path
+- extend docs ingest so updated sections write lexical + vector state
+
+Gate:
+
+- docs sections work end to end before hybrid query integration
+
+### WS4 - Unified invalidation and rebuild behavior
+
+Goal: remove compatibility ambiguity.
+
+Deliverables:
+
+- detect incompatible code/docs stores
+- mark the source as rebuild-required
+- ensure `search_catalog` falls back with warning during that window
+- ensure `ingest_sources` rebuilds lexical + vector state together
+
+Gate:
+
+- no partial semantic serving on incompatible indexes
+
+### WS5 - Query integration and public API cleanup
+
+Goal: simplify the MCP surface while wiring in the new retrieval path.
+
+Deliverables:
+
+- integrate symbol and section KNN into `search_catalog`
+- `query_mode=natural_language` implies semantic
+- semantic fallback warnings
+- delete `semantic_only`
+- delete `semantic_weight`
+- delete hidden `embed_repo`
+- update `src/tools.json`
+- update Rust arg structs to match `tools.json`
+
+Gate:
+
+- runtime and schema must match exactly
+
+### WS6 - Test and performance hardening
+
+Goal: keep the feature honest.
+
+Deliverables:
+
+- targeted integration tests for code semantic retrieval
+- targeted integration tests for docs semantic retrieval
+- fallback warning tests
+- invalid-index/rebuild tests
+- incremental update tests for vector delete+insert
+- behavioral golden queries
+- measured ingest and query timings
+
+Gate:
+
+- no merge without passing the repo performance policy
+
+---
+
+## 11. Tests we actually need
+
+Do not replace everything with only goldens.
+
+We need all of:
+
+### 11.1 Compatibility tests
+
+- sqlite-vec registration works in this build
+- embedder loads and returns a stable dimension
+
+### 11.2 Storage tests
+
+- code vec rows insert/delete/update correctly
+- docs vec rows insert/delete/update correctly
+- KNN returns joinable row IDs
+
+### 11.3 Ingest tests
+
+- full ingest populates lexical and vector indexes
+- incremental code update updates both
+- incremental docs update updates both
+- removed symbols/sections delete vec rows
+
+### 11.4 Query behavior tests
+
+- `natural_language` uses semantic retrieval when available
+- semantic requests fall back with warning when unavailable
+- file-only searches remain lexical-only
+- hybrid code+docs retrieval returns both domains correctly
+
+### 11.5 Contract tests
+
+- `tools.json` matches Rust args
+- deleted knobs are rejected/absent
+- hidden `embed_repo` is gone
+
+### 11.6 Behavioral goldens
+
+Keep a small golden set, but use it as one layer, not the only layer.
+
+---
+
+## 12. Performance policy
+
+Do not relax AGENTS.md to make the plan easier.
+
+Targets remain:
+
+- cached reads: `< 50 ms`
+- cold reads on medium repo: `< 200 ms`
+- incremental reindex after single-file edit: `< 100 ms`
+- cold full ingest of this repo: `< 5 s`
+
+Implications:
+
+- embed only changed symbols/sections on incremental ingest
+- batch encode updates
+- keep chunk text small
+- do not add a global re-embed step
+
+If eager embedding threatens these numbers, fix the implementation. Do not
+change the target in the plan.
+
+---
+
+## 13. Code deletion target
+
+This refactor should still end net-negative in code.
+
+Expected deletions:
+
+- `src/retrieval/semantic.rs`
+- TF-IDF-only logic in `src/service/agent_v1/catalog_search/semantic.rs`
+- hidden `embed_repo` path in `src/service/agent_v1/index_admin.rs`
+- semantic provider detection and env-var plumbing
+- `AppConfig::embedding_path`
+- TF-IDF-only tests
+
+Expected additions:
+
+- root embedder + fusion modules
+- storage vec helpers
+- targeted semantic integration tests
+
+Net goal:
+
+- fewer moving parts
+- fewer runtime modes
+- no sidecar embedding JSON
+
+---
+
+## 14. Done criteria
+
+This replacement is done only when all of these are true:
+
+1. TF-IDF code and provider plumbing are deleted.
+2. `semantic_only`, `semantic_weight`, and hidden `embed_repo` are gone.
+3. `query_mode=natural_language` performs semantic retrieval when available.
+4. Semantic requests fall back to lexical results with warnings when
+   unavailable.
+5. Code symbol embeddings and doc section embeddings both ship in the same
+   feature.
+6. Incremental ingest updates lexical and vector indexes together.
+7. Incompatible old indexes are invalidated and rebuilt rather than migrated
+   in place.
+8. `src/tools.json` and Rust args match exactly.
+9. Targeted tests cover storage, ingest, query behavior, contract cleanup, and
+   goldens.
+10. The AGENTS performance targets are met without rewriting the policy.
+
+If any of these are false, the branch is not ready.
+
+---
+
+## 15. Implementation appendix — dogfooded via codesight-mcp
+
+Every target below was verified by querying the live codesight index of this
+repo (`OlegHQ/codesight-mcp`, 413 files, 4143 symbols). Line numbers are
+current as of commit `e9f8ea9`.
+
+### 15.1 Exact delete list (WS5)
+
+Full module deletions:
+
+- `src/retrieval/semantic.rs` — entire file (29 symbols: `EmbeddingProvider`,
+  `EmbeddingStore`, `StoredData`, `TfidfModel`, `detect_embedding_provider`,
+  `compute_tfidf_embeddings`, `compute_query_vector`, `tokenize`, plus tests).
+- `src/service/agent_v1/catalog_search/semantic.rs` — entire file
+  (`SemanticMode`, `apply_semantic`, `build_semantic_item`). Replaced by new
+  `src/retrieval/embedder.rs` + `src/retrieval/fusion.rs` called from
+  `catalog_search/mod.rs`.
+- `tests/agent_v1_semantic.rs` — entire file. Replace with targeted
+  integration tests (§11) against the new stack.
+
+Targeted surgical edits:
+
+- `src/service/agent_v1/args.rs::SearchCatalogArgs` lines 80–86: delete
+  `semantic_weight` (L82) and `semantic_only` (L85). Keep `semantic`.
+- `src/service/agent_v1/registry.rs::AGENT_V1_HANDLERS` L11–26: delete
+  `("embed_repo", CodeService::embed_repo)` entry. Evaluate deleting
+  `search_columns`, `check_references`, `get_cross_repo_map` in the same
+  pass — they are registry-only, not in `src/tools.json`, matching the
+  "public surface should end smaller than today" goal (§4.3). Confirm with
+  maintainer before scope creep.
+- `src/service/agent_v1/index_admin.rs::CodeService.embed_repo` L211–304:
+  delete entire method and its `Args` struct.
+- `src/service/agent_v1/catalog_search/mod.rs::search_catalog` L464–466:
+  delete the `if (semantic_enabled || semantic_only) && flags.want_symbol`
+  block. Replace with dense-lane dispatch (§15.4).
+- `src/service/agent_v1/catalog_search/mod.rs` L395–397: delete the
+  `semantic_only` read and the `SemanticMode::resolve` call.
+- `src/service/agent_v1/catalog_search/mod.rs` L84–90: delete the
+  `"No embedding provider configured..."` error path; replace with fallback
+  warning (§15.4).
+- `src/config/app.rs::AppConfig.embedding_path` L98–100: delete. Grep all
+  callers — currently only `semantic.rs` and `index_admin.rs::embed_repo`.
+- `src/config/env.rs` L17: delete `pub const EMBED_MODEL`. No other uses
+  outside the deleted TF-IDF path.
+
+Env/config that disappears (no new callers): `CODESIGHT_EMBED_MODEL`,
+`OPENAI_API_KEY`, `OPENAI_EMBED_MODEL`, `GOOGLE_API_KEY`,
+`GOOGLE_EMBED_MODEL`. Removed by deleting `detect_embedding_provider` and
+its error messages (the only readers).
+
+### 15.2 Storage hook points (WS0, WS2, WS3)
+
+SQLite open path — sqlite-vec registration:
+
+- `crates/codesight-storage/src/db.rs::apply_rw_pragmas` L82–92: add
+  `sqlite_vec::load(&conn)?` call *after* pragmas. Must also register on
+  the RO path: extend `open_ro` L96–104 with the same loader (sqlite-vec is
+  a query-time dependency, readers need it too).
+
+Code-store DDL:
+
+- `crates/codesight-storage/src/storage/schema.rs::INDEX_STORE_INIT_SQL_TAIL`
+  L7–79: append `CREATE VIRTUAL TABLE IF NOT EXISTS vec_symbol_embeddings
+  USING vec0(symbol_rowid INTEGER PRIMARY KEY, embedding FLOAT[DIM])`. The
+  existing `symbols` table already has `row_id INTEGER PRIMARY KEY
+  AUTOINCREMENT` (L16–34) and `symbol_fts` already uses
+  `content_rowid='row_id'` (L37–45) — the key join is already the right
+  shape.
+
+Docs-store DDL:
+
+- `crates/codesight-storage/src/storage/doc_schema.rs::DOC_STORE_INIT_SQL_TAIL`
+  L15–67: append `CREATE VIRTUAL TABLE IF NOT EXISTS vec_section_embeddings
+  USING vec0(section_rowid INTEGER PRIMARY KEY, embedding FLOAT[DIM])`.
+  `sections` table L24–40 already has `row_id` and `section_fts` uses
+  `content_rowid='row_id'` (L41–50).
+- Bump `DOC_INDEX_TARGET_USER_VERSION` (currently `1`, L75) to `2` and add
+  a forward-only migration branch in `apply_doc_index_migrations` (L79–85)
+  that creates the vec table on existing stores. *Exception to §1.4 in
+  letter only*: sqlite-vec table creation is safe against existing data
+  because it carries no rows until ingest populates it. If the maintainer
+  prefers strict invalidation semantics, skip the migration and let the
+  store-version mismatch (§15.5) force a rebuild — cleaner.
+
+New storage helpers (WS2/WS3 deliverables, host crate =
+`codesight-storage`):
+
+- `crates/codesight-storage/src/storage/vector_index.rs` (new): functions
+  `insert_symbol_vectors(tx, stable_id → embedding)`,
+  `delete_symbol_vectors(tx, stable_ids)`,
+  `query_symbol_knn(conn, query_vec, k) -> Vec<(row_id, distance)>`, plus
+  section-side mirrors. Each write helper resolves stable_id → row_id via
+  a `SELECT row_id FROM symbols WHERE id = ?` inside the same transaction
+  (no stable ID leaks into vec tables). Pattern already used in
+  `crates/codesight-storage/src/storage/symbol_reads.rs::symbol_record`
+  (L63).
+
+### 15.3 Ingest wiring (WS2, WS3)
+
+Code ingest entry:
+
+- `src/service/agent_v1/ingest.rs::ingest_sources` L17–233. L155 dispatches
+  to `do_index_folder_with_warnings`.
+- `src/service/code_tools.rs::do_index_folder_with_warnings` L26+ owns the
+  crawl → extract → write pipeline. Add a post-write embedding phase here:
+  batch-encode all newly-inserted/updated symbols using the singleton
+  embedder on `CodeService`, then call the new
+  `vector_index::insert_symbol_vectors` helper inside the existing write
+  transaction. Do NOT detach into a background task — §9 mandates unified
+  writes.
+
+Docs ingest entry:
+
+- `do_index_local` (same module) is the docs counterpart. Mirror the code
+  path: after sections land via `DocStore`, embed and call
+  `insert_section_vectors`.
+
+Incremental delete coverage:
+
+- Symbol removal already cascades through `symbols_ad` trigger (schema.rs
+  L53–56). Add an equivalent trigger or explicit `delete_symbol_vectors`
+  call to wipe vec rows when symbols disappear. Triggers are cleaner
+  because they stay in sync with the FTS cleanup; vec0 supports DELETE
+  statements keyed on `symbol_rowid`.
+
+Full reindex invalidation:
+
+- `wipe_indexes_for_repo` (referenced at `ingest.rs:152`) already drops
+  both DB files. No change needed — new vec tables get created on
+  `open_rw` via `INDEX_STORE_INIT_SQL`.
+
+### 15.4 Query integration (WS5)
+
+`src/service/agent_v1/catalog_search/mod.rs::search_catalog` L384–491 is
+the integration site. New flow:
+
+1. Resolve `semantic_enabled = args.semantic.unwrap_or(false) ||
+   query_mode_effective == "natural_language"`. This replaces L395–397.
+2. After `search_code_side`/`search_doc_side` populate lexical items,
+   branch on `semantic_enabled && flags.want_symbol`:
+   - Encode query via `CodeService.embedder` (new field, WS1).
+   - Call `vector_index::query_symbol_knn(store, qvec, k)` and, if docs
+     in play, `query_section_knn`.
+   - Run `retrieval::fusion::rrf` per domain over `(bm25_rank,
+     knn_rank)`. Replace the current items list.
+3. On model-load-fail / vec-missing / embedder-unavailable, append a
+   `SEMANTIC_FALLBACK` warning (§4.1 shape) and keep lexical items.
+   Mechanism already in place: `success_response_with_warnings`
+   (`src/service/mod.rs:180`).
+
+File-text hits path (L432+): already lexical-only — no change needed.
+
+### 15.5 Invalid-index detection (WS4)
+
+- `check_staleness` (`crates/codesight-storage/src/db.rs:138`) is the
+  current stale-detection seam. Extend it (or add a sibling) to also
+  check `PRAGMA user_version` against `INDEX_STORE_TARGET_USER_VERSION`
+  (needs to be introduced, mirroring `DOC_INDEX_TARGET_USER_VERSION`
+  at `doc_schema.rs:75`).
+- On mismatch: surface through `manage_indexes status`
+  (`index_admin.rs::manage_indexes`) and have `search_catalog` emit
+  `SEMANTIC_FALLBACK { reason: "index_rebuild_required" }` until
+  `ingest_sources` with `incremental: false` runs.
+
+### 15.6 Embedder singleton placement (WS1)
+
+- `src/service/mod.rs::CodeService` struct L59–65: add
+  `embedder: Arc<OnceCell<Result<Embedder, EmbedderError>>>`.
+- `CodeService::new` L68–88: construct the cell lazily — do not block
+  startup on model load. First `search_catalog` with semantic enabled
+  triggers initialization; failures become `SEMANTIC_FALLBACK` warnings.
+- `src/retrieval/embedder.rs` (new): wraps `model2vec_rs::Model` with a
+  `encode(&[&str]) -> Vec<Vec<f32>>` batching API. Dim must be exposed
+  so the DDL constant `DIM` (§6.1, §6.2) can be compile-time-known or
+  checked at open.
+
+### 15.7 Surface-shrink scoreboard
+
+Approximate deltas (verified via outline counts):
+
+| Area | Symbols deleted | Symbols added |
 |---|---|---|
-| `Embedder::embed(query)` | < 1 ms | `cargo bench --bench embed` (microbench) |
-| `vec_symbols` KNN (k=20, N=4k) | < 3 ms | Bench against this repo's indexed state |
-| RRF merge (20 + 20 items) | < 0.2 ms | microbench |
-| Full hybrid `search_catalog` | **< 20 ms p95** cold, **< 10 ms** warm | `timing_ms` meta field in integration test |
-| Cold ingest (this repo, ~4100 syms) | **< 7 s** (was < 5 s) | wall-clock on `ingest_sources path=.` |
-| Incremental reindex (single file) | **< 150 ms** (was < 100 ms) | benchmark in worklog |
+| `src/retrieval/semantic.rs` | 29 | 0 |
+| `src/retrieval/embedder.rs` | 0 | ~4 |
+| `src/retrieval/fusion.rs` | 0 | ~2 |
+| `catalog_search/semantic.rs` | 5 | 0 |
+| `index_admin.rs::embed_repo` | 2 | 0 |
+| `registry.rs` entry | 1 | 0 |
+| `args.rs` (two fields) | 2 | 0 |
+| `config/app.rs::embedding_path` | 1 | 0 |
+| `config/env.rs::EMBED_MODEL` | 1 | 0 |
+| `storage/vector_index.rs` | 0 | ~6 |
+| `tests/agent_v1_semantic.rs` | ~25 | 0 |
 
-Ingest regresses by ~2 s because we now embed every symbol eagerly. That's
-an acceptable trade — the alternative (deferred/async embedding) creates a
-"stale vector index" state that violates the stateless-per-request
-invariant. Worklog gets an entry to revisit if users complain.
+Net: strongly negative symbol count, matches §13.
 
-Every `search_catalog` response already returns `_meta.timing_ms`; integration
-test asserts p95 under budget across 50 queries from
-`tests/fixtures/semantic_queries.yaml` (new file).
+### 15.8 Suggested commit sequence
 
----
+1. `ws0-spike`: add `model2vec-rs` + `sqlite-vec` deps; register loader;
+   one smoke test in `crates/codesight-storage/src/db.rs` tests module.
+2. `ws1-embedder`: land `src/retrieval/embedder.rs` + `fusion.rs`;
+   `CodeService` owns singleton; still unused.
+3. `ws2-code-vec`: DDL, `vector_index.rs` helpers, ingest write path for
+   symbols. Ends with storage-level integration test.
+4. `ws3-docs-vec`: mirror for sections.
+5. `ws4-invalidation`: version bump + fallback plumbing.
+6. `ws5-delete-and-wire`: delete the TF-IDF modules and stale args/env/
+   tools; wire new path into `search_catalog`; update `src/tools.json`;
+   update `tests/agent_v1_semantic.rs` → new `tests/agent_v1_dense.rs`
+   targeted tests.
+7. `ws6-harden`: goldens + perf measurements recorded in
+   `REFACTOR_WORKLOG.md`.
 
-## 9. Correctness harness
+Each commit must leave `cargo nextest run --lib` green on the root crate
+and both middle crates.
 
-Replace `tests/agent_v1_semantic.rs` (574 LoC of TF-IDF internals) with
-**behavioral goldens**:
-
-```yaml
-# tests/fixtures/semantic_queries.yaml
-- query: "what is the main dispatch loop for MCP tool calls"
-  must_include_symbol: ["run_dispatch_loop"]
-  must_not_rank_above_top_5: ["run_for_loop_increases_hints"]
-- query: "how does error handling work"
-  must_include_symbol_prefix: ["ToolError", "IndexError"]
-  must_not_top: ["run_missing_repo_error"]
-- query: "what happens when a file changes on disk"
-  must_include_file: ["src/service/file_watcher.rs"]
-- query: "parse tree-sitter symbols from rust"
-  must_include_file: ["crates/codesight-extractors/"]
-```
-
-Test harness runs against the live index, asserts recall invariants rather
-than exact rank order (ranks drift with model versions). If any golden
-regresses, CI fails — that's the semantic-quality tripwire.
-
-Keep this fixture small (≤20 queries). It's a quality gate, not a
-benchmark suite.
-
----
-
-## 10. Rollout milestones
-
-One branch, no feature flags. Each milestone is a reviewable commit.
-
-1. **M1 — Dependencies + model.** Add `model2vec-rs`, `sqlite-vec`,
-   `rust-embed` to `Cargo.toml`. Commit `models/potion-base-8M/` via
-   Git LFS. Binary builds, no behavior change yet.
-2. **M2 — `Embedder` singleton.** `src/retrieval/embedder.rs` + wired into
-   `CodeService::new`. Unit tests for embed determinism + dim.
-3. **M3 — Schema migration + vec extension loader.** New migration,
-   `sqlite3_auto_extension` hook, `store.vec_knn(vec, k)` helper.
-4. **M4 — Indexing hook.** Embed-on-insert in the ingest path.
-   `ingest_sources` now populates `vec_symbols`. Delete the separate
-   TF-IDF embedding block in `index_admin.rs`.
-5. **M5 — Query integration.** New `apply_semantic` + RRF fusion.
-   Rewire `query_mode=natural_language` to auto-enable semantic.
-6. **M6 — `tools.json` update + doc sections.** Ship contract change.
-   Add `vec_sections` population on the docs side.
-7. **M7 — Delete TF-IDF.** Remove `src/retrieval/semantic.rs`,
-   `detect_embedding_provider`, `embedding_path`, old JSON store, old test
-   file. `cargo check` is green, full suite passes.
-8. **M8 — Golden harness.** Add `tests/fixtures/semantic_queries.yaml` and
-   `tests/semantic_hybrid.rs`. Verify the four demonstrated failure
-   cases now pass.
-9. **M9 — Worklog + performance numbers.** Update
-   `REFACTOR_WORKLOG.md`: baseline LoC, new LoC, new timing numbers,
-   confirm "tokens saved" regression-free on the live `_savings.json`.
-
-Each milestone lands on `dev`. Main merge only after M9.
-
----
-
-## 11. Risks & mitigations
-
-| Risk | Likelihood | Mitigation |
-|---|---|---|
-| `model2vec-rs` crate instability (v0.1.x) | medium | Pin exact version; vendor if needed — the model format is a frozen safetensors + tokenizer.json pair, so we can always load manually with `safetensors` + `tokenizers` crates as a ~120 LoC fallback |
-| `sqlite-vec` extension-loading friction with rusqlite `bundled` feature | medium | Prototype in M1; if it fights us, fall back to a parallel `_vectors` table with a hand-rolled brute-force cosine KNN (≤30 ms for 4k vectors — still fine) |
-| Binary size balloon | low | Default to potion-base-8M, feature-gate the bundle, document external-model path |
-| Static embedding quality below user expectation | low/medium | Hybrid via RRF means BM25 catches what embeddings miss. Escape hatch: distill a code-specialized model via the official Python model2vec tool, swap the baked bytes, bump migration version |
-| Indexing latency regression | medium | Measured in the performance budget table; if > 10 s on this repo, batch embeddings in groups of 128 with SIMD |
-| Someone on the team reaches for the old `CODESIGHT_EMBED_MODEL` env var | low | Deleted outright — loud failure beats silent stub. The worklog lists this as a breaking change |
-
----
-
-## 12. What this unlocks next
-
-Not in scope for this patch, but now cheap:
-
-- **`evaluate_quality analysis=plan_turn`** — the ranked read-plan already
-  mooted in `REFACTOR_WORKLOG.md` becomes a trivial wrapper: embed the
-  user's task description, KNN over symbols + sections, return the top-N
-  with token estimates.
-- **Duplicate-code detection** — cosine similarity between symbol
-  embeddings identifies semantic clones that AST-based detectors miss
-  (same logic, different names/structure).
-- **`search_catalog query_mode=natural_language domain=hybrid`** finally
-  matches the description in `search_catalog`'s tool schema: "natural
-  language hits both code and docs semantically."
-
-None of these require new infra. They're follow-up PRs of ~100 LoC each
-that consume the embedder and vec0 table this plan installs.
-
----
-
-## 13. Success criteria
-
-This patch is done when all of the following are true:
-
-1. `git diff --stat` shows a **net reduction of ≥ 500 LoC** across `src/`
-   and `tests/`.
-2. The four failing queries from the 2026-04-13 session (`dispatch loop`,
-   `error handling`, `file changes on disk`, `parse tree-sitter symbols`)
-   all return correct top-5 hits.
-3. `search_catalog` p95 latency ≤ 20 ms on this repo's index.
-4. Binary size ≤ 35 MB with default features.
-5. `cargo nextest run` passes with zero `#[ignore]` additions.
-6. `_savings.json` shows non-negative token savings for the golden
-   semantic queries (the new `natural_language` behavior must never
-   surface *more* tokens than naive BM25).
-7. `REFACTOR_WORKLOG.md` reflects the new baseline numbers and the
-   closed work items.
-
-If any of these miss, the branch doesn't merge.

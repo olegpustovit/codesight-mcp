@@ -19,7 +19,6 @@ static AGENT_V1_HANDLERS: &[(&str, AgentV1Handler)] = &[
     ("evaluate_quality", CodeService::evaluate_quality),
     ("assemble_context", CodeService::assemble_context),
     ("manage_indexes", CodeService::manage_indexes),
-    ("embed_repo", CodeService::embed_repo),
     ("search_columns", CodeService::search_columns),
     ("check_references", CodeService::check_references),
     ("get_cross_repo_map", CodeService::get_cross_repo_map),

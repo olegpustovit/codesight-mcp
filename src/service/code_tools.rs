@@ -28,7 +28,7 @@ impl CodeService {
         root: &std::path::Path,
     ) -> anyhow::Result<(IndexResult, Vec<Value>)> {
         let outcome = code_index::index_workspace(&self.config, root)?;
-        let warnings = outcome
+        let mut warnings: Vec<Value> = outcome
             .warnings
             .into_iter()
             .map(|warning| {
@@ -38,6 +38,14 @@ impl CodeService {
                 })
             })
             .collect();
+
+        // Dense embeddings: re-encode the repo's symbols and write vec rows.
+        // Any failure is downgraded to a warning — lexical ingest already
+        // succeeded and `search_catalog` has a lexical-only fallback path.
+        if let Some(embed_warning) = self.embed_repo_symbols(&outcome.summary.repo) {
+            warnings.push(embed_warning);
+        }
+
         Ok((
             IndexResult {
                 repo: outcome.summary.repo,
@@ -51,6 +59,82 @@ impl CodeService {
             },
             warnings,
         ))
+    }
+
+    /// Encode every symbol for `source_id` and upsert vec rows. Returns
+    /// `Some(warning_json)` on failure so the caller can forward it. On
+    /// success, returns `None` (silent success — ingest meta already
+    /// includes symbol_count).
+    fn embed_repo_symbols(&self, source_id: &str) -> Option<Value> {
+        let store = match self.ensure_repo_store(source_id, None) {
+            Ok(s) => s,
+            Err(e) => {
+                return Some(json!({
+                    "code": "SEMANTIC_EMBED_SKIPPED",
+                    "message": format!("failed to open index for embedding: {e}"),
+                }));
+            }
+        };
+        let inputs = match store.all_symbol_embedding_inputs() {
+            Ok(v) => v,
+            Err(e) => {
+                return Some(json!({
+                    "code": "SEMANTIC_EMBED_SKIPPED",
+                    "message": format!("failed to read symbols for embedding: {e}"),
+                }));
+            }
+        };
+        if inputs.is_empty() {
+            return None;
+        }
+        let embedder = match self.embedder() {
+            Ok(e) => e.clone(),
+            Err(reason) => {
+                return Some(json!({
+                    "code": "SEMANTIC_EMBED_SKIPPED",
+                    "message": format!("embedder unavailable: {reason}"),
+                }));
+            }
+        };
+        let texts: Vec<String> = inputs
+            .iter()
+            .map(|s| {
+                crate::retrieval::embedder::symbol_chunk_text(
+                    &s.kind,
+                    &s.name,
+                    &s.signature,
+                    &s.summary,
+                    &s.source_text,
+                )
+            })
+            .collect();
+        let vectors = match embedder.encode(&texts) {
+            Ok(v) => v,
+            Err(e) => {
+                return Some(json!({
+                    "code": "SEMANTIC_EMBED_SKIPPED",
+                    "message": format!("encoder error: {e}"),
+                }));
+            }
+        };
+        let rows: Vec<codesight_storage::storage::vector_index::VectorRow<'_>> = inputs
+            .iter()
+            .zip(vectors.iter())
+            .map(|(inp, vec)| codesight_storage::storage::vector_index::VectorRow {
+                stable_id: &inp.id,
+                embedding: vec.as_slice(),
+            })
+            .collect();
+        match store.write_symbol_vectors(&rows) {
+            Ok(n) => {
+                info!(source_id, written = n, "wrote symbol embeddings");
+                None
+            }
+            Err(e) => Some(json!({
+                "code": "SEMANTIC_EMBED_SKIPPED",
+                "message": format!("vec write failed: {e}"),
+            })),
+        }
     }
 
     pub(super) fn get_file_content(&self, args: FileContentArgs) -> anyhow::Result<Value> {

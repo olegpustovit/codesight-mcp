@@ -1,8 +1,8 @@
 {
-  "total_tokens_saved": 273400657,
+  "total_tokens_saved": 286006492,
   "total_cost_avoided": {
-    "claude_sonnet": 820.2019710000002,
-    "gpt4o": 683.5016424999986,
-    "claude_opus": 4101.009854999998
+    "gpt4o": 715.0162299999984,
+    "claude_opus": 4290.0973799999965,
+    "claude_sonnet": 858.0194760000003
   }
 }

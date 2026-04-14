@@ -95,10 +95,6 @@ impl AppConfig {
         self.doc_dir(repo).join("doc_index.sqlite3")
     }
 
-    pub fn embedding_path(&self, repo: &str) -> PathBuf {
-        self.repo_dir(repo).join("embeddings.json")
-    }
-
     /// Passive-checkpoint every known code and doc database on disk. Used on
     /// graceful shutdown so the server does not leave fat WAL files behind.
     /// Errors are logged and swallowed — shutdown must not hang on a broken

@@ -241,6 +241,53 @@ impl IndexStore {
         Ok(PathBuf::from(value))
     }
 
+    /// Replace dense-embedding rows for the given (stable_id, vector) pairs
+    /// in a single transaction. Unknown stable ids are silently skipped —
+    /// the lexical insert is the source of truth. Returns the number of
+    /// rows written.
+    pub fn write_symbol_vectors(
+        &self,
+        rows: &[super::vector_index::VectorRow<'_>],
+    ) -> anyhow::Result<usize> {
+        let mut conn = self.open_connection()?;
+        let tx = conn.transaction()?;
+        let n = super::vector_index::upsert_vectors(
+            &tx,
+            super::vector_index::Domain::Symbol,
+            rows,
+        )?;
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// Delete dense-embedding rows by stable id.
+    pub fn delete_symbol_vectors_by_id(&self, ids: &[&str]) -> anyhow::Result<usize> {
+        let mut conn = self.open_connection()?;
+        let tx = conn.transaction()?;
+        let n = super::vector_index::delete_vectors(
+            &tx,
+            super::vector_index::Domain::Symbol,
+            ids,
+        )?;
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// KNN over code-symbol embeddings. Returns `(stable_id, distance)` pairs.
+    pub fn query_symbol_knn(
+        &self,
+        query: &[f32],
+        k: usize,
+    ) -> anyhow::Result<Vec<(String, f64)>> {
+        let conn = self.open_read_only()?;
+        Ok(super::vector_index::query_knn(
+            &conn,
+            super::vector_index::Domain::Symbol,
+            query,
+            k,
+        )?)
+    }
+
     pub(crate) fn open_connection(&self) -> anyhow::Result<Connection> {
         let conn = db::open_rw(&self.db_path)?;
         migrations::apply_code_index_migrations(&conn)?;

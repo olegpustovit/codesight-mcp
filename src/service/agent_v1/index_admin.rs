@@ -1,6 +1,5 @@
 //! Index lifecycle + column search.
 
-use std::collections::HashSet;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -203,102 +202,6 @@ impl CodeService {
                 "agent_readiness_score": gov.agent_readiness_score,
                 "confidence": gov.confidence,
                 "stored": true,
-            }),
-        )
-    }
-
-    // ── embed_repo ─────────────────────────────────────────────────────────
-    pub(in crate::service) fn embed_repo(&self, v: Value) -> anyhow::Result<Value> {
-        #[derive(Deserialize)]
-        struct Args {
-            source_id: String,
-            #[serde(default)]
-            force: bool,
-        }
-        let args: Args = ValidatedArgs::from_validated(v)?.into_inner();
-        let timer = MetaBuilder::new(0);
-
-        // Check for embedding provider
-        let provider = crate::retrieval::semantic::detect_embedding_provider();
-        let Some(provider) = provider else {
-            return self.error_response(&timer, ToolError {
-                category: ToolErrorCategory::InvalidArgument,
-                code: "no_embedding_provider",
-                message: "No embedding provider configured. Set CODESIGHT_EMBED_MODEL, or OPENAI_API_KEY+OPENAI_EMBED_MODEL, or GOOGLE_API_KEY+GOOGLE_EMBED_MODEL.".into(),
-                detail: json!({}),
-            });
-        };
-
-        let store = require_store!(repo: self, &args.source_id, None, &timer);
-
-        // Get all symbols for embedding
-        let sym_infos = store.all_symbols_with_source()?;
-        let emb_path = self.config.embedding_path(&args.source_id);
-        let model_path = emb_path.with_extension("tfidf.json");
-        let mut emb_store = crate::retrieval::semantic::EmbeddingStore::open(&emb_path);
-
-        // Check if already embedded (cached)
-        let already_embedded = if !args.force {
-            sym_infos.iter().all(|s| emb_store.contains(&s.id))
-        } else {
-            false
-        };
-
-        if already_embedded {
-            return self.success_response(
-                &timer,
-                json!({
-                    "source_id": args.source_id,
-                    "symbols_embedded": 0,
-                    "cached": true,
-                    "provider": provider.provider,
-                    "model": provider.model,
-                }),
-            );
-        }
-
-        // Build TF-IDF embeddings
-        let documents: Vec<(String, String)> = sym_infos
-            .iter()
-            .map(|s| (s.id.clone(), format!("{} {} {}", s.name, s.kind, s.source)))
-            .collect();
-
-        let (vocab, embeddings) = crate::retrieval::semantic::compute_tfidf_embeddings(&documents);
-
-        // Build DF map for query vector computation
-        let mut df: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        for (_, text) in &documents {
-            let tokens: HashSet<String> = text
-                .split(|c: char| !c.is_alphanumeric() && c != '_')
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_lowercase())
-                .collect();
-            for tok in tokens {
-                *df.entry(tok).or_insert(0) += 1;
-            }
-        }
-
-        let model = crate::retrieval::semantic::TfidfModel {
-            vocab: vocab.clone(),
-            doc_count: documents.len(),
-            df,
-        };
-        let _ = model.save(&model_path);
-
-        let count = embeddings.len();
-        emb_store.set_many(embeddings);
-        if !vocab.is_empty() {
-            emb_store.set_dimension(vocab.len(), &provider.model);
-        }
-
-        self.success_response(
-            &timer,
-            json!({
-                "source_id": args.source_id,
-                "symbols_embedded": count,
-                "cached": false,
-                "provider": provider.provider,
-                "model": provider.model,
             }),
         )
     }

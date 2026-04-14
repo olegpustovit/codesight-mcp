@@ -13,15 +13,20 @@ mod snapshot_store;
 mod symbol_reads;
 mod symbol_record;
 mod types;
+pub mod vector_index;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub use repo_summary::RepoMetadata;
+pub use schema::EMBEDDING_DIM;
 pub use snapshot_store::QualitySnapshot;
 pub use symbol_reads::is_outline_noise;
 pub use symbol_record::{SymbolMetadata, SymbolRecord};
-pub use types::{AnalysisSymbol, RetrievedSymbol, SearchSymbol, SymbolSourceRecord};
+pub use types::{
+    AnalysisSymbol, RetrievedSymbol, SearchSymbol, SectionEmbeddingInput, SymbolEmbeddingInput,
+    SymbolSourceRecord,
+};
 
 #[derive(Clone)]
 pub struct IndexStore {

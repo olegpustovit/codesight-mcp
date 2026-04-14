@@ -4,7 +4,8 @@
 
 pub mod bm25_reference;
 pub mod doc_summarizer;
+pub mod embedder;
+pub mod fusion;
 pub mod fuzzy;
 pub mod sections;
-pub mod semantic;
 pub mod summarizer;

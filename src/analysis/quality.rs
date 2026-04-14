@@ -19,7 +19,11 @@ pub fn complexity_payload(store: &IndexStore, symbol_id: &str) -> anyhow::Result
     let branch_hints = cyclomatic.saturating_sub(1);
     let first_line = rec.stored_source.lines().next().unwrap_or("");
     let param_count = count_params(first_line);
-    let max_nesting = max_nesting_depth_for_file(&rec.stored_source, &rec.file_path);
+    // Report depth BELOW the function body itself: a flat function is 0,
+    // a single `if` inside it is 1. `max_nesting_depth_for_file` counts
+    // the function body as depth 1 (its `{` or first indent), so subtract.
+    let max_nesting = max_nesting_depth_for_file(&rec.stored_source, &rec.file_path)
+        .saturating_sub(1);
     let assessment = complexity_assessment(cyclomatic);
     let repo_path = rec.root_path.to_string_lossy().to_string();
 

@@ -31,8 +31,6 @@ fn search_args(source_id: &str, query: &str, repo_path: Option<&str>) -> SearchC
         max_edit_distance: None,
         repo_path: repo_path.map(|s| s.to_string()),
         semantic: None,
-        semantic_weight: None,
-        semantic_only: None,
         sort_by: None,
         output_mode: None,
         pattern: None,

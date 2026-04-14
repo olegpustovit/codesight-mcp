@@ -6,6 +6,38 @@ archive. See [`AGENTS.md`](AGENTS.md) for the policies that govern this work.
 
 ---
 
+## 2026-04-14 — TF-IDF → dense embeddings (IDF_REPLACEMENT.md)
+
+Landed the full IDF replacement across WS0–WS6. Outcomes:
+
+- **Deleted.** `src/retrieval/semantic.rs` (29 symbols),
+  `tests/agent_v1_semantic.rs`, `embed_repo` registry entry + handler,
+  `AppConfig::embedding_path`, `CODESIGHT_EMBED_MODEL` env,
+  `SearchCatalogArgs::{semantic_only, semantic_weight}`. Net deletion.
+- **Added.** `src/retrieval/embedder.rs` (model2vec-rs wrapper, lazy
+  `EmbedderSlot`), `src/retrieval/fusion.rs` (RRF), storage-side
+  `crates/codesight-storage/src/storage/vector_index.rs` with
+  insert/delete/KNN for symbols and sections.
+- **Storage.** sqlite-vec auto-registered via `sqlite3_auto_extension`
+  in `db.rs::ensure_sqlite_vec_registered`. DDL migration: code
+  `user_version` 5→6, docs 1→2, both adding `vec_*_embeddings` vec0
+  tables keyed by `row_id`. `EMBEDDING_DIM=256` pinned for
+  `potion-base-8M`.
+- **Wiring.** `do_index_folder_with_warnings` embeds symbols after
+  crawl; `do_index_local` does sections. `search_catalog` runs
+  `run_dense_lane` when `semantic=true` or
+  `query_mode=natural_language`, fuses via RRF, emits
+  `SEMANTIC_FALLBACK` on model/vec failure — never hard-fails.
+- **Nix darwin.** `.cargo/config.toml` now pins
+  `CC=/usr/bin/clang`, `CXX=/usr/bin/clang++`, and adds the
+  libiconv RUSTFLAGS shim required by `sqlite-vec`.
+- **Tests green.** `storage::vector_index::sqlite_vec_available_and_roundtrips`,
+  `retrieval::fusion::*`, and four new `tests/agent_v1_dense.rs` cases
+  (fallback warning, natural_language-implies-semantic, deleted args
+  silently ignored, lexical-only path clean).
+
+---
+
 ## Current metrics (baseline: 2026-04-13, updated 2026-04-13 session 3)
 
 | Metric | Current | Target | Trend |
