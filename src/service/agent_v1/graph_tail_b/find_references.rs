@@ -15,7 +15,7 @@ impl CodeService {
         let ci_word_match = |body: &str, name: &str| -> bool {
             let body_lc = body.to_lowercase();
             let name_lc = name.to_lowercase();
-            crate::analysis::graph::word_match(&body_lc, &name_lc)
+            codesight_analysis::graph::word_match(&body_lc, &name_lc)
         };
 
         if let Some(identifiers) = &args.identifiers {
@@ -145,7 +145,7 @@ impl CodeService {
         }
 
         let _call_edges = if include_call_chain {
-            Some(crate::analysis::graph::build_call_edges(&sym_infos))
+            Some(codesight_analysis::graph::build_call_edges(&sym_infos))
         } else {
             None
         };
@@ -157,7 +157,7 @@ impl CodeService {
                 "matches": matches,
             });
             if include_call_chain {
-                let file_syms: Vec<&crate::analysis::graph::SymbolInfo> =
+                let file_syms: Vec<&codesight_analysis::graph::SymbolInfo> =
                     sym_infos.iter().filter(|s| &s.file == file).collect();
                 let mut calling_symbols: Vec<Value> = Vec::new();
                 for fs in &file_syms {

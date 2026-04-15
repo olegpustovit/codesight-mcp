@@ -3,7 +3,7 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::analysis::reference_check;
+use super::reference_check;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::ContentRef;
 use crate::service::agent_v1::validate::ValidatedArgs;

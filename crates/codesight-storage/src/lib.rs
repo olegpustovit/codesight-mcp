@@ -1,5 +1,5 @@
 pub mod class_hierarchy;
-mod config;
+pub mod config;
 pub mod db;
 pub mod error;
 pub mod indexing;

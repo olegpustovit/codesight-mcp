@@ -4,13 +4,13 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use crate::analysis::agent_readiness::{
+use crate::agent_readiness::{
     AgentReadinessSignal, compute_agent_readiness, is_fn_method,
 };
-use crate::analysis::complexity::cyclomatic_complexity;
-use crate::analysis::dead_code;
-use crate::analysis::graph::find_cycles;
-use crate::storage::{AnalysisSymbol, IndexStore};
+use crate::complexity::cyclomatic_complexity;
+use crate::dead_code;
+use crate::graph::find_cycles;
+use codesight_storage::storage::{AnalysisSymbol, IndexStore};
 
 /// Per-dimension [0.0, 1.0] scores for the 5 structural root causes.
 pub struct RootCauseScores {

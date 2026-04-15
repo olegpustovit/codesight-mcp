@@ -177,7 +177,7 @@ impl CodeService {
         let most_central = if adj.is_empty() {
             Vec::new()
         } else {
-            let pr = crate::analysis::graph::compute_pagerank(&adj, 0.85, 100, 1e-6);
+            let pr = codesight_analysis::graph::compute_pagerank(&adj, 0.85, 100, 1e-6);
             let mut ranked: Vec<_> = pr
                 .scores
                 .iter()

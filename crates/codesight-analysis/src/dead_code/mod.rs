@@ -7,10 +7,10 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use crate::{
-    analysis::{evidence::EvidenceNote, graph as dep_graph},
-    storage::{AnalysisSymbol, IndexStore},
-};
+use codesight_storage::storage::{AnalysisSymbol, IndexStore};
+
+use crate::evidence::EvidenceNote;
+use crate::graph as dep_graph;
 
 use self::entrypoints::{is_test_file, is_test_fixture};
 use self::reachability::build_repo_reachability;
@@ -260,7 +260,7 @@ fn serialize_notes(notes: &[EvidenceNote]) -> Value {
 /// token). Sets `truncated: true` when anything was dropped. Used by the
 /// `evaluate_quality` handler when callers pass `max_tokens`.
 pub fn pack_dead_code_to_budget(data: &mut Value, max_tokens: u32) {
-    let byte_budget = (max_tokens as usize).saturating_mul(crate::config::BYTES_PER_TOKEN as usize);
+    let byte_budget = (max_tokens as usize).saturating_mul(codesight_storage::config::BYTES_PER_TOKEN as usize);
     if serialized_len(data) <= byte_budget {
         return;
     }

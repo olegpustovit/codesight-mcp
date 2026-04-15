@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/codesight-core", "crates/codesight-extractors", "crates/codesight-framework", "crates/codesight-imports", "crates/codesight-retrieval", "crates/codesight-storage"]
+members = [".", "crates/codesight-analysis", "crates/codesight-core", "crates/codesight-extractors", "crates/codesight-framework", "crates/codesight-imports", "crates/codesight-retrieval", "crates/codesight-storage"]
 resolver = "2"
 
 [package]
@@ -14,6 +14,7 @@ anyhow = "1"
 blake3 = "1"
 clap = { version = "4", features = ["derive", "env"] }
 chrono = { version = "0.4", features = ["serde"] }
+codesight-analysis = { path = "crates/codesight-analysis" }
 codesight-core = { path = "crates/codesight-core" }
 codesight-extractors = { path = "crates/codesight-extractors" }
 codesight-framework = { path = "crates/codesight-framework" }

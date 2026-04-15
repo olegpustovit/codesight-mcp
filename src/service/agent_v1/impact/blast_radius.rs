@@ -185,9 +185,9 @@ impl CodeService {
         if call_depth > 0 {
             let sym_infos = store.all_symbols_with_source()?;
             if let Some(target) = sym_infos.iter().find(|s| s.name == symbol_name) {
-                let call_edges = crate::analysis::graph::build_call_edges(&sym_infos);
+                let call_edges = codesight_analysis::graph::build_call_edges(&sym_infos);
                 let callers =
-                    crate::analysis::graph::find_callers(&target.id, &call_edges, call_depth);
+                    codesight_analysis::graph::find_callers(&target.id, &call_edges, call_depth);
                 let callers_json: Vec<Value> = callers
                     .iter()
                     .map(|(id, name, file, line, kind, depth)| {

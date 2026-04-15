@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use codesight_mcp::analysis::quality::doc_coverage_payload;
+use codesight_mcp::service::agent_v1::quality::doc_coverage::doc_coverage_payload;
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::service::CodeService;
 use codesight_mcp::storage::DocStore;

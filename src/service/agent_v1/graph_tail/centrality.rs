@@ -27,11 +27,11 @@ impl CodeService {
         }
 
         let adj = store.dependency_graph()?;
-        let degrees = crate::analysis::graph::compute_in_out_degrees(&adj);
+        let degrees = codesight_analysis::graph::compute_in_out_degrees(&adj);
         let top_n = args.top_n.unwrap_or(20);
 
         let (ranked, iterations) = if algo == "pagerank" {
-            let pr = crate::analysis::graph::compute_pagerank(&adj, 0.85, 100, 1e-6);
+            let pr = codesight_analysis::graph::compute_pagerank(&adj, 0.85, 100, 1e-6);
             let mut ranked: Vec<_> = pr.scores.iter().collect();
             ranked.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
             let ranked: Vec<Value> = ranked

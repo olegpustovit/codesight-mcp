@@ -4,7 +4,9 @@ mod evidence;
 
 use serde_json::{Value, json};
 
-use crate::{analysis::evidence::EvidenceNote, storage::IndexStore};
+use codesight_analysis::evidence::EvidenceNote;
+
+use crate::storage::IndexStore;
 
 use self::evidence::{IdentifierReferenceEvidence, ReferenceEvidenceProvider};
 

@@ -4,8 +4,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::analysis::complexity::cyclomatic_complexity;
-use crate::storage::AnalysisSymbol;
+use crate::complexity::cyclomatic_complexity;
+use codesight_storage::storage::AnalysisSymbol;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AgentReadinessDimensions {

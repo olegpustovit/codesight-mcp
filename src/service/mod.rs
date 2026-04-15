@@ -1,4 +1,4 @@
-pub(crate) mod agent_v1;
+pub mod agent_v1;
 mod args;
 mod code_tools;
 pub(crate) mod cross_repo_map;

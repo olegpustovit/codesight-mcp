@@ -76,7 +76,7 @@ pub(in crate::service) fn extract_symbol_names_from_content(
 pub(in crate::service) fn build_call_chain(
     target_id: &str,
     caller_id: &str,
-    edges: &[crate::analysis::graph::CallEdge],
+    edges: &[codesight_analysis::graph::CallEdge],
 ) -> Vec<String> {
     use std::collections::{HashMap, VecDeque};
     // Build reverse edge map: callee -> callers

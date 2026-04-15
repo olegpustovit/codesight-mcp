@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::analysis::{dead_code, quality, quality_signal};
+use codesight_analysis::{dead_code, quality, quality_signal};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::require_store;
@@ -27,7 +27,7 @@ impl CodeService {
         let index_stale = meta.is_stale.unwrap_or(false);
 
         let adj = store.dependency_graph_strict()?;
-        let cycles = crate::analysis::graph::find_cycles(&adj);
+        let cycles = codesight_analysis::graph::find_cycles(&adj);
         let cycle_count = cycles.len();
         let cycles_sample: Vec<_> = cycles.iter().take(5).cloned().collect();
 

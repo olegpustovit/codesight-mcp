@@ -2,9 +2,9 @@
 
 use serde_json::{Value, json};
 
-use crate::analysis::agent_readiness::{compute_file_churn, max_nesting_depth_for_file};
-use crate::analysis::complexity::{complexity_assessment, cyclomatic_complexity};
-use crate::storage::{IndexStore, doc_index::DocStore};
+use crate::agent_readiness::{compute_file_churn, max_nesting_depth_for_file};
+use crate::complexity::{complexity_assessment, cyclomatic_complexity};
+use codesight_storage::storage::IndexStore;
 
 pub fn complexity_payload(store: &IndexStore, symbol_id: &str) -> anyhow::Result<Option<Value>> {
     let Some(rec) = store.symbol_record(symbol_id)? else {
@@ -122,73 +122,6 @@ pub fn hotspots_payload(
     }))
 }
 
-pub fn doc_coverage_payload(doc_store: &DocStore, symbol_ids: &[String]) -> anyhow::Result<Value> {
-    if symbol_ids.is_empty() {
-        return Ok(json!({
-            "analysis": "doc_coverage",
-            "symbols_checked": 0,
-            "documented_count": 0,
-            "undocumented_count": 0,
-            "coverage_pct": 0.0,
-            "documented": [],
-            "undocumented": [],
-        }));
-    }
-
-    let all_sections = doc_store.all_sections()?;
-    let mut heading_sections = std::collections::HashMap::<String, Vec<Value>>::new();
-    for section in &all_sections {
-        heading_sections
-            .entry(section.heading.to_lowercase())
-            .or_default()
-            .push(json!({
-                "section_id": section.id,
-                "section_title": section.heading,
-                "doc_path": section.file_path,
-            }));
-    }
-
-    let mut documented = Vec::new();
-    let mut undocumented = Vec::new();
-    for symbol_id in symbol_ids {
-        let symbol_name = extract_symbol_name_from_id(symbol_id);
-        let heading_key = symbol_name.to_lowercase();
-        if let Some(sections) = heading_sections.get(&heading_key) {
-            documented.push(json!({
-                "symbol_id": symbol_id,
-                "symbol_name": symbol_name,
-                "matching_sections": sections,
-            }));
-        } else {
-            undocumented.push(json!({
-                "symbol_id": symbol_id,
-                "symbol_name": symbol_name,
-            }));
-        }
-    }
-
-    let documented_count = documented.len();
-    let total = symbol_ids.len();
-    let coverage_pct = if total == 0 {
-        0.0
-    } else {
-        documented_count as f64 / total as f64 * 100.0
-    };
-
-    let summary = doc_store.doc_summary()?;
-
-    Ok(json!({
-        "analysis": "doc_coverage",
-        "repo": summary["source_id"],
-        "symbols_checked": total,
-        "documented_count": documented_count,
-        "undocumented_count": undocumented.len(),
-        "coverage_pct": coverage_pct,
-        "documented": documented,
-        "undocumented": undocumented,
-    }))
-}
-
 pub fn extract_symbol_name_from_id(id: &str) -> String {
     let after_colons = id.rsplit("::").next().unwrap_or(id);
     after_colons
@@ -241,7 +174,7 @@ fn count_params(signature: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{count_params, extract_symbol_name_from_id};
-    use crate::analysis::agent_readiness::max_nesting_depth_for_file;
+    use crate::agent_readiness::max_nesting_depth_for_file;
 
     #[test]
     fn extracts_symbol_name_from_stable_id() {

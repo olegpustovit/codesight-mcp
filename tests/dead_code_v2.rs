@@ -1,6 +1,6 @@
 //! Slice tests for dead-code-v2, plus a small MCP-envelope contract check.
 
-use codesight_mcp::analysis::dead_code::dead_code_v2_payload;
+use codesight_analysis::dead_code::dead_code_v2_payload;
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::service::CodeService;
 use codesight_mcp::storage::IndexStore;

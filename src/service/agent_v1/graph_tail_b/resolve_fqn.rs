@@ -51,7 +51,7 @@ impl CodeService {
         };
 
         let source_files: HashSet<String> = store.all_file_paths()?.into_iter().collect();
-        match crate::analysis::graph::fqn_to_symbol(fqn, &psr4_map, &source_files) {
+        match codesight_analysis::graph::fqn_to_symbol(fqn, &psr4_map, &source_files) {
             Some(symbol_id) => self.success_response(
                 &MetaBuilder::new(0),
                 json!({

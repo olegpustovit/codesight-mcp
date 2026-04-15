@@ -1,6 +1,6 @@
 //! Slice tests for symbol complexity, plus a small MCP-envelope contract check.
 
-use codesight_mcp::analysis::quality::complexity_payload;
+use codesight_analysis::quality::complexity_payload;
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::service::CodeService;
 use codesight_mcp::storage::IndexStore;
