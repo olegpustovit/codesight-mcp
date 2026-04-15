@@ -1,7 +1,7 @@
 use super::render::{metadata, render_file_context};
 use super::snapshot::{NextjsSnapshot, NextjsStats};
 
-crate::framework::impl_framework_provider! {
+crate::impl_framework_provider! {
     provider: NextjsProvider,
     snapshot: NextjsSnapshot,
     stats: NextjsStats,

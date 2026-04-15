@@ -3,7 +3,6 @@ pub mod agent_v1;
 pub mod analysis;
 pub mod cli;
 pub mod config;
-pub mod framework;
 pub mod indexing;
 pub mod mcp;
 pub mod model;

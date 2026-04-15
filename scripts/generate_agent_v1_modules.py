@@ -131,7 +131,7 @@ def main() -> None:
             "use walkdir::WalkDir;\n\n"
             "use crate::storage::class_hierarchy;\n"
             "use crate::storage::doc_index::DocStore;\n"
-            "use crate::framework;\n"
+            "use codesight_framework;\n"
             "use crate::repo_id::normalize_repo_id;\n"
             "use crate::retrieval::sections;\n"
             "use crate::storage::IndexStore;\n\n"

@@ -2,7 +2,7 @@ use super::imports::compute_extra_imports;
 use super::render::{metadata, render_file_context};
 use super::snapshot::{LaravelSnapshot, LaravelStats};
 
-crate::framework::impl_framework_provider! {
+crate::impl_framework_provider! {
     provider: LaravelProvider,
     snapshot: LaravelSnapshot,
     stats: LaravelStats,

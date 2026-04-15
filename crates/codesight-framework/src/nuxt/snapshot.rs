@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::framework::{ExtraImport, rel_path, walk_files};
+use crate::{ExtraImport, rel_path, walk_files};
 
 use super::routing::{NuxtApiRoute, nuxt_api_route_from_path, nuxt_route_from_path};
 

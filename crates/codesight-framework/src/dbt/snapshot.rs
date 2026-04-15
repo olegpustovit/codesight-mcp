@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::framework::walk_files;
+use crate::walk_files;
 
 use super::docs::{parse_doc_blocks, parse_doc_blocks_from_content};
 use super::project::detect_dbt_project;

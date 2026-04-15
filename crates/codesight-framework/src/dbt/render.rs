@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::framework::FileContext;
+use crate::FileContext;
 
 use super::snapshot::DbtSnapshot;
 

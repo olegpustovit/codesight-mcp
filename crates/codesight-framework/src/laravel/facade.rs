@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::regex::RE;
-use crate::framework::ExtraImport;
+use crate::ExtraImport;
 
 /// Map of Laravel facade names to their underlying classes.
 fn facade_map() -> HashMap<&'static str, &'static str> {

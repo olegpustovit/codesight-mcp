@@ -1,7 +1,7 @@
 use super::render::{metadata, render_file_context};
 use super::snapshot::{NuxtSnapshot, NuxtStats};
 
-crate::framework::impl_framework_provider! {
+crate::impl_framework_provider! {
     provider: NuxtProvider,
     snapshot: NuxtSnapshot,
     stats: NuxtStats,

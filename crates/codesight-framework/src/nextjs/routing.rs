@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use tree_sitter::Node;
 
-use crate::extractors::common::parse_tree;
+use codesight_extractors::extractors::common::parse_tree;
 
 static ROUTE_EXPORT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b")

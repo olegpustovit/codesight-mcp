@@ -413,6 +413,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "codesight-framework"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "codesight-extractors",
+ "regex",
+ "serde_json",
+ "serde_yaml",
+ "tree-sitter",
+ "tree-sitter-php",
+ "tree-sitter-typescript",
+ "walkdir",
+]
+
+[[package]]
 name = "codesight-mcp"
 version = "0.1.0"
 dependencies = [
@@ -423,6 +438,7 @@ dependencies = [
  "clap",
  "codesight-core",
  "codesight-extractors",
+ "codesight-framework",
  "codesight-storage",
  "dirs",
  "ignore",

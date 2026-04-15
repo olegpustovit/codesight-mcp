@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 framework laravel.
 
-use codesight_mcp::framework::FrameworkProvider;
-use codesight_mcp::framework::laravel::*;
+use codesight_framework::FrameworkProvider;
+use codesight_framework::laravel::*;
 
 // ── _guess_table ────────────────────────────────────────────────────────────
 #[test]

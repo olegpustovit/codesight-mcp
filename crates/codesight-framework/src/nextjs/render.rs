@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::framework::FileContext;
+use crate::FileContext;
 
 use super::routing::next_route_from_path;
 use super::snapshot::NextjsSnapshot;

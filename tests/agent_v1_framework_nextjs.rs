@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 framework nextjs.
 
-use codesight_mcp::framework::FrameworkProvider;
-use codesight_mcp::framework::nextjs::*;
+use codesight_framework::FrameworkProvider;
+use codesight_framework::nextjs::*;
 
 // ── _next_route_from_path ───────────────────────────────────────────────────
 #[test]

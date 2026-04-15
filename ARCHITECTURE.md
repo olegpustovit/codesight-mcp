@@ -15,7 +15,6 @@ codesight-mcp/                          ← product crate (root Cargo.toml)
 │   ├── service/                        ← MCP boundary + agent-v1 dispatch
 │   ├── indexing/                       ← crawl, delta, imports, packages
 │   ├── analysis/                       ← graph, quality, cross-repo, evidence
-│   ├── framework/                      ← dbt / laravel / nextjs / nuxt detection
 │   ├── retrieval/                      ← ranking, summarization, sections
 │   ├── server_support/                 ← repo-id, path map, reindex state
 │   ├── security/                       ← binary policy, secret policy, paths
@@ -23,31 +22,35 @@ codesight-mcp/                          ← product crate (root Cargo.toml)
 └── crates/
     ├── codesight-core/                 ← shared primitives (symbols, fact quality)
     ├── codesight-extractors/           ← SCM engine + curated query packs
+    ├── codesight-framework/            ← dbt / laravel / nextjs / nuxt detection
     └── codesight-storage/              ← SQLite schema + migrations + reads/writes
 ```
 
 **Dependency direction is inward.** `codesight-core` is the base; the
-`extractors` and `storage` crates depend on it; the product crate depends on
-all three. Nothing in the crates depends on the product layer.
+`extractors` and `storage` crates depend on it; `framework` depends on
+`extractors` (for shared `parse_tree`); the product crate depends on all
+four. Nothing in the crates depends on the product layer.
 
 ### Workspace dependency graph (current snapshot)
 
-Extracted from `cargo metadata --format-version 1 --no-deps` on 2026-04-10;
+Extracted from `cargo metadata --format-version 1 --no-deps` on 2026-04-15;
 regenerate whenever a workspace crate is added or an edge changes.
 
-| From → To             | `codesight-core` | `codesight-extractors` | `codesight-storage` | `codesight-mcp` |
-|-----------------------|:----------------:|:----------------------:|:-------------------:|:---------------:|
-| `codesight-core`      |        —         |           ✗            |          ✗          |        ✗        |
-| `codesight-extractors`|        ✓         |           —            |          ✗          |        ✗        |
-| `codesight-storage`   |        ✓         |           ✗            |          —          |        ✗        |
-| `codesight-mcp`       |        ✓         |           ✓            |          ✓          |        —        |
+| From → To              | `codesight-core` | `codesight-extractors` | `codesight-framework` | `codesight-storage` | `codesight-mcp` |
+|------------------------|:----------------:|:----------------------:|:---------------------:|:-------------------:|:---------------:|
+| `codesight-core`       |        —         |           ✗            |           ✗           |          ✗          |        ✗        |
+| `codesight-extractors` |        ✓         |           —            |           ✗           |          ✗          |        ✗        |
+| `codesight-framework`  |        ✗         |           ✓            |           —           |          ✗          |        ✗        |
+| `codesight-storage`    |        ✓         |           ✗            |           ✗           |          —          |        ✗        |
+| `codesight-mcp`        |        ✓         |           ✓            |           ✓           |          ✓          |        —        |
 
 Rules enforced by this table:
 
 - `codesight-core` is a leaf — it depends on no other workspace crate.
-- `codesight-extractors` and `codesight-storage` do not depend on each other
-  (no horizontal edges between the two middle crates).
-- `codesight-mcp` is the only consumer that pulls in all three inner crates.
+- `codesight-extractors` and `codesight-storage` do not depend on each other.
+- `codesight-framework` depends only on `codesight-extractors` (for the
+  shared `parse_tree` helper) — no storage, no core.
+- `codesight-mcp` is the only consumer that pulls in every inner crate.
 - Additional workspace crates are allowed when they preserve these dependency
   invariants and own a coherent domain boundary.
 - Any new crate member or new edge requires updating this table **and** the
@@ -76,17 +79,16 @@ compile and dependency weight from `codesight-mcp`.
 
 | Candidate crate | Current scope | Feasibility | What we gain | Main blockers / prerequisites |
 |-----------------|---------------|-------------|--------------|-------------------------------|
-| `codesight-framework` | `src/framework/**` | High | Removes a self-contained framework domain from the root crate; trims framework-specific parser dependencies from the product crate; keeps dbt / Laravel / Next.js / Nuxt work behind one library boundary | Keep `FrameworkProvider`, `FileContext`, `ExtraImport`, registry assembly, and profile rendering owned by the crate; expose a small facade instead of leaking root-only helpers |
 | `codesight-imports` | `src/indexing/imports/**` plus `src/indexing/packages/**` | Medium-high | Pulls multilingual import extraction and package registry logic out of the root crate; gives graph analysis and service code one dependency-facts library; isolates more tree-sitter language dependencies from MCP/service code | Decide whether package-registry code stays attached to import extraction; extract stable evidence/result types so `analysis` and `service` stop reaching into root indexing internals |
 | `codesight-retrieval` | `src/retrieval/**` | Medium | Isolates ranking, section parsing, embedding/model loading, and retrieval helpers from MCP dispatch; shrinks the root crate's hot edit surface for search work | Move config-driven behavior behind small request/config structs; keep storage and service integration at the API boundary rather than through root-module imports |
 | `codesight-analysis` | `src/analysis/**` | Medium-low | Makes `service` thinner and turns graph / quality / readiness logic into a reusable library once its inputs stabilize | Today analysis still reads storage-backed facts and indexing utilities directly; split only after import/dependency APIs are carved out and storage DTOs stop leaking through root-owned seams |
 
-Planned order:
+`codesight-framework` (was first on this list) shipped 2026-04-15 — see
+[`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md). Planned order for what remains:
 
-1. `codesight-framework`
-2. `codesight-imports`
-3. `codesight-retrieval`
-4. `codesight-analysis`
+1. `codesight-imports`
+2. `codesight-retrieval`
+3. `codesight-analysis`
 
 Modules that should stay in the root crate for now:
 

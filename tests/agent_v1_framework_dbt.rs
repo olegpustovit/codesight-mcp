@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use codesight_mcp::framework::FrameworkProvider;
-use codesight_mcp::framework::dbt::*;
+use codesight_framework::FrameworkProvider;
+use codesight_framework::dbt::*;
 
 // ── _detect_dbt_project ─────────────────────────────────────────────────────
 #[test]

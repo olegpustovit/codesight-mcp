@@ -166,7 +166,7 @@ macro_rules! impl_framework_provider {
             }
         }
 
-        impl $crate::framework::FrameworkProvider for $Provider {
+        impl $crate::FrameworkProvider for $Provider {
             fn name(&self) -> &str {
                 $name
             }
@@ -179,7 +179,7 @@ macro_rules! impl_framework_provider {
                 $load_body
             }
 
-            fn get_file_context(&self, rel_path: &str) -> Option<$crate::framework::FileContext> {
+            fn get_file_context(&self, rel_path: &str) -> Option<$crate::FileContext> {
                 self.snapshot
                     .as_ref()
                     .and_then(|snapshot| render_file_context(snapshot, rel_path))
@@ -195,7 +195,7 @@ macro_rules! impl_framework_provider {
                 fn get_extra_imports(
                     &$ei_self,
                 ) -> anyhow::Result<
-                    std::collections::HashMap<String, Vec<$crate::framework::ExtraImport>>,
+                    std::collections::HashMap<String, Vec<$crate::ExtraImport>>,
                 > {
                     $ei_body
                 }

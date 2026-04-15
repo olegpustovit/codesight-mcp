@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::framework::{ExtraImport, FileContext, rel_path, walk_files};
+use crate::{ExtraImport, FileContext, rel_path, walk_files};
 
 use super::migrations::parse_migration;
 use super::models::{guess_table, parse_model};

@@ -73,6 +73,34 @@ Landed the full IDF replacement across WS0–WS6. Outcomes:
   (fallback warning, natural_language-implies-semantic, deleted args
   silently ignored, lexical-only path clean).
 
+## 2026-04-15 — `codesight-framework` crate split
+
+Carried out the first split from the `ARCHITECTURE.md` roadmap. Outcomes:
+
+- **New crate.** `crates/codesight-framework/` now owns dbt / Laravel /
+  Next.js / Nuxt detection, the `FrameworkProvider` trait,
+  `FrameworkRegistry`, `FileContext`, `ExtraImport`, the
+  `impl_framework_provider!` macro, and `profiles::detect_framework`.
+  Old `src/framework/` directory is gone.
+- **Dependency edge.** New crate depends only on `codesight-extractors`
+  (for the shared `parse_tree` helper). Pulls `tree-sitter`,
+  `tree-sitter-php`, `tree-sitter-typescript`, `walkdir`, `regex`,
+  `serde_yaml`, `serde_json`, `anyhow` out of the root edit surface for
+  framework work.
+- **No back-compat.** Removed `pub mod framework;` from `src/lib.rs`
+  with no re-export alias. Renamed every `crate::framework::X` to
+  `crate::X` inside the new crate; rewrote `$crate::framework::` paths
+  in the provider macro; updated all 5 integration tests to import
+  from `codesight_framework::*` directly. Generator script's stale
+  `use crate::framework;` line now emits `use codesight_framework;`.
+- **Invariants test extended.** `tests/crate_graph.rs` now requires
+  `codesight-framework` membership, asserts the `framework →
+  extractors` edge exists, and forbids `framework → storage`.
+- **Verification.** `cargo nextest run --test agent_v1_framework_core
+  --test agent_v1_framework_dbt --test agent_v1_framework_laravel
+  --test agent_v1_framework_nextjs --test agent_v1_framework_nuxt
+  --test crate_graph` → 193 passed, 0 failed in 3.7 s.
+
 ## 2026-04-15 — Crate graph audit and policy unfreeze
 
 Audited the workspace split against the current code shape before changing any
@@ -108,7 +136,8 @@ crate boundaries. Result:
 | Metric | Current | Target | Trend |
 |---|---|---|---|
 | Product crate LoC (`src/`) | **~28.8k** | ↓ each session | ↓ -94 (workspace_digest) |
-| Workspace crate LoC (`crates/`) | core 0.2k / extractors 9.4k / storage 3.1k | stable | stable |
+| Workspace crate LoC (`crates/`) | core 0.2k / extractors 9.4k / framework 3.2k / storage 3.1k | stable | ↑ +3.2k (framework split out of root) |
+| Product crate LoC (`src/`) after framework split | **~25.6k** | ↓ each session | ↓ -3.2k from framework move |
 | Governance score | **7780** (very good) | ↑ | ↑ +2 this session |
 | Structural score | **8072** (very good) | ↑ | stable |
 | Agent readiness score | **7498** (very good) | ↑ | ↑ +4 this session |

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::framework::ExtraImport;
+use crate::ExtraImport;
 
 use super::api_client::extract_api_calls;
 use super::blade::extract_blade_imports;
@@ -251,7 +251,7 @@ fn collect_api_call_imports(
 fn scan_js_for_api_calls(
     dir: &Path,
     root: &Path,
-    routes: &[crate::framework::laravel::RouteInfo],
+    routes: &[crate::laravel::RouteInfo],
     imports: &mut HashMap<String, Vec<ExtraImport>>,
 ) {
     let entries = match std::fs::read_dir(dir) {

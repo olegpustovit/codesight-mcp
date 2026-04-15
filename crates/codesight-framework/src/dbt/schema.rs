@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::framework::FileContext;
+use crate::FileContext;
 
 use super::docs::resolve_description;
 
