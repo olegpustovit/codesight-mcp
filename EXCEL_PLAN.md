@@ -24,8 +24,9 @@ shippable, has exact file paths, API shapes, and test commands.
 - **Out of scope (deferred):** T1 (tiktoken), T5 (ToolEnvelope), T6
   (plan_turn), T7 (audit_config), T8 (ownership), T10 (security hardening)
   all stay in `REFACTOR_WORKLOG.md`. This plan is additive, not a replacement.
-- **Crate graph freeze (T9) still holds.** Any new code stays in the crate
-  it belongs to; no new cross-crate edges.
+- **Workspace dependency invariants still hold.** Any new code stays in the
+  crate it belongs to unless a new crate creates a cleaner domain boundary
+  without introducing upward or horizontal coupling.
 
 ## Guiding principles (non-negotiable)
 

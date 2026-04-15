@@ -1,7 +1,7 @@
-//! CI gate: assert the workspace crate dependency DAG is frozen.
+//! CI gate: assert the workspace crate dependency invariants still hold.
 
 #[test]
-fn crate_dependency_graph_is_frozen() {
+fn workspace_crate_dependency_invariants_hold() {
     let metadata = cargo_metadata::MetadataCommand::new().exec().unwrap();
     let workspace_members: Vec<&cargo_metadata::Package> = metadata
         .packages
@@ -9,13 +9,7 @@ fn crate_dependency_graph_is_frozen() {
         .filter(|p| metadata.workspace_members.contains(&p.id))
         .collect();
 
-    // Exactly 4 workspace members
     let names: Vec<&str> = workspace_members.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(
-        names.len(),
-        4,
-        "expected 4 workspace crates, got: {names:?}"
-    );
     for expected in [
         "codesight-mcp",
         "codesight-core",
@@ -41,7 +35,7 @@ fn crate_dependency_graph_is_frozen() {
             .collect::<Vec<_>>()
     };
 
-    // codesight-core has no workspace deps
+    // codesight-core stays the base crate.
     assert!(
         ws_deps("codesight-core").is_empty(),
         "codesight-core must have no workspace deps"
@@ -68,7 +62,19 @@ fn crate_dependency_graph_is_frozen() {
     // codesight-storage does NOT depend on codesight-extractors
     assert!(!ws_deps("codesight-storage").contains(&"codesight-extractors".to_string()));
 
-    // Root crate depends on all three
+    // No workspace crate may depend on the product crate.
+    for pkg_name in &names {
+        if *pkg_name == "codesight-mcp" {
+            continue;
+        }
+        let deps = ws_deps(pkg_name);
+        assert!(
+            !deps.contains(&"codesight-mcp".to_string()),
+            "{pkg_name} must not depend on codesight-mcp: {deps:?}"
+        );
+    }
+
+    // Root crate depends on all three foundational crates.
     let root_deps = ws_deps("codesight-mcp");
     for dep in [
         "codesight-core",

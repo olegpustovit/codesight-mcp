@@ -73,6 +73,34 @@ Landed the full IDF replacement across WS0–WS6. Outcomes:
   (fallback warning, natural_language-implies-semantic, deleted args
   silently ignored, lexical-only path clean).
 
+## 2026-04-15 — Crate graph audit and policy unfreeze
+
+Audited the workspace split against the current code shape before changing any
+crate boundaries. Result:
+
+- **No immediate forced split.** The current four-crate layout is still
+  coherent, but the "exactly four crates" rule had become policy debt rather
+  than architectural guidance.
+- **Highest-feasibility next split:** `src/framework/` into its own crate.
+  It is largely self-contained, heavily tested, and carries parser-heavy
+  dependencies that currently bloat the root crate compile surface.
+- **Medium-feasibility split:** move `src/indexing/imports/` behind either
+  `codesight-extractors` or a dedicated import-analysis crate. This would
+  further pull tree-sitter language dependencies out of the root crate, but it
+  needs a cleaner seam because graph analysis and service handlers consume it.
+- **Lower-feasibility split:** `src/analysis/` as a crate. The domain is real,
+  but it still reaches into storage and indexing often enough that splitting it
+  today would mostly move coupling around.
+- **Policy change:** removed frozen-crate-graph language from
+  `AGENTS.md`, `ARCHITECTURE.md`, `IDF_REPLACEMENT.md`, and `EXCEL_PLAN.md`.
+  `tests/crate_graph.rs` now enforces dependency invariants instead of
+  "exactly four workspace crates".
+- **Architecture roadmap added.** `ARCHITECTURE.md` now lists the feasible
+  split candidates in order: `codesight-framework`,
+  `codesight-imports`, `codesight-retrieval`, then `codesight-analysis`,
+  along with gains and prerequisites for each.
+- **Verification:** `cargo nextest run --test crate_graph`.
+
 ---
 
 ## Current metrics (baseline: 2026-04-13, updated 2026-04-13 session 3)
@@ -124,7 +152,7 @@ search, and delta reindex on this repo.
 |---|---|---|---|
 | T3 | Kill `workspace_digest` mode | -94 | 31 context/workspace pass |
 | T4 | Rename `churn_rate`->`change_velocity`, `extraction_candidates`->`refactor_targets`, `coupling_metrics`->`module_coupling` | ~0 (renames) | 40 pass |
-| T9 | Crate graph CI gate (`tests/crate_graph.rs`) | +30 | 1 pass |
+| T9 | Workspace dependency invariants gate (`tests/crate_graph.rs`) | +30 | 1 pass |
 
 ---
 
@@ -488,6 +516,13 @@ loop, `fuzzy` to find MetaBuilder from typo. Zero fallbacks.
 **Friction:** `read_content` tip says "use Read tool if you plan to edit" —
 this is correct but forces a double-read (codesight for discovery, Read for
 harness tracking). ~20M tokens saved this session (267M cumulative).
+
+**2026-04-15.** Retrieval fallback for the crate-graph audit because the
+codesight MCP tool surface was not available in this Codex harness. Used shell
+search (`rg`, `cargo metadata`) to audit workspace edges and documentation
+drift, then updated the policy docs and invariants test in the same patch.
+Product gap: add a first-class workspace-graph / crate-coupling view so this
+audit can be dogfooded instead of reconstructed from Cargo metadata.
 
 ---
 

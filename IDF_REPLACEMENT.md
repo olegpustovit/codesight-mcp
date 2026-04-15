@@ -56,7 +56,6 @@ These are now fixed.
   - vec table helpers
   - vector insert/delete/query helpers
   - no model code
-- We do not add a new crate. The crate graph stays frozen.
 
 ### 1.3 Storage strategy
 

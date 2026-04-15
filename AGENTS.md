@@ -247,11 +247,17 @@ Tests are our **biggest technical debt** right now. Rules:
 | [`CONFIGURATION.md`](CONFIGURATION.md) | Env vars, precedence, per-workspace `.codesight.toml`. |
 | [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md) | **Current state, open work, metrics, next-session backlog.** |
 
-**Crate graph is frozen** at four members until shared fact types stabilize.
-Dependencies point inward: `codesight-core` ← `codesight-extractors` /
-`codesight-storage` ← root `codesight-mcp`. The two middle crates don't
-depend on each other. Product-only logic (MCP handlers, framework detection,
-CLI) stays in the root crate — don't smuggle it into middle crates.
+The **current** crate graph has four members. Dependencies point inward:
+`codesight-core` ← `codesight-extractors` / `codesight-storage` ← root
+`codesight-mcp`. The two middle crates don't depend on each other.
+Product-only logic (MCP handlers, framework detection, CLI) stays in the root
+crate until a split creates a cleaner ownership boundary and lower compile
+surface.
+
+New crates are allowed when they remove a coherent domain from the root crate
+without introducing a shared-types dumping ground or upward dependencies.
+Preferred first splits are self-contained domains with stable APIs and heavy
+dependency footprints.
 
 ## Working rules
 
