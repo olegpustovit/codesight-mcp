@@ -1,10 +1,10 @@
 //! Integration tests: agent v1 doc summarize.
 
-use codesight_mcp::retrieval::doc_summarizer::{
+use codesight_retrieval::doc_summarizer::{
     DocSummarizerConfig, get_provider_name, heading_summary, parse_response, summarize_sections,
     title_fallback,
 };
-use codesight_mcp::retrieval::sections::Section;
+use codesight_retrieval::sections::Section;
 
 fn make_section(heading: &str, level: u8) -> Section {
     Section {

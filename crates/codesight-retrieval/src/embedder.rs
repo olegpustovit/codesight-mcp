@@ -17,8 +17,6 @@ use std::sync::OnceLock;
 use codesight_storage::EMBEDDING_DIM;
 use model2vec_rs::model::StaticModel;
 
-use crate::config::BUILD_SHA;
-
 const MODEL_ID: &str = "potion-base-8M";
 const CONFIG_JSON: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -159,12 +157,25 @@ impl Default for EmbedderSlot {
     }
 }
 
+fn model_bundle_hash() -> &'static str {
+    // Content-addressed cache key: invalidates whenever any vendored asset
+    // changes. Avoids depending on the product crate's git-SHA build stamp.
+    static HASH: OnceLock<String> = OnceLock::new();
+    HASH.get_or_init(|| {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(CONFIG_JSON);
+        hasher.update(TOKENIZER_JSON);
+        hasher.update(MODEL_SAFETENSORS);
+        hasher.finalize().to_hex().as_str()[..12].to_string()
+    })
+}
+
 fn materialize_model_bundle() -> anyhow::Result<PathBuf> {
     let root = dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("codesight")
         .join("embedded-model")
-        .join(format!("{MODEL_ID}-{BUILD_SHA}"));
+        .join(format!("{MODEL_ID}-{}", model_bundle_hash()));
     fs::create_dir_all(&root)?;
     ensure_asset(&root.join("config.json"), CONFIG_JSON)?;
     ensure_asset(&root.join("tokenizer.json"), TOKENIZER_JSON)?;

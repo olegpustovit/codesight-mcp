@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use crate::db;
+use codesight_storage::db;
 
 const NAME_REPS: usize = 3;
 const SIGNATURE_REPS: usize = 2;

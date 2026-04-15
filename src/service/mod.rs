@@ -64,7 +64,7 @@ pub struct CodeService {
     ledger_guard: Mutex<()>,
     reindex_states: Arc<ReindexStateManager>,
     watchers: file_watcher::WatcherManager,
-    embedder: crate::retrieval::embedder::EmbedderSlot,
+    embedder: codesight_retrieval::embedder::EmbedderSlot,
 }
 
 impl CodeService {
@@ -87,14 +87,14 @@ impl CodeService {
             ledger_guard: Mutex::new(()),
             reindex_states,
             watchers: file_watcher::WatcherManager::new(),
-            embedder: crate::retrieval::embedder::EmbedderSlot::new(),
+            embedder: codesight_retrieval::embedder::EmbedderSlot::new(),
         })
     }
 
     /// Lazy-init access to the dense embedder. `Err` means the model could
     /// not be loaded in this session — callers translate to
     /// `SEMANTIC_FALLBACK` warnings rather than erroring the request.
-    pub fn embedder(&self) -> Result<&std::sync::Arc<crate::retrieval::embedder::Embedder>, &str> {
+    pub fn embedder(&self) -> Result<&std::sync::Arc<codesight_retrieval::embedder::Embedder>, &str> {
         self.embedder.get()
     }
 

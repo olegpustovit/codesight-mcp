@@ -55,7 +55,7 @@ impl CodeService {
                         .unwrap_or("");
                     (
                         section.id.clone(),
-                        crate::retrieval::embedder::section_chunk_text(
+                        codesight_retrieval::embedder::section_chunk_text(
                             &section.heading,
                             &section.heading_path,
                             &section.summary,

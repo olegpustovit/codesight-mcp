@@ -111,11 +111,11 @@ fn merge_dense_ranked_items(
         }
     }
 
-    let fused_symbols = crate::retrieval::fusion::rrf(
+    let fused_symbols = codesight_retrieval::fusion::rrf(
         lex_symbols,
         dense_symbol_hits.iter().map(|hit| hit.id.clone()),
     );
-    let fused_sections = crate::retrieval::fusion::rrf(
+    let fused_sections = codesight_retrieval::fusion::rrf(
         lex_sections,
         dense_section_hits.iter().map(|hit| hit.id.clone()),
     );

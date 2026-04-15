@@ -15,7 +15,6 @@ codesight-mcp/                          ← product crate (root Cargo.toml)
 │   ├── service/                        ← MCP boundary + agent-v1 dispatch
 │   ├── indexing/                       ← crawl, delta orchestration (code_index)
 │   ├── analysis/                       ← graph, quality, cross-repo, evidence
-│   ├── retrieval/                      ← ranking, summarization, sections
 │   ├── server_support/                 ← repo-id, path map, reindex state
 │   ├── security/                       ← binary policy, secret policy, paths
 │   └── tools.json                      ← frozen MCP contract
@@ -24,6 +23,7 @@ codesight-mcp/                          ← product crate (root Cargo.toml)
     ├── codesight-extractors/           ← SCM engine + curated query packs
     ├── codesight-framework/            ← dbt / laravel / nextjs / nuxt detection
     ├── codesight-imports/              ← multilingual import extraction + package manifest registry
+    ├── codesight-retrieval/            ← ranking, summarization, section parsing, embedder
     └── codesight-storage/              ← SQLite schema + migrations + reads/writes
 ```
 
@@ -37,14 +37,15 @@ four. Nothing in the crates depends on the product layer.
 Extracted from `cargo metadata --format-version 1 --no-deps` on 2026-04-15;
 regenerate whenever a workspace crate is added or an edge changes.
 
-| From → To              | `codesight-core` | `codesight-extractors` | `codesight-framework` | `codesight-imports` | `codesight-storage` | `codesight-mcp` |
-|------------------------|:----------------:|:----------------------:|:---------------------:|:-------------------:|:-------------------:|:---------------:|
-| `codesight-core`       |        —         |           ✗            |           ✗           |          ✗          |          ✗          |        ✗        |
-| `codesight-extractors` |        ✓         |           —            |           ✗           |          ✗          |          ✗          |        ✗        |
-| `codesight-framework`  |        ✗         |           ✓            |           —           |          ✗          |          ✗          |        ✗        |
-| `codesight-imports`    |        ✓         |           ✓            |           ✗           |          —          |          ✗          |        ✗        |
-| `codesight-storage`    |        ✓         |           ✗            |           ✗           |          ✗          |          —          |        ✗        |
-| `codesight-mcp`        |        ✓         |           ✓            |           ✓           |          ✓          |          ✓          |        —        |
+| From → To              | `codesight-core` | `codesight-extractors` | `codesight-framework` | `codesight-imports` | `codesight-retrieval` | `codesight-storage` | `codesight-mcp` |
+|------------------------|:----------------:|:----------------------:|:---------------------:|:-------------------:|:---------------------:|:-------------------:|:---------------:|
+| `codesight-core`       |        —         |           ✗            |           ✗           |          ✗          |           ✗           |          ✗          |        ✗        |
+| `codesight-extractors` |        ✓         |           —            |           ✗           |          ✗          |           ✗           |          ✗          |        ✗        |
+| `codesight-framework`  |        ✗         |           ✓            |           —           |          ✗          |           ✗           |          ✗          |        ✗        |
+| `codesight-imports`    |        ✓         |           ✓            |           ✗           |          —          |           ✗           |          ✗          |        ✗        |
+| `codesight-retrieval`  |        ✓         |           ✗            |           ✗           |          ✗          |           —           |          ✓          |        ✗        |
+| `codesight-storage`    |        ✓         |           ✗            |           ✗           |          ✗          |           ✗           |          —          |        ✗        |
+| `codesight-mcp`        |        ✓         |           ✓            |           ✓           |          ✓          |           ✓           |          ✓          |        —        |
 
 Rules enforced by this table:
 
@@ -73,6 +74,13 @@ Rules enforced by this table:
   prefer self-contained domains that reduce root-crate dependency load before
   carving out tightly-coupled orchestration code.
 
+### Shipped splits
+
+- 2026-04-15 — `codesight-retrieval` carved out of `src/retrieval/**`. Owns
+  ranking, section parsing, fusion/RRF, fuzzy matching, summarizer config,
+  and the dense embedder (bundled model assets now live inside the crate).
+  Depends on `codesight-core` and `codesight-storage` only.
+
 ### Planned split roadmap
 
 The root crate is not being split indiscriminately. A module becomes a crate
@@ -86,14 +94,13 @@ compile and dependency weight from `codesight-mcp`.
 
 | Candidate crate | Current scope | Feasibility | What we gain | Main blockers / prerequisites |
 |-----------------|---------------|-------------|--------------|-------------------------------|
-| `codesight-retrieval` | `src/retrieval/**` | Medium | Isolates ranking, section parsing, embedding/model loading, and retrieval helpers from MCP dispatch; shrinks the root crate's hot edit surface for search work | Move config-driven behavior behind small request/config structs; keep storage and service integration at the API boundary rather than through root-module imports |
 | `codesight-analysis` | `src/analysis/**` | Medium-low | Makes `service` thinner and turns graph / quality / readiness logic into a reusable library once its inputs stabilize | Today analysis still reads storage-backed facts and indexing utilities directly; split only after import/dependency APIs are carved out and storage DTOs stop leaking through root-owned seams |
 
-`codesight-framework` and `codesight-imports` both shipped 2026-04-15 — see
-[`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md). Planned order for what remains:
+`codesight-framework`, `codesight-imports`, and `codesight-retrieval` all
+shipped 2026-04-15 — see [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md). Planned
+order for what remains:
 
-1. `codesight-retrieval`
-2. `codesight-analysis`
+1. `codesight-analysis`
 
 Modules that should stay in the root crate for now:
 

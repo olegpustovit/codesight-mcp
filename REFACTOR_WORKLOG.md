@@ -6,6 +6,49 @@ archive. See [`AGENTS.md`](AGENTS.md) for the policies that govern this work.
 
 ---
 
+## 2026-04-15 — codesight-retrieval crate split
+
+Carved `src/retrieval/**` into `crates/codesight-retrieval/`.
+
+- **New crate.** `codesight-retrieval` (2.7k LoC moved). Owns ranking
+  (`bm25_reference`, `fuzzy`, `fusion`), summarization (`summarizer`,
+  `doc_summarizer`), section parsing (`sections/**`), and the dense
+  embedder (`embedder`). Vendored `potion-base-8M` assets moved from
+  `assets/embedder/` to `crates/codesight-retrieval/assets/embedder/`
+  so `include_bytes!` resolves against the crate's `CARGO_MANIFEST_DIR`.
+- **Dependency edge.** `codesight-retrieval → codesight-core` and
+  `codesight-retrieval → codesight-storage`. Storage dep is required
+  because `bm25_reference` uses `db::tokenize`, `sections::paths` uses
+  `db::SKIP_DIRS`, and the embedder pins `EMBEDDING_DIM` to the storage
+  vec-table contract. Does not depend on extractors.
+- **No back-compat.** `pub mod retrieval;` removed from `src/lib.rs`.
+  All 10 `src/` consumers and 9 `tests/` consumers renamed to
+  `codesight_retrieval::*` in the same patch. No aliases, no shims.
+- **Env/config decision (option b + inline).** `SummarizerConfig::from_env`
+  previously read `crate::config::env::{SUMMARIZER_PROVIDER,
+  SUMMARIZER_MODEL}`. Those consts are duplicated as inline `const`s inside
+  `summarizer.rs`; the other six env vars were already literal strings. No
+  back-edge into the root `config` module. The `BUILD_SHA` dependency in
+  the embedder's cache-dir seeding was replaced with a blake3 content hash
+  of the three vendored asset bytes — content-addressed and more correct.
+- **build.rs.** Added a macOS-only `-isysroot` shim (same shape as the root
+  crate's) so `cargo test -p codesight-retrieval` links against `libc++`
+  inside the Nix shell; C++ comes in via `tokenizers` / `onig_sys` from
+  `model2vec-rs`.
+- **Invariants test extended.** `tests/crate_graph.rs` asserts
+  `codesight-retrieval` is a workspace member, depends exactly on
+  `[codesight-core, codesight-storage]`, does not depend on extractors,
+  and is a required dep of the root crate.
+- **Verification.**
+  - `cargo check --all-targets` — clean.
+  - `cargo clippy -p codesight-retrieval --all-targets -- -D warnings` — clean.
+  - `cargo nextest run --test crate_graph` — 1/1 pass.
+  - `cargo nextest run -p codesight-retrieval --lib` — 11/11 pass.
+  - `cargo nextest run --test bm25_correctness --test doc_parser_remaining
+    --test doc_tools --test agent_v1_doc_summarize --test related_symbols
+    --test agent_v1_summarize --test doc_parser_html --test fuzzy_search
+    --test doc_parser_jupyter` — 155/155 pass.
+
 ## 2026-04-15 — codesight-imports crate split
 
 Pulled `src/indexing/imports/**` and `src/indexing/packages/**` out of the
@@ -171,8 +214,8 @@ crate boundaries. Result:
 
 | Metric | Current | Target | Trend |
 |---|---|---|---|
-| Product crate LoC (`src/`) | **~24.1k** | ↓ each session | ↓ -4.7k (framework + imports splits) |
-| Workspace crate LoC (`crates/`) | core 0.2k / extractors 9.4k / framework 3.2k / imports 1.5k / storage 3.1k | stable | ↑ +4.7k from splits |
+| Product crate LoC (`src/`) | **~21.4k** | ↓ each session | ↓ -7.4k (framework + imports + retrieval splits) |
+| Workspace crate LoC (`crates/`) | core 0.2k / extractors 9.4k / framework 3.2k / imports 1.5k / retrieval 2.7k / storage 3.1k | stable | ↑ +7.4k from splits |
 | Governance score | **7780** (very good) | ↑ | ↑ +2 this session |
 | Structural score | **8072** (very good) | ↑ | stable |
 | Agent readiness score | **7498** (very good) | ↑ | ↑ +4 this session |

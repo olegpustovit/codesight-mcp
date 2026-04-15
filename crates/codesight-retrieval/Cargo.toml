@@ -1,0 +1,15 @@
+[package]
+name = "codesight-retrieval"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+blake3 = "1"
+codesight-core = { path = "../codesight-core" }
+codesight-storage = { path = "../codesight-storage" }
+dirs = "6.0.0"
+model2vec-rs = "0.1"
+serde_json = "1"
+serde_yaml = "0.9"
+tracing = "0.1"

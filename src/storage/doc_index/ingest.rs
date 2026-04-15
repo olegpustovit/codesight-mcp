@@ -11,10 +11,9 @@ use walkdir::{DirEntry, WalkDir};
 
 use codesight_storage::storage::vector_index::OwnedVectorRow;
 
-use crate::{
-    repo_id::normalize_repo_id,
-    retrieval::sections::{extract_sections, is_doc_file},
-};
+use codesight_retrieval::sections::{extract_sections, is_doc_file};
+
+use crate::repo_id::normalize_repo_id;
 
 use super::{DocFileUpdate, DocStore};
 

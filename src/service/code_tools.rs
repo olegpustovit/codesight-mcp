@@ -89,7 +89,7 @@ impl CodeService {
                 file.symbols.iter().map(|symbol| {
                     (
                         symbol.id.clone(),
-                        crate::retrieval::embedder::symbol_chunk_text(
+                        codesight_retrieval::embedder::symbol_chunk_text(
                             symbol.kind.as_str(),
                             &symbol.name,
                             &symbol.signature,

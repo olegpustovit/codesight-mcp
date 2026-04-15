@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use crate::retrieval::fuzzy;
+use codesight_retrieval::fuzzy;
 use crate::service::agent_v1::args::SearchCatalogArgs;
 use crate::storage::{IndexStore, SearchSymbol};
 

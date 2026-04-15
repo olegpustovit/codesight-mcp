@@ -1,7 +1,7 @@
 //! Documentation path classification helpers.
 
 pub fn should_skip_relative_doc_path(path: &str) -> bool {
-    use crate::db::SKIP_DIRS;
+    use codesight_storage::db::SKIP_DIRS;
     for seg in path.split(['/', '\\']) {
         if seg.is_empty() {
             continue;

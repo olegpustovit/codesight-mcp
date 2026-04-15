@@ -4,7 +4,9 @@ use std::path::Path;
 
 use rusqlite::{Transaction, params};
 
-use crate::{config::SCHEMA_VERSION, retrieval::sections::Section};
+use codesight_retrieval::sections::Section;
+
+use crate::config::SCHEMA_VERSION;
 
 use super::{DocFileUpdate, DocStore};
 
