@@ -13,14 +13,14 @@ codesight-mcp/                          ← product crate (root Cargo.toml)
 │   ├── cli/                            ← operator subcommands (`check`)
 │   ├── config/                         ← layered AppConfig + env + trust
 │   ├── service/                        ← MCP boundary + agent-v1 dispatch
-│   ├── indexing/                       ← crawl, delta, imports, packages
-│   ├── analysis/                       ← graph, quality, cross-repo, evidence
+│   ├── indexing/                       ← crawl, delta, imports, packages, dep_graph
 │   ├── framework/                      ← dbt / laravel / nextjs / nuxt detection
 │   ├── retrieval/                      ← ranking, summarization, sections
 │   ├── server_support/                 ← repo-id, path map, reindex state
 │   ├── security/                       ← binary policy, secret policy, paths
 │   └── tools.json                      ← frozen MCP contract
 └── crates/
+    ├── codesight-analysis/             ← graph, quality, dead-code, readiness, evidence
     ├── codesight-core/                 ← shared primitives (symbols, fact quality)
     ├── codesight-extractors/           ← SCM engine + curated query packs
     └── codesight-storage/              ← SQLite schema + migrations + reads/writes
@@ -35,12 +35,13 @@ all three. Nothing in the crates depends on the product layer.
 Extracted from `cargo metadata --format-version 1 --no-deps` on 2026-04-10;
 regenerate whenever a workspace crate is added or an edge changes.
 
-| From → To             | `codesight-core` | `codesight-extractors` | `codesight-storage` | `codesight-mcp` |
-|-----------------------|:----------------:|:----------------------:|:-------------------:|:---------------:|
-| `codesight-core`      |        —         |           ✗            |          ✗          |        ✗        |
-| `codesight-extractors`|        ✓         |           —            |          ✗          |        ✗        |
-| `codesight-storage`   |        ✓         |           ✗            |          —          |        ✗        |
-| `codesight-mcp`       |        ✓         |           ✓            |          ✓          |        —        |
+| From → To             | `codesight-core` | `codesight-extractors` | `codesight-storage` | `codesight-analysis` | `codesight-mcp` |
+|-----------------------|:----------------:|:----------------------:|:-------------------:|:--------------------:|:---------------:|
+| `codesight-core`      |        —         |           ✗            |          ✗          |          ✗           |        ✗        |
+| `codesight-extractors`|        ✓         |           —            |          ✗          |          ✗           |        ✗        |
+| `codesight-storage`   |        ✓         |           ✗            |          —          |          ✗           |        ✗        |
+| `codesight-analysis`  |        ✓         |           ✗            |          ✓          |          —           |        ✗        |
+| `codesight-mcp`       |        ✓         |           ✓            |          ✓          |          ✓           |        —        |
 
 Rules enforced by this table:
 
@@ -74,19 +75,25 @@ The root crate is not being split indiscriminately. A module becomes a crate
 only when it owns a coherent domain, exports a narrow API, and removes real
 compile and dependency weight from `codesight-mcp`.
 
+Shipped: `codesight-analysis` (2026-04-15) — carved `src/analysis/**` out of the
+root crate except for `import_graph` (moved to `src/indexing/dep_graph.rs`
+alongside its `indexing::imports` inputs) and `reference_check` (moved under
+`src/service/agent_v1/reference_check/` since it reaches into both
+`indexing::imports` and `indexing::packages`). `doc_coverage_payload` stays in
+the root crate (`src/service/agent_v1/quality/doc_coverage.rs`) because
+`DocStore` still lives in `src/storage/doc_index/`; promote that next.
+
 | Candidate crate | Current scope | Feasibility | What we gain | Main blockers / prerequisites |
 |-----------------|---------------|-------------|--------------|-------------------------------|
 | `codesight-framework` | `src/framework/**` | High | Removes a self-contained framework domain from the root crate; trims framework-specific parser dependencies from the product crate; keeps dbt / Laravel / Next.js / Nuxt work behind one library boundary | Keep `FrameworkProvider`, `FileContext`, `ExtraImport`, registry assembly, and profile rendering owned by the crate; expose a small facade instead of leaking root-only helpers |
-| `codesight-imports` | `src/indexing/imports/**` plus `src/indexing/packages/**` | Medium-high | Pulls multilingual import extraction and package registry logic out of the root crate; gives graph analysis and service code one dependency-facts library; isolates more tree-sitter language dependencies from MCP/service code | Decide whether package-registry code stays attached to import extraction; extract stable evidence/result types so `analysis` and `service` stop reaching into root indexing internals |
+| `codesight-imports` | `src/indexing/imports/**` plus `src/indexing/packages/**` plus `src/indexing/dep_graph.rs` | Medium-high | Pulls multilingual import extraction, package registry logic, and file-level dependency adjacency out of the root crate; gives service code one dependency-facts library; isolates more tree-sitter language dependencies from MCP/service code | Decide whether package-registry code stays attached to import extraction; once shipped, `src/service/agent_v1/reference_check/` can either move into `codesight-analysis` or stay where it is as a thin service facade |
 | `codesight-retrieval` | `src/retrieval/**` | Medium | Isolates ranking, section parsing, embedding/model loading, and retrieval helpers from MCP dispatch; shrinks the root crate's hot edit surface for search work | Move config-driven behavior behind small request/config structs; keep storage and service integration at the API boundary rather than through root-module imports |
-| `codesight-analysis` | `src/analysis/**` | Medium-low | Makes `service` thinner and turns graph / quality / readiness logic into a reusable library once its inputs stabilize | Today analysis still reads storage-backed facts and indexing utilities directly; split only after import/dependency APIs are carved out and storage DTOs stop leaking through root-owned seams |
 
 Planned order:
 
 1. `codesight-framework`
 2. `codesight-imports`
 3. `codesight-retrieval`
-4. `codesight-analysis`
 
 Modules that should stay in the root crate for now:
 

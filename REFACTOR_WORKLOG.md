@@ -6,6 +6,66 @@ archive. See [`AGENTS.md`](AGENTS.md) for the policies that govern this work.
 
 ---
 
+## 2026-04-15 — `codesight-analysis` crate split
+
+Carved the analysis domain out of the root crate. ~4.6k LoC moved from
+`src/analysis/**` into `crates/codesight-analysis/`.
+
+- **New crate.** `codesight-analysis` (edition 2024). Deps: `anyhow`,
+  `codesight-core`, `codesight-storage`, `ignore`, `regex`, `serde`,
+  `serde_json`, `toml`; dev-dep `tempfile`. Does NOT depend on
+  `codesight-extractors`. Modules: `agent_readiness`, `complexity`,
+  `dead_code/**`, `evidence`, `graph/**` (calls, coupling, cycles, layers,
+  pagerank, psr4), `impact`, `quality`, `quality_signal`, `test_gaps`.
+- **Stayed in root crate (unavoidable indexing inversions).**
+  - `src/analysis/graph/import_graph.rs` → `src/indexing/dep_graph.rs`.
+    It calls `indexing::imports::{extract_imports_with_quality,
+    language_for_path, resolve_import_edge_for_graph}`, which
+    `codesight-analysis` cannot depend on without a cycle. Moved to sit
+    next to its inputs; it is a pure indexing-time adjacency helper now.
+    Only consumers: `src/indexing/code_index.rs` and
+    `tests/find_importers.rs`.
+  - `src/analysis/reference_check/**` → `src/service/agent_v1/reference_check/**`.
+    Reads `indexing::imports::*` and `indexing::packages::*`. Its only
+    caller is `src/service/agent_v1/reference_tool.rs`, so folding it in
+    as a sibling module costs nothing.
+  - `doc_coverage_payload` → `src/service/agent_v1/quality/doc_coverage.rs`.
+    Requires `DocStore`, which still lives in
+    `src/storage/doc_index/`. Once that type is promoted into
+    `codesight-storage`, the function can follow the rest of `quality`
+    into `codesight-analysis`.
+- **Storage.** `codesight-storage::config` is now `pub` (was private) so
+  `codesight-analysis::dead_code` can reach `BYTES_PER_TOKEN` without
+  duplicating the constant.
+- **Visibility.** `service::agent_v1` is now `pub` (was `pub(crate)`) and
+  `service::agent_v1::quality` is `pub` (was `mod`) so
+  `tests/document_coverage.rs` can reach the relocated
+  `doc_coverage_payload`.
+- **No back-compat.** Zero `pub use ... as analysis`, zero
+  `#[deprecated]`. Every consumer renamed in the same patch:
+  16 files in `src/`, 10 files in `tests/`.
+- **Tests.** `cargo nextest run --test crate_graph` (1 passed);
+  `cargo nextest run -p codesight-analysis --lib` (50 passed); and the
+  10 consumer integration tests
+  `document_coverage check_rename_safe call_hierarchy fqn symbol_complexity
+  dead_code_v2 find_dead_code pagerank hotspots find_importers` — 243
+  total passed, 0 failures.
+- **Clippy.** `cargo clippy -p codesight-analysis --all-targets
+  -- -D warnings` clean.
+- **Follow-up (after `codesight-imports` lands).**
+  `src/indexing/dep_graph.rs` moves into `codesight-imports` — it is
+  already colocated with its inputs. Revisit whether
+  `src/service/agent_v1/reference_check/**` moves into
+  `codesight-analysis` or into `codesight-imports` once the imports
+  crate exposes a stable `ImportEdge` facade. `DocStore` into
+  `codesight-storage` unblocks moving `doc_coverage_payload` into
+  `codesight-analysis::quality`.
+- **Architecture.** `ARCHITECTURE.md` updated: crate layout tree,
+  dependency graph table (new row + column), split roadmap
+  (`codesight-analysis` removed from the planned list, shipped note
+  added above the table, `codesight-imports` scope broadened to include
+  `dep_graph.rs`).
+
 ## 2026-04-14 — IDF replacement verification follow-up
 
 Verified the `IDF_REPLACEMENT.md` rollout against the live code and fixed the
@@ -107,8 +167,8 @@ crate boundaries. Result:
 
 | Metric | Current | Target | Trend |
 |---|---|---|---|
-| Product crate LoC (`src/`) | **~28.8k** | ↓ each session | ↓ -94 (workspace_digest) |
-| Workspace crate LoC (`crates/`) | core 0.2k / extractors 9.4k / storage 3.1k | stable | stable |
+| Product crate LoC (`src/`) | **~24.2k** | ↓ each session | ↓ -4.6k (codesight-analysis split) |
+| Workspace crate LoC (`crates/`) | analysis 4.6k / core 0.2k / extractors 9.4k / storage 3.1k | stable | ↑ new crate |
 | Governance score | **7780** (very good) | ↑ | ↑ +2 this session |
 | Structural score | **8072** (very good) | ↑ | stable |
 | Agent readiness score | **7498** (very good) | ↑ | ↑ +4 this session |

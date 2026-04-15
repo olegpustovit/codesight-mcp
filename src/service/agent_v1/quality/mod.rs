@@ -1,8 +1,9 @@
+pub mod doc_coverage;
 mod repo_health;
 
 use serde_json::{Value, json};
 
-use crate::analysis::{dead_code, quality, quality_signal};
+use codesight_analysis::{dead_code, quality, quality_signal};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::agent_v1::validate::ValidatedArgs;

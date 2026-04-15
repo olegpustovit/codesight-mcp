@@ -161,7 +161,7 @@ pub struct InspectGraphArgs {
     pub module_path: Option<String>,
     /// For `layer_violations` graph mode: layer rules.
     #[serde(default)]
-    pub rules: Option<Vec<crate::analysis::graph::LayerDef>>,
+    pub rules: Option<Vec<codesight_analysis::graph::LayerDef>>,
     /// For `calls` mode: symbol to analyze.
     #[serde(default)]
     pub symbol_id: Option<String>,

@@ -1,14 +1,15 @@
 //! Heuristic call graph from symbol bodies (whole-word name matches).
 //!
 //! By default, edges are built only between symbols whose extraction tier maps to
-//! [`crate::core::symbols::FactQuality::suitable_for_strict_analysis`]. Heuristic-tier
+//! [`codesight_core::symbols::FactQuality::suitable_for_strict_analysis`]. Heuristic-tier
 //! symbols remain available for exploratory graphs via [`build_call_edges_including_heuristic`].
 
 use std::collections::HashSet;
 
 use serde::Serialize;
 
-use crate::{core::symbols::ExtractionTier, storage::SymbolSourceRecord};
+use codesight_core::symbols::ExtractionTier;
+use codesight_storage::storage::SymbolSourceRecord;
 
 /// Check if `body` contains `name` as a whole-word match (not a partial match).
 /// Uses simple word-boundary heuristic: the character before and after `name`
@@ -119,14 +120,14 @@ fn build_call_edges_with_policy(symbols: &[SymbolInfo], policy: CallEdgePolicy) 
 /// Build call edges from a list of symbols by checking if a symbol's body
 /// text contains another symbol's name as a whole-word match.
 ///
-/// Only symbols whose tier maps to [`crate::core::symbols::FactQuality::suitable_for_strict_analysis`]
+/// Only symbols whose tier maps to [`codesight_core::symbols::FactQuality::suitable_for_strict_analysis`]
 /// participate as callers or callees (REFACTOR_PLAN: graph analysis defaults to trusted/baseline structural).
 #[must_use]
 pub fn build_call_edges(symbols: &[SymbolInfo]) -> Vec<CallEdge> {
     build_call_edges_with_policy(symbols, CallEdgePolicy::StrictAnalysis)
 }
 
-/// Same as [`build_call_edges`], but allows [`crate::core::symbols::FactQuality::Heuristic`]
+/// Same as [`build_call_edges`], but allows [`codesight_core::symbols::FactQuality::Heuristic`]
 /// symbols as edge endpoints (exploratory / legacy behavior).
 #[must_use]
 pub fn build_call_edges_including_heuristic(symbols: &[SymbolInfo]) -> Vec<CallEdge> {
@@ -204,7 +205,7 @@ pub fn find_callees(
 
 #[cfg(test)]
 mod tests {
-    use crate::core::symbols::ExtractionTier;
+    use codesight_core::symbols::ExtractionTier;
 
     use super::{SymbolInfo, build_call_edges, build_call_edges_including_heuristic};
 

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use crate::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 
 pub fn rename_safety_payload(
     store: &IndexStore,

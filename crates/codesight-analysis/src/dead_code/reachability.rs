@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
-use crate::{analysis::evidence::EvidenceNote, storage::AnalysisSymbol};
+use codesight_storage::storage::AnalysisSymbol;
+
+use crate::evidence::EvidenceNote;
 
 use super::entrypoints::{
     detect_cargo_target_files, detect_main_guard_files, entrypoint_root_notes, is_test_file,

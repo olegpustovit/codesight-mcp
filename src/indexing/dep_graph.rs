@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::core::symbols::FactQuality;
+use codesight_core::symbols::FactQuality;
 use crate::indexing::imports::{
     extract_imports_with_quality, language_for_path, resolve_import_edge_for_graph,
 };

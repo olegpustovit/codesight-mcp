@@ -11,8 +11,8 @@ static MD_INTERNAL_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").expect("infallible markdown link regex")
 });
 
-use crate::analysis::complexity::cyclomatic_complexity;
-use crate::analysis::quality;
+use codesight_analysis::complexity::cyclomatic_complexity;
+use codesight_analysis::quality;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
@@ -238,7 +238,7 @@ impl CodeService {
                 },
             );
         }
-        let data = quality::doc_coverage_payload(&doc_store, &symbol_ids)?;
+        let data = super::quality::doc_coverage::doc_coverage_payload(&doc_store, &symbol_ids)?;
         self.success_response(timer, data)
     }
 
@@ -252,7 +252,7 @@ impl CodeService {
         let timer = MetaBuilder::new(raw_bytes);
         let top_n = args.top_n.unwrap_or(25);
         let min_complexity = args.min_complexity.unwrap_or(3);
-        let data = crate::analysis::test_gaps::test_gap_payload(&store, top_n, min_complexity)?;
+        let data = codesight_analysis::test_gaps::test_gap_payload(&store, top_n, min_complexity)?;
         self.success_response(&timer, data)
     }
 }

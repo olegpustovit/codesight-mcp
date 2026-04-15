@@ -37,19 +37,19 @@ impl CodeService {
             );
         };
 
-        let edges = crate::analysis::graph::build_call_edges(&sym_infos);
+        let edges = codesight_analysis::graph::build_call_edges(&sym_infos);
         let direction = args.direction.as_deref().unwrap_or("both");
         let depth = args.depth.unwrap_or(3);
 
         let caller_tuples = if direction == "callees" {
             vec![]
         } else {
-            crate::analysis::graph::find_callers(symbol_id, &edges, depth)
+            codesight_analysis::graph::find_callers(symbol_id, &edges, depth)
         };
         let callee_tuples = if direction == "callers" {
             vec![]
         } else {
-            crate::analysis::graph::find_callees(symbol_id, &edges, depth)
+            codesight_analysis::graph::find_callees(symbol_id, &edges, depth)
         };
 
         let to_json = |tuples: &[(String, String, String, u32, String, usize)]| -> Vec<Value> {

@@ -1,6 +1,8 @@
 use std::{collections::HashSet, fs, path::Path};
 
-use crate::{analysis::evidence::EvidenceNote, storage::AnalysisSymbol};
+use codesight_storage::storage::AnalysisSymbol;
+
+use crate::evidence::EvidenceNote;
 
 pub(crate) const ENTRYPOINT_BASENAMES: &[&str] = &[
     "main.py",

@@ -1,6 +1,6 @@
 //! Slice tests for rename safety, plus explicit MCP error/meta checks.
 
-use codesight_mcp::analysis::impact::rename_safety_payload;
+use codesight_analysis::impact::rename_safety_payload;
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::service::CodeService;
 use codesight_mcp::storage::IndexStore;

@@ -21,7 +21,7 @@ impl CodeService {
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
         let adj = store.dependency_graph_strict()?;
-        let cycles = crate::analysis::graph::find_cycles(&adj);
+        let cycles = codesight_analysis::graph::find_cycles(&adj);
         self.success_response(
             &timer,
             json!({

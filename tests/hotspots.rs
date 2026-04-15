@@ -2,7 +2,7 @@
 
 use std::process::Command;
 
-use codesight_mcp::analysis::quality::hotspots_payload;
+use codesight_analysis::quality::hotspots_payload;
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::service::CodeService;
 use codesight_mcp::storage::IndexStore;

@@ -43,7 +43,7 @@ impl CodeService {
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
         let adj = store.dependency_graph_strict()?;
-        let metrics = crate::analysis::graph::compute_coupling(&module_path, &adj);
+        let metrics = codesight_analysis::graph::compute_coupling(&module_path, &adj);
         self.success_response(
             &timer,
             json!({
@@ -84,7 +84,7 @@ impl CodeService {
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
         let adj = store.dependency_graph_strict()?;
-        let violations = crate::analysis::graph::find_layer_violations(&adj, &rules);
+        let violations = codesight_analysis::graph::find_layer_violations(&adj, &rules);
         self.success_response(
             &timer,
             json!({

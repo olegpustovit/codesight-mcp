@@ -5,11 +5,11 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 
-use crate::analysis::agent_readiness::{
+use crate::agent_readiness::{
     compute_fan_in, compute_file_churn, is_fn_method, is_test_file, tested_file_set,
 };
-use crate::analysis::complexity::cyclomatic_complexity;
-use crate::storage::{AnalysisSymbol, IndexStore};
+use crate::complexity::cyclomatic_complexity;
+use codesight_storage::storage::{AnalysisSymbol, IndexStore};
 
 pub struct TestGap {
     pub symbol_id: String,

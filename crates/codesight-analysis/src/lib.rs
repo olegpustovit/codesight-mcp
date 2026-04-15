@@ -8,5 +8,4 @@ pub mod graph;
 pub mod impact;
 pub mod quality;
 pub mod quality_signal;
-pub mod reference_check;
 pub mod test_gaps;

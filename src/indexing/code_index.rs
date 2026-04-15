@@ -13,11 +13,10 @@ use tracing::instrument;
 use codesight_storage::storage::vector_index::OwnedVectorRow;
 
 use crate::{
-    analysis::graph as dep_graph,
     config::{AppConfig, GITIGNORE_WARNING_FILE_THRESHOLD},
     core::pipeline::{FileFingerprint, IndexedFileUpdate},
     extractors::ExtractorRegistry,
-    indexing::packages,
+    indexing::{dep_graph, packages},
     repo_id::normalize_repo_id,
     storage::IndexStore,
 };

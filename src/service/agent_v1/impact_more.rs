@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use crate::analysis::impact;
+use codesight_analysis::impact;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::agent_v1::util_graph::build_call_chain;
@@ -271,8 +271,8 @@ impl CodeService {
 
         // Find callers using call edges
         let sym_infos = store.all_symbols_with_source()?;
-        let edges = crate::analysis::graph::build_call_edges(&sym_infos);
-        let callers = crate::analysis::graph::find_callers(&sym_id, &edges, 3);
+        let edges = codesight_analysis::graph::build_call_edges(&sym_infos);
+        let callers = codesight_analysis::graph::find_callers(&sym_id, &edges, 3);
 
         // Build affected_symbols (deduplicated)
         let mut affected_symbols: Vec<Value> = Vec::new();

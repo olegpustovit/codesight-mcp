@@ -1,13 +1,11 @@
 use std::collections::BTreeSet;
 
-use crate::{
-    analysis::{evidence::EvidenceNote, graph as dep_graph},
-    indexing::{
-        imports::{ImportEdge, extract_imports, language_for_path},
-        packages::extract_root_package_from_specifier,
-    },
-    storage::IndexStore,
-};
+use codesight_analysis::evidence::EvidenceNote;
+use codesight_analysis::graph as dep_graph;
+
+use crate::indexing::imports::{ImportEdge, extract_imports, language_for_path};
+use crate::indexing::packages::extract_root_package_from_specifier;
+use crate::storage::IndexStore;
 
 #[derive(Debug, Clone)]
 pub struct IdentifierReferenceEvidence {
@@ -54,7 +52,7 @@ struct FileImportFacts {
 
 pub struct ReferenceEvidenceProvider {
     file_imports: Vec<FileImportFacts>,
-    symbol_sources: Vec<crate::analysis::graph::SymbolInfo>,
+    symbol_sources: Vec<codesight_analysis::graph::SymbolInfo>,
     raw_contents: Vec<(String, String)>,
 }
 

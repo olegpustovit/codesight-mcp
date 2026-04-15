@@ -12,6 +12,7 @@ fn workspace_crate_dependency_invariants_hold() {
     let names: Vec<&str> = workspace_members.iter().map(|p| p.name.as_str()).collect();
     for expected in [
         "codesight-mcp",
+        "codesight-analysis",
         "codesight-core",
         "codesight-extractors",
         "codesight-storage",
@@ -57,6 +58,18 @@ fn workspace_crate_dependency_invariants_hold() {
         "storage deps: {stor_deps:?}"
     );
 
+    // codesight-analysis depends on codesight-core and codesight-storage (not extractors).
+    let mut ana_deps = ws_deps("codesight-analysis");
+    ana_deps.sort();
+    assert_eq!(
+        ana_deps,
+        vec![
+            "codesight-core".to_string(),
+            "codesight-storage".to_string(),
+        ],
+        "analysis deps: {ana_deps:?}"
+    );
+
     // codesight-extractors does NOT depend on codesight-storage
     assert!(!ws_deps("codesight-extractors").contains(&"codesight-storage".to_string()));
     // codesight-storage does NOT depend on codesight-extractors
@@ -77,6 +90,7 @@ fn workspace_crate_dependency_invariants_hold() {
     // Root crate depends on all three foundational crates.
     let root_deps = ws_deps("codesight-mcp");
     for dep in [
+        "codesight-analysis",
         "codesight-core",
         "codesight-extractors",
         "codesight-storage",
