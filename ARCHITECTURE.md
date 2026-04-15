@@ -27,10 +27,11 @@ codesight-mcp/                          ← product crate (root Cargo.toml)
     └── codesight-storage/              ← SQLite schema + migrations + reads/writes
 ```
 
-**Dependency direction is inward.** `codesight-core` is the base; the
-`extractors` and `storage` crates depend on it; `framework` depends on
-`extractors` (for shared `parse_tree`); the product crate depends on all
-four. Nothing in the crates depends on the product layer.
+**Dependency direction is inward.** `codesight-core` is the base; `extractors`
+and `storage` depend on it; `framework` depends on `extractors` (for shared
+`parse_tree`); `imports` depends on both core and extractors; `analysis` and
+`retrieval` both depend on core + storage. The product crate depends on every
+inner crate. Nothing in the crates depends on the product layer.
 
 ### Workspace dependency graph (current snapshot)
 
@@ -70,40 +71,48 @@ Rules enforced by this table:
 - `codesight-core` holds only primitives that are legitimately shared: the
   `Symbol` / `FactQuality` taxonomy, small serde DTOs, the error marker traits.
   It is deliberately small so it stays stable.
-- Everything else — ingest orchestration, MCP dispatch, framework detection,
-  retrieval, analysis — lives in the product crate today. Future splits should
-  prefer self-contained domains that reduce root-crate dependency load before
-  carving out tightly-coupled orchestration code.
+- What still lives in the product crate is the orchestration layer — ingest
+  (`src/indexing/code_index.rs`), MCP dispatch (`src/service/`), CLI
+  (`src/cli/`), config/security/server-support, and the file-level dependency
+  graph (`src/indexing/dep_graph.rs`) that bridges `codesight_imports` into
+  ingest. Future splits should prefer self-contained domains that reduce
+  root-crate dependency load before carving out tightly-coupled orchestration
+  code.
 
-### Shipped splits
+### Shipped splits (2026-04-15)
 
-- 2026-04-15 — `codesight-retrieval` carved out of `src/retrieval/**`. Owns
-  ranking, section parsing, fusion/RRF, fuzzy matching, summarizer config,
-  and the dense embedder (bundled model assets now live inside the crate).
-  Depends on `codesight-core` and `codesight-storage` only.
+- `codesight-framework` — dbt / Laravel / Next.js / Nuxt detection,
+  `FrameworkProvider` trait, `FrameworkRegistry`, `impl_framework_provider!`
+  macro. Depends on `codesight-extractors` only.
+- `codesight-imports` — multilingual import extraction + package manifest
+  registry. Depends on `codesight-core` and `codesight-extractors`.
+- `codesight-retrieval` — ranking, section parsing, fusion/RRF, fuzzy
+  matching, summarizer config, dense embedder (bundled model assets now live
+  inside the crate). Depends on `codesight-core` and `codesight-storage`.
+- `codesight-analysis` — graph (calls, coupling, cycles, layers, pagerank,
+  PSR-4), quality, dead-code, agent readiness, evidence, impact, test gaps.
+  Depends on `codesight-core` and `codesight-storage`.
+
+### Carve-outs from the analysis split
+
+Three modules stayed in the root crate to keep `codesight-analysis` from
+needing a forbidden edge to `codesight-imports`:
+
+- `import_graph` lives as `src/indexing/dep_graph.rs`, next to its
+  `codesight_imports::imports` inputs.
+- `reference_check` lives at `src/service/agent_v1/reference_check/` — it
+  consumes both `codesight_imports::imports` and `codesight_imports::packages`.
+- `doc_coverage_payload` is parked at
+  `src/service/agent_v1/quality/doc_coverage.rs` until `DocStore` is promoted
+  from `src/storage/doc_index/` into `codesight-storage`; once that lands the
+  helper can rejoin `codesight_analysis::quality`.
 
 ### Planned split roadmap
 
-The root crate is not being split indiscriminately. A module becomes a crate
-only when it owns a coherent domain, exports a narrow API, and removes real
-compile and dependency weight from `codesight-mcp`.
-
-All four candidate splits — `codesight-framework`, `codesight-imports`,
-`codesight-retrieval`, `codesight-analysis` — shipped 2026-04-15. The roadmap
-is empty; future splits are evaluated against the dependency invariants.
-
-Notes on the analysis split:
-
-- `import_graph` was kept in the root crate as `src/indexing/dep_graph.rs`
-  next to its `codesight_imports::imports` inputs, since analysis itself does
-  not (and must not) depend on `codesight-imports`.
-- `reference_check` lives at `src/service/agent_v1/reference_check/` for the
-  same reason — it consumes both `codesight_imports::imports` and
-  `codesight_imports::packages`.
-- `doc_coverage_payload` is parked at `src/service/agent_v1/quality/doc_coverage.rs`
-  until `DocStore` is promoted from `src/storage/doc_index/` into
-  `codesight-storage`; once that lands, the helper can rejoin
-  `codesight_analysis::quality`.
+The roadmap is empty. Future workspace crates are evaluated case-by-case
+against the dependency invariants enforced by `tests/crate_graph.rs`. A
+module becomes a crate only when it owns a coherent domain, exports a narrow
+API, and removes real compile and dependency weight from `codesight-mcp`.
 
 Modules that should stay in the root crate for now:
 
@@ -175,7 +184,7 @@ Extraction and analysis both tag facts with a coarse `FactQuality` value:
 
 Downstream graph and quality analysis default to the structural tiers;
 heuristic evidence is labeled and treated as secondary. See
-`src/analysis/evidence.rs`.
+`crates/codesight-analysis/src/evidence.rs`.
 
 ## Known heuristic islands
 
@@ -198,7 +207,7 @@ All logs go through `tracing`; library code contains no bare `eprintln!` or
 **stderr** only so JSON-RPC on stdout stays clean. Log format is selectable
 via `--log-format json|pretty` or `CODESIGHT_LOG_FORMAT`. Filtering uses
 `RUST_LOG` with the standard `EnvFilter` syntax; the default fallback is
-`warn,codesight_mcp=info,codesight_storage=info,codesight_extractors=info`.
+`warn,codesight_mcp=info,codesight_analysis=info,codesight_extractors=info,codesight_framework=info,codesight_imports=info,codesight_retrieval=info,codesight_storage=info`.
 
 Dispatch, ingest, and extraction boundaries are instrumented with spans;
 the per-file extract span is `DEBUG` so hot loops stay quiet by default.
