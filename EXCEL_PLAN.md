@@ -1,902 +1,846 @@
 # EXCEL_PLAN.md
 
-Performance & ergonomics improvements for `codesight-mcp`, derived from real
-dogfooding friction (2026-04-13/14 sessions) and hardened with external
-research on tokenizer crates (pure-Rust `tiktoken`), rust-analyzer's VFS
-tombstoning pattern, and the known Claude Code file-state tracking
-limitation.
+Implementation plan refresh for `codesight-mcp`, rewritten after a live repo
+audit on 2026-04-15.
 
-This file is a **single-shot implementation plan**. Each item is independently
-shippable, has exact file paths, API shapes, and test commands.
+This replaces the earlier draft. The previous version had the right themes, but
+it drifted behind the codebase after the 2026-04-15 crate split wave. This
+version is grounded in the current workspace layout, the current handler/module
+ownership, and the behavior verified by targeted tests run during the audit.
 
----
+Verified during this review:
 
-## Scope, non-goals, and coordination
-
-- **In scope:** retrieval ergonomics (envelope fields), index freshness
-  (delete/rename detection), richer quality signal, rename-aware context
-  assembly, harness-friction mitigations, session-level observability.
-- **Out of scope (explicit):** `src/retrieval/semantic.rs`, the embeddings
-  pipeline, any vector-store work — a parallel agent is implementing proper
-  semantic search. **Do not touch** files under `src/retrieval/` except
-  through the stable interfaces already re-exported from
-  `src/retrieval/mod.rs`.
-- **Out of scope (deferred):** T1 (tiktoken), T5 (ToolEnvelope), T6
-  (plan_turn), T7 (audit_config), T8 (ownership), T10 (security hardening)
-  all stay in `REFACTOR_WORKLOG.md`. This plan is additive, not a replacement.
-- **Workspace dependency invariants still hold.** Any new code stays in the
-  crate it belongs to unless a new crate creates a cleaner domain boundary
-  without introducing upward or horizontal coupling.
-
-## Guiding principles (non-negotiable)
-
-1. **No net LoC growth** on the product crate. If an item adds >30 LoC, it
-   must either delete something equivalent or move behavior into a crate.
-2. **Tests-first-or-same-patch.** Every item ships with a targeted
-   `cargo nextest run -E 'test(...)'` invocation that proves the new
-   behavior. The `tests/envelope_shape.rs` invariant (BASELINE_META_KEYS)
-   must keep passing throughout.
-3. **Stateless-per-request.** No item introduces per-conversation server
-   state. Session-level aggregates (E10) live in the savings ledger file,
-   not in RAM.
-4. **Contract-first.** Every item that changes tool I/O updates
-   `src/tools.json` in the same patch.
-5. **Backwards compatibility: none.** Breaking the JSON response shape is
-   fine — callers re-generate from `tools.json`. We do not ship shims.
-
-## External research that hardens this plan
-
-| Assumption | Source | Implication |
-|---|---|---|
-| Pure-Rust `tiktoken` crate exists (updated March 2026) with `cl100k_base`. | [crates.io/crates/tiktoken](https://crates.io/crates/tiktoken), [anysphere/tiktoken-rs](https://github.com/anysphere/tiktoken-rs) | T1 viable when we get to it; **out of scope for this plan** — byte/4 approximation is fine for E1–E10. |
-| rust-analyzer's VFS treats file deletion as "push a `Removed` change through the change pipeline, Salsa re-derives from a smaller fact set." | [rust-analyzer vfs docs](https://rust-lang.github.io/rust-analyzer/vfs/index.html) | E2's design: diff disk-set vs index-set at ingest time; delete stale rows in one SQL `DELETE WHERE path NOT IN (?...)`. No per-symbol tombstone needed — referential integrity via `ON DELETE CASCADE` already covers it. |
-| `notify-debouncer-full` emits `Rename { from, to }` as a single debounced event. Our watcher already matches `EventKind::Remove(_)`; the `files_removed` counter in `reindex_files` stats confirms the store already accepts deletions. | [notify-rs docs](https://docs.rs/notify), `src/service/file_watcher.rs:105` | E2 only needs to wire the **ingest** path; the watcher path is already correct. |
-| "Edit/Write tools fail with 'File has not been read yet'" is an upstream Claude Code limitation — tracked in [claude-code#4230](https://github.com/anthropics/claude-code/issues/4230), [#10123](https://github.com/anthropics/claude-code/issues/10123), [#10437](https://github.com/anthropics/claude-code/issues/10437). | Anthropic issue tracker | E7 must **mitigate** (not "fix") — we surface a `next_step_hint` in responses and document the two-tool workflow. |
+- `cargo nextest run --test crate_graph` — pass
+- `cargo nextest run --test quality_signal` — pass
+- `cargo nextest run --test refactor_targets` — pass
+- `cargo nextest run --test incremental --test envelope_shape` — pass
 
 ---
 
-## Item index (ordered by leverage/effort ratio)
+## Architecture refresh
 
-| ID | Title | LoC | Effort | User-facing win |
-|---|---|---|---|---|
-| **E1** | `total_matches` in every `search_catalog` response | +20 / −0 | XS | Plan renames without a second count call |
-| **E5** | `tokens_saved_per_ms` efficiency metric in `_meta` | +15 / −0 | XS | Pick the right tool when two apply |
-| **E4** | `quality_signal` actionable recommendations[] | +120 / −0 | S | Quality dashboard becomes a task list |
-| **E3** | `refactor_targets` whole-repo mode | +60 / −0 | S | Ask "where to refactor?" without knowing the file |
-| **E7** | Harness-friction mitigations (next_step_hint + AGENTS.md) | +40 / −5 | S | Cut 30 % of redundant re-reads |
-| **E2** | Incremental ingest detects deletes & renames | +90 / −0 | M | Stale ghosts vanish without full re-ingest |
-| **E10** | `manage_indexes action=session_stats` | +80 / −0 | S | See per-tool savings over the session |
-| **E6** | `assemble_context mode=rename_plan` | +160 / −0 | M | Executable, ranked rename work-list |
-| **E9** | Bench harness: incremental deletion + rename | +40 / −0 | S | Regression gate for E2/E6 |
-| **E8** | Watcher: explicit rename event propagation (folded into E2) | +15 | XS | Consistency with manual-ingest path |
+The plan must target the code that exists today, not the pre-split layout.
 
-Total: **≈ +640 product-crate LoC** across 10 items. Absorbed (at least)
-by deletions from the worklog (T1/T5 when they land) and by the -94 from T3
-already in git. Net budget stays neutral or better.
+Current workspace members:
+
+- `codesight-mcp` — root product crate; owns MCP boundary, ingest orchestration,
+  watcher/freshness, CLI, config/security, and the frozen `src/tools.json`
+  contract.
+- `codesight-core` — shared primitives only.
+- `codesight-extractors` — tree-sitter and query-pack extraction.
+- `codesight-storage` — SQLite schema, migrations, reads/writes, vec tables.
+- `codesight-analysis` — quality, impact, graph, dead-code, test-gap,
+  agent-readiness logic.
+- `codesight-framework` — framework detection.
+- `codesight-imports` — import extraction and package registry.
+- `codesight-retrieval` — ranking, fuzzy, sections, summarizers, embedder.
+
+Dependency direction remains:
+
+- `codesight-core` is the leaf.
+- `codesight-analysis` depends on `codesight-core` + `codesight-storage`.
+- `codesight-retrieval` depends on `codesight-core` + `codesight-storage`.
+- `codesight-framework` depends on `codesight-extractors`.
+- `codesight-imports` depends on `codesight-core` + `codesight-extractors`.
+- The root crate depends on all inner crates and owns orchestration only.
+
+Implications for this plan:
+
+- Anything that computes or formats quality-domain recommendations belongs in
+  `crates/codesight-analysis`, not `src/analysis/**` in the root crate.
+- Anything that touches ranking, section parsing, or embedder behavior must
+  target `crates/codesight-retrieval/**`; the old `src/retrieval/**` paths are
+  gone.
+- Anything that changes tool I/O, dispatch, freshness, watcher behavior, or the
+  savings envelope belongs in the root crate under `src/service/**`,
+  `src/indexing/**`, or `src/tools.json`.
+
+Preflight doc drift discovered during the audit:
+
+- `README.md` still says "four-crate workspace".
+- `REFACTOR_WORKLOG.md` currently contains a raw `=======` merge marker.
+
+Those are not the primary purpose of this file, but they should be cleaned up
+before or alongside the next docs pass so the plan, README, architecture doc,
+and worklog stop disagreeing about the same repo.
 
 ---
 
-## E1 — `total_matches` in every `search_catalog` response
+## Gaps found in the previous draft
 
-**Goal.** Every `search_catalog` response (any `output_mode`, any
-`query_mode`) includes `data.total_matches: u64` — the count **before**
-limit/budget truncation. Currently `items` mode returns only the clipped
-slice, so an agent planning a rename has to make a second `output_mode=count`
-call to gauge scale.
+### 1. E1 was under-scoped
 
-### Design
+The old draft assumed `total_matches` could be derived by "count before
+truncate" inside `format_output`. That is not true in the current pipeline:
 
-Add to every `items` / `files_with_matches` / `count` response body:
-```json
-"data": {
-  "items": [...],          // as today
-  "total_matches": 247,    // NEW: pre-truncation cardinality
-  ...
-}
-```
+- `search_catalog` caps each lexical lane before formatting.
+- hybrid search uses `per_kind_cap`, so symbol/section counts are already
+  clipped before `format_output`.
+- the dense path currently truncates to `lim` before `format_output`.
 
-In `_meta`, keep existing `truncated: bool`, but add `truncated_reason`:
-`"limit" | "token_budget" | null`. Callers can then decide whether to raise
-`limit` or `max_tokens`.
+Real `total_matches` needs dedicated count paths, not a formatter-local fix.
 
-### Files to change
+### 2. E2 is mostly shipped already
 
-| File | Change |
-|---|---|
-| `src/service/agent_v1/catalog_search/mod.rs` (around line 148–192) | Compute total **before** the `truncate` step; thread into response via the `extra` vec as `("total_matches", json!(n))`. Replace the ad-hoc `total_count` in count mode with the same field so both modes agree. |
-| `src/service/agent_v1/catalog_search/filters.rs` (or wherever the post-filter truncation lives) | Return the pre-truncation length as a second tuple element from the ranker. |
-| `src/tools.json` | Add to `search_catalog` output shape description: `"total_matches": "Pre-truncation match count."` under the response doc block. |
-| `tests/search_catalog_basics.rs` (new if absent) | Assert `total_matches >= items.len()` for all modes; assert `total_matches == items.len()` when `limit > matches`. |
+Delete/rename handling is no longer hypothetical:
 
-### Code sketch
+- `src/indexing/code_index.rs::index_workspace_with_symbol_vectors` computes
+  `removed_files = existing - seen_files`.
+- `src/indexing/code_index.rs::reindex_files` also computes `removed_files`.
+- `crates/codesight-storage/src/storage/index_store.rs::apply_index_with_deps`
+  calls `delete_removed_files` before replacing touched/updated files.
+
+The remaining work is hardening, response-shape surfacing, and explicit tests,
+not inventing deletion support from scratch.
+
+### 3. E4 and parts of E6 targeted the wrong owners
+
+The old plan pointed at `src/analysis/quality_signal.rs` and root-owned
+retrieval paths that no longer exist. After the split:
+
+- quality/governance logic lives in `crates/codesight-analysis/src/quality_signal.rs`
+- fuzzy/ranking/section code lives in `crates/codesight-retrieval/**`
+
+### 4. E7 is partially implemented already
+
+`read_content` already emits an unconditional `_meta.tip`:
+
+- `src/service/agent_v1/content.rs`
+
+So the real work is to replace the generic always-on hint with a structured,
+opt-in hint that appears only when it helps.
+
+### 5. E10 violated repo policy
+
+The earlier draft proposed in-memory process-local `DashMap` session stats.
+That conflicts with `AGENTS.md`:
+
+- session-level aggregates must live in the savings ledger file, not in RAM
+
+`session_stats` should therefore be backed by `src/service/savings.rs`, not a
+new ad hoc runtime store.
+
+### 6. E6 picked the wrong reference primitive
+
+The previous draft wanted to reuse `inspect_graph graph=references`. That path
+is explicitly documented as heuristic-only and searches symbol bodies via
+substring logic.
+
+For rename planning, the better base is the `find_references` machinery in:
+
+- `src/service/agent_v1/graph_tail_b/find_references.rs`
+
+That path scans indexed symbol bodies plus full file text and is a better fit
+for whole-word rename planning.
+
+### 7. Acceptance criteria were too broad
+
+The prior version required full-suite `cargo nextest run` as a default gate.
+That conflicts with the repo rule that tests should be targeted by default.
+
+This plan now uses targeted nextest commands as the default proof path, and
+reserves full-suite runs for merge gates or explicit requests.
+
+## Specification / implementation planning gaps
+
+The main planning failures were not missing ideas; they were mismatches between
+the intended contract and the code that actually owns it.
+
+- **Contract drift.** Some documentation and examples still described
+  pre-split paths or outdated tool args (`local_path`, `kinds=...`) even
+  though `src/tools.json` already requires `path` and `graph`.
+- **Ownership drift.** The old draft assigned work to root-crate modules that
+  no longer exist after the split, which would have sent implementation into
+  the wrong crate.
+- **Response-shape drift.** Several items named desired fields
+  (`total_matches`, session stats, next-step hints) without defining where in
+  the envelope they live or which handler owns the serialization.
+- **Rollout drift.** The old draft defaulted to full-suite verification and a
+  new bench CLI even though the repo policy is targeted `nextest` plus the
+  existing `scripts/bench-hotpaths` harness.
+- **Timeline drift.** Historical notes about the crate graph were being read as
+  current architecture. That must be marked explicitly in docs and the worklog.
+
+---
+
+## Revised item map
+
+| ID | Status after audit | Owner | What changes now |
+|---|---|---|---|
+| `P0` | New | docs | Sync plan assumptions with the eight-crate workspace and fix doc drift |
+| `E5` | Still correct | root `src/service/savings.rs` | Add `_meta.tokens_saved_per_ms` |
+| `E1` | Re-scoped | root + storage + doc store | Add real per-lane count queries and truncation metadata |
+| `E4` | Re-homed | `codesight-analysis` | Add structured recommendations to governance signal JSON |
+| `E3` | Still useful | root `quality_more.rs` | Make `refactor_targets` support repo-wide mode |
+| `E7` | Narrowed | root `content.rs` + docs | Replace unconditional tip with structured `next_step_hint` |
+| `E2` | Mostly landed | root indexer + storage | Harden delete/rename path and surface delta stats |
+| `E10` | Re-designed | root `savings.rs` + `manage_indexes` | Persist per-tool session stats in ledger file |
+| `E6` | Re-based | root context layer + helper extraction | Build rename work-plan on `find_references` + `rename_safety` |
+| `E9` | Still useful | shell harness | Extend existing `scripts/bench-hotpaths`; do not invent a new bench CLI |
+
+Recommended implementation order:
+
+1. `P0`
+2. `E5`
+3. `E1`
+4. `E4`
+5. `E3`
+6. `E7`
+7. `E2`
+8. `E10`
+9. `E6`
+10. `E9`
+
+---
+
+## P0 — plan and architecture hygiene
+
+Before feature work, remove stale references so the plan stops pointing at
+modules that no longer exist.
+
+### Files
+
+- `EXCEL_PLAN.md`
+- `README.md`
+- `REFACTOR_WORKLOG.md`
+- `ARCHITECTURE.md` only if additional drift is found during the patch
+
+### Required fixes
+
+- Replace every reference to root-owned `src/retrieval/**` with
+  `crates/codesight-retrieval/**`.
+- Replace every reference to root-owned `src/analysis/**` where the code now
+  lives in `crates/codesight-analysis/**`.
+- Update any "four-crate workspace" language to the current eight-member graph.
+- Resolve the raw merge marker in `REFACTOR_WORKLOG.md`.
+
+No behavior change here. This is a prerequisite for the rest of the plan being
+actionable.
+
+---
+
+## E5 — `_meta.tokens_saved_per_ms`
+
+This item remains low-risk and correctly scoped.
+
+### Files
+
+- `src/service/savings.rs`
+- `tests/envelope_shape.rs`
+
+### Implementation
+
+Add a new `Meta` field:
 
 ```rust
-// catalog_search/mod.rs — around line 148
-let pre_truncation_len = items.len();
-let (items, limit_truncated) = truncate_to_limit(items, lim);
-let (items, budget_truncated) = truncate_to_budget(items, max_tokens);
-let truncated = limit_truncated || budget_truncated;
-let truncated_reason = match (limit_truncated, budget_truncated) {
-    (true, _) => Some("limit"),
-    (_, true) => Some("token_budget"),
-    _ => None,
-};
-extra.push(("total_matches".into(), json!(pre_truncation_len)));
-if let Some(r) = truncated_reason {
-    extra.push(("truncated_reason".into(), json!(r)));
-}
+pub tokens_saved_per_ms: f64
 ```
 
-### Test
-
-```bash
-cargo nextest run -E 'test(search_catalog) + test(catalog)'
-```
-
-New assertions in `tests/search_catalog_basics.rs`:
-- `limit=3, corpus=10` → `items.len()==3 && total_matches==10 && truncated_reason=="limit"`
-- `limit=100, corpus=10` → `items.len()==10 && total_matches==10 && truncated==false`
-
-### Risks / rollback
-
-- Risk: pre-truncation materializes a large Vec before clipping. Current
-  ranker already does this (we sort before limit), so no extra allocations.
-- Rollback: one-line revert of the `extra.push` lines.
-
-### LoC estimate
-
-+20 product, +35 test.
-
----
-
-## E5 — `tokens_saved_per_ms` efficiency metric
-
-**Goal.** Expose `_meta.tokens_saved_per_ms` so agents can compare tool paths
-objectively (e.g., `search_catalog natural_language` vs.
-`inspect_graph centrality` for "what are the central files?").
-
-### Design
-
-Computed in `MetaBuilder::finish` — one line:
+Compute it in `MetaBuilder::finish` from the same `timing_ms` already emitted.
+Use a small timing floor to avoid pathological ratios on sub-millisecond calls:
 
 ```rust
 let timing_ms = self.started_at.elapsed().as_secs_f64() * 1000.0;
-let tokens_saved_per_ms = if timing_ms > 0.0 {
-    (tokens_saved as f64) / timing_ms
-} else {
-    0.0
-};
+let denom = timing_ms.max(0.1);
+let tokens_saved_per_ms = tokens_saved as f64 / denom;
 ```
 
-Added to `Meta` struct with `#[serde(skip_serializing_if = "f64::is_nan_or_zero")]`
-wait — no, always serialize, zero is a valid datapoint.
-
-### Files to change
-
-| File | Change |
-|---|---|
-| `src/service/savings.rs` | Add field `tokens_saved_per_ms: f64` to `Meta`; compute in `finish`. |
-| `tests/envelope_shape.rs` | Add `"tokens_saved_per_ms"` to `BASELINE_META_KEYS`. |
-
 ### Test
+
+- Extend `tests/envelope_shape.rs::BASELINE_META_KEYS`
+- Assert the value is present, finite, and non-negative
+
+Command:
 
 ```bash
 cargo nextest run --test envelope_shape
 ```
 
-Assert the new key is present and is finite, non-negative.
-
-### Risks / rollback
-
-- Noise for fast-and-tiny responses (dividing by 0.1 ms gives huge ratios).
-  Mitigation: floor `timing_ms` at `0.1` to stabilize.
-
-### LoC estimate
-
-+15 product, +5 test.
-
 ---
 
-## E4 — `quality_signal` actionable `recommendations[]`
+## E1 — real `total_matches` and truncation metadata
 
-**Goal.** Turn `evaluate_quality analysis=quality_signal` from a dashboard
-into a task list. Each low sub-metric yields a structured recommendation
-with a concrete first step.
+This item needs a deeper change than the original draft proposed.
 
-### Design
+### Goal
 
-Extend the existing `quality_signal` payload (in `src/analysis/quality_signal.rs`
-per the worklog hotspots table — actually check the path first; see Files
-below) with:
+Every `search_catalog` response should expose real pre-truncation counts,
+regardless of `output_mode`.
+
+Proposed response shape:
 
 ```json
 {
-  "agent_dimensions": { ... },           // as today
-  "agent_submetrics": { ... },           // as today
-  "recommendations": [
-    {
-      "dimension": "change_safety",
-      "sub_metric": "change_locality",
-      "sub_metric_value": 0.38,
-      "severity": "high",                  // low|medium|high
-      "suggestion": "Split god-functions: blast_radius.rs::evaluate_impact_blast_radius (CC 32) and context.rs::assemble_context (CC 24).",
-      "first_step": {
-        "tool": "evaluate_quality",
-        "args": { "analysis": "refactor_targets", "file_path": "src/service/agent_v1/impact/blast_radius.rs" }
-      },
-      "worklog_hint": "T5 (ToolEnvelope) or extract-helpers in blast_radius.rs"
-    }
-  ]
+  "data": {
+    "items": [...],
+    "total_matches": 247,
+    "total_files_with_matches": 19,
+    "truncated": true
+  },
+  "_meta": {
+    "truncated": true,
+    "truncated_by": ["limit", "token_budget"]
+  }
 }
 ```
 
-A **rule table** drives the mapping. One row per `(sub_metric, threshold)`
-pair:
+Use `truncated_by: []` instead of a single `truncated_reason` string; both
+limit and token budget can legitimately fire in the same request.
+
+### Files
+
+- `src/service/agent_v1/catalog_search/mod.rs`
+- `src/service/agent_v1/catalog_search_files.rs`
+- `src/service/code_tools.rs`
+- `crates/codesight-storage/src/storage/search.rs`
+- `src/storage/doc_index/query.rs`
+- `src/tools.json`
+- extend `tests/retrieval_tools.rs` and/or add a focused search-catalog count test
+
+### Implementation specifics
+
+1. Add dedicated count helpers.
+
+In `crates/codesight-storage/src/storage/search.rs`:
+
+- `count_symbols(query, kind, scope) -> usize`
+
+In `src/storage/doc_index/query.rs`:
+
+- `count_sections(query, scope) -> usize`
+
+In `src/service/agent_v1/catalog_search_files.rs`:
+
+- `count_code_files_text_matches(...) -> (total_matches, total_files_with_matches)`
+
+The file-text lane is not FTS-backed today, so file counts must still walk the
+tree. That is acceptable for this item because file-text search is already a
+walk-based path.
+
+2. Centralize truncation after fusion.
+
+Remove the dense-lane `items.truncate(lim)` in
+`src/service/agent_v1/catalog_search/mod.rs`; let `format_output` own the final
+packing/truncation stage so the formatter sees the full fused list it is about
+to report on.
+
+3. Thread explicit lane counts.
+
+Introduce a small local struct in `catalog_search/mod.rs`:
 
 ```rust
-// src/analysis/quality_signal/recommendations.rs  (new file)
-struct Rule {
-    sub_metric: &'static str,
-    dimension: &'static str,
-    low_threshold: f64,
-    severity_of: fn(f64) -> Severity,
-    build_suggestion: fn(&Snapshot, &IndexStore) -> Recommendation,
+struct SearchCounts {
+    total_matches: usize,
+    total_files_with_matches: usize,
 }
-
-const RULES: &[Rule] = &[
-    Rule { sub_metric: "change_locality", dimension: "change_safety",
-           low_threshold: 0.6, severity_of: threshold_bands,
-           build_suggestion: suggest_split_god_functions },
-    Rule { sub_metric: "symbol_uniqueness", dimension: "navigability",
-           low_threshold: 0.7, severity_of: threshold_bands,
-           build_suggestion: suggest_rename_ambiguous },
-    Rule { sub_metric: "test_oracle_quality", dimension: "verifiability",
-           low_threshold: 0.4, severity_of: threshold_bands,
-           build_suggestion: suggest_strengthen_test_oracles },
-    // ...one row per sub_metric in agent_submetrics.
-];
 ```
 
-Each `build_suggestion` re-uses the existing `hotspots` / `dead_code` /
-`refactor_targets` analyses internally (without shelling back out through
-MCP) to produce a concrete ref.
+Populate it from the lane-specific count helpers before formatting.
 
-### Files to change
+4. Keep `count` mode additive.
 
-| File | Change |
-|---|---|
-| `src/analysis/quality_signal.rs` (or `quality_signal/mod.rs` — see the grep below) | Add `recommendations` to the payload. |
-| `src/analysis/quality_signal/recommendations.rs` (new) | Rule table + suggestion builders. |
-| `src/service/agent_v1/quality/mod.rs` | Forward the field — probably no change if `quality_signal_payload` returns a `Value` that's passed through. |
-| `tests/quality_signal.rs` | Assert that on this repo (CC > 20 functions exist), at least one `high` severity recommendation is present. |
+For `output_mode=count`, keep the existing `count` field for readability, but
+also emit `total_matches` so all modes share the same cardinality field.
 
-Verify path with:
+### Tests
+
+Add targeted coverage for:
+
+- limit truncation
+- token-budget truncation
+- both truncations together
+- count-mode agreement with `items` mode
+- hybrid search where symbol + section counts are both non-zero
+
+Command:
+
 ```bash
+cargo nextest run --test retrieval_tools --test envelope_shape
 ```
-(use codesight, not a blind edit — `search_catalog query=quality_signal_payload query_mode=keyword`).
 
-### Code sketch
+---
 
-```rust
-pub(crate) fn build_recommendations(
-    dims: &Dimensions,
-    subs: &SubMetrics,
-    store: &IndexStore,
-) -> Vec<Value> {
-    let mut recs = Vec::new();
-    for rule in RULES {
-        let value = subs.get(rule.sub_metric).copied().unwrap_or(1.0);
-        if value < rule.low_threshold {
-            let sev = (rule.severity_of)(value);
-            recs.push(serde_json::to_value(
-                (rule.build_suggestion)(&Snapshot { value, dims, subs }, store)
-                    .with_severity(sev)
-            ).unwrap());
-        }
+## E4 — actionable `quality_signal.recommendations[]`
+
+This should live in `codesight-analysis`, not in the root crate.
+
+### Files
+
+- `crates/codesight-analysis/src/quality_signal.rs`
+- likely new `crates/codesight-analysis/src/quality_signal_recommendations.rs`
+- `crates/codesight-analysis/src/lib.rs` only if a new module is added
+- `src/service/agent_v1/quality/mod.rs` only if the pass-through needs a minor tweak
+- `tests/quality_signal.rs`
+- optionally `tests/repo_health.rs` if repo-health output should assert the same field
+
+### Implementation specifics
+
+The key leverage point is `governance_signal_json(...)` in
+`crates/codesight-analysis/src/quality_signal.rs`. Add recommendations there so
+both:
+
+- `evaluate_quality analysis=quality_signal`
+- `evaluate_quality analysis=repo_health`
+
+inherit the same recommendation block from one shared formatter.
+
+Recommended shape:
+
+```json
+"recommendations": [
+  {
+    "dimension": "change_safety",
+    "sub_metric": "change_locality",
+    "severity": "high",
+    "value": 0.38,
+    "suggestion": "Reduce fan-in on hot files and split high-CC functions.",
+    "first_step": {
+      "tool": "evaluate_quality",
+      "args": {
+        "analysis": "refactor_targets",
+        "file_path": "src/service/agent_v1/impact/blast_radius.rs"
+      }
     }
-    recs.sort_by_key(|r| std::cmp::Reverse(severity_rank(r)));
-    recs
-}
+  }
+]
 ```
 
-### Test
+Keep the rule engine crate-local. Suggested design:
+
+- a small `Rule` table keyed by sub-metric name
+- one `build_recommendations(&GovernanceSignal, &IndexStore)` helper
+- use existing coverage and hotspot data instead of inventing new scans
+
+Examples:
+
+- `change_locality` / `hotspot_containment` can point at `refactor_targets`
+- `test_oracle_quality` can point at `test_gaps`
+- `symbol_uniqueness` can point at `search_catalog` over ambiguous names
+
+### Tests
+
+Extend `tests/quality_signal.rs` to assert:
+
+- `recommendations` exists
+- at least one recommendation is emitted on the current multi-module fixture
+- `first_step.tool` is present for low-score cases
+
+Command:
 
 ```bash
 cargo nextest run --test quality_signal
 ```
 
-- Given this repo (known weak `change_locality ≈ 0.38`), assert
-  `recommendations[0].severity == "high"` and the first_step's `tool` is
-  `"evaluate_quality"`.
-- Property test: for each rule, inject a fake snapshot with
-  `sub_metric = threshold - ε` and assert the rule fires.
-
-### Risks / rollback
-
-- Rule-table drift vs. reality. Mitigation: rules live next to the metric
-  they judge; adding a new sub-metric is a checked const array insertion
-  (compiler errors if the match arm in `build_suggestion` is missing).
-
-### LoC estimate
-
-+120 product (rule table + 6 suggestion builders), +60 test.
-
 ---
 
-## E3 — `refactor_targets` whole-repo mode
+## E3 — repo-wide `refactor_targets`
 
-**Goal.** Make `file_path` optional on `evaluate_quality analysis=refactor_targets`.
-When omitted, scan the top-N most complex files (via existing `hotspots_payload`)
-and aggregate candidates across them. Currently agents have to run
-`hotspots` → pick a file → `refactor_targets` — three round-trips for one
-question.
+This is still a good item and the code seams are straightforward.
 
-### Design
+### Files
 
-Input (backwards-incompatible shape — no compat shim):
+- `src/service/agent_v1/args.rs`
+- `src/service/agent_v1/quality_more.rs`
+- `src/tools.json`
+- `tests/refactor_targets.rs`
+
+### Implementation specifics
+
+Make `file_path` optional and add:
 
 ```json
-{
-  "source_id": "...",
-  "analysis": "refactor_targets",
-  "file_path": "optional",                // NEW: optional
-  "top_files": 10,                          // NEW: defaults to 10; ignored if file_path set
-  "min_complexity": 0,
-  "min_callers": 0,
-  "top_n": 25                               // per-file cap; also caps aggregate when repo-wide
-}
+"top_files": 10
 ```
 
-Output when `file_path` omitted:
+Behavior:
+
+- if `file_path` is present, preserve current file-scoped behavior
+- if absent, repo-scope mode:
+  - call `codesight_analysis::quality::hotspots_payload(...)`
+  - take the hottest `top_files`
+  - run the existing per-file candidate extractor across each file
+  - merge and globally sort by score
+
+Emit explicit scope metadata:
 
 ```json
 {
   "analysis": "refactor_targets",
   "scope": "repository",
   "files_scanned": 10,
-  "candidates": [
-    { "id": "...", "file": "src/service/agent_v1/impact/blast_radius.rs",
-      "name": "evaluate_impact_blast_radius", "cyclomatic": 32,
-      "caller_count": 4, "score": 160.0 }
-  ]
+  "candidates": [...]
 }
 ```
 
-### Files to change
+### Tests
 
-| File | Change |
-|---|---|
-| `src/service/agent_v1/quality_more.rs::quality_refactor_targets` | Branch on `args.file_path.is_some()`; in repo mode, call `hotspots_payload` with `top_n = top_files`, extract file paths, loop per-file reusing the existing candidate logic, merge. |
-| `src/service/agent_v1/args.rs::EvaluateQualityArgs` | Add `top_files: Option<usize>`. |
-| `src/tools.json` | Make `file_path` non-required; add `top_files` to the property list; update `refactor_targets` description. |
-| `tests/refactor_targets.rs` | New tests `refactor_targets_repo_mode_*`: assert `scope == "repository"`, candidates span multiple files, result is score-sorted globally. |
+Extend `tests/refactor_targets.rs` with:
 
-### Code sketch
+- repo mode returns `scope == "repository"`
+- repo mode spans multiple files
+- `top_n` still globally truncates after merge
 
-```rust
-fn quality_refactor_targets(
-    &self, args: &EvaluateQualityArgs, timer: &MetaBuilder,
-) -> anyhow::Result<Value> {
-    let store = require_store!(...);
-    let raw_bytes = store.repo_total_bytes()?;
-    let timer = MetaBuilder::new(raw_bytes);
-
-    let files: Vec<String> = if let Some(fp) = args.file_path.as_deref() {
-        vec![resolve_file(&store, fp)?]
-    } else {
-        let top_files = args.top_files.unwrap_or(10);
-        hottest_files(&store, top_files)?   // ≈ hotspots_payload rebound
-    };
-
-    let mut candidates = Vec::new();
-    for file in &files {
-        candidates.extend(candidates_for_file(&store, file,
-            args.min_complexity.unwrap_or(0),
-            args.min_callers.unwrap_or(0))?);
-    }
-    candidates.sort_by(|a, b| { /* desc by score */ });
-    candidates.truncate(args.top_n.unwrap_or(25));
-
-    self.success_response(&timer, json!({
-        "analysis": "refactor_targets",
-        "scope": if args.file_path.is_some() { "file" } else { "repository" },
-        "files_scanned": files.len(),
-        "candidates": candidates,
-    }))
-}
-```
-
-### Test
+Command:
 
 ```bash
 cargo nextest run --test refactor_targets
 ```
 
-Add:
-- `refactor_targets_repo_mode_returns_cross_file_candidates` — index a
-  fixture with 3 complex files, assert candidates span all 3.
-- `refactor_targets_repo_mode_respects_top_n` — set `top_n=5`, assert
-  `candidates.len() == 5` when >5 exist.
-
-### Risks / rollback
-
-- Without `file_path` the response can be large (10 files × avg 5 candidates
-  = 50 rows × ~200 bytes). `top_n=25` cap + existing `max_tokens` budget
-  keep it bounded.
-
-### LoC estimate
-
-+60 product, +40 test.
-
 ---
 
-## E7 — Harness-friction mitigations
+## E7 — structured `next_step_hint` for edit workflows
 
-**Goal.** Reduce the double-read tax. We cannot fix the Claude Code harness
-(confirmed upstream limitation — issues #4230, #10123, #10437), but we can:
+This item should be smaller than the earlier draft because part of it is
+already present.
 
-1. **Signal edit intent.** When a caller pairs `read_content` with a
-   `verify=true` flag or `include=["body","hash"]`, add
-   `_meta.next_step_hint` recommending an explicit `Read` before `Edit`.
-2. **Guarantee byte-for-byte equivalence.** `read_content` currently returns
-   `content` with leading/trailing whitespace preserved and no BOM stripping
-   — verify once with a test so agents can trust `read_content` output is
-   identical to `Read` output for edit planning.
-3. **Document.** AGENTS.md gets a "Two-tool edit pattern" subsection under
-   "Effective use guidelines".
+### Files
 
-### Design
+- `src/service/agent_v1/content.rs`
+- `AGENTS.md`
+- extend `tests/incremental.rs` or add a small focused read-content test
 
-#### 1. `_meta.next_step_hint` field
+### Implementation specifics
 
-```rust
-// in read_content handler
-if args.verify || args.include.iter().any(|s| s == "hash") {
-    extra.push(("next_step_hint".into(), json!({
-        "tool": "Read",
-        "reason": "Claude Code's Edit/Write tools require a prior Read-tool call on the same file. \
-                   Call Read(path) before editing; read_content alone is not registered with the harness.",
-        "docs": "https://github.com/anthropics/claude-code/issues/4230"
-    })));
+Current behavior:
+
+- `read_content` always emits `_meta.tip`
+
+Desired behavior:
+
+- remove the unconditional generic tip
+- emit a structured `_meta.next_step_hint` only when:
+  - `verify == true`, or
+  - `include` contains `"hash"`
+
+Suggested shape:
+
+```json
+"next_step_hint": {
+  "tool": "Read",
+  "reason": "Claude Code Edit/Write tracks read state separately from codesight read_content.",
+  "when": "before editing the same file in the harness"
 }
 ```
 
-#### 2. Byte-equivalence test
+Do not add this on every read; the point is to reduce noise, not add it.
 
-`tests/read_content_byte_parity.rs` (new) — index a fixture file, call
-`read_content`, compare against `std::fs::read_to_string` of the same file,
-assert exact equality (no BOM strip, no newline normalization).
+The byte-parity work should reuse what already exists:
 
-#### 3. AGENTS.md section
+- `tests/incremental.rs::run_crlf_preserved_in_cached_files`
 
-Insert under "Effective use guidelines" after the bullet about batch
-`read_content`:
+Broaden that coverage to assert exact file-body parity for a plain file read,
+instead of creating a duplicate test binary.
 
-```markdown
-- **Two-tool edit pattern.** `read_content` is for discovery and planning.
-  **Before you `Edit` or `Write` a file, call the harness's `Read` tool on
-  it.** The Claude Code harness tracks read-state for Edit/Write separately
-  from codesight and will reject edits on files it hasn't seen via `Read`.
-  See upstream issue [claude-code#4230](https://github.com/anthropics/claude-code/issues/4230).
-  This is a harness limitation, not a codesight bug.
-```
-
-### Files to change
-
-| File | Change |
-|---|---|
-| `src/service/agent_v1/content.rs` | Conditionally emit `next_step_hint` on verify / hash include. |
-| `AGENTS.md` | Add subsection. |
-| `tests/read_content_byte_parity.rs` (new) | Byte-for-byte assertion. |
-
-### Test
+Command:
 
 ```bash
-cargo nextest run --test read_content_byte_parity -E 'test(read_content)'
+cargo nextest run --test incremental
 ```
-
-### Risks / rollback
-
-- Adds ~60 bytes to every `verify`-enabled response. Benign, agent-facing
-  guidance. If it adds noise, gate behind an env var.
-
-### LoC estimate
-
-+40 product + doc, +30 test.
 
 ---
 
-## E2 — Incremental ingest detects deletes and renames
+## E2 — ingest delete/rename hardening and delta surfacing
 
-**Goal.** `ingest_sources incremental=true` diffs the disk file-set against
-the index file-set and removes stale rows. Solves the "I renamed
-`churn_rate.rs` → `change_velocity.rs` and the old file stayed in the
-index" problem I hit in session 3.
+This item is now a hardening pass over already-landed behavior.
 
-### Design (follows rust-analyzer VFS pattern)
+### Files
 
-Pipeline at `src/indexing/code_index.rs::ingest_workspace` (or the
-incremental-ingest entrypoint — resolve with codesight):
+- `src/indexing/code_index.rs`
+- `src/service/code_tools.rs`
+- `src/service/args.rs`
+- `src/service/agent_v1/ingest.rs`
+- `src/service/file_watcher.rs`
+- `crates/codesight-storage/src/storage/index_store.rs`
+- `tests/incremental.rs`
+- optionally a new watcher parity test if async coverage is worth the extra harness
 
-```
-1. Walk disk → disk_set: HashSet<String>  (repo-relative paths)
-2. Query index → index_set = store.all_file_paths()?.into_iter().collect()
-3. Additions   = disk_set - index_set   → parse + insert as today
-4. Modifications (fingerprint mismatch) → as today
-5. Deletions   = index_set - disk_set   → store.delete_files(&deletions)?
-   - must be a single SQL DELETE in a transaction
-   - relies on foreign-key ON DELETE CASCADE for symbols/references/docs
-```
+### What already exists
 
-Return shape gains:
+- full ingest computes `removed_files`
+- delta reindex computes `removed_files`
+- storage deletes removed file rows before replacing touched files
+- code/doc schemas already use `ON DELETE CASCADE` for file-owned rows
+
+### Remaining work
+
+1. Add a hard guard against accidental mass deletion.
+
+In `src/indexing/code_index.rs`, if the disk walk returns zero candidate files
+while the existing index is non-empty, bail instead of treating it as "delete
+everything".
+
+2. Surface delta stats in the ingest response.
+
+Do not over-spec `symbols_removed` unless we actually need it. The cheap,
+immediately useful fields are:
 
 ```json
-{
-  "files_added": 5,
-  "files_modified": 12,
-  "files_removed": 3,       // NEW (was 0 on ingest path)
-  "symbols_added": 142,
-  "symbols_removed": 41,    // NEW
-  ...
+"delta": {
+  "files_reindexed": 12,
+  "files_removed": 3
 }
 ```
 
-### Files to change
+If symbol-removal counts are still desired later, add them in storage with an
+explicit pre-delete `COUNT(*)` query.
 
-| File | Change |
-|---|---|
-| `src/indexing/code_index.rs::ingest_workspace` | After the walk, compute set-diff and call `store.delete_files(deletions)`. |
-| `crates/codesight-storage/src/storage/index_writes.rs` (or wherever the existing `reindex_files` removal is — grep for `files_removed` counter) | Export `delete_files(&[&str]) -> Result<Removed>` if not public; verify FK cascade covers `symbols`, `refs`, `imports`, `doc_sections`. |
-| `src/service/agent_v1/ingest.rs` | Forward the new counters into the response. |
-| `crates/codesight-storage/src/storage/migrations.rs` | Sanity check: all FK relationships on `files.path` use `ON DELETE CASCADE`. If any lack it, add a forward-only migration (this crate has no backwards compat). |
-| `tests/ingest_deletion.rs` (new) | Index a 3-file fixture, delete one file on disk, re-ingest incremental, assert `files_removed == 1` and the deleted file is no longer in `all_file_paths()`. |
-| `tests/ingest_rename.rs` (new) | Rename `a.rs → b.rs` on disk, re-ingest, assert `all_file_paths()` contains `b.rs` but not `a.rs`, and symbols from `a.rs` are gone. |
+3. Keep vector deletion explicit.
 
-### Code sketch
+`delete_removed_files` currently deletes symbol vectors explicitly before row
+deletion. Keep that; vec tables are not magically covered by the SQL foreign key
+graph.
 
-```rust
-// src/indexing/code_index.rs
-let disk_set: HashSet<String> = walk_files(root)?.into_iter()
-    .map(rel_path_string).collect();
-let index_set: HashSet<String> = store.all_file_paths()?.into_iter().collect();
+4. Add explicit rename coverage.
 
-let to_delete: Vec<&str> = index_set.difference(&disk_set).map(String::as_str).collect();
-let Removed { files, symbols } = if !to_delete.is_empty() {
-    store.delete_files(&to_delete)?
-} else {
-    Removed::default()
-};
+Current tests prove delete behavior (`tests/incremental.rs`) but not the rename
+case directly. Add a rename case there before inventing a separate binary.
 
-stats.files_removed = files;
-stats.symbols_removed = symbols;
-```
+### Tests
 
-### Rename handling
+Extend `tests/incremental.rs` with:
 
-Notify-rs distinguishes `Rename { from, to }` in debounced events ([notify-rs docs](https://docs.rs/notify)).
-In the **watcher** path, `collect_changed_paths` currently folds every
-`EventKind::Remove(_)` and `EventKind::Modify(_)` into a single changed-paths
-Vec. Because `reindex_files` already tracks `files_removed`, the watcher
-path is **already correct for renames** — the `from` path is seen as Remove
-and the `to` path as Create, both queued in the same debounced batch.
+- rename `a.py -> b.py` and verify the old path disappears from indexed paths
+- empty-walk guard test
+- optionally surface `files_removed` in the ingest JSON and assert it
 
-The **only** gap is the ingest path (no watcher, just a user-triggered
-`ingest_sources` call). E2 closes that gap. No change needed to the watcher
-— but E8 (below) adds a test that asserts the watcher behavior explicitly.
-
-### Test
+Command:
 
 ```bash
-cargo nextest run --test ingest_deletion --test ingest_rename
+cargo nextest run --test incremental
 ```
-
-### Risks / rollback
-
-- **Data loss** if a bug makes `disk_set` empty (e.g., walker returns 0
-  files under a bad glob) and we then delete the entire index. Mitigation:
-  **hard guard**:
-  ```rust
-  if disk_set.is_empty() && !index_set.is_empty() {
-      bail!("refusing to delete all indexed files — disk walk returned empty");
-  }
-  ```
-  And a test that triggers this guard.
-- FK cascade assumption: verify with `PRAGMA foreign_keys` turned on in the
-  migration, and add an assertion in the test that symbols really disappear.
-
-### LoC estimate
-
-+90 product, +70 test.
 
 ---
 
-## E10 — `manage_indexes action=session_stats`
+## E10 — `manage_indexes action=session_stats` backed by the ledger
 
-**Goal.** Return per-tool aggregated tokens saved, calls made, and
-efficiency (tokens / ms) since binary start. Lets you grade a session
-without grepping `_savings.json`.
+This item needs redesign to match repo policy.
 
-### Design
+### Files
 
-New handler arm on `manage_indexes`:
+- `src/service/savings.rs`
+- `src/service/mod.rs`
+- `src/service/agent_v1/index_admin.rs`
+- `src/tools.json`
+- new `tests/session_stats.rs`
 
-```json
-{
-  "action": "session_stats"
-}
-```
+### Required design change
 
-Output:
-```json
-{
-  "action": "session_stats",
-  "process_started_at": "2026-04-14T10:12:33Z",
-  "uptime_ms": 438293,
-  "total_tokens_saved_this_session": 3721000,
-  "per_tool": [
-    { "tool": "search_catalog", "calls": 42, "tokens_saved": 2_800_000,
-      "avg_timing_ms": 1.4, "avg_tokens_saved_per_ms": 2_000_000 },
-    { "tool": "read_content", "calls": 11, "tokens_saved": 340_000, ... }
-  ]
-}
-```
+Do not add a process-local `DashMap`.
 
-### Storage
-
-Process-local only. Add:
+Instead, extend `SavingsState` in `src/service/savings.rs` with a current
+session block:
 
 ```rust
-// src/service/session_stats.rs (new)
-pub struct SessionStats {
-    started_at: Instant,
-    per_tool: DashMap<&'static str, ToolStats>,
+struct SavingsState {
+    total_tokens_saved: u64,
+    total_cost_avoided: HashMap<String, f64>,
+    current_session: SessionState,
 }
-#[derive(Default)]
-pub struct ToolStats { pub calls: u64, pub tokens_saved: u64, pub timing_ms_sum: f64 }
+
+struct SessionState {
+    started_at: String,
+    per_tool: HashMap<String, ToolSessionStats>,
+}
 ```
 
-Record from the dispatch wrapper in `src/service/agent_v1/registry.rs` —
-one line per tool exit. **No** `_savings.json` write on each call (that's
-already handled by the ledger); this is an in-memory aggregate only.
+Suggested per-tool stats:
 
-### Files to change
+```rust
+struct ToolSessionStats {
+    calls: u64,
+    tokens_saved: u64,
+    timing_ms_sum: f64,
+    error_count: u64,
+}
+```
 
-| File | Change |
-|---|---|
-| `src/service/session_stats.rs` (new) | Struct + thread-safe accumulate. Use `parking_lot::Mutex<HashMap>` or `dashmap = "6"` (already a dep? verify). |
-| `src/service/mod.rs::CodeService` | Hold an `Arc<SessionStats>`. |
-| `src/service/agent_v1/registry.rs::dispatch_tool` | After handler returns, update stats from `_meta`. |
-| `src/service/agent_v1/index_admin.rs` | Add `"session_stats"` match arm; return serialized stats. |
-| `src/tools.json` | Add to `manage_indexes` action enum. |
-| `tests/session_stats.rs` (new) | Dispatch a known mix of tools, assert per-tool counters match. |
+### Plumbing
 
-### Test
+Update `CodeService::dispatch` so that after a handler returns a response with
+`_meta`, the service records:
+
+- tool name
+- `tokens_saved`
+- `timing_ms`
+- whether `ok` was false
+
+into the ledger file under the existing ledger mutex.
+
+Then add `manage_indexes action=session_stats` that reads the current session
+block from the ledger and returns it.
+
+Important schema fix:
+
+- `src/tools.json` currently requires `source_id` for all `manage_indexes`
+  calls
+- `session_stats` is global
+- change the schema so `action` is the only required field and validate
+  `source_id` per action inside the handler
+
+Do not promise result-cache integration yet. `ResultCache` exists in
+`src/server_support/result_cache.rs`, but it is not currently wired into
+`CodeService` dispatch. Add it to `session_stats` only after the cache is a real
+service-owned runtime dependency.
+
+### Tests
+
+New `tests/session_stats.rs` should:
+
+- dispatch at least two different tools
+- call `manage_indexes { "action": "session_stats" }`
+- assert per-tool call counts and token totals are present
+
+Command:
 
 ```bash
 cargo nextest run --test session_stats
 ```
 
-### Risks / rollback
-
-- Concurrency: a `DashMap` keyed by `&'static str` tool-name is cheap.
-  Alternatively, `parking_lot::Mutex<HashMap<&'static str, ToolStats>>` —
-  under contention the dispatch path is already single-digit-ms, so even
-  a naive mutex is fine.
-- No persistence across restarts — call this out in the response so agents
-  don't confuse it with the lifetime ledger.
-
-### LoC estimate
-
-+80 product, +40 test.
-
 ---
 
 ## E6 — `assemble_context mode=rename_plan`
 
-**Goal.** Given a symbol and a proposed `new_name`, return an executable,
-ranked plan for the rename — grouped by file, with refs and token estimates
-— so an agent can edit in one pass. Replaces the current workflow of
-`search_catalog regex` → manual sort → per-file `read_content`.
+This remains a strong feature, but it should be built on reusable internals,
+not handler-to-handler JSON calls.
 
-### Design
+### Files
+
+- new `src/service/agent_v1/context_tail/rename_plan.rs`
+- `src/service/agent_v1/context_tail/mod.rs`
+- `src/service/agent_v1/graph_tail_b/find_references.rs` or a new extracted helper next to it
+- `src/service/agent_v1/impact_more.rs` only if a shared helper is extracted there
+- `src/tools.json`
+- new `tests/rename_plan.rs`
+
+### Implementation specifics
+
+1. Extract a reusable reference collector.
+
+Do not call `inspect_graph` from inside `assemble_context`.
+Instead, pull the reusable search logic out of:
+
+- `src/service/agent_v1/graph_tail_b/find_references.rs`
+
+into a helper that returns structured matches without building an MCP envelope.
+
+2. Pair it with rename safety.
+
+Use:
+
+- `codesight_analysis::impact::rename_safety_payload`
+
+to populate collision warnings.
+
+3. Group and rank by file.
+
+For each file:
+
+- classify matches as `definition`, `symbol_body_match`, or `text_match`
+- estimate read cost from `IndexStore::file_bytes(file) / BYTES_PER_TOKEN`
+- sort files as:
+  - definition file first
+  - then files with symbol-body matches by descending match count
+  - then text-only files
+
+Suggested output:
 
 ```json
-// input
-{
-  "source_id": "...",
-  "mode": "rename_plan",
-  "refs": [{ "kind": "symbol", "stable_id": "...::OldName#function",
-             "new_name": "NewName" }],
-  "max_tokens": 8000
-}
-
-// output
 {
   "mode": "rename_plan",
-  "symbol": { "id": "...", "old_name": "OldName", "new_name": "NewName" },
+  "symbol": { "id": "...", "old_name": "foo", "new_name": "bar" },
   "files": [
     {
-      "path": "src/service/.../foo.rs",
+      "path": "src/a.py",
+      "estimated_tokens_to_read": 120,
       "edits": [
-        { "line": 12, "kind": "definition", "context": "pub fn OldName(..." },
-        { "line": 45, "kind": "call_site", "context": "OldName(x)" }
-      ],
-      "estimated_tokens_to_read": 420,
-      "risk": "low"        // low|medium|high — medium if macro-expanded, high if dyn dispatch
+        { "kind": "definition", "line": 4, "preview": "def foo():" }
+      ]
     }
   ],
-  "total_files": 4,
-  "total_edits": 11,
-  "strategy": "reference_graph + text_scan",
-  "warnings": []           // e.g., "Name collision with NewName in bar.rs"
+  "warnings": [...]
 }
 ```
 
-### Implementation
+4. Reuse the existing `max_tokens` contract.
 
-Reuses three existing pieces:
-1. `impact::rename_safety_payload` for collision warnings.
-2. `inspect_graph graph=references` for the reference graph.
-3. A `string_scan` fallback (regex on file text) for matches the graph
-   doesn't catch (macros, string literals in tests, doc comments).
+Stop once the packed file list crosses the requested budget. Emit truncation
+metadata rather than silently clipping.
 
-Files come back **ordered**: definition file first, then callers ranked by
-call count desc, then other occurrences.
+### Tests
 
-### Files to change
+New `tests/rename_plan.rs` should cover:
 
-| File | Change |
-|---|---|
-| `src/service/agent_v1/context_tail/rename_plan.rs` (new) | ~120 LoC handler. |
-| `src/service/agent_v1/context_tail/mod.rs` | Add match arm; add `mod rename_plan;`. |
-| `src/tools.json` | Add `"rename_plan"` to `assemble_context` mode enum; document `refs[0].new_name`. |
-| `tests/rename_plan.rs` (new) | Index a fixture, rename `foo`→`bar`, assert every call site in the fixture is represented and definition file is `files[0]`. |
+- definition file is listed first
+- helper names like `foo_helper` are not mistaken for `foo`
+- rename warnings surface collisions from `rename_safety_payload`
 
-### Test
+Command:
 
 ```bash
-cargo nextest run --test rename_plan -E 'test(rename)'
+cargo nextest run --test rename_plan
 ```
 
-### Risks / rollback
+---
 
-- False negatives from the string scan (e.g., `OldName` appearing as a
-  substring of `OldNameHelper`). Mitigation: boundary-aware regex
-  `\bOldName\b`; a test asserts the Helper variant is **not** returned.
-- Output size for wide-blast renames. Existing `max_tokens` applies to
-  `files[*].edits`; truncate edits per-file and surface `truncated_in_file`
-  counter.
+## E9 — extend the existing hot-path bench harness
 
-### LoC estimate
+The earlier draft pointed at a non-existent `src/cli/bench.rs`. The repo
+already has a shell harness:
 
-+160 product, +80 test.
+- `scripts/bench-hotpaths`
+
+Build on that instead of adding a new CLI surface.
+
+### Files
+
+- `scripts/bench-hotpaths`
+- `REFACTOR_WORKLOG.md`
+
+### Cases to add
+
+- incremental delete
+- incremental rename
+- rename-plan small fixture, after `E6` lands
+
+Use the existing `codesight-mcp ingest` and `codesight-mcp search` diagnostic
+CLI commands. Only add a new CLI subcommand if the shell harness becomes
+unmaintainable.
+
+This is a perf follow-up item, not a prerequisite for the behavioral work.
 
 ---
 
-## E9 — Bench harness: deletion + rename cases
+## Out of scope
 
-**Goal.** `scripts/bench-hotpaths` gets two new cases so E2/E6 can't
-regress without being caught.
-
-### Cases
-
-1. `incremental_delete` — on a cold-ingested fixture (413 files), delete
-   50 files on disk, time `ingest_sources incremental=true`. Target:
-   **< 150 ms** for 50 deletions.
-2. `incremental_rename` — rename 20 files, time delta. Target: **< 250 ms**.
-3. `rename_plan_small` — run E6 rename_plan over a 5-file fixture. Target:
-   **< 30 ms**.
-
-### Files to change
-
-| File | Change |
-|---|---|
-| `scripts/bench-hotpaths` | Add the three cases; shell out to `cargo run --release --bin codesight-mcp -- bench --case <name>` or extend in-process. |
-| `src/cli/bench.rs` (if the binary exists; else create) | New cases. |
-| `REFACTOR_WORKLOG.md` current-metrics table | Add three new rows. |
-
-### Test
-
-Benchmarks aren't run on every test invocation. They're part of the
-`check --bench` CLI command and run manually after perf-sensitive patches.
-
-### LoC estimate
-
-+40 script/CLI, +0 test.
+- semantic-retrieval internals in `crates/codesight-retrieval/**`; a separate
+  stream already owns that area
+- tokenizer replacement
+- envelope-wide refactor beyond the additive meta fields in this plan
+- new crate splits; the current priority is making the eight-crate architecture
+  coherent and well-documented, not introducing crate nine
+- session-in-RAM state
 
 ---
 
-## E8 — Watcher rename-event parity (folded into E2)
+## Acceptance criteria
 
-**Goal.** Prove the watcher path emits the same delta as the ingest path
-for rename/delete. Prevents the two paths from drifting.
+For any one item or item batch in this plan:
 
-### Test
+- update `src/tools.json` in the same patch as any tool contract change
+- run the smallest proving test set for the touched area
+- always keep `tests/crate_graph.rs` and `tests/envelope_shape.rs` green when
+  touching crate boundaries or `_meta`
+- update `REFACTOR_WORKLOG.md` in the same patch as the landed behavior
 
-`tests/watcher_rename_parity.rs` (new, integration-style):
-- Start watcher on a tempdir, write 3 files, wait for initial index.
-- Rename one file.
-- Assert the watcher's delta (observed via watch status
-  `manage_indexes action=status`) matches what `ingest_sources incremental=true`
-  would produce on the same tempdir post-rename.
+Default targeted verification by item:
 
-### LoC estimate
+- `E5`: `cargo nextest run --test envelope_shape`
+- `E1`: `cargo nextest run --test retrieval_tools --test envelope_shape`
+- `E4`: `cargo nextest run --test quality_signal`
+- `E3`: `cargo nextest run --test refactor_targets`
+- `E7`: `cargo nextest run --test incremental`
+- `E2`: `cargo nextest run --test incremental`
+- `E10`: `cargo nextest run --test session_stats`
+- `E6`: `cargo nextest run --test rename_plan`
 
-+15 test.
-
----
-
-## Rollout / sequencing
-
-Recommended merge order (lowest risk → highest):
-
-1. **E5** (efficiency metric) — trivial, touches only `Meta`.
-2. **E1** (total_matches) — envelope-level, no semantics.
-3. **E7** (harness hint) — additive `_meta` field only.
-4. **E3** (refactor_targets repo mode) — additive arg.
-5. **E4** (recommendations) — additive response field.
-6. **E10** (session_stats) — new handler arm, zero risk to existing tools.
-7. **E2 + E8 + E9** (deletion detection) — ship together; highest code-path
-   risk. Land behind a 1-session dogfood gate before closing E2.
-8. **E6** (rename_plan) — builds on E2 being reliable.
-
----
-
-## Acceptance criteria (session-end gate)
-
-A session that ships any subset of E1–E10 must prove:
-
-- [ ] `cargo nextest run` passes full suite in ≤ 30 s.
-- [ ] `cargo clippy --all-targets -- -D warnings` clean.
-- [ ] `tests/crate_graph.rs` still passes (T9 gate from session 3).
-- [ ] `tests/envelope_shape.rs` passes — any new `_meta` keys were added
-      to `BASELINE_META_KEYS` in the same patch.
-- [ ] `_savings.json` cumulative `total_tokens_saved` strictly increases
-      after dogfooding the session with `codesight-mcp check --savings`.
-- [ ] `REFACTOR_WORKLOG.md` Current metrics table is updated.
-- [ ] `REFACTOR_WORKLOG.md` "Completed this session" section is updated.
-- [ ] For E2: a manual smoke — `rm` a file from the repo, run
-      `ingest_sources incremental=true`, confirm `files_removed: 1`.
-
----
-
-## Risks at a glance
-
-| Risk | Item | Mitigation |
-|---|---|---|
-| Deleting the whole index from an empty walk | E2 | Hard guard: refuse to delete all. Test for it. |
-| Rule-table drift in quality_signal | E4 | Rules colocated with the metric; compiler-checked match arm. |
-| Double-truncation bug when both limit and budget fire | E1 | `truncated_reason` orders them; test both together. |
-| Session stats RAM grows | E10 | Tool count is bounded by `tools.json` (≤ 15 keys). HashMap tiny. |
-| `next_step_hint` noise | E7 | Gate behind `verify`/hash include flags — opt-in path. |
-| FK cascade missing on some tables | E2 | Audit `migrations.rs`; add forward-only migration if missing. |
-
----
-
-## Non-goals — explicit exclusions
-
-- **Semantic embeddings.** A parallel agent owns `src/retrieval/semantic.rs`
-  and the embeddings indexing path. Do not touch.
-- **Tokenizer swap.** Stays in worklog as T1. Byte/4 is good enough for
-  E1–E10 budgets.
-- **Tool envelope refactor.** Stays in worklog as T5. When T5 lands, E1's
-  `total_matches` and E5's `tokens_saved_per_ms` move onto the `Meta`
-  struct automatically — no rework needed.
-- **Plan_turn, audit_config, ownership.** Already specced (T6/T7/T8),
-  implement separately.
-- **Security hardening.** T10 stays separate.
-
----
-
-## Sources (external)
-
-- [crates.io: tiktoken](https://crates.io/crates/tiktoken) — pure-Rust BPE, March 2026 update
-- [crates.io: tiktoken-rs](https://crates.io/crates/tiktoken-rs) — alternate implementation
-- [anysphere/tiktoken-rs GitHub](https://github.com/anysphere/tiktoken-rs) — maintained fork
-- [rust-analyzer VFS documentation](https://rust-lang.github.io/rust-analyzer/vfs/index.html) — file-change / Salsa pattern
-- [rust-analyzer Guide](https://rust-analyzer.github.io/book/contributing/guide.html) — incremental computation architecture
-- [notify-rs Watcher docs](https://docs.rs/notify/latest/notify/trait.Watcher.html) — rename/delete event semantics
-- [notify-rs GitHub](https://github.com/notify-rs/notify) — debouncer integration
-- [claude-code#4230 — Write tool should auto-read](https://github.com/anthropics/claude-code/issues/4230) — harness limitation
-- [claude-code#10123 — File-watch mechanism invalidates read state](https://github.com/anthropics/claude-code/issues/10123)
-- [claude-code#10437 — "File has been unexpectedly modified" after Read](https://github.com/anthropics/claude-code/issues/10437)
+Run the full suite only for an explicit merge gate or when requested.

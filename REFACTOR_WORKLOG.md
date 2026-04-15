@@ -73,7 +73,8 @@ root crate into a new workspace member `crates/codesight-imports/`.
 - **Invariants test extended.** `tests/crate_graph.rs` adds
   `codesight-imports` to the membership list, asserts
   `imports → {core, extractors}`, forbids `imports → storage`, and
-  requires the root crate to depend on all four inner crates.
+  requires the root crate to depend on `codesight-core`,
+  `codesight-extractors`, `codesight-storage`, and `codesight-imports`.
 - **LoC moved.** ~1530 lines of Rust moved out of the root crate into
   the new crate (imports: ~1220; packages: ~310). Root `src/` shrinks
   by the same amount; workspace total is flat.
@@ -84,7 +85,7 @@ root crate into a new workspace member `crates/codesight-imports/`.
   `cargo nextest run --test find_importers --test cross_repo --test get_context_bundle --test packages_walker` (165 passed),
   `cargo nextest run --test parsers` (351 passed),
   `cargo check --tests` (workspace clean).
-=======
+
 ## 2026-04-15 — `codesight-analysis` crate split
 
 Carved the analysis domain out of the root crate. ~4.6k LoC moved from
@@ -245,9 +246,11 @@ Carried out the first split from the `ARCHITECTURE.md` roadmap. Outcomes:
 Audited the workspace split against the current code shape before changing any
 crate boundaries. Result:
 
-- **No immediate forced split.** The current four-crate layout is still
-  coherent, but the "exactly four crates" rule had become policy debt rather
-  than architectural guidance.
+- **Historical note.** This audit happened before the later same-day
+  framework/imports/retrieval/analysis splits landed. At audit time, the
+  then-current pre-split workspace layout was still coherent, but the
+  "exactly four crates" rule had become policy debt rather than
+  architectural guidance.
 - **Highest-feasibility next split:** `src/framework/` into its own crate.
   It is largely self-contained, heavily tested, and carries parser-heavy
   dependencies that currently bloat the root crate compile surface.
@@ -270,11 +273,11 @@ crate boundaries. Result:
 
 ---
 
-## Current metrics (baseline: 2026-04-13, updated 2026-04-13 session 3)
+## Current metrics (baseline: 2026-04-13, refreshed 2026-04-15)
 
 | Metric | Current | Target | Trend |
 |---|---|---|---|
-| Product crate LoC (`src/`) | **~16.8k** | ↓ each session | ↓ -12k from 4-crate split (framework + imports + retrieval + analysis) |
+| Product crate LoC (`src/`) | **~16.8k** | ↓ each session | ↓ -12k from the 2026-04-15 split wave (framework + imports + retrieval + analysis) |
 | Workspace crate LoC (`crates/`) | analysis 4.6k / core 0.2k / extractors 9.4k / framework 3.2k / imports 1.5k / retrieval 2.7k / storage 3.1k | stable | ↑ +12k from splits |
 | Governance score | **7780** (very good) | ↑ | ↑ +2 this session |
 | Structural score | **8072** (very good) | ↑ | stable |
@@ -301,7 +304,7 @@ search, and delta reindex on this repo.
 | `evaluate_impact_blast_radius` | 32 | `src/service/agent_v1/impact/blast_radius.rs` | 198 |
 | `apply_index_with_deps` | 26 | `crates/.../index_store.rs` | 384 |
 | `assemble_context` | 24 | `src/service/agent_v1/context.rs` | 301 |
-| `dead_code_payload` | 22 | `src/analysis/dead_code/mod.rs` | 301 |
+| `dead_code_payload` | 22 | `crates/codesight-analysis/src/dead_code/mod.rs` | 301 |
 | `read_content` | 22 | `src/service/agent_v1/content.rs` | 211 |
 | `ingest_sources` | 22 | `src/service/agent_v1/ingest.rs` | 289 |
 | `insert_symbol` | 22 | `crates/.../index_store.rs` | 384 |
@@ -313,7 +316,7 @@ search, and delta reindex on this repo.
 
 ---
 
-## Completed this session (2026-04-13 session 3)
+## Completed in 2026-04-13 session 3
 
 | Task | Summary | LoC delta | Tests |
 |---|---|---|---|

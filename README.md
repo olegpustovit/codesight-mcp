@@ -1,8 +1,8 @@
 # codesight-mcp
 
-A local MCP (Model Context Protocol) server that gives coding agents structural, token-efficient access to any codebase. It indexes symbols, imports, docs, and dependency graphs into a WAL-configured SQLite database and exposes them through the `agent-v1` tool surface — the same contract shape as [`prior-art-mcp`](https://github.com/prior-art/prior-art-mcp), without the wide tool-name sprawl.
+A local MCP (Model Context Protocol) server that gives coding agents structural, token-efficient access to any codebase. It indexes symbols, imports, docs, and dependency graphs into a WAL-configured SQLite database and exposes them through the consolidated `agent-v1` tool surface.
 
-The design goal is simple: when your agent can answer a code question by asking codesight-mcp instead of pulling the whole file through `Read`, it saves tokens. This repo is the Rust implementation — 30+ languages via tree-sitter query packs, a four-crate workspace (`codesight-core` → `codesight-extractors` / `codesight-storage` → `codesight-mcp`), and an `agent-v1` surface of ~11 coarse tools that covers ingest, catalog search, file/symbol inspection, graph analysis, impact evaluation, quality heuristics, and context assembly.
+The design goal is simple: when your agent can answer a code question by asking codesight-mcp instead of pulling the whole file through `Read`, it saves tokens. This repo is the Rust implementation — 30+ languages via tree-sitter query packs, an eight-crate workspace (`codesight-core`, `codesight-extractors`, `codesight-storage`, `codesight-analysis`, `codesight-framework`, `codesight-imports`, `codesight-retrieval`, and the root `codesight-mcp` crate), and a consolidated MCP surface for ingest, catalog search, structure, graph, impact, quality, context, and index management.
 
 ## Install
 
@@ -61,7 +61,7 @@ codesight-mcp check --workspace .    # validates storage, migrations, query pack
 Then, from your Claude Code session in that workspace, ask the agent to index the repo. Under the hood it calls the `ingest_sources` tool:
 
 ```
-Call codesight ingest_sources { "local_path": "." }
+Call codesight ingest_sources { "path": "." }
 ```
 
 Once indexing finishes (usually a few seconds for medium repos, longer for monorepos), the other tools become useful:
@@ -71,11 +71,11 @@ Call codesight search_catalog { "source_id": "<repo>", "query": "dispatch", "lim
 Call codesight inspect_structure { "source_id": "<repo>", "view": "file_outline", "path": "src/main.rs" }
 ```
 
-The response carries `timing_ms` and the raw result set; the unified response envelope with `tokens_saved` telemetry is tracked in [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md) and lands in an imminent patch.
+The response carries `timing_ms`, `tokens_saved` telemetry, and the raw result set. Current envelope work and follow-on changes are tracked in [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md).
 
 ## Where state lives
 
-SQLite databases, embedding stores, and per-workspace sessions all live under `CODESIGHT_INDEX_DIR`. The `check` subcommand inspects and reports on every piece of it; see [`CONFIGURATION.md`](CONFIGURATION.md) for the full precedence chain (env → global TOML → compiled default) and per-workspace `.codesight.toml` overrides.
+SQLite databases, embedding stores, and the `_savings.json` ledger all live under `CODESIGHT_INDEX_DIR`. The `check` subcommand inspects and reports on every piece of it; see [`CONFIGURATION.md`](CONFIGURATION.md) for the full precedence chain (env → global TOML → compiled default) and per-workspace `.codesight.toml` overrides.
 
 ## When to reach for codesight-mcp vs Read / Grep / Glob
 
@@ -93,10 +93,10 @@ over `Read` / `Grep` / `Glob` for code exploration once the index is built:
 
 - `search_catalog` for keyword and fuzzy symbol/file lookup.
 - `inspect_structure view=file_outline` instead of `Read` for "what's in this file?".
-- `inspect_graph kinds=references|importers` instead of grepping for callers.
+- `inspect_graph graph=references` or `inspect_graph graph=importers` instead of grepping for callers.
 - `evaluate_impact analysis=blast_radius|rename_safety` before risky refactors.
 
-Run `ingest_sources local_path=.` once per workspace; rerun after large changes.
+Run `ingest_sources path=.` once per workspace; rerun after large changes.
 ```
 
 ## Further reading
