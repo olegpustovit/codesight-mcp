@@ -4,12 +4,13 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
+use codesight_imports::{
+    imports::{extract_imports, language_for_path, package_reference_evidence},
+    packages,
+};
+
 use crate::{
     config::AppConfig,
-    indexing::{
-        imports::{extract_imports, language_for_path, package_reference_evidence},
-        packages,
-    },
     storage::{IndexStore, list_repo_summaries},
 };
 

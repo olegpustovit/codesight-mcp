@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use crate::indexing::imports::{extract_imports, language_for_path, package_reference_evidence};
+use codesight_imports::imports::{extract_imports, language_for_path, package_reference_evidence};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::require_store;
@@ -112,13 +112,13 @@ impl CodeService {
                     && let Ok(s) = IndexStore::open(db_path)
                 {
                     let pkg_names = s.get_package_names().unwrap_or_default();
-                    repo_entries.push(crate::indexing::packages::RepoEntry {
+                    repo_entries.push(codesight_imports::packages::RepoEntry {
                         repo_id: summary.repo.clone(),
                         package_names: pkg_names,
                     });
                 }
             }
-            let registry = crate::indexing::packages::build_package_registry(&repo_entries);
+            let registry = codesight_imports::packages::build_package_registry(&repo_entries);
             let mut cross_repo_edges: Vec<Value> = Vec::new();
             if let Ok(all_contents) = store.all_file_contents() {
                 for (file, content) in &all_contents {

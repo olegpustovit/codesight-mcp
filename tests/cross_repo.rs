@@ -5,7 +5,7 @@ use tempfile::tempdir;
 
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::db;
-use codesight_mcp::indexing::packages::{
+use codesight_imports::packages::{
     RepoEntry, build_package_registry, extract_package_names, extract_root_package_from_specifier,
     find_repos_for_package,
 };

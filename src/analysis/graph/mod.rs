@@ -9,7 +9,7 @@ mod layers;
 mod pagerank;
 mod psr4;
 
-pub use crate::indexing::imports::{
+pub use codesight_imports::imports::{
     ImportEdge, extract_imports, language_for_path, load_tsconfig_aliases, parse_tsconfig_paths,
     resolve_import_edge_for_graph, resolve_imports_to_files, resolve_specifier,
 };

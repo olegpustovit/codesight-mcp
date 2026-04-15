@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 
+use codesight_imports::{
+    imports::{ImportEdge, extract_imports, language_for_path},
+    packages::extract_root_package_from_specifier,
+};
+
 use crate::{
     analysis::{evidence::EvidenceNote, graph as dep_graph},
-    indexing::{
-        imports::{ImportEdge, extract_imports, language_for_path},
-        packages::extract_root_package_from_specifier,
-    },
     storage::IndexStore,
 };
 

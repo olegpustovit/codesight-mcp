@@ -2,7 +2,7 @@
 
 use tree_sitter::Node;
 
-use crate::extractors::common::{parse_tree, source_slice};
+use codesight_extractors::extractors::common::{parse_tree, source_slice};
 
 use super::super::ImportEdge;
 

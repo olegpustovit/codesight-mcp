@@ -6,6 +6,42 @@ archive. See [`AGENTS.md`](AGENTS.md) for the policies that govern this work.
 
 ---
 
+## 2026-04-15 — codesight-imports crate split
+
+Pulled `src/indexing/imports/**` and `src/indexing/packages/**` out of the
+root crate into a new workspace member `crates/codesight-imports/`.
+
+- **New crate.** `codesight-imports` (`crates/codesight-imports/`) with
+  `pub mod imports;` + `pub mod packages;`. Workspace deps:
+  `codesight-core`, `codesight-extractors`. External deps: `serde`,
+  `serde_json`, `toml`, `tree-sitter`, `tree-sitter-{go,javascript,python,rust,typescript}`,
+  `walkdir`. Dev: `tempfile`.
+- **Dependency edge.** Added `codesight-mcp → codesight-imports` and
+  `codesight-imports → codesight-{core,extractors}` to the workspace
+  graph. No upward edges, no horizontal edge with `codesight-storage`.
+- **No back-compat.** `src/indexing/mod.rs` dropped `pub mod imports;`
+  and `pub mod packages;`. Every caller in `src/` (`analysis/graph/**`,
+  `analysis/reference_check/evidence.rs`, `indexing/code_index.rs`,
+  `service/agent_v1/graph_tail/**`, `service/agent_v1/context_bundle/gather.rs`,
+  `service/code_tools.rs`, `service/cross_repo_map.rs`) and `tests/`
+  (`cross_repo.rs`, `find_importers.rs`, `get_context_bundle.rs`,
+  `packages_walker.rs`, `parsers/dart_imports.rs`) was renamed to use
+  `codesight_imports::{imports,packages}::...` directly. Zero aliases.
+- **Invariants test extended.** `tests/crate_graph.rs` adds
+  `codesight-imports` to the membership list, asserts
+  `imports → {core, extractors}`, forbids `imports → storage`, and
+  requires the root crate to depend on all four inner crates.
+- **LoC moved.** ~1530 lines of Rust moved out of the root crate into
+  the new crate (imports: ~1220; packages: ~310). Root `src/` shrinks
+  by the same amount; workspace total is flat.
+- **Verification.** `cargo check -p codesight-imports`,
+  `cargo clippy -p codesight-imports --all-targets -- -D warnings`,
+  `cargo nextest run --test crate_graph` (1 passed),
+  `cargo nextest run -p codesight-imports --lib` (59 passed),
+  `cargo nextest run --test find_importers --test cross_repo --test get_context_bundle --test packages_walker` (165 passed),
+  `cargo nextest run --test parsers` (351 passed),
+  `cargo check --tests` (workspace clean).
+
 ## 2026-04-14 — IDF replacement verification follow-up
 
 Verified the `IDF_REPLACEMENT.md` rollout against the live code and fixed the
@@ -135,9 +171,8 @@ crate boundaries. Result:
 
 | Metric | Current | Target | Trend |
 |---|---|---|---|
-| Product crate LoC (`src/`) | **~28.8k** | ↓ each session | ↓ -94 (workspace_digest) |
-| Workspace crate LoC (`crates/`) | core 0.2k / extractors 9.4k / framework 3.2k / storage 3.1k | stable | ↑ +3.2k (framework split out of root) |
-| Product crate LoC (`src/`) after framework split | **~25.6k** | ↓ each session | ↓ -3.2k from framework move |
+| Product crate LoC (`src/`) | **~24.1k** | ↓ each session | ↓ -4.7k (framework + imports splits) |
+| Workspace crate LoC (`crates/`) | core 0.2k / extractors 9.4k / framework 3.2k / imports 1.5k / storage 3.1k | stable | ↑ +4.7k from splits |
 | Governance score | **7780** (very good) | ↑ | ↑ +2 this session |
 | Structural score | **8072** (very good) | ↑ | stable |
 | Agent readiness score | **7498** (very good) | ↑ | ↑ +4 this session |
