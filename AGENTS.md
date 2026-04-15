@@ -47,7 +47,7 @@ must widen the gap, never narrow it.
 - **`ingest_sources input_kind=single_file`** — already handles post-edit
   reindexing of a single file. prior-art's `register_edit` is equivalent.
 - **`search_catalog semantic=true`** — local dense retrieval already exists
-  in `src/retrieval/embedder.rs` + `src/service/agent_v1/catalog_search/semantic.rs`.
+  in `crates/codesight-retrieval/src/embedder.rs` + `src/service/agent_v1/catalog_search/semantic.rs`.
   prior-art requires external API keys.
 - **`run_watcher`** (`src/service/file_watcher.rs`) — built-in debounced file
   watcher with delta reindex. prior-art needs a separate `watch-claude` command.

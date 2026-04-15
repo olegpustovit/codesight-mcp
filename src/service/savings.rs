@@ -25,6 +25,7 @@ pub struct Meta {
     /// spot a long-running MCP server that predates a fix landing on disk.
     pub build_time: String,
     pub timing_ms: f64,
+    pub tokens_saved_per_ms: f64,
     pub powered_by: String,
 }
 
@@ -35,11 +36,29 @@ const MODEL_PRICING: &[(&str, f64)] = &[
     ("gpt4o", 2.50),
 ];
 
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct ToolSessionStats {
+    pub calls: u64,
+    pub tokens_saved: u64,
+    pub timing_ms_sum: f64,
+    pub error_count: u64,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct SessionState {
+    #[serde(default)]
+    pub started_at: String,
+    #[serde(default)]
+    pub per_tool: HashMap<String, ToolSessionStats>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct SavingsState {
     total_tokens_saved: u64,
     #[serde(default)]
     total_cost_avoided: HashMap<String, f64>,
+    #[serde(default)]
+    current_session: SessionState,
 }
 
 #[derive(Debug, Clone)]
@@ -59,12 +78,8 @@ impl SavingsLedger {
     pub fn record(&self, delta: u64) -> io::Result<(u64, HashMap<String, f64>)> {
         let mut state = self.load()?;
         state.total_tokens_saved = state.total_tokens_saved.saturating_add(delta);
-        for &(model, price) in MODEL_PRICING {
-            let cost = (delta as f64 / 1_000_000.0) * price;
-            *state
-                .total_cost_avoided
-                .entry(model.to_string())
-                .or_default() += cost;
+        for (model, cost) in cost_for_tokens(delta) {
+            *state.total_cost_avoided.entry(model).or_default() += cost;
         }
         let total = state.total_tokens_saved;
         let total_cost = state.total_cost_avoided.clone();
@@ -75,6 +90,35 @@ impl SavingsLedger {
     pub fn current_state(&self) -> io::Result<(u64, HashMap<String, f64>)> {
         let state = self.load()?;
         Ok((state.total_tokens_saved, state.total_cost_avoided))
+    }
+
+    pub fn record_tool_call(
+        &self,
+        tool: &str,
+        tokens_saved: u64,
+        timing_ms: f64,
+        ok: bool,
+    ) -> io::Result<()> {
+        let mut state = self.load()?;
+        if state.current_session.started_at.is_empty() {
+            state.current_session.started_at = chrono::Utc::now().to_rfc3339();
+        }
+        let entry = state
+            .current_session
+            .per_tool
+            .entry(tool.to_string())
+            .or_default();
+        entry.calls = entry.calls.saturating_add(1);
+        entry.tokens_saved = entry.tokens_saved.saturating_add(tokens_saved);
+        entry.timing_ms_sum += timing_ms;
+        if !ok {
+            entry.error_count = entry.error_count.saturating_add(1);
+        }
+        self.store(&state)
+    }
+
+    pub fn current_session(&self) -> io::Result<SessionState> {
+        Ok(self.load()?.current_session)
     }
 
     fn load(&self) -> io::Result<SavingsState> {
@@ -161,6 +205,8 @@ impl MetaBuilder {
         cost_avoided: HashMap<String, f64>,
         total_cost_avoided: HashMap<String, f64>,
     ) -> Meta {
+        let timing_ms = self.started_at.elapsed().as_secs_f64() * 1000.0;
+        let tokens_saved_per_ms = tokens_saved as f64 / timing_ms.max(0.1);
         Meta {
             tokens_saved,
             total_tokens_saved,
@@ -173,7 +219,8 @@ impl MetaBuilder {
             build_version: BUILD_VERSION.to_string(),
             build_sha: BUILD_SHA.to_string(),
             build_time: BUILD_TIME.to_string(),
-            timing_ms: self.started_at.elapsed().as_secs_f64() * 1000.0,
+            timing_ms,
+            tokens_saved_per_ms,
             powered_by: "codesight-mcp — token-efficient code & doc retrieval".to_string(),
         }
     }

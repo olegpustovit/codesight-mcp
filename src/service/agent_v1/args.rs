@@ -255,6 +255,10 @@ pub struct EvaluateQualityArgs {
     pub file_path: Option<String>,
     #[serde(default)]
     pub min_callers: Option<u64>,
+    /// For repo-wide `refactor_targets`: how many hottest files to scan
+    /// when `file_path` is omitted.
+    #[serde(default)]
+    pub top_files: Option<usize>,
     /// Optional token budget for the serialized response body. Alias
     /// `token_budget`.
     #[serde(default, alias = "token_budget")]
@@ -289,6 +293,12 @@ pub struct AssembleContextArgs {
     /// `ranked`: restrict hits to these symbol kinds (`class`, `function`, …).
     #[serde(default, alias = "include_kinds")]
     pub kind_filter: Option<Vec<String>>,
+    /// `rename_plan`: existing name to rename. Defaults to `query`.
+    #[serde(default)]
+    pub old_name: Option<String>,
+    /// `rename_plan`: proposed new name.
+    #[serde(default)]
+    pub new_name: Option<String>,
     #[serde(default)]
     pub repo_path: Option<String>,
 }

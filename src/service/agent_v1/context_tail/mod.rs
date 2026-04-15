@@ -1,4 +1,5 @@
 mod query_suggestions;
+mod rename_plan;
 mod section_context;
 use serde_json::{Value, json};
 
@@ -18,6 +19,7 @@ impl CodeService {
             "section_context" => self.context_section(args, timer),
             "query_suggestions" => self.context_query_suggestions(args, timer),
             "context_bundle" => self.assemble_context_bundle(args, timer),
+            "rename_plan" => self.context_rename_plan(args, timer),
             _ => self.error_response(
                 timer,
                 ToolError {

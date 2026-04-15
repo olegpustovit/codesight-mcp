@@ -1,4 +1,4 @@
-mod find_references;
+pub(crate) mod find_references;
 mod resolve_fqn;
 
 use serde_json::{Value, json};

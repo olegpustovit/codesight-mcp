@@ -352,7 +352,15 @@
         },
         "top_n": {
           "type": "integer",
-          "description": "hotspots / dead_code: cap the returned list size (default 50 for hotspots, 25 for dead_code)."
+          "description": "hotspots / dead_code / refactor_targets: cap the returned list size (default 50 for hotspots/refactor_targets, 25 for dead_code)."
+        },
+        "top_files": {
+          "type": "integer",
+          "description": "refactor_targets (repo mode, when file_path is omitted): number of hottest files to scan (default 10)."
+        },
+        "file_path": {
+          "type": "string",
+          "description": "refactor_targets: file to scope the scan to. Omit for repo-wide mode over the hottest `top_files`."
         },
         "min_complexity": {
           "type": "integer",
@@ -384,7 +392,7 @@
         "source_id": { "type": "string" },
         "mode": {
           "type": "string",
-          "enum": ["bundle", "context_bundle", "section_context", "ranked", "query_suggestions"]
+          "enum": ["bundle", "context_bundle", "section_context", "ranked", "query_suggestions", "rename_plan"]
         },
         "query": { "type": "string" },
         "refs": {
@@ -416,19 +424,27 @@
           "items": { "type": "string" },
           "description": "ranked: filter symbol hits to these kinds (e.g. class)."
         },
+        "old_name": {
+          "type": "string",
+          "description": "rename_plan: existing symbol name being renamed. Falls back to `query` when unset."
+        },
+        "new_name": {
+          "type": "string",
+          "description": "rename_plan: proposed new name used for collision checks."
+        },
         "repo_path": { "type": "string" }
       }
     }
   },
   {
     "name": "manage_indexes",
-    "description": "Invalidate, delete, rebuild, or status for a source index. Every action targets a single source and requires `source_id`; use `catalog_sources` first to obtain one. `rebuild` additionally requires `root_hint` (a filesystem path).",
+    "description": "Invalidate, delete, rebuild, status, snapshot_quality, or session_stats. Most actions target a single source and require `source_id`; `session_stats` is global and does not. `rebuild` additionally requires `root_hint`.",
     "inputSchema": {
       "type": "object",
-      "required": ["action", "source_id"],
+      "required": ["action"],
       "properties": {
-        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status", "snapshot_quality"] },
-        "source_id": { "type": "string", "description": "Required. The source the action targets, as returned by `catalog_sources`." },
+        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status", "snapshot_quality", "session_stats"] },
+        "source_id": { "type": "string", "description": "Required for invalidate/delete/rebuild/status/snapshot_quality; ignored for session_stats." },
         "root_hint": { "type": "string", "description": "Filesystem path; required for `rebuild`." },
         "domains": { "type": "string" },
         "snapshot_name": { "type": "string", "description": "snapshot_quality: logical name for the snapshot (default \"session\"). Overwrites existing." }

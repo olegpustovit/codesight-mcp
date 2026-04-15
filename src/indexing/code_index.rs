@@ -37,10 +37,17 @@ pub struct CodeIndexSummary {
     pub languages_without_import_extractor: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct IngestDelta {
+    pub files_reindexed: usize,
+    pub files_removed: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct CodeIndexOutcome {
     pub summary: CodeIndexSummary,
     pub warnings: Vec<IndexWarning>,
+    pub delta: IngestDelta,
 }
 
 #[instrument(
@@ -203,6 +210,12 @@ where
         });
     }
 
+    if seen_files.is_empty() && !existing.is_empty() {
+        anyhow::bail!(
+            "empty_walk_guard_tripped: disk walk found zero files while index tracks {} existing files; refusing to delete the index",
+            existing.len()
+        );
+    }
     let removed_files = existing
         .keys()
         .filter(|path| !seen_files.contains(*path))
@@ -239,6 +252,8 @@ where
         .filter(|language| !codesight_imports::imports::supports_import_extraction(language))
         .collect();
 
+    let files_reindexed = updated_files.len();
+    let files_removed = removed_files.len();
     Ok(CodeIndexOutcome {
         summary: CodeIndexSummary {
             repo,
@@ -249,6 +264,10 @@ where
             languages_without_import_extractor,
         },
         warnings,
+        delta: IngestDelta {
+            files_reindexed,
+            files_removed,
+        },
     })
 }
 

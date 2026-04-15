@@ -8,18 +8,75 @@ use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
+fn ci_word_match(body: &str, name: &str) -> bool {
+    let body_lc = body.to_lowercase();
+    let name_lc = name.to_lowercase();
+    codesight_analysis::graph::word_match(&body_lc, &name_lc)
+}
+
+/// Pure reference match — no MCP envelope, usable from other tools.
+#[derive(Debug, Clone)]
+pub(crate) struct RefMatch {
+    pub file: String,
+    pub line: u32,
+    pub kind: &'static str,
+    pub preview: String,
+}
+
+/// Collect whole-word references to `name` in the indexed workspace.
+/// `definition_id` (optional) is excluded from symbol-body matches.
+pub(crate) fn collect_references(
+    store: &crate::storage::IndexStore,
+    name: &str,
+) -> anyhow::Result<Vec<RefMatch>> {
+    let sym_infos = store.all_symbols_with_source()?;
+    let all_contents = store.all_file_contents().unwrap_or_default();
+
+    let mut out: Vec<RefMatch> = Vec::new();
+    let mut seen_files: HashSet<String> = HashSet::new();
+    for sym in &sym_infos {
+        if sym.name.eq_ignore_ascii_case(name) {
+            out.push(RefMatch {
+                file: sym.file.clone(),
+                line: sym.line as u32,
+                kind: "definition",
+                preview: sym.source.lines().next().unwrap_or("").to_string(),
+            });
+            seen_files.insert(sym.file.clone());
+            continue;
+        }
+        if ci_word_match(&sym.source, name) {
+            out.push(RefMatch {
+                file: sym.file.clone(),
+                line: sym.line as u32,
+                kind: "symbol_body_match",
+                preview: sym.name.clone(),
+            });
+            seen_files.insert(sym.file.clone());
+        }
+    }
+    for (file, content) in &all_contents {
+        if seen_files.contains(file) {
+            continue;
+        }
+        if ci_word_match(content, name) {
+            out.push(RefMatch {
+                file: file.clone(),
+                line: 0,
+                kind: "text_match",
+                preview: String::new(),
+            });
+        }
+    }
+    Ok(out)
+}
+
 impl CodeService {
     pub(super) fn graph_find_references(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
 
-        let ci_word_match = |body: &str, name: &str| -> bool {
-            let body_lc = body.to_lowercase();
-            let name_lc = name.to_lowercase();
-            codesight_analysis::graph::word_match(&body_lc, &name_lc)
-        };
-
         if let Some(identifiers) = &args.identifiers {
-            return self.find_references_batch(&store, identifiers, &ci_word_match);
+            return self.find_references_batch(&store, identifiers, ci_word_match);
         }
 
         let Some(identifier) = args.identifier.as_deref() else {
@@ -34,14 +91,14 @@ impl CodeService {
             );
         };
 
-        self.find_references_single(&store, identifier, args, &ci_word_match)
+        self.find_references_single(&store, identifier, args, ci_word_match)
     }
 
     fn find_references_batch(
         &self,
         store: &crate::storage::IndexStore,
         identifiers: &[String],
-        ci_word_match: &dyn Fn(&str, &str) -> bool,
+        ci_word_match: fn(&str, &str) -> bool,
     ) -> anyhow::Result<Value> {
         let sym_infos = store.all_symbols_with_source()?;
         let all_contents = store.all_file_contents().unwrap_or_default();
@@ -106,7 +163,7 @@ impl CodeService {
         store: &crate::storage::IndexStore,
         identifier: &str,
         args: &InspectGraphArgs,
-        ci_word_match: &dyn Fn(&str, &str) -> bool,
+        ci_word_match: fn(&str, &str) -> bool,
     ) -> anyhow::Result<Value> {
         let sym_infos = store.all_symbols_with_source()?;
         let all_contents = store.all_file_contents().unwrap_or_default();

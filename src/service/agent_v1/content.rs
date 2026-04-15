@@ -225,14 +225,22 @@ impl CodeService {
         }
 
         let timer = MetaBuilder::new(raw_bytes_total.max(1));
+        let mut extra: Vec<(String, Value)> = Vec::new();
+        if args.verify || want_hash {
+            extra.push((
+                "next_step_hint".to_string(),
+                json!({
+                    "tool": "Read",
+                    "reason": "Claude Code Edit/Write tracks read state separately from codesight read_content.",
+                    "when": "before editing the same file in the harness",
+                }),
+            ));
+        }
         self.success_response_with_meta_extra(
             &timer,
             json!({ "items": items }),
             Vec::new(),
-            [(
-                "tip".to_string(),
-                json!("Use the Read tool if you plan to edit these files — the Claude Code harness tracks read state separately."),
-            )],
+            extra,
         )
     }
 }

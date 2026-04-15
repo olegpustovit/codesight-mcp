@@ -506,7 +506,98 @@ pub fn suggestion_for_bottleneck(bottleneck: &str, coverage: &SignalCoverage) ->
 /// Used by both `repo_health` (embedded in a finding) and
 /// `quality_signal` (as top-level response data) to avoid duplicating
 /// the field layout in two handlers.
+/// Build actionable recommendations from a governance signal. Each entry
+/// names the weakest dimension/sub-metric, a severity, and a `first_step`
+/// tool call the agent can run next.
+fn build_recommendations(gov: &GovernanceSignal) -> Vec<serde_json::Value> {
+    fn severity(value: f64) -> &'static str {
+        if value < 0.4 {
+            "high"
+        } else if value < 0.6 {
+            "medium"
+        } else {
+            "low"
+        }
+    }
+
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    let sm = &gov.agent.submetrics;
+    let rules: &[(&str, &str, f64, &str, serde_json::Value)] = &[
+        (
+            "change_safety",
+            "change_locality",
+            sm.change_locality,
+            "Reduce fan-in on hot files and split high-CC functions.",
+            serde_json::json!({
+                "tool": "evaluate_quality",
+                "args": { "analysis": "refactor_targets" }
+            }),
+        ),
+        (
+            "change_safety",
+            "hotspot_containment",
+            sm.hotspot_containment,
+            "Shrink the churn-weighted complexity of the hottest files.",
+            serde_json::json!({
+                "tool": "evaluate_quality",
+                "args": { "analysis": "hotspots" }
+            }),
+        ),
+        (
+            "verifiability",
+            "test_oracle_quality",
+            sm.test_oracle_quality,
+            "Add focused tests where coverage is thinnest.",
+            serde_json::json!({
+                "tool": "evaluate_quality",
+                "args": { "analysis": "test_gaps" }
+            }),
+        ),
+        (
+            "navigability",
+            "symbol_uniqueness",
+            sm.symbol_uniqueness,
+            "Resolve same-name ambiguity to make retrieval deterministic.",
+            serde_json::json!({
+                "tool": "search_catalog",
+                "args": { "query": "", "unit_kinds": ["symbol"] }
+            }),
+        ),
+        (
+            "comprehensibility",
+            "nesting_depth_health",
+            sm.nesting_depth_health,
+            "Flatten deeply nested blocks; split long functions.",
+            serde_json::json!({
+                "tool": "evaluate_quality",
+                "args": { "analysis": "refactor_targets" }
+            }),
+        ),
+    ];
+    for (dim, sub, val, suggestion, first_step) in rules {
+        if *val < 0.6 {
+            out.push(serde_json::json!({
+                "dimension": dim,
+                "sub_metric": sub,
+                "severity": severity(*val),
+                "value": val,
+                "suggestion": suggestion,
+                "first_step": first_step,
+            }));
+        }
+    }
+    out.sort_by(|a, b| {
+        a["value"]
+            .as_f64()
+            .unwrap_or(1.0)
+            .partial_cmp(&b["value"].as_f64().unwrap_or(1.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out
+}
+
 pub fn governance_signal_json(gov: &GovernanceSignal, suggestion: &str) -> serde_json::Value {
+    let recommendations = build_recommendations(gov);
     serde_json::json!({
         "score": gov.score,
         "structural_score": gov.structural_score,
@@ -541,6 +632,7 @@ pub fn governance_signal_json(gov: &GovernanceSignal, suggestion: &str) -> serde
         "bottleneck": gov.bottleneck,
         "bottleneck_layer": gov.bottleneck_layer,
         "suggestion": suggestion,
+        "recommendations": recommendations,
     })
 }
 

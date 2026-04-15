@@ -74,6 +74,8 @@ impl CodeService {
                 languages_without_import_extractor: outcome
                     .summary
                     .languages_without_import_extractor,
+                files_reindexed: outcome.delta.files_reindexed,
+                files_removed: outcome.delta.files_removed,
             },
             warnings,
         ))

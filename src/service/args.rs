@@ -41,6 +41,8 @@ pub struct IndexResult {
     pub symbol_count: usize,
     pub languages: BTreeMap<String, usize>,
     pub languages_without_import_extractor: Vec<String>,
+    pub files_reindexed: usize,
+    pub files_removed: usize,
 }
 
 pub struct DocIndexResult {

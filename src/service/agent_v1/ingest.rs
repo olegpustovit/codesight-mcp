@@ -178,6 +178,10 @@ impl CodeService {
                     data["languages_without_import_extractor"] =
                         json!(c.languages_without_import_extractor);
                 }
+                data["delta"] = json!({
+                    "files_reindexed": c.files_reindexed,
+                    "files_removed": c.files_removed,
+                });
                 data
             }
             (Some(c), None) => {
@@ -192,6 +196,10 @@ impl CodeService {
                     d["languages_without_import_extractor"] =
                         json!(c.languages_without_import_extractor);
                 }
+                d["delta"] = json!({
+                    "files_reindexed": c.files_reindexed,
+                    "files_removed": c.files_removed,
+                });
                 d
             }
             (None, Some(d)) => {

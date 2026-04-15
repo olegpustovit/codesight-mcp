@@ -105,6 +105,12 @@ impl CodeService {
     /// Run `f` with the savings-ledger mutex held. Poison is recovered
     /// because a poisoned lock only means a previous caller panicked mid-run;
     /// the on-disk JSON is still readable.
+    pub(crate) fn savings_ledger_current_session(
+        &self,
+    ) -> std::io::Result<crate::service::savings::SessionState> {
+        self.with_ledger_locked(|ledger| ledger.current_session())
+    }
+
     fn with_ledger_locked<R>(&self, f: impl FnOnce(&SavingsLedger) -> R) -> R {
         let _guard = self
             .ledger_guard
@@ -172,7 +178,21 @@ impl CodeService {
             }
         };
         match dispatched {
-            Ok(value) => Ok(value),
+            Ok(value) => {
+                let tokens_saved = value
+                    .pointer("/_meta/tokens_saved")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let timing_ms = value
+                    .pointer("/_meta/timing_ms")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let ok = value["ok"].as_bool().unwrap_or(false);
+                self.with_ledger_locked(|ledger| {
+                    let _ = ledger.record_tool_call(tool_name, tokens_saved, timing_ms, ok);
+                });
+                Ok(value)
+            }
             Err(err) => {
                 // Any leaked error becomes a categorized error response so the MCP
                 // boundary never returns an uncategorized failure. If the underlying

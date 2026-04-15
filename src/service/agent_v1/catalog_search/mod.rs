@@ -260,15 +260,22 @@ fn format_output(
     mut warnings: Vec<Value>,
     mut extra: Vec<(String, Value)>,
 ) -> anyhow::Result<Value> {
+    let total_matches = items.len();
+    let total_files_with_matches: usize = items
+        .iter()
+        .filter_map(|item| item.pointer("/ref/path")?.as_str())
+        .collect::<std::collections::HashSet<&str>>()
+        .len();
     match ctx.output_mode {
         "count" => {
-            let total_count = items.len();
-            let file_set: std::collections::HashSet<&str> = items
-                .iter()
-                .filter_map(|item| item.pointer("/ref/path")?.as_str())
-                .collect();
-            let data = json!({ "count": total_count, "files": file_set.len() });
+            let data = json!({
+                "count": total_matches,
+                "files": total_files_with_matches,
+                "total_matches": total_matches,
+                "total_files_with_matches": total_files_with_matches,
+            });
             extra.push(("truncated".to_string(), json!(false)));
+            extra.push(("truncated_by".to_string(), json!(Vec::<&str>::new())));
             svc.success_response_with_meta_extra(timer, data, warnings, extra)
         }
         "files_with_matches" => {
@@ -283,35 +290,50 @@ fn format_output(
                 .into_iter()
                 .map(|(file, count)| json!({ "file": file, "count": count }))
                 .collect();
-            let data = json!({ "files": file_items });
+            let data = json!({
+                "files": file_items,
+                "total_matches": total_matches,
+                "total_files_with_matches": total_files_with_matches,
+            });
             extra.push(("truncated".to_string(), json!(false)));
+            extra.push(("truncated_by".to_string(), json!(Vec::<&str>::new())));
             svc.success_response_with_meta_extra(timer, data, warnings, extra)
         }
         _ => {
-            let mut budget_truncated = false;
+            let mut truncated_by: Vec<&'static str> = Vec::new();
             if let Some(mt) = ctx.max_tokens {
                 let (packed, bt) = pack_catalog_items_to_token_budget(items, mt);
                 items = packed;
-                budget_truncated = bt;
+                if bt {
+                    truncated_by.push("token_budget");
+                }
             }
 
             let lim = ctx.lim;
-            let mut limit_truncated = items.len() > lim || ctx.more_file_hits_exist;
-            if items.len() > lim {
+            let limit_hit_by_overflow = items.len() > lim;
+            if limit_hit_by_overflow {
                 warnings.push(json!({
                     "code": "TRUNCATED",
                     "message": format!("results truncated to limit {lim}"),
                 }));
                 items.truncate(lim);
-                limit_truncated = true;
+            }
+            if limit_hit_by_overflow || ctx.more_file_hits_exist {
+                truncated_by.push("limit");
             }
 
-            let meta_truncated = budget_truncated || limit_truncated;
-            let mut data = json!({ "items": items });
-            if limit_truncated && let Value::Object(ref mut map) = data {
+            let meta_truncated = !truncated_by.is_empty();
+            let mut data = json!({
+                "items": items,
+                "total_matches": total_matches,
+                "total_files_with_matches": total_files_with_matches,
+            });
+            if meta_truncated && let Value::Object(ref mut map) = data {
                 map.insert("truncated".to_string(), json!(true));
+                map.insert("truncated_by".to_string(), json!(truncated_by));
             }
             extra.push(("truncated".to_string(), json!(meta_truncated)));
+            extra.push(("truncated_by".to_string(), json!(truncated_by)));
 
             // Suggest find_references when keyword query matches exact symbol name.
             if ctx.query_mode_effective == "keyword" && items.len() <= 3 {
@@ -602,9 +624,8 @@ impl CodeService {
                     dense_symbol_items,
                     dense_section_items,
                 );
-                if items.len() > lim {
-                    items.truncate(lim);
-                }
+                // Final truncation is owned by `format_output` so it sees
+                // the full fused list for reporting `total_matches`.
             }
         }
 

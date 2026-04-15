@@ -57,3 +57,48 @@ d = json.load(sys.stdin)
 print(f'  files={d[\"data\"][\"file_count\"]}  symbols={d[\"data\"][\"symbol_count\"]}')
 "
 echo "  elapsed: $ELAPSED"
+echo
+
+# ── E9: incremental delete + rename scenarios ────────────────────────────
+FIXTURE_ROOT=$(mktemp -d)
+trap 'rm -rf "$CODESIGHT_STORAGE_DIR" "$FIXTURE_ROOT"' EXIT
+mkdir -p "$FIXTURE_ROOT/src"
+cat >"$FIXTURE_ROOT/src/a.py" <<'PY'
+def foo():
+    return 1
+PY
+cat >"$FIXTURE_ROOT/src/b.py" <<'PY'
+def bar():
+    return 2
+PY
+
+"$BIN" ingest "$FIXTURE_ROOT" --domains code >/dev/null 2>&1
+
+echo "=== Incremental delete ==="
+rm "$FIXTURE_ROOT/src/b.py"
+T0=$(ts)
+DEL_JSON=$("$BIN" ingest "$FIXTURE_ROOT" --domains code 2>/dev/null)
+T1=$(ts)
+ELAPSED=$(python3 -c "print(f'{$T1 - $T0:.3f}s')")
+echo "$DEL_JSON" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+delta = d['data'].get('delta', {})
+print(f'  files_removed={delta.get(\"files_removed\", \"?\")}')
+"
+echo "  elapsed: $ELAPSED"
+echo
+
+echo "=== Incremental rename ==="
+mv "$FIXTURE_ROOT/src/a.py" "$FIXTURE_ROOT/src/a_renamed.py"
+T0=$(ts)
+REN_JSON=$("$BIN" ingest "$FIXTURE_ROOT" --domains code 2>/dev/null)
+T1=$(ts)
+ELAPSED=$(python3 -c "print(f'{$T1 - $T0:.3f}s')")
+echo "$REN_JSON" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+delta = d['data'].get('delta', {})
+print(f'  files_reindexed={delta.get(\"files_reindexed\", \"?\")}  files_removed={delta.get(\"files_removed\", \"?\")}')
+"
+echo "  elapsed: $ELAPSED"

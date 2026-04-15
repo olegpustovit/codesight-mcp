@@ -25,6 +25,7 @@ const BASELINE_META_KEYS: &[&str] = &[
     "retrieval_version",
     "timing_ms",
     "tokens_saved",
+    "tokens_saved_per_ms",
     "total_cost_avoided",
     "total_tokens_saved",
 ];
@@ -43,6 +44,14 @@ fn assert_has_baseline_keys(keys: &BTreeSet<String>, tool: &str) {
             "{tool}: _meta missing required key `{required}`; got {keys:?}"
         );
     }
+}
+
+fn assert_tokens_saved_per_ms_sane(response: &Value, tool: &str) {
+    let v = response["_meta"]["tokens_saved_per_ms"]
+        .as_f64()
+        .unwrap_or_else(|| panic!("{tool}: tokens_saved_per_ms not a number"));
+    assert!(v.is_finite(), "{tool}: tokens_saved_per_ms must be finite");
+    assert!(v >= 0.0, "{tool}: tokens_saved_per_ms must be non-negative");
 }
 
 fn build_service() -> (CodeService, tempfile::TempDir) {
@@ -103,6 +112,7 @@ fn search_catalog_meta_has_baseline_keys() {
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "search_catalog failed: {r:?}");
     assert_has_baseline_keys(&meta_keys(&r), "search_catalog");
+    assert_tokens_saved_per_ms_sane(&r, "search_catalog");
 }
 
 #[test]

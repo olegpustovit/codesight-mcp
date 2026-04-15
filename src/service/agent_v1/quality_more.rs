@@ -74,48 +74,61 @@ impl CodeService {
         timer: &MetaBuilder,
     ) -> anyhow::Result<Value> {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
-        let Some(file_path) = args.file_path.as_deref() else {
-            return self.error_response(
-                timer,
-                ToolError {
-                    category: ToolErrorCategory::InvalidArgument,
-                    code: "INVALID_REQUEST",
-                    message: "refactor_targets requires file_path.".to_string(),
-                    detail: json!({}),
-                },
-            );
-        };
         let min_complexity = args.min_complexity.unwrap_or(0);
         let min_callers = args.min_callers.unwrap_or(0);
+        let top_n = args.top_n.unwrap_or(50);
 
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
 
-        let all_files = store.all_file_paths()?;
-        let Some(resolved_path) = all_files
-            .iter()
-            .find(|f| {
-                f.as_str() == file_path
-                    || f.ends_with(&format!("/{file_path}"))
-                    || f.ends_with(file_path)
-            })
-            .cloned()
-        else {
-            return self.error_response(
-                &timer,
-                ToolError {
-                    category: ToolErrorCategory::NotFound,
-                    code: "NOT_FOUND",
-                    message: format!("File '{file_path}' not found in index."),
-                    detail: json!({ "file_path": file_path }),
-                },
-            );
+        let scope_files: Vec<String> = if let Some(file_path) = args.file_path.as_deref() {
+            let all_files = store.all_file_paths()?;
+            let Some(resolved_path) = all_files
+                .iter()
+                .find(|f| {
+                    f.as_str() == file_path
+                        || f.ends_with(&format!("/{file_path}"))
+                        || f.ends_with(file_path)
+                })
+                .cloned()
+            else {
+                return self.error_response(
+                    &timer,
+                    ToolError {
+                        category: ToolErrorCategory::NotFound,
+                        code: "NOT_FOUND",
+                        message: format!("File '{file_path}' not found in index."),
+                        detail: json!({ "file_path": file_path }),
+                    },
+                );
+            };
+            vec![resolved_path]
+        } else {
+            let top_files = args.top_files.unwrap_or(10).max(1);
+            let hotspots = quality::hotspots_payload(&store, 0, top_files)?;
+            let items = hotspots
+                .get("hotspots")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            items
+                .iter()
+                .filter_map(|h| h.get("file").and_then(|v| v.as_str()).map(String::from))
+                .take(top_files)
+                .collect()
         };
+
+        let scope_tag = if args.file_path.is_some() {
+            "file"
+        } else {
+            "repository"
+        };
+        let file_set: HashSet<&str> = scope_files.iter().map(String::as_str).collect();
 
         let all_symbols = store.all_symbols_for_analysis()?;
         let mut candidates: Vec<Value> = Vec::new();
         for sym in &all_symbols {
-            if sym.file_path != resolved_path {
+            if !file_set.contains(sym.file_path.as_str()) {
                 continue;
             }
             let kind_lower = sym.kind.to_ascii_lowercase();
@@ -150,15 +163,18 @@ impl CodeService {
             let sb = b["score"].as_f64().unwrap_or(0.0);
             sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
         });
+        candidates.truncate(top_n);
 
-        self.success_response(
-            &timer,
-            json!({
-                "analysis": "refactor_targets",
-                "file": resolved_path,
-                "candidates": candidates,
-            }),
-        )
+        let mut data = json!({
+            "analysis": "refactor_targets",
+            "scope": scope_tag,
+            "files_scanned": scope_files.len(),
+            "candidates": candidates,
+        });
+        if args.file_path.is_some() && let Value::Object(ref mut map) = data {
+            map.insert("file".to_string(), json!(scope_files[0]));
+        }
+        self.success_response(&timer, data)
     }
 
     fn quality_broken_links(

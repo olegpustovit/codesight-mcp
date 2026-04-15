@@ -134,6 +134,32 @@ impl CodeService {
                 )
             }
             "snapshot_quality" => self.manage_snapshot_quality(&args, &timer),
+            "session_stats" => {
+                let session = self.savings_ledger_current_session()?;
+                let per_tool: serde_json::Map<String, Value> = session
+                    .per_tool
+                    .into_iter()
+                    .map(|(tool, stats)| {
+                        (
+                            tool,
+                            json!({
+                                "calls": stats.calls,
+                                "tokens_saved": stats.tokens_saved,
+                                "timing_ms_sum": stats.timing_ms_sum,
+                                "error_count": stats.error_count,
+                            }),
+                        )
+                    })
+                    .collect();
+                self.success_response(
+                    &timer,
+                    json!({
+                        "action": "session_stats",
+                        "started_at": session.started_at,
+                        "per_tool": per_tool,
+                    }),
+                )
+            }
             _ => self.error_response(
                 &timer,
                 ToolError {
