@@ -1,4 +1,4 @@
-use crate::indexing::imports::ImportEdge;
+use crate::imports::ImportEdge;
 
 use super::helpers::extract_quoted_string;
 

@@ -1,4 +1,4 @@
-use crate::indexing::imports::ImportEdge;
+use crate::imports::ImportEdge;
 
 pub(crate) fn extract_imports(content: &str) -> Vec<ImportEdge> {
     let mut edges = Vec::new();

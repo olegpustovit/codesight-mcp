@@ -3,7 +3,7 @@ use std::fs;
 use serde_json::{Value, json};
 
 use crate::core::symbols::SymbolKind;
-use crate::indexing::imports::context_bundle_import_lines;
+use codesight_imports::imports::context_bundle_import_lines;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::ContentRef;
 use crate::service::agent_v1::util::resolve_symbol_id;

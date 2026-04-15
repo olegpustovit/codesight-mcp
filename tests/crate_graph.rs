@@ -14,6 +14,7 @@ fn workspace_crate_dependency_invariants_hold() {
         "codesight-mcp",
         "codesight-core",
         "codesight-extractors",
+        "codesight-imports",
         "codesight-storage",
     ] {
         assert!(
@@ -62,6 +63,15 @@ fn workspace_crate_dependency_invariants_hold() {
     // codesight-storage does NOT depend on codesight-extractors
     assert!(!ws_deps("codesight-storage").contains(&"codesight-extractors".to_string()));
 
+    // codesight-imports depends on codesight-core and codesight-extractors only.
+    let imp_deps = ws_deps("codesight-imports");
+    assert_eq!(
+        imp_deps,
+        vec!["codesight-core", "codesight-extractors"],
+        "imports deps: {imp_deps:?}"
+    );
+    assert!(!imp_deps.contains(&"codesight-storage".to_string()));
+
     // No workspace crate may depend on the product crate.
     for pkg_name in &names {
         if *pkg_name == "codesight-mcp" {
@@ -79,6 +89,7 @@ fn workspace_crate_dependency_invariants_hold() {
     for dep in [
         "codesight-core",
         "codesight-extractors",
+        "codesight-imports",
         "codesight-storage",
     ] {
         assert!(

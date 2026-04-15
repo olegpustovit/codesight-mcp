@@ -413,6 +413,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "codesight-imports"
+version = "0.1.0"
+dependencies = [
+ "codesight-core",
+ "codesight-extractors",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-javascript",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+ "walkdir",
+]
+
+[[package]]
 name = "codesight-mcp"
 version = "0.1.0"
 dependencies = [
@@ -423,6 +442,7 @@ dependencies = [
  "clap",
  "codesight-core",
  "codesight-extractors",
+ "codesight-imports",
  "codesight-storage",
  "dirs",
  "ignore",

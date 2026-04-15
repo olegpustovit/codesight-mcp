@@ -17,7 +17,6 @@ use crate::{
     config::{AppConfig, GITIGNORE_WARNING_FILE_THRESHOLD},
     core::pipeline::{FileFingerprint, IndexedFileUpdate},
     extractors::ExtractorRegistry,
-    indexing::packages,
     repo_id::normalize_repo_id,
     storage::IndexStore,
 };
@@ -210,7 +209,7 @@ where
         .cloned()
         .collect::<Vec<_>>();
 
-    let alias_map = crate::indexing::imports::load_tsconfig_aliases(&root.to_string_lossy());
+    let alias_map = codesight_imports::imports::load_tsconfig_aliases(&root.to_string_lossy());
     let alias_ref = (!alias_map.is_empty()).then_some(&alias_map);
     let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(&graph_sources, alias_ref);
 
@@ -229,7 +228,7 @@ where
         extractor_version,
     )?;
 
-    let package_names = packages::extract_package_names(&root.to_string_lossy());
+    let package_names = codesight_imports::packages::extract_package_names(&root.to_string_lossy());
     if !package_names.is_empty() {
         let _ = store.set_package_names(&package_names);
     }
@@ -237,7 +236,7 @@ where
     let metadata = store.repo_metadata()?;
     let languages_without_import_extractor: Vec<String> = indexed_languages
         .into_iter()
-        .filter(|language| !crate::indexing::imports::supports_import_extraction(language))
+        .filter(|language| !codesight_imports::imports::supports_import_extraction(language))
         .collect();
 
     Ok(CodeIndexOutcome {
@@ -341,7 +340,7 @@ pub fn reindex_files(
         });
     }
 
-    let alias_map = crate::indexing::imports::load_tsconfig_aliases(&root.to_string_lossy());
+    let alias_map = codesight_imports::imports::load_tsconfig_aliases(&root.to_string_lossy());
     let alias_ref = (!alias_map.is_empty()).then_some(&alias_map);
     let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(&graph_sources, alias_ref);
 

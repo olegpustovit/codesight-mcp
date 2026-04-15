@@ -8,9 +8,11 @@ use tracing::info;
 use super::args::*;
 use super::helpers::{slice_file_lines, *};
 use super::{CodeService, MAX_QUERY_LEN};
+use codesight_imports::imports::language_for_path;
+
 use crate::{
     core::pipeline::IndexedFileUpdate,
-    indexing::{code_index, imports::language_for_path},
+    indexing::code_index,
     repo_id::normalize_repo_id,
     savings::MetaBuilder,
     storage::{self, IndexStore, RetrievedSymbol, SearchSymbol},

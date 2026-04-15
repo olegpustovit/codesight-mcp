@@ -4,7 +4,7 @@
 
 use serde::Serialize;
 
-use crate::indexing::packages::extract_root_package_from_specifier;
+use crate::packages::extract_root_package_from_specifier;
 
 use super::ImportEdge;
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::indexing::imports::ImportEdge;
+use crate::imports::ImportEdge;
 
 pub(crate) fn deduplicate_edges(edges: Vec<ImportEdge>) -> Vec<ImportEdge> {
     let mut seen: HashMap<String, Vec<String>> = HashMap::new();

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use crate::indexing::imports::{extract_imports, language_for_path, package_reference_evidence};
+use codesight_imports::imports::{extract_imports, language_for_path, package_reference_evidence};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
@@ -79,7 +79,7 @@ impl CodeService {
                     && let Ok(s) = IndexStore::open(db_path)
                 {
                     let pkg_names = s.get_package_names().unwrap_or_default();
-                    repo_entries.push(crate::indexing::packages::RepoEntry {
+                    repo_entries.push(codesight_imports::packages::RepoEntry {
                         repo_id: summary.repo.clone(),
                         package_names: pkg_names,
                     });

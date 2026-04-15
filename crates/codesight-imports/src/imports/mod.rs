@@ -22,7 +22,7 @@ pub use resolve::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::symbols::FactQuality;
+use codesight_core::symbols::FactQuality;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportExtractionMode {
@@ -210,7 +210,7 @@ pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<Im
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::symbols::FactQuality;
+    use codesight_core::symbols::FactQuality;
 
     #[test]
     fn python_imports_with_quality_is_structural_when_tree_sitter_runs() {

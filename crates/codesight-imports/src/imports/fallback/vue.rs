@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::indexing::imports::ImportEdge;
+use crate::imports::ImportEdge;
 
 use super::js_ts;
 

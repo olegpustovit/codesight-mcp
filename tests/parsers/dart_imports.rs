@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use codesight_mcp::extractors::ExtractorRegistry;
-use codesight_mcp::indexing::imports::extract_imports;
+use codesight_imports::imports::extract_imports;
 
 // ---------------------------------------------------------------------------
 // Dart source fixture (inline, matching reference)
