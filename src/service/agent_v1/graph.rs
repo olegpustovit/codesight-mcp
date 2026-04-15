@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::retrieval::fuzzy;
+use codesight_retrieval::fuzzy;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::agent_v1::util_graph::graph_ref_symbol_id;

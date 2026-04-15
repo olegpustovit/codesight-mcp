@@ -104,9 +104,9 @@ def main() -> None:
             "use walkdir::WalkDir;\n\n"
             "use crate::config::BYTES_PER_TOKEN;\n"
             "use crate::storage::doc_index::DocStore;\n"
-            "use crate::retrieval::fuzzy;\n"
+            "use codesight_retrieval::fuzzy;\n"
             "use crate::storage::SearchSymbol;\n"
-            "use crate::retrieval::semantic;\n"
+            "use codesight_retrieval::semantic;\n"
             "use crate::storage::IndexStore;\n\n"
             "use crate::service::helpers::{canonicalize_root, should_descend, to_repo_relative, normalize_search_scope};\n\n"
         ),
@@ -119,7 +119,7 @@ def main() -> None:
             "use crate::core::symbols::SymbolKind;\n"
             "use crate::storage::SearchSymbol;\n"
             "use crate::repo_id::normalize_repo_id;\n"
-            "use crate::retrieval::sections;\n"
+            "use codesight_retrieval::sections;\n"
             "use crate::storage::IndexStore;\n\n"
         ),
     )
@@ -133,7 +133,7 @@ def main() -> None:
             "use crate::storage::doc_index::DocStore;\n"
             "use crate::framework;\n"
             "use crate::repo_id::normalize_repo_id;\n"
-            "use crate::retrieval::sections;\n"
+            "use codesight_retrieval::sections;\n"
             "use crate::storage::IndexStore;\n\n"
         ),
     )

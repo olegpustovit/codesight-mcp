@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/codesight-core", "crates/codesight-extractors", "crates/codesight-storage"]
+members = [".", "crates/codesight-core", "crates/codesight-extractors", "crates/codesight-retrieval", "crates/codesight-storage"]
 resolver = "2"
 
 [package]
@@ -16,11 +16,11 @@ clap = { version = "4", features = ["derive", "env"] }
 chrono = { version = "0.4", features = ["serde"] }
 codesight-core = { path = "crates/codesight-core" }
 codesight-extractors = { path = "crates/codesight-extractors" }
+codesight-retrieval = { path = "crates/codesight-retrieval" }
 codesight-storage = { path = "crates/codesight-storage" }
 dirs = "6.0.0"
 rusqlite = { version = "0.39.0", features = ["bundled", "chrono"] }
 sqlite-vec = "0.1"
-model2vec-rs = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 strum = { version = "0.26", features = ["derive"] }
@@ -69,6 +69,7 @@ notify-debouncer-full = "0.5"
 
 [dev-dependencies]
 cargo_metadata = "0.19"
+codesight-retrieval = { path = "crates/codesight-retrieval" }
 tempfile = "3"
 # `test-util` enables `#[tokio::test(start_paused = true)]` so timeout /
 # drain tests can use virtual time instead of real sleeps (saves ~2 s off

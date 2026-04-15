@@ -1,7 +1,12 @@
 //! Code symbol summarization: docstring extraction, signature fallback,
 //! provider detection, circuit breaker, and model override.
 
-use crate::core::symbols::SymbolKind;
+use codesight_core::symbols::SymbolKind;
+
+// Env var names for summarizer config. Duplicated from `src/config/env.rs`
+// in the product crate so this crate has no back-edge into the root module.
+const ENV_SUMMARIZER_PROVIDER: &str = "CODESIGHT_SUMMARIZER_PROVIDER";
+const ENV_SUMMARIZER_MODEL: &str = "CODESIGHT_SUMMARIZER_MODEL";
 
 // ── Docstring extraction ─────────────────────────────────────────────────────
 
@@ -93,14 +98,14 @@ impl SummarizerConfig {
             std::env::var(key).ok().filter(|v| !v.is_empty())
         }
         Self {
-            explicit_provider: env_opt(crate::config::env::SUMMARIZER_PROVIDER),
+            explicit_provider: env_opt(ENV_SUMMARIZER_PROVIDER),
             anthropic_api_key: env_opt("ANTHROPIC_API_KEY"),
             google_api_key: env_opt("GOOGLE_API_KEY"),
             openai_api_base: env_opt("OPENAI_API_BASE"),
             minimax_api_key: env_opt("MINIMAX_API_KEY"),
             zhipuai_api_key: env_opt("ZHIPUAI_API_KEY"),
             openrouter_api_key: env_opt("OPENROUTER_API_KEY"),
-            model_name: env_opt(crate::config::env::SUMMARIZER_MODEL),
+            model_name: env_opt(ENV_SUMMARIZER_MODEL),
         }
     }
 }

@@ -14,6 +14,7 @@ fn workspace_crate_dependency_invariants_hold() {
         "codesight-mcp",
         "codesight-core",
         "codesight-extractors",
+        "codesight-retrieval",
         "codesight-storage",
     ] {
         assert!(
@@ -62,6 +63,20 @@ fn workspace_crate_dependency_invariants_hold() {
     // codesight-storage does NOT depend on codesight-extractors
     assert!(!ws_deps("codesight-storage").contains(&"codesight-extractors".to_string()));
 
+    // codesight-retrieval depends only on codesight-core and codesight-storage
+    let mut retr_deps = ws_deps("codesight-retrieval");
+    retr_deps.sort();
+    assert_eq!(
+        retr_deps,
+        vec![
+            "codesight-core".to_string(),
+            "codesight-storage".to_string()
+        ],
+        "retrieval deps: {retr_deps:?}"
+    );
+    // retrieval must not depend on extractors
+    assert!(!ws_deps("codesight-retrieval").contains(&"codesight-extractors".to_string()));
+
     // No workspace crate may depend on the product crate.
     for pkg_name in &names {
         if *pkg_name == "codesight-mcp" {
@@ -79,6 +94,7 @@ fn workspace_crate_dependency_invariants_hold() {
     for dep in [
         "codesight-core",
         "codesight-extractors",
+        "codesight-retrieval",
         "codesight-storage",
     ] {
         assert!(

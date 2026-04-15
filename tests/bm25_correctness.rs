@@ -1,6 +1,6 @@
 //! Integration tests: bm25 correctness.
 
-use codesight_mcp::retrieval::bm25_reference::{
+use codesight_retrieval::bm25_reference::{
     self, Bm25CorpusStats, Bm25SymbolRow, SymbolTokenCache, sym_token_bag, unique_dl,
 };
 

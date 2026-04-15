@@ -7,7 +7,6 @@ pub mod framework;
 pub mod indexing;
 pub mod mcp;
 pub mod model;
-pub mod retrieval;
 pub mod security;
 pub mod server_support;
 pub mod service;

@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use codesight_mcp::retrieval::sections::{
+use codesight_retrieval::sections::{
     extract_markdown_sections, extract_sections, preprocess_content, preprocess_notebook,
 };
 
@@ -13,7 +13,7 @@ fn fixture_notebook() -> String {
 }
 
 /// Helper: preprocess notebook fixture and extract sections from the resulting markdown.
-fn fixture_sections() -> (String, Vec<codesight_mcp::retrieval::sections::Section>) {
+fn fixture_sections() -> (String, Vec<codesight_retrieval::sections::Section>) {
     let content = fixture_notebook();
     let md = preprocess_content(&content, "sample.ipynb");
     let sections = extract_markdown_sections("sample.ipynb", &md);
@@ -106,7 +106,7 @@ fn notebook_code_in_section_body() {
 #[test]
 fn notebook_hierarchy_wired() {
     let (_md, sections) = fixture_sections();
-    let by_heading: std::collections::HashMap<&str, &codesight_mcp::retrieval::sections::Section> =
+    let by_heading: std::collections::HashMap<&str, &codesight_retrieval::sections::Section> =
         sections.iter().map(|s| (s.heading.as_str(), s)).collect();
 
     let validation = by_heading

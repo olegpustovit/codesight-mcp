@@ -423,11 +423,11 @@ dependencies = [
  "clap",
  "codesight-core",
  "codesight-extractors",
+ "codesight-retrieval",
  "codesight-storage",
  "dirs",
  "ignore",
  "jsonschema",
- "model2vec-rs",
  "notify",
  "notify-debouncer-full",
  "regex",
@@ -474,6 +474,21 @@ dependencies = [
  "tree-sitter-xml",
  "tree-sitter-yaml",
  "walkdir",
+]
+
+[[package]]
+name = "codesight-retrieval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "codesight-core",
+ "codesight-storage",
+ "dirs",
+ "model2vec-rs",
+ "serde_json",
+ "serde_yaml",
+ "tracing",
 ]
 
 [[package]]

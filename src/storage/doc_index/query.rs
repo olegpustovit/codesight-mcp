@@ -340,7 +340,7 @@ impl DocStore {
     pub fn is_stale(&self, root_path: &Path) -> anyhow::Result<bool> {
         let conn = self.open_read_only()?;
         Ok(db::check_staleness(&conn, root_path, "doc_files", |rel| {
-            crate::retrieval::sections::is_doc_file(rel)
+            codesight_retrieval::sections::is_doc_file(rel)
         })?)
     }
 }

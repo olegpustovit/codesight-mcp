@@ -17,7 +17,9 @@ use anyhow::Context;
 use rusqlite::Connection;
 use serde_json::Value;
 
-use crate::{db, retrieval::sections::Section};
+use codesight_retrieval::sections::Section;
+
+use crate::db;
 
 #[derive(Debug, Clone)]
 pub struct DocFileUpdate {
