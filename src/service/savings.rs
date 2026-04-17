@@ -37,11 +37,23 @@ const MODEL_PRICING: &[(&str, f64)] = &[
 ];
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct ReadContentStats {
+    pub symbol_reads: u64,
+    pub section_reads: u64,
+    pub file_range_reads: u64,
+    pub file_full_reads: u64,
+    pub warning_count: u64,
+    pub bytes_returned: u64,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ToolSessionStats {
     pub calls: u64,
     pub tokens_saved: u64,
     pub timing_ms_sum: f64,
     pub error_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_content_detail: Option<ReadContentStats>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -79,17 +91,21 @@ impl SavingsLedger {
         let mut state = self.load()?;
         state.total_tokens_saved = state.total_tokens_saved.saturating_add(delta);
         for (model, cost) in cost_for_tokens(delta) {
-            *state.total_cost_avoided.entry(model).or_default() += cost;
+            let entry = state.total_cost_avoided.entry(model).or_default();
+            *entry = round_cost(*entry + cost);
         }
         let total = state.total_tokens_saved;
-        let total_cost = state.total_cost_avoided.clone();
+        let total_cost = round_cost_map(state.total_cost_avoided.clone());
         self.store(&state)?;
         Ok((total, total_cost))
     }
 
     pub fn current_state(&self) -> io::Result<(u64, HashMap<String, f64>)> {
         let state = self.load()?;
-        Ok((state.total_tokens_saved, state.total_cost_avoided))
+        Ok((
+            state.total_tokens_saved,
+            round_cost_map(state.total_cost_avoided),
+        ))
     }
 
     pub fn record_tool_call(
@@ -114,6 +130,26 @@ impl SavingsLedger {
         if !ok {
             entry.error_count = entry.error_count.saturating_add(1);
         }
+        self.store(&state)
+    }
+
+    /// Record read_content-specific detail (scope counters, warnings, bytes).
+    pub fn record_read_content_detail(&self, detail: ReadContentStats) -> io::Result<()> {
+        let mut state = self.load()?;
+        let entry = state
+            .current_session
+            .per_tool
+            .entry("read_content".to_string())
+            .or_default();
+        let d = entry
+            .read_content_detail
+            .get_or_insert_with(ReadContentStats::default);
+        d.symbol_reads += detail.symbol_reads;
+        d.section_reads += detail.section_reads;
+        d.file_range_reads += detail.file_range_reads;
+        d.file_full_reads += detail.file_full_reads;
+        d.warning_count += detail.warning_count;
+        d.bytes_returned += detail.bytes_returned;
         self.store(&state)
     }
 
@@ -145,9 +181,20 @@ fn cost_for_tokens(tokens: u64) -> HashMap<String, f64> {
         .iter()
         .map(|&(model, price)| {
             let cost = (tokens as f64 / 1_000_000.0) * price;
-            (model.to_string(), (cost * 10000.0).round() / 10000.0)
+            (model.to_string(), round_cost(cost))
         })
         .collect()
+}
+
+fn round_cost(value: f64) -> f64 {
+    (value * 10_000.0).round() / 10_000.0
+}
+
+fn round_cost_map(mut values: HashMap<String, f64>) -> HashMap<String, f64> {
+    for value in values.values_mut() {
+        *value = round_cost(*value);
+    }
+    values
 }
 
 #[derive(Debug)]
@@ -212,8 +259,8 @@ impl MetaBuilder {
             total_tokens_saved,
             response_tokens,
             naive_tokens,
-            cost_avoided,
-            total_cost_avoided,
+            cost_avoided: round_cost_map(cost_avoided),
+            total_cost_avoided: round_cost_map(total_cost_avoided),
             retrieval_engine: RETRIEVAL_ENGINE.to_string(),
             retrieval_version: RETRIEVAL_VERSION.to_string(),
             build_version: BUILD_VERSION.to_string(),
@@ -222,6 +269,29 @@ impl MetaBuilder {
             timing_ms,
             tokens_saved_per_ms,
             powered_by: "codesight-mcp — token-efficient code & doc retrieval".to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::SavingsLedger;
+
+    #[test]
+    fn savings_ledger_rounds_accumulated_costs() {
+        let dir = tempdir().unwrap();
+        let ledger = SavingsLedger::new(dir.path().join("_savings.json"));
+        ledger.record(123_456).unwrap();
+        ledger.record(123_456).unwrap();
+        let (_tokens, costs) = ledger.current_state().unwrap();
+        for value in costs.values() {
+            let scaled = value * 10_000.0;
+            assert!(
+                (scaled - scaled.round()).abs() < 1e-9,
+                "cost should be rounded to 4 decimals: {value}"
+            );
         }
     }
 }

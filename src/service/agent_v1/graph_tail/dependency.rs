@@ -4,12 +4,12 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use codesight_imports::imports::{extract_imports, language_for_path, package_reference_evidence};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 use crate::storage::{IndexStore, list_repo_summaries};
+use codesight_imports::imports::{extract_imports, language_for_path, package_reference_evidence};
 
 impl CodeService {
     pub(super) fn graph_dependency_cycles(
@@ -102,7 +102,7 @@ impl CodeService {
             })
         };
 
-        let cross_repo = args.cross_repo.unwrap_or(self.config.cross_repo_default);
+        let cross_repo = args.cross_repo.unwrap_or(false);
         if cross_repo {
             let summaries = list_repo_summaries(&self.config.repos_dir())?;
             let mut repo_entries = Vec::new();

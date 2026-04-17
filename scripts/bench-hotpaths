@@ -9,9 +9,9 @@ if [[ ! -x "$BIN" ]]; then
   cargo build --release --manifest-path "$ROOT/Cargo.toml" 2>&1 | tail -1
 fi
 
-export CODESIGHT_STORAGE_DIR
-CODESIGHT_STORAGE_DIR=$(mktemp -d)
-trap 'rm -rf "$CODESIGHT_STORAGE_DIR"' EXIT
+export CODESIGHT_INDEX_DIR
+CODESIGHT_INDEX_DIR=$(mktemp -d)
+trap 'rm -rf "$CODESIGHT_INDEX_DIR"' EXIT
 
 ts() { python3 -c "import time; print(time.monotonic())"; }
 
@@ -61,7 +61,7 @@ echo
 
 # ── E9: incremental delete + rename scenarios ────────────────────────────
 FIXTURE_ROOT=$(mktemp -d)
-trap 'rm -rf "$CODESIGHT_STORAGE_DIR" "$FIXTURE_ROOT"' EXIT
+trap 'rm -rf "$CODESIGHT_INDEX_DIR" "$FIXTURE_ROOT"' EXIT
 mkdir -p "$FIXTURE_ROOT/src"
 cat >"$FIXTURE_ROOT/src/a.py" <<'PY'
 def foo():

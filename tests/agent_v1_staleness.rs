@@ -1,9 +1,9 @@
 //! Integration tests: agent v1 staleness.
 
-use codesight_mcp::reindex_state::{FreshnessMode, ReindexStateManager};
+use codesight_mcp::reindex_state::ReindexStateManager;
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Repo State Creation
@@ -259,82 +259,6 @@ fn is_any_reindex_in_progress_tracks_multiple_repos() {
 
     mgr.mark_reindex_done("repo/b");
     assert!(!mgr.is_any_reindex_in_progress());
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Freshness Mode
-// ═══════════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn default_freshness_is_relaxed() {
-    let mgr = ReindexStateManager::new();
-    assert_eq!(mgr.get_freshness_mode(), FreshnessMode::Relaxed);
-}
-
-#[test]
-fn set_freshness_mode_strict() {
-    let mgr = ReindexStateManager::new();
-    mgr.set_freshness_mode("strict").unwrap();
-    assert_eq!(mgr.get_freshness_mode(), FreshnessMode::Strict);
-}
-
-#[test]
-fn set_invalid_freshness_mode_raises() {
-    let mgr = ReindexStateManager::new();
-    let err = mgr.set_freshness_mode("lazy").unwrap_err();
-    assert!(err.contains("Invalid freshness mode"), "got: {err}");
-}
-
-#[test]
-fn await_relaxed_returns_immediately() {
-    let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
-    // Relaxed mode: should return true immediately even though reindex is in progress
-    let result = mgr.await_freshness_if_strict("repo/a", Some(10));
-    assert!(result);
-}
-
-#[test]
-fn await_strict_blocks_until_done() {
-    let mgr = Arc::new(ReindexStateManager::new());
-    mgr.set_freshness_mode("strict").unwrap();
-    mgr.mark_reindex_start("repo/a");
-
-    let mgr2 = mgr.clone();
-    let handle = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(50));
-        mgr2.mark_reindex_done("repo/a");
-    });
-
-    let start = Instant::now();
-    let result = mgr.await_freshness_if_strict("repo/a", Some(2000));
-    let elapsed = start.elapsed();
-    handle.join().unwrap();
-
-    assert!(result);
-    assert!(
-        elapsed.as_millis() >= 30,
-        "should have waited at least ~30ms, got {}ms",
-        elapsed.as_millis()
-    );
-}
-
-#[test]
-fn await_strict_respects_custom_timeout() {
-    let mgr = ReindexStateManager::new();
-    mgr.set_freshness_mode("strict").unwrap();
-    mgr.mark_reindex_start("repo/a");
-
-    let start = Instant::now();
-    let result = mgr.await_freshness_if_strict("repo/a", Some(50));
-    let elapsed = start.elapsed();
-
-    assert!(!result);
-    assert!(
-        elapsed.as_millis() < 500,
-        "should not block indefinitely, got {}ms",
-        elapsed.as_millis()
-    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

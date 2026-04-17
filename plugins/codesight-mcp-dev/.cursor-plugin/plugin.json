@@ -1,0 +1,5 @@
+{
+  "name": "codesight-mcp-dev",
+  "version": "0.1.0",
+  "description": "Dev-mode codesight-mcp: serves via cargo run, hooks steer toward codesight tools"
+}

@@ -107,8 +107,6 @@ where
         })
         .build();
 
-    let max_files = config.max_folder_files;
-
     for result in walker {
         let entry = match result {
             Ok(entry) => entry,
@@ -128,10 +126,6 @@ where
         };
 
         indexed_languages.insert(extractor.language_name().to_string());
-
-        if max_files > 0 && seen_files.len() >= max_files {
-            break;
-        }
 
         let metadata = match entry.metadata() {
             Ok(metadata) => metadata,

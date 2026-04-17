@@ -5,18 +5,19 @@
 
 use std::collections::HashSet;
 
-use codesight_retrieval::fuzzy;
 use crate::service::agent_v1::args::SearchCatalogArgs;
 use crate::storage::{IndexStore, SearchSymbol};
+use codesight_retrieval::fuzzy;
 
 pub(super) fn augment_with_fuzzy(
     store: &IndexStore,
     args: &SearchCatalogArgs,
     scope: Option<&str>,
+    exclude: &[String],
     per_kind_cap: usize,
     auto_fuzzy: bool,
     symbols: &mut Vec<SearchSymbol>,
-) {
+) -> usize {
     // When the caller opts in with `fuzzy=true`, lower the trigram threshold
     // and enable a default Levenshtein fallback so single-character
     // transpositions in short queries (e.g. `vlaidate` → `validate`) match.
@@ -33,11 +34,17 @@ pub(super) fn augment_with_fuzzy(
     let primary_ids: HashSet<String> = symbols.iter().map(|s| s.id.clone()).collect();
     let scan_cap = per_kind_cap.saturating_mul(50).clamp(500, 12_000);
     let Ok(candidates) = store.symbols_light_scan(args.kind.as_deref(), scope, scan_cap) else {
-        return;
+        return 0;
     };
     let mut fuzzy_rows: Vec<SearchSymbol> = Vec::new();
     for mut c in candidates {
         if primary_ids.contains(&c.id) {
+            continue;
+        }
+        if exclude
+            .iter()
+            .any(|pattern| c.file.starts_with(pattern) || c.file.contains(pattern))
+        {
             continue;
         }
         let score = fuzzy::score_name_pair(&args.query, &c.name);
@@ -59,5 +66,7 @@ pub(super) fn augment_with_fuzzy(
     });
     let take_extra = per_kind_cap.saturating_mul(4).clamp(32, 100);
     fuzzy_rows.truncate(take_extra);
+    let added = fuzzy_rows.len();
     symbols.extend(fuzzy_rows);
+    added
 }

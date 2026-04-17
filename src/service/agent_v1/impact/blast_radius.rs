@@ -202,7 +202,7 @@ impl CodeService {
             }
         }
 
-        if args.cross_repo.unwrap_or(self.config.cross_repo_default) {
+        if args.cross_repo.unwrap_or(false) {
             data["cross_repo_key"] = json!(format!("blast_radius:{}", symbol_name));
         }
 

@@ -11,6 +11,7 @@ use crate::config::SCHEMA_VERSION;
 use super::{DocFileUpdate, DocStore};
 
 impl DocStore {
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_index(
         &self,
         repo: &str,

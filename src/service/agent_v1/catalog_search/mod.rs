@@ -3,6 +3,8 @@
 mod fuzzy;
 mod semantic;
 
+use std::collections::BTreeSet;
+
 use serde_json::{Value, json};
 
 use crate::service::agent_v1::args::SearchCatalogArgs;
@@ -24,9 +26,12 @@ fn dense_similarity(distance: f64) -> f64 {
 }
 
 fn materialize_dense_symbol_items(
+    svc: &CodeService,
     source_id: &str,
     store: Option<&IndexStore>,
     dense_hits: &[DenseRankedHit],
+    include_body: bool,
+    context_lines: usize,
 ) -> Result<std::collections::HashMap<String, Value>, ToolError> {
     let Some(store) = store else {
         return Ok(std::collections::HashMap::new());
@@ -42,15 +47,25 @@ fn materialize_dense_symbol_items(
         .map(|mut row| {
             row.score = *scores.get(row.id.as_str()).unwrap_or(&0.0);
             let id = row.id.clone();
-            (id, search_hit_symbol(source_id, &row))
+            let body = if include_body {
+                svc.symbol_body_with_context(store, &row.id, context_lines)
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
+            (id, search_hit_symbol(source_id, &row, body.as_deref()))
         })
         .collect())
 }
 
 fn materialize_dense_section_items(
+    svc: &CodeService,
     source_id: &str,
     store: Option<&DocStore>,
     dense_hits: &[DenseRankedHit],
+    include_body: bool,
+    context_lines: usize,
 ) -> Result<std::collections::HashMap<String, Value>, ToolError> {
     let Some(store) = store else {
         return Ok(std::collections::HashMap::new());
@@ -66,7 +81,14 @@ fn materialize_dense_section_items(
         .map(|mut row| {
             row.score = *scores.get(row.id.as_str()).unwrap_or(&0.0);
             let id = row.id.clone();
-            (id, search_hit_section(source_id, &row))
+            let body = if include_body {
+                svc.section_body_with_context(store, &row.id, context_lines)
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
+            (id, search_hit_section(source_id, &row, body.as_deref()))
         })
         .collect())
 }
@@ -149,6 +171,62 @@ struct KindFlags {
     want_symbol: bool,
     want_section: bool,
     want_file: bool,
+}
+
+#[derive(Default, Clone, Copy)]
+struct CodeSideStats {
+    more_file_hits: bool,
+    fuzzy_applied: bool,
+}
+
+fn estimate_candidate_file_bytes(
+    code_store: Option<&IndexStore>,
+    doc_store: Option<&DocStore>,
+    items: &[Value],
+) -> Result<u64, ToolError> {
+    let mut code_paths = BTreeSet::new();
+    let mut doc_paths = BTreeSet::new();
+
+    for item in items {
+        let Some(path) = item.pointer("/ref/path").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if path.is_empty() {
+            continue;
+        }
+        match item.pointer("/ref/domain").and_then(|value| value.as_str()) {
+            Some("docs") => {
+                doc_paths.insert(path.to_string());
+            }
+            _ => {
+                code_paths.insert(path.to_string());
+            }
+        }
+    }
+
+    let mut total = 0u64;
+    if let Some(store) = code_store
+        && !code_paths.is_empty()
+    {
+        let paths = code_paths.into_iter().collect::<Vec<_>>();
+        total = total.saturating_add(
+            store
+                .sum_file_sizes_for_paths(&paths)
+                .map_err(index_error)?,
+        );
+    }
+    if let Some(store) = doc_store
+        && !doc_paths.is_empty()
+    {
+        let paths = doc_paths.into_iter().collect::<Vec<_>>();
+        total = total.saturating_add(
+            store
+                .sum_file_sizes_for_paths(&paths)
+                .map_err(index_error)?,
+        );
+    }
+
+    Ok(total)
 }
 
 impl KindFlags {
@@ -242,6 +320,19 @@ fn coerce_search_args(args: &mut SearchCatalogArgs) -> Result<String, ToolError>
     Ok(output_mode)
 }
 
+#[derive(Default, Clone, Copy)]
+struct SearchCounts {
+    total_matches: usize,
+    total_files_with_matches: usize,
+}
+
+impl SearchCounts {
+    fn add(&mut self, m: usize, f: usize) {
+        self.total_matches += m;
+        self.total_files_with_matches += f;
+    }
+}
+
 struct FormatCtx<'a> {
     output_mode: &'a str,
     query: &'a str,
@@ -249,6 +340,7 @@ struct FormatCtx<'a> {
     lim: usize,
     max_tokens: Option<u32>,
     more_file_hits_exist: bool,
+    counts: SearchCounts,
 }
 
 /// Format collected items for count / files_with_matches / items modes.
@@ -260,12 +352,8 @@ fn format_output(
     mut warnings: Vec<Value>,
     mut extra: Vec<(String, Value)>,
 ) -> anyhow::Result<Value> {
-    let total_matches = items.len();
-    let total_files_with_matches: usize = items
-        .iter()
-        .filter_map(|item| item.pointer("/ref/path")?.as_str())
-        .collect::<std::collections::HashSet<&str>>()
-        .len();
+    let total_matches = ctx.counts.total_matches;
+    let total_files_with_matches = ctx.counts.total_files_with_matches;
     match ctx.output_mode {
         "count" => {
             let data = json!({
@@ -310,15 +398,21 @@ fn format_output(
             }
 
             let lim = ctx.lim;
-            let limit_hit_by_overflow = items.len() > lim;
-            if limit_hit_by_overflow {
+            let pre_cap_exceeds_lim = total_matches > items.len().max(lim);
+            let overflow = items.len() > lim;
+            if overflow {
                 warnings.push(json!({
                     "code": "TRUNCATED",
                     "message": format!("results truncated to limit {lim}"),
                 }));
                 items.truncate(lim);
+            } else if pre_cap_exceeds_lim {
+                warnings.push(json!({
+                    "code": "TRUNCATED",
+                    "message": format!("results truncated to limit {lim}"),
+                }));
             }
-            if limit_hit_by_overflow || ctx.more_file_hits_exist {
+            if overflow || pre_cap_exceeds_lim || ctx.more_file_hits_exist {
                 truncated_by.push("limit");
             }
 
@@ -417,6 +511,7 @@ impl CodeService {
         Ok((code_store, doc_store))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn search_code_side(
         &self,
         store: &IndexStore,
@@ -425,33 +520,37 @@ impl CodeService {
         flags: &KindFlags,
         per_kind_cap: usize,
         items: &mut Vec<Value>,
-    ) -> Result<bool, ToolError> {
+        counts: &mut SearchCounts,
+    ) -> Result<CodeSideStats, ToolError> {
+        let ctx_lines = args.context_lines.unwrap_or(0).min(50);
+        let want_body = args.include_body.unwrap_or(false);
+        let exclude = args.exclude.as_deref().unwrap_or(&[]);
         let mut more_file_hits = false;
+        let mut fuzzy_applied = false;
         if flags.want_file {
             let qmode = args.query_mode.as_deref().unwrap_or("keyword");
-            let ctx = args.context_lines.unwrap_or(0).min(50);
-            let probe_cap = per_kind_cap.saturating_add(1).clamp(1, 50);
-            let matches = self
+            let result = self
                 .search_code_files_text(
                     store,
                     &args.source_id,
                     &args.query,
                     scope.cloned(),
-                    probe_cap,
+                    exclude,
+                    per_kind_cap,
                     qmode,
-                    ctx,
+                    ctx_lines,
                 )
                 .map_err(index_error)?;
-            more_file_hits = matches.len() > per_kind_cap;
-            let mut matches = matches;
-            matches.truncate(per_kind_cap);
-            items.extend(matches);
+            counts.add(result.total_matches, result.files_with_matches);
+            more_file_hits = result.more_file_hits;
+            items.extend(result.items);
         }
         if flags.want_symbol || (!flags.want_file && !flags.want_section) {
             let mut symbols = self.run_search(
                 store,
                 args.query.clone(),
                 scope.cloned(),
+                exclude,
                 args.kind.clone(),
                 per_kind_cap,
             )?;
@@ -464,20 +563,31 @@ impl CodeService {
                 }
             }
             if fuzzy_explicit || auto_fuzzy {
-                fuzzy::augment_with_fuzzy(
+                fuzzy_applied = fuzzy::augment_with_fuzzy(
                     store,
                     args,
                     scope.map(String::as_str),
+                    exclude,
                     per_kind_cap,
                     auto_fuzzy,
                     &mut symbols,
-                );
+                ) > 0;
             }
             for s in symbols {
-                items.push(search_hit_symbol(&args.source_id, &s));
+                let body = if want_body {
+                    self.symbol_body_with_context(store, &s.id, ctx_lines)
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                };
+                items.push(search_hit_symbol(&args.source_id, &s, body.as_deref()));
             }
         }
-        Ok(more_file_hits)
+        Ok(CodeSideStats {
+            more_file_hits,
+            fuzzy_applied,
+        })
     }
 
     fn search_doc_side(
@@ -488,6 +598,9 @@ impl CodeService {
         per_kind_cap: usize,
         items: &mut Vec<Value>,
     ) -> Result<(), ToolError> {
+        let exclude = args.exclude.as_deref().unwrap_or(&[]);
+        let want_body = args.include_body.unwrap_or(false);
+        let ctx_lines = args.context_lines.unwrap_or(0).min(50);
         let trimmed = args.query.trim();
         if trimmed.is_empty() {
             return Ok(());
@@ -498,10 +611,22 @@ impl CodeService {
             trimmed
         };
         let sections = store
-            .search_sections(effective_query, scope.map(String::as_str), per_kind_cap)
+            .search_sections(
+                effective_query,
+                scope.map(String::as_str),
+                exclude,
+                per_kind_cap,
+            )
             .map_err(index_error)?;
         for sec in sections {
-            items.push(search_hit_section(&args.source_id, &sec));
+            let body = if want_body {
+                self.section_body_with_context(store, &sec.id, ctx_lines)
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
+            items.push(search_hit_section(&args.source_id, &sec, body.as_deref()));
         }
         Ok(())
     }
@@ -556,9 +681,29 @@ impl CodeService {
         let mut items: Vec<Value> = Vec::new();
         let mut raw_bytes = 0u64;
         let mut more_file_hits_exist = false;
+        let mut fuzzy_applied = false;
+        let mut counts = SearchCounts::default();
+        let exclude = args.exclude.as_deref().unwrap_or(&[]);
+
+        if let Some(ref store) = code_store
+            && (flags.want_symbol || (!flags.want_file && !flags.want_section))
+            && let Ok((m, f)) = store.count_symbols(
+                &args.query,
+                args.kind.as_deref(),
+                scope.as_deref(),
+                exclude,
+            )
+        {
+            counts.add(m, f);
+        }
+        if let Some(ref dstore) = doc_store
+            && (flags.want_section || domain == "docs" || domain == "hybrid")
+            && let Ok((m, f)) = dstore.count_sections(&args.query, scope.as_deref(), exclude)
+        {
+            counts.add(m, f);
+        }
 
         if let Some(ref store) = code_store {
-            raw_bytes = raw_bytes.max(store.repo_total_bytes()?);
             match self.search_code_side(
                 store,
                 &args,
@@ -566,21 +711,22 @@ impl CodeService {
                 &flags,
                 per_kind_cap,
                 &mut items,
+                &mut counts,
             ) {
-                Ok(more) => more_file_hits_exist = more,
+                Ok(stats) => {
+                    more_file_hits_exist = stats.more_file_hits;
+                    fuzzy_applied = stats.fuzzy_applied;
+                }
                 Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
             }
         }
 
         if let Some(ref dstore) = doc_store
             && (flags.want_section || domain == "docs" || domain == "hybrid")
-        {
-            raw_bytes = raw_bytes.max(dstore.repo_total_bytes()?);
-            if let Err(e) =
+            && let Err(e) =
                 self.search_doc_side(dstore, &args, scope.as_ref(), per_kind_cap, &mut items)
-            {
-                return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e);
-            }
+        {
+            return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e);
         }
 
         let semantic_requested =
@@ -602,17 +748,23 @@ impl CodeService {
                 warnings.push(w);
             } else {
                 let dense_symbol_items = match materialize_dense_symbol_items(
+                    self,
                     &args.source_id,
                     code_store.as_ref(),
                     &dense.symbol_hits,
+                    args.include_body.unwrap_or(false),
+                    args.context_lines.unwrap_or(0).min(50),
                 ) {
                     Ok(items) => items,
                     Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
                 };
                 let dense_section_items = match materialize_dense_section_items(
+                    self,
                     &args.source_id,
                     doc_store.as_ref(),
                     &dense.section_hits,
+                    args.include_body.unwrap_or(false),
+                    args.context_lines.unwrap_or(0).min(50),
                 ) {
                     Ok(items) => items,
                     Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
@@ -629,6 +781,11 @@ impl CodeService {
             }
         }
 
+        raw_bytes =
+            match estimate_candidate_file_bytes(code_store.as_ref(), doc_store.as_ref(), &items) {
+                Ok(bytes) => bytes,
+                Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
+            };
         let timer = MetaBuilder::new(raw_bytes.max(1));
         let extra: Vec<(String, Value)> = vec![
             ("domain_effective".to_string(), json!(domain)),
@@ -637,6 +794,23 @@ impl CodeService {
                 json!(query_mode_effective),
             ),
             ("domain_explicit".to_string(), json!(domain_explicit)),
+            (
+                "estimate_method".to_string(),
+                json!("byte_approx_candidate_files"),
+            ),
+            (
+                "baseline_scope".to_string(),
+                json!("candidate_files_materialized_pre_output"),
+            ),
+            (
+                "unit_kinds_effective".to_string(),
+                json!({
+                    "symbol": flags.want_symbol,
+                    "section": flags.want_section,
+                    "file": flags.want_file,
+                }),
+            ),
+            ("fuzzy_applied".to_string(), json!(fuzzy_applied)),
             ("semantic_applied".to_string(), json!(semantic_requested)),
         ];
 
@@ -647,6 +821,7 @@ impl CodeService {
             lim,
             max_tokens: args.max_tokens,
             more_file_hits_exist,
+            counts,
         };
         format_output(self, &fmt_ctx, items, &timer, warnings, extra)
     }

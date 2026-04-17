@@ -1,21 +1,16 @@
-//! Per-repo reindex state tracking and freshness gating.
+//! Per-repo reindex state tracking.
 //!
 //! Provides [`ReindexStateManager`] for tracking reindex lifecycle
-//! (start / done / failed) across multiple repos, with configurable
-//! freshness mode (relaxed vs strict) and wait-for-fresh semantics.
+//! (start / done / failed) across multiple repos, with wait-for-fresh
+//! semantics for operators that need to block until an in-flight reindex
+//! settles. Read-path handlers never block — they annotate responses with
+//! `STALE_DATA_WARNING` when a reindex is mid-flight.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 // ─── Public types ────────────────────────────────────────────────────────────
-
-/// Freshness gating mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FreshnessMode {
-    Relaxed,
-    Strict,
-}
 
 /// Snapshot of a repo's reindex status returned by [`ReindexStateManager::get_status`].
 #[derive(Debug, Clone)]
@@ -111,14 +106,12 @@ impl RepoReindexState {
 /// Thread-safe manager holding reindex states for multiple repos.
 pub struct ReindexStateManager {
     states: Mutex<HashMap<String, Arc<RepoReindexState>>>,
-    freshness_mode: RwLock<FreshnessMode>,
 }
 
 impl ReindexStateManager {
     pub fn new() -> Self {
         Self {
             states: Mutex::new(HashMap::new()),
-            freshness_mode: RwLock::new(FreshnessMode::Relaxed),
         }
     }
 
@@ -233,50 +226,6 @@ impl ReindexStateManager {
         }
         out.sort();
         out
-    }
-
-    /// Set the freshness mode. Only `"relaxed"` and `"strict"` are valid.
-    pub fn set_freshness_mode(&self, mode: &str) -> Result<(), String> {
-        let m = match mode {
-            "relaxed" => FreshnessMode::Relaxed,
-            "strict" => FreshnessMode::Strict,
-            other => return Err(format!("Invalid freshness mode: {other}")),
-        };
-        *self
-            .freshness_mode
-            .write()
-            .unwrap_or_else(|e| e.into_inner()) = m;
-        Ok(())
-    }
-
-    pub fn get_freshness_mode(&self) -> FreshnessMode {
-        *self
-            .freshness_mode
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// In relaxed mode returns `true` immediately. In strict mode blocks until
-    /// the event is set or the timeout expires.
-    pub fn await_freshness_if_strict(&self, repo: &str, timeout_ms: Option<u64>) -> bool {
-        if self.get_freshness_mode() == FreshnessMode::Relaxed {
-            return true;
-        }
-        let state = self.get_state(repo);
-        let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000));
-        let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let deadline = Instant::now() + timeout;
-        while !inner.event_set {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return false;
-            }
-            inner = match state.cvar.wait_timeout(inner, remaining) {
-                Ok((guard, _)) => guard,
-                Err(p) => p.into_inner().0,
-            };
-        }
-        true
     }
 
     /// Wait for the repo to become fresh. For unknown (never-started) repos

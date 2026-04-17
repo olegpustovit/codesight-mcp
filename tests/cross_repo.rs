@@ -3,12 +3,12 @@
 use std::fs;
 use tempfile::tempdir;
 
-use codesight_mcp::config::AppConfig;
-use codesight_mcp::db;
 use codesight_imports::packages::{
     RepoEntry, build_package_registry, extract_package_names, extract_root_package_from_specifier,
     find_repos_for_package,
 };
+use codesight_mcp::config::AppConfig;
+use codesight_mcp::db;
 use codesight_mcp::service::CodeService;
 use codesight_mcp::storage::IndexStore;
 use serde_json::json;
@@ -946,87 +946,6 @@ fn case_get_cross_repo_map_cross_repo_edges_structure() {
             "missing package_name: {edge:?}"
         );
     }
-}
-
-// ============================================================
-// Phase 7: CODESIGHT_CROSS_REPO_DEFAULT env var
-// ============================================================
-
-#[test]
-fn case_env_var_sets_cross_repo_default() {
-    // Setting CODESIGHT_CROSS_REPO_DEFAULT=true enables cross-repo by default.
-    // We test the AppConfig field directly since env vars are process-global.
-    let tmp = tempdir().unwrap();
-    let mut config = AppConfig::new(tmp.path().join("idx"));
-    config.cross_repo_default = true;
-    assert!(
-        config.cross_repo_default,
-        "cross_repo_default should be true"
-    );
-
-    // Verify it affects blast_radius output (cross_repo_key appears)
-    let src = tmp.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    _write(&src, "utils.py", "def helper(): return 42\n");
-    _write(&src, "main.py", "from utils import helper\n");
-
-    let svc = CodeService::new(config).unwrap();
-    let sid = ingest(&svc, &src);
-
-    let r = svc
-        .dispatch(
-            "evaluate_impact",
-            json!({
-                "source_id": sid,
-                "analysis": "blast_radius",
-                "target": "helper",
-                // No explicit cross_repo param — should use config default (true)
-            }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    assert!(
-        r["data"].get("cross_repo_key").is_some(),
-        "cross_repo_key should appear when config.cross_repo_default=true: {:?}",
-        r["data"]
-    );
-}
-
-#[test]
-fn case_env_var_false_keeps_default() {
-    // CROSS_REPO_DEFAULT=false keeps cross-repo off by default.
-    let tmp = tempdir().unwrap();
-    let mut config = AppConfig::new(tmp.path().join("idx"));
-    config.cross_repo_default = false;
-    assert!(
-        !config.cross_repo_default,
-        "cross_repo_default should be false"
-    );
-
-    let src = tmp.path().join("src");
-    fs::create_dir_all(&src).unwrap();
-    _write(&src, "utils.py", "def helper(): return 42\n");
-    _write(&src, "main.py", "from utils import helper\n");
-
-    let svc = CodeService::new(config).unwrap();
-    let sid = ingest(&svc, &src);
-
-    let r = svc
-        .dispatch(
-            "evaluate_impact",
-            json!({
-                "source_id": sid,
-                "analysis": "blast_radius",
-                "target": "helper",
-            }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    assert!(
-        r["data"].get("cross_repo_key").is_none(),
-        "cross_repo_key should NOT appear when config.cross_repo_default=false: {:?}",
-        r["data"]
-    );
 }
 
 // ============================================================

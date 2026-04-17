@@ -130,7 +130,7 @@ fn setup_perf_repo() -> PerfRepo {
     let ws = tempdir().unwrap();
     let root = build_search_perf_repo(ws.path());
     let idx_root = ws.path().join("idx");
-    let svc = CodeService::new(app_config_for_perf(idx_root.clone())).unwrap();
+    let svc = CodeService::new(AppConfig::new(idx_root.clone())).unwrap();
     let source_id = ingest(&svc, &root);
     PerfRepo {
         _ws: ws,
@@ -142,19 +142,11 @@ fn setup_perf_repo() -> PerfRepo {
 
 impl PerfRepo {
     fn fresh_service(&self) -> CodeService {
-        CodeService::new(app_config_for_perf(self.idx_root.clone())).unwrap()
+        CodeService::new(AppConfig::new(self.idx_root.clone())).unwrap()
     }
 }
 
 const QUERIES: &[&str] = &["parse", "search", "index", "token", "server", "load"];
-
-fn app_config_for_perf(idx_root: std::path::PathBuf) -> AppConfig {
-    let mut cfg = AppConfig::new(idx_root);
-    // Staleness checks + auto reindex during `search_catalog` blow up latency budgets and
-    // cause flaky timing; this suite measures search hot/cold paths on a fixed index only.
-    cfg.auto_reindex = false;
-    cfg
-}
 
 // ---------------------------------------------------------------------------
 // T14 -- Correctness: result stability across calls
@@ -339,7 +331,7 @@ fn case_scores_stable_across_two_calls() {
     // The Rust search_catalog surfaces per-result `score` in every item.
     let ws = tempdir().unwrap();
     let src_root = build_search_perf_repo(ws.path());
-    let svc = CodeService::new(app_config_for_perf(ws.path().join("idx"))).unwrap();
+    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
     let source_id = ingest(&svc, &src_root);
 
     let r1 = search(&svc, &source_id, "parse file", 5);

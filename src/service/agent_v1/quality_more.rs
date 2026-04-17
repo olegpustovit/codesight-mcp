@@ -11,13 +11,13 @@ static MD_INTERNAL_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").expect("infallible markdown link regex")
 });
 
-use codesight_analysis::complexity::cyclomatic_complexity;
-use codesight_analysis::quality;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
+use codesight_analysis::complexity::cyclomatic_complexity;
+use codesight_analysis::quality;
 
 impl CodeService {
     pub(in crate::service) fn evaluate_quality_tail(
@@ -171,7 +171,9 @@ impl CodeService {
             "files_scanned": scope_files.len(),
             "candidates": candidates,
         });
-        if args.file_path.is_some() && let Value::Object(ref mut map) = data {
+        if args.file_path.is_some()
+            && let Value::Object(ref mut map) = data
+        {
             map.insert("file".to_string(), json!(scope_files[0]));
         }
         self.success_response(&timer, data)

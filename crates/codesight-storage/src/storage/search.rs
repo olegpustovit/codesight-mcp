@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use rusqlite::named_params;
+use rusqlite::{named_params, types::Value as SqlValue};
 
 use crate::core::symbols::SymbolKind;
 use crate::db;
@@ -17,6 +17,7 @@ impl IndexStore {
         query: &str,
         kind: Option<&str>,
         scope: Option<&str>,
+        exclude: &[String],
         max_results: usize,
     ) -> anyhow::Result<Vec<SearchSymbol>> {
         let query_tokens = db::tokenize(query);
@@ -29,13 +30,10 @@ impl IndexStore {
             .map(|token| format!("{token}*"))
             .collect::<Vec<_>>()
             .join(" OR ");
-        let scope_value = scope.map(normalize_scope);
-        let scope_prefix = scope_value.as_ref().map(|value| format!("{value}%"));
-        let scope_contains = scope_value.as_ref().map(|value| format!("%{value}%"));
         let row_limit = (max_results.clamp(1, 25) * 6) as i64;
 
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare_cached(
+        let mut sql = String::from(
             r#"
             SELECT
                 s.id,
@@ -49,58 +47,49 @@ impl IndexStore {
                 bm25(symbol_fts, 8.0, 6.0, 4.0, 3.0, 2.0, 1.0) AS rank
             FROM symbol_fts
             JOIN symbols s ON s.row_id = symbol_fts.rowid
-            WHERE symbol_fts MATCH :fts
-              AND (:kind IS NULL OR s.kind = :kind)
-              AND (
-                    :scope_exact IS NULL
-                 OR s.file_path = :scope_exact
-                 OR s.file_path LIKE :scope_prefix
-                 OR s.file_path LIKE :scope_contains
-              )
-            ORDER BY rank ASC
-            LIMIT :row_limit
+            WHERE symbol_fts MATCH ?
         "#,
-        )?;
+        );
+        let mut params = vec![SqlValue::from(fts_query)];
+        if let Some(kind) = kind {
+            sql.push_str(" AND s.kind = ?");
+            params.push(SqlValue::from(kind.to_string()));
+        }
+        push_scope_clause(&mut sql, &mut params, "s.file_path", scope);
+        push_exclude_clause(&mut sql, &mut params, "s.file_path", exclude);
+        sql.push_str(" ORDER BY rank ASC LIMIT ?");
+        params.push(SqlValue::Integer(row_limit));
+        let mut stmt = conn.prepare_cached(&sql)?;
 
-        let rows = stmt.query_map(
-            named_params! {
-                ":fts": &fts_query,
-                ":kind": &kind,
-                ":scope_exact": &scope_value.as_deref(),
-                ":scope_prefix": &scope_prefix.as_deref(),
-                ":scope_contains": &scope_contains.as_deref(),
-                ":row_limit": &row_limit,
-            },
-            |row| {
-                let kind_str: String = row.get(1)?;
-                let kind = SymbolKind::from_db(&kind_str).ok_or_else(|| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        1,
-                        rusqlite::types::Type::Text,
-                        Box::new(std::io::Error::other(format!(
-                            "unknown symbol kind {kind_str}"
-                        ))),
-                    )
-                })?;
-                Ok(SearchCandidate {
-                    result: SearchSymbol {
-                        id: row.get(0)?,
-                        kind,
-                        name: row.get(2)?,
-                        file: row.get(3)?,
-                        line: row.get::<_, u32>(4)?,
-                        signature: row.get(5)?,
-                        summary: row.get(6)?,
-                        score: 0.0,
-                        match_type: None,
-                        fuzzy_similarity: None,
-                        edit_distance: None,
-                    },
-                    qualified_name: row.get(7)?,
-                    raw_rank: row.get::<_, f64>(8)?,
-                })
-            },
-        )?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            let kind_str: String = row.get(1)?;
+            let kind = SymbolKind::from_db(&kind_str).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::other(format!(
+                        "unknown symbol kind {kind_str}"
+                    ))),
+                )
+            })?;
+            Ok(SearchCandidate {
+                result: SearchSymbol {
+                    id: row.get(0)?,
+                    kind,
+                    name: row.get(2)?,
+                    file: row.get(3)?,
+                    line: row.get::<_, u32>(4)?,
+                    signature: row.get(5)?,
+                    summary: row.get(6)?,
+                    score: 0.0,
+                    match_type: None,
+                    fuzzy_similarity: None,
+                    edit_distance: None,
+                },
+                qualified_name: row.get(7)?,
+                raw_rank: row.get::<_, f64>(8)?,
+            })
+        })?;
 
         let mut seen_ids = HashSet::new();
         let mut candidates = Vec::new();
@@ -124,6 +113,69 @@ impl IndexStore {
         });
         reranked.truncate(max_results.clamp(1, 25));
         Ok(reranked)
+    }
+
+    /// True pre-cap cardinality for the same BM25 WHERE clause as `search_symbols`.
+    /// Returns `(total_matches, files_with_matches)`.
+    pub fn count_symbols(
+        &self,
+        query: &str,
+        kind: Option<&str>,
+        scope: Option<&str>,
+        exclude: &[String],
+    ) -> anyhow::Result<(usize, usize)> {
+        let query_tokens = db::tokenize(query);
+        if query_tokens.is_empty() {
+            return Ok((0, 0));
+        }
+
+        let fts_query = query_tokens
+            .iter()
+            .map(|token| format!("{token}*"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let conn = self.open_read_only()?;
+        let mut sql = String::from(
+            r#"
+            SELECT COUNT(DISTINCT s.id), COUNT(DISTINCT s.file_path)
+            FROM symbol_fts
+            JOIN symbols s ON s.row_id = symbol_fts.rowid
+            WHERE symbol_fts MATCH ?
+        "#,
+        );
+        let mut params = vec![SqlValue::from(fts_query)];
+        if let Some(kind) = kind {
+            sql.push_str(" AND s.kind = ?");
+            params.push(SqlValue::from(kind.to_string()));
+        }
+        push_scope_clause(&mut sql, &mut params, "s.file_path", scope);
+        push_exclude_clause(&mut sql, &mut params, "s.file_path", exclude);
+        let mut stmt = conn.prepare_cached(&sql)?;
+
+        let (total, files): (i64, i64) = stmt
+            .query_row(rusqlite::params_from_iter(params.iter()), |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?;
+        Ok((total.max(0) as usize, files.max(0) as usize))
+    }
+
+    pub fn sum_file_sizes_for_paths(&self, paths: &[String]) -> anyhow::Result<u64> {
+        if paths.is_empty() {
+            return Ok(0);
+        }
+
+        let placeholders = std::iter::repeat_n("?", paths.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE file_path IN ({placeholders})"
+        );
+        let conn = self.open_read_only()?;
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let total = stmt.query_row(rusqlite::params_from_iter(paths.iter()), |row| {
+            row.get::<_, i64>(0)
+        })?;
+        Ok(total.max(0) as u64)
     }
 
     /// Substring name match (case-insensitive) for `search_catalog` fuzzy augmentation.
@@ -330,6 +382,40 @@ fn normalize_scope(scope: &str) -> String {
         .trim_matches('*')
         .trim()
         .to_string()
+}
+
+fn push_scope_clause(
+    sql: &mut String,
+    params: &mut Vec<SqlValue>,
+    column: &str,
+    scope: Option<&str>,
+) {
+    let Some(scope) = scope else {
+        return;
+    };
+    let scope = normalize_scope(scope);
+    sql.push_str(&format!(
+        " AND ({column} = ? OR {column} LIKE ? OR {column} LIKE ?)"
+    ));
+    params.push(SqlValue::from(scope.clone()));
+    params.push(SqlValue::from(format!("{scope}%")));
+    params.push(SqlValue::from(format!("%{scope}%")));
+}
+
+fn push_exclude_clause(
+    sql: &mut String,
+    params: &mut Vec<SqlValue>,
+    column: &str,
+    exclude: &[String],
+) {
+    for pattern in exclude {
+        let pattern = normalize_scope(pattern);
+        sql.push_str(&format!(
+            " AND ({column} NOT LIKE ? AND {column} NOT LIKE ?)"
+        ));
+        params.push(SqlValue::from(format!("{pattern}%")));
+        params.push(SqlValue::from(format!("%{pattern}%")));
+    }
 }
 
 fn rerank_candidate(candidate: SearchCandidate, query_tokens: &[String]) -> SearchSymbol {

@@ -1,16 +1,15 @@
-//! Read-path freshness gating for `agent-v1`.
+//! Read-path freshness annotation for `agent-v1`.
 //!
-//! Read tools consult [`ReindexStateManager`] before running so the dispatcher can
-//! either block (strict mode) or annotate the response with a `stale_data_warning`
-//! (relaxed mode) when an in-flight reindex would otherwise return stale results.
-//! Write/utility tools are skipped — they drive reindex state, they don't observe it.
+//! Read tools never block on reindex: if an auto-reindex is in flight for the
+//! target repo, the response envelope is annotated with `STALE_DATA_WARNING`
+//! so MCP clients can surface that the answer predates the latest edits.
 
 use serde_json::{Value, json};
 
-use crate::server_support::reindex_state::{FreshnessMode, ReindexStateManager};
+use crate::server_support::reindex_state::ReindexStateManager;
 use crate::service::CodeService;
 
-/// Tools that observe indexed state and should respect freshness gating.
+/// Tools that observe indexed state and should carry a staleness annotation.
 const READ_TOOLS: &[&str] = &[
     "search_catalog",
     "read_content",
@@ -31,26 +30,6 @@ pub(super) fn is_read_tool(tool: &str) -> bool {
 /// Extract the `source_id` argument the read-tool envelope uses to scope a repo.
 pub(super) fn source_id(args: &Value) -> Option<&str> {
     args.get("source_id").and_then(Value::as_str)
-}
-
-/// In strict mode, block until the repo is fresh (or the wait times out).
-/// In relaxed mode, this is a no-op — staleness is reported via [`annotate`].
-pub(super) fn await_if_strict(svc: &CodeService, repo: &str) {
-    if svc.reindex_states().get_freshness_mode() == FreshnessMode::Strict {
-        // Bounded wait so a stuck reindex never deadlocks the MCP loop.
-        let _ = svc.reindex_states().await_freshness_if_strict(repo, None);
-    }
-}
-
-/// In strict mode, block until every tracked repo is fresh. Used for global
-/// read tools like `catalog_sources` that have no `source_id` of their own.
-pub(super) fn await_all_if_strict(svc: &CodeService) {
-    if svc.reindex_states().get_freshness_mode() != FreshnessMode::Strict {
-        return;
-    }
-    for repo in svc.reindex_states().in_flight_repos() {
-        let _ = svc.reindex_states().await_freshness_if_strict(&repo, None);
-    }
 }
 
 /// Attach an `indexing: [...]` list + `STALE_DATA_WARNING` to `catalog_sources`
@@ -78,17 +57,14 @@ pub(super) fn annotate_catalog_with_in_flight(svc: &CodeService, mut response: V
     response
 }
 
-/// In relaxed mode, if a reindex is in progress for `repo`, append a
-/// `stale_data_warning` warning to the response envelope so MCP clients can
-/// surface it. No-op in strict mode (the request blocked above).
+/// If a reindex is in progress for `repo`, append a `STALE_DATA_WARNING`
+/// warning to the response envelope so MCP clients can surface it. No-op if
+/// the repo is fresh.
 pub(super) fn annotate(svc: &CodeService, repo: &str, response: Value) -> Value {
     annotate_with(svc.reindex_states().as_ref(), repo, response)
 }
 
 fn annotate_with(states: &ReindexStateManager, repo: &str, mut response: Value) -> Value {
-    if states.get_freshness_mode() != FreshnessMode::Relaxed {
-        return response;
-    }
     let status = states.get_status(repo);
     if !status.reindex_in_progress {
         return response;
@@ -113,7 +89,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn relaxed_mode_appends_warning_when_reindex_in_progress() {
+    fn appends_warning_when_reindex_in_progress() {
         let states = ReindexStateManager::new();
         states.mark_reindex_start("repo-x");
         let body = json!({ "ok": true, "data": {}, "warnings": [] });
@@ -124,21 +100,10 @@ mod tests {
     }
 
     #[test]
-    fn relaxed_mode_skips_warning_when_fresh() {
+    fn skips_warning_when_fresh() {
         let states = ReindexStateManager::new();
-        // never started => fresh
         let body = json!({ "ok": true, "data": {}, "warnings": [] });
         let annotated = annotate_with(&states, "repo-y", body);
-        assert!(annotated["warnings"].as_array().unwrap().is_empty());
-    }
-
-    #[test]
-    fn strict_mode_does_not_annotate() {
-        let states = ReindexStateManager::new();
-        states.set_freshness_mode("strict").unwrap();
-        states.mark_reindex_start("repo-z");
-        let body = json!({ "ok": true, "data": {}, "warnings": [] });
-        let annotated = annotate_with(&states, "repo-z", body);
         assert!(annotated["warnings"].as_array().unwrap().is_empty());
     }
 }

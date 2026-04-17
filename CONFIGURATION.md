@@ -3,22 +3,18 @@
 Everything an operator can configure in `codesight-mcp`. For the data flow
 and crate layout see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-## Precedence
+## Philosophy
 
-For every setting, the first layer that sets it wins:
+Runtime behavior is **defaults-only**. There is no global TOML, no
+precedence chain, no hypothetical tuning knobs. Three environment
+variables cover every real operator scenario; everything else is a
+compile-time constant in `src/config/defaults.rs`. If you want to change
+a threshold, edit the const and recompile.
 
-1. Command-line flag (where applicable)
-2. Environment variable (`CODESIGHT_*`)
-3. Global config file: `$XDG_CONFIG_HOME/codesight/config.toml`
-   (or `~/Library/Application Support/codesight/config.toml` on macOS,
-   `%APPDATA%\codesight\config.toml` on Windows)
-4. Compiled-in default
-
-A per-workspace `.codesight.toml` at the root of the indexed project
-controls **workspace-local** concerns (adaptive languages, extra file
-extensions, extra query-pack roots). It is loaded by the ingest flow, not
-by the startup loader, because its scope is the workspace being indexed,
-not the server's global lifetime.
+Per-workspace `.codesight.toml` at the root of the indexed project is a
+different thing: it carries workspace-local concerns (adaptive languages,
+extra file extensions, extra query-pack roots) and is loaded by the
+ingest flow, not by the startup loader.
 
 ## Command-line flags
 
@@ -48,55 +44,32 @@ Checks performed:
 - **project_config** — (when `--workspace` given) `.codesight.toml` parses
   if present.
 
-Use it in deploys, smoke tests, and when diagnosing "it won't start".
-
 ## Environment variables
 
-Canonical list. Every name lives in `src/config/env.rs` as a `const &str`;
-do not scatter new `std::env::var("CODESIGHT_*")` calls in new code.
+Canonical list. Every name lives in `src/config/env.rs`. Do not scatter
+new `std::env::var("CODESIGHT_*")` calls in new code.
 
-| Variable                         | Type    | Default | Meaning |
-|----------------------------------|---------|---------|---------|
-| `CODESIGHT_INDEX_DIR`            | path    | `~/.code-index/codesight` | Where code and doc indexes are stored. |
-| `CODESIGHT_STORAGE_DIR`          | path    | (alias of `CODESIGHT_INDEX_DIR`) | Alias kept for operator convenience. |
-| `CODESIGHT_AUTO_REINDEX`         | bool    | `true`  | Auto-reindex on stale detection. Set to `false` or `0` to disable. |
-| `CODESIGHT_MAX_FOLDER_FILES`     | usize   | `0`     | Cap on files discovered from one folder; `0` = unlimited. |
-| `CODESIGHT_CROSS_REPO_DEFAULT`   | bool    | `false` | Default for the `cross_repo` param on `inspect_graph` modes. |
-| `CODESIGHT_STRICT_FRESHNESS`     | bool    | `false` | When `true`, read tools that opt in block until an in-flight reindex finishes. Otherwise they annotate the response with a stale-data warning. |
-| `CODESIGHT_LOG_FORMAT`           | enum    | `pretty` | `pretty` or `json`. |
-| `CODESIGHT_PATH_MAP`             | string  | *(none)* | `orig=repl;...` list for path remapping in MCP responses. |
-| `CODESIGHT_GLOBAL_CONFIG`        | path    | *(none)* | Override location of the global `config.toml`. |
-| `RUST_LOG`                       | string  | see below | Standard `tracing-subscriber` `EnvFilter` syntax. |
+| Variable              | Type    | Default                    | Meaning |
+|-----------------------|---------|----------------------------|---------|
+| `CODESIGHT_INDEX_DIR` | path    | `~/.code-index/codesight`  | Where code and doc indexes are stored. |
+| `CODESIGHT_LOG_FORMAT`| enum    | `pretty`                   | `pretty` or `json`. |
+| `CODESIGHT_PATH_MAP`  | string  | *(none)*                   | `orig=repl,...` list for path remapping in MCP responses (Docker / remote-dev workflows). |
+| `RUST_LOG`            | string  | see below                  | Standard `tracing-subscriber` `EnvFilter` syntax. |
 
 Default log filter: `warn,codesight_mcp=info,codesight_storage=info,codesight_extractors=info`.
 
-### Bool parsing rules
+## Compiled-in defaults
 
-Booleans coming from env vars accept `true`/`1` as true and `false`/`0`
-(or empty) as false. Anything else is treated as "not set" and falls
-through to the next precedence layer.
+These used to be environment-tunable; they are now constants in
+`src/config/defaults.rs`. Change them by editing the source and
+recompiling.
 
-## Global config file (`config.toml`)
-
-All keys are optional. Missing keys fall through to the env layer.
-
-```toml
-# ~/.config/codesight/config.toml
-auto_reindex = true
-index_dir = "/var/codesight/indexes"
-max_folder_files = 50000
-cross_repo_default = false
-strict_freshness = false
-
-# Path-trust policy. When whitelist mode is true (default), only paths
-# inside these folders can be indexed. When false, the list is a blacklist.
-trusted_folders = ["/srv/projects"]
-trusted_folders_whitelist_mode = true
-```
-
-A malformed config file is logged at `WARN` and the server falls back to
-defaults. `codesight-mcp check` will not catch a malformed *global*
-config today; it catches malformed *project* configs.
+| Constant                  | Value    | Meaning |
+|---------------------------|----------|---------|
+| `HANDLER_TIMEOUT_MS`      | `2_000`  | Per-handler wall-clock budget. Exceeding it yields a `TIMEOUT` error. |
+| `SHUTDOWN_DRAIN_SECS`     | `5`      | Shutdown-drain wait before aborting in-flight dispatches. |
+| `DISPATCH_CONCURRENCY`    | `4`      | In-flight `tools/call` dispatches. |
+| `TOKEN_HEAVY_READ_BYTES`  | `4_096`  | Byte threshold for the `TOKEN_HEAVY_READ` warning in `read_content`. |
 
 ## Per-workspace `.codesight.toml`
 
@@ -129,14 +102,41 @@ is owned by `codesight-extractors`. The product crate adds
 ## Path trust
 
 Before any indexing, the path is checked against the trust policy in
-`src/config/trust.rs`:
+`src/config/trust.rs`. `AppConfig.trusted_folders` is a whitelist:
 
-- **Whitelist mode** (default): only paths inside `trusted_folders` (or
-  their descendants) are allowed. Empty list = allow any non-broad path.
-- **Blacklist mode**: `trusted_folders` lists *untrusted* paths; empty
-  list is an error (fail-closed).
-- **Broad roots** (`/`, `/home`, `/Users`, `/tmp`, etc.) are refused
-  outright unless an operator explicitly listed them. When they *are*
-  explicitly trusted, a warning is attached to the response envelope.
+- Non-empty: only paths inside the list (or their descendants) may be indexed.
+- Empty (default): any non-broad path is allowed.
+- Broad roots (`/`, `/home`, `/Users`, `/tmp`, etc.) are refused outright
+  unless explicitly listed. When explicitly trusted, a warning is attached
+  to the response envelope.
 
-See `src/config/trust.rs` for the full list and the policy logic.
+`trusted_folders` is populated programmatically (via `AppConfig::new`
+callers) or from a per-workspace `.codesight.toml` section when indexing.
+
+---
+
+## Warning Codes
+
+Warnings appear in the `warnings` array of any tool response. Each warning
+has a `code`, `message`, and optional `detail` object.
+
+| Code | Tool | Trigger | Recovery |
+|------|------|---------|----------|
+| `TOKEN_HEAVY_READ` | `read_content` | Whole-file read exceeds `TOKEN_HEAVY_READ_BYTES` (4 KB) | Use `inspect_structure view=file_outline`, symbol reads, or bounded file ranges |
+| `STALE_DATA_WARNING` | all read tools | Index is stale relative to on-disk files | Run `ingest_sources incremental=true` |
+| `SEMANTIC_FALLBACK` | `search_catalog` | Dense retrieval unavailable or failed | Results are BM25-only; check embedding model |
+| `CALL_HEURISTIC` | `inspect_graph` | Call graph used text heuristics instead of AST | Results may include false positives |
+| `REGRESSION_DETECTED` | `evaluate_quality` | Quality regression vs. snapshot | Review regressed symbols |
+
+---
+
+## Hook Environment Variables
+
+These variables configure the Claude Code hook subcommands
+(`hook-pretooluse`, `hook-posttooluse`, `hook-precompact`).
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `CODESIGHT_HOOK_MIN_SIZE` | `4096` | Files below this size pass through the Read hook silently |
+| `CODESIGHT_HOOK_BLOCK_READS` | `0` | `1` = deny (block) instead of warn |
+| `CODESIGHT_HOOK_ALLOW_EDIT_READS` | `1` | `1` = allow targeted reads with offset+limit (edit prep) |

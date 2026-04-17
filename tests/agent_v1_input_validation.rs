@@ -556,10 +556,10 @@ fn inspect_graph_imports_requires_file_path() {
     assert_eq!(r["ok"], false, "imports without file_path should fail: {r}");
 }
 
-// ── P2-A: read_content tip ─────────────────────────────────────────────────
+// ── P2-A: read_content hint ────────────────────────────────────────────────
 
 #[test]
-fn read_content_includes_tip() {
+fn read_content_plain_read_omits_next_step_hint() {
     let dir = tempdir().unwrap();
     let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
     let sid = ingest_fixture_repo(&svc, &dir);
@@ -573,9 +573,9 @@ fn read_content_includes_tip() {
         )
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "read_content failed: {r}");
-    let tip = r["_meta"]["tip"].as_str().unwrap_or("");
     assert!(
-        tip.contains("Read tool"),
-        "should include tip about Read tool: {tip}"
+        r["_meta"].get("next_step_hint").is_none(),
+        "plain read should not emit next_step_hint: {}",
+        r["_meta"]
     );
 }

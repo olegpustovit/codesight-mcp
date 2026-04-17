@@ -1,0 +1,34 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [{ "type": "command", "command": "codesight-mcp hook-pretooluse" }]
+      },
+      {
+        "matcher": "Grep",
+        "hooks": [{ "type": "command", "command": "codesight-mcp hook-pretooluse" }]
+      },
+      {
+        "matcher": "Glob",
+        "hooks": [{ "type": "command", "command": "codesight-mcp hook-pretooluse" }]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "codesight-mcp hook-pretooluse" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "codesight-mcp hook-posttooluse" }]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": "codesight-mcp hook-precompact" }]
+      }
+    ]
+  }
+}

@@ -37,23 +37,14 @@ pub(in crate::service) fn dispatch(
 ) -> anyhow::Result<Value> {
     let args = validate::coerce_and_validate(tool_name, args).map_err(anyhow::Error::new)?;
 
-    // Read-path freshness gating: in strict mode, block until the repo is fresh;
-    // in relaxed mode, the response is annotated post-hoc with a stale_data_warning.
+    // Read-path freshness: never block. If a reindex is mid-flight, the
+    // response envelope carries a `STALE_DATA_WARNING` so clients can
+    // surface it instead of the handler hanging on the reindex.
     let freshness_repo = if freshness::is_read_tool(tool_name) {
-        let repo = freshness::source_id(&args).map(str::to_string);
-        if let Some(ref r) = repo {
-            freshness::await_if_strict(svc, r);
-        }
-        repo
+        freshness::source_id(&args).map(str::to_string)
     } else {
         None
     };
-
-    // catalog_sources is global (no source_id): block on any in-flight ingest
-    // under strict mode, otherwise annotate the response with the in-flight list.
-    if tool_name == "catalog_sources" {
-        freshness::await_all_if_strict(svc);
-    }
 
     let result = if let Some(res) = registry::dispatch_tool(svc, tool_name, args)? {
         res

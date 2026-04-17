@@ -1,0 +1,51 @@
+---
+description: codesight-mcp code exploration routing — prefer structured retrieval over native tools
+alwaysApply: true
+---
+
+## Code Exploration Policy — codesight-mcp
+
+This workspace has codesight-mcp indexed. **Always use codesight tools for code
+exploration. Never fall back to Read, Grep, Glob, or Bash for code discovery.**
+
+Exception: use native `Read` only when your client requires a Read-before-Edit
+acknowledgement. That is a client quirk, not the normal discovery path.
+
+### Tool routing
+
+| Task | Tool | Key args |
+|------|------|----------|
+| Find a symbol/function/type | `search_catalog` | `query_mode=keyword` |
+| Search for a string/pattern | `search_catalog` | `query_mode=regex` |
+| Fuzzy / unsure of name | `search_catalog` | `fuzzy=true` |
+| Natural language question | `search_catalog` | `query_mode=natural_language`, `domain=hybrid` |
+| What's in this file? | `inspect_structure` | `view=file_outline` |
+| File tree / project structure | `inspect_structure` | `view=file_tree` |
+| Repo overview | `inspect_structure` | `view=repo_outline` |
+| Read a specific symbol body | `read_content` | `refs=[{kind:"symbol", ...}]` |
+| Read a file range | `read_content` | `refs=[{kind:"file", start_line:N, end_line:M}]` |
+| Batch read N items | `read_content` | pass N items in `refs` array — one call, not N |
+| Who imports this file? | `inspect_graph` | `graph=importers` |
+| What does this file import? | `inspect_graph` | `graph=imports` |
+| Where is X referenced? | `inspect_graph` | `graph=references` |
+| What does this function call? | `inspect_graph` | `graph=calls` |
+| Pre-refactor blast radius | `evaluate_impact` | `analysis=blast_radius` |
+| Rename safety check | `evaluate_impact` | `analysis=rename_safety` |
+| Code quality / hotspots | `evaluate_quality` | `analysis=hotspots` |
+| Dead code | `evaluate_quality` | `analysis=dead_code` |
+| Repo health / doc coverage | `evaluate_quality` | `analysis=repo_health` |
+| Context bundle for a ticket | `assemble_context` | `mode=context_bundle` |
+| List indexed sources | `catalog_sources` | (no args) |
+
+### Efficiency rules
+
+- **Always start with `catalog_sources`.** Gets the `source_id` every tool needs.
+- **Outline first.** Use `inspect_structure view=file_outline` before reading a
+  whole file. Decide which symbols you need, then read those.
+- **Batch reads.** `read_content` takes an array of `refs` — one call, not N.
+- **Narrow scope.** Pass `scope=`, `file_pattern=`, or `unit_kinds=` to
+  `search_catalog` to reduce result size.
+- **Budget tokens.** Set `max_tokens=4000` for browsing, `8000` for deep reads.
+- **Check `_meta.tokens_saved`.** If zero or negative, rethink the query.
+- **Pick the right `query_mode`.** `keyword` for identifiers (fastest), `regex`
+  for patterns, `natural_language` for questions.

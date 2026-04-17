@@ -54,6 +54,24 @@ fn assert_tokens_saved_per_ms_sane(response: &Value, tool: &str) {
     assert!(v >= 0.0, "{tool}: tokens_saved_per_ms must be non-negative");
 }
 
+fn assert_cost_maps_rounded(response: &Value, tool: &str) {
+    for key in ["cost_avoided", "total_cost_avoided"] {
+        let map = response["_meta"][key]
+            .as_object()
+            .unwrap_or_else(|| panic!("{tool}: {key} should be an object"));
+        for (model, value) in map {
+            let v = value
+                .as_f64()
+                .unwrap_or_else(|| panic!("{tool}: {key}.{model} should be a number"));
+            let scaled = v * 10_000.0;
+            assert!(
+                (scaled - scaled.round()).abs() < 1e-9,
+                "{tool}: {key}.{model} should be rounded to 4 decimals, got {v}"
+            );
+        }
+    }
+}
+
 fn build_service() -> (CodeService, tempfile::TempDir) {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
@@ -113,6 +131,30 @@ fn search_catalog_meta_has_baseline_keys() {
     assert!(r["ok"].as_bool().unwrap(), "search_catalog failed: {r:?}");
     assert_has_baseline_keys(&meta_keys(&r), "search_catalog");
     assert_tokens_saved_per_ms_sane(&r, "search_catalog");
+    assert_cost_maps_rounded(&r, "search_catalog");
+    let kinds = r["_meta"]["unit_kinds_effective"]
+        .as_object()
+        .expect("search_catalog: missing unit_kinds_effective object");
+    assert_eq!(kinds.get("symbol").and_then(Value::as_bool), Some(true));
+    assert_eq!(kinds.get("section").and_then(Value::as_bool), Some(false));
+    assert_eq!(kinds.get("file").and_then(Value::as_bool), Some(false));
+    assert!(
+        r["_meta"]["fuzzy_applied"].is_boolean(),
+        "search_catalog: missing fuzzy_applied bool: {}",
+        r["_meta"]
+    );
+    assert_eq!(
+        r["_meta"]["estimate_method"].as_str(),
+        Some("byte_approx_candidate_files"),
+        "search_catalog: estimate_method drifted: {}",
+        r["_meta"]
+    );
+    assert_eq!(
+        r["_meta"]["baseline_scope"].as_str(),
+        Some("candidate_files_materialized_pre_output"),
+        "search_catalog: baseline_scope drifted: {}",
+        r["_meta"]
+    );
 }
 
 #[test]

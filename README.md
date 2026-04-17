@@ -47,7 +47,7 @@ For manual wiring (or if `claude mcp add` isn't available in your environment), 
 }
 ```
 
-`CODESIGHT_INDEX_DIR` is optional — it defaults to `~/.code-index/codesight`. `CODESIGHT_LOG_FORMAT=json` switches stderr output to structured JSON for log aggregators. The full list of env knobs lives in [`CONFIGURATION.md`](CONFIGURATION.md).
+`CODESIGHT_INDEX_DIR` is optional — it defaults to `~/.code-index/codesight`. `CODESIGHT_LOG_FORMAT=json` switches stderr output to structured JSON for log aggregators. These two plus `CODESIGHT_PATH_MAP` (Docker / remote-dev path remapping) are the only env knobs; everything else is a compiled-in default. See [`CONFIGURATION.md`](CONFIGURATION.md).
 
 ## First run
 
@@ -75,13 +75,13 @@ The response carries `timing_ms`, `tokens_saved` telemetry, and the raw result s
 
 ## Where state lives
 
-SQLite databases, embedding stores, and the `_savings.json` ledger all live under `CODESIGHT_INDEX_DIR`. The `check` subcommand inspects and reports on every piece of it; see [`CONFIGURATION.md`](CONFIGURATION.md) for the full precedence chain (env → global TOML → compiled default) and per-workspace `.codesight.toml` overrides.
+SQLite databases, embedding stores, and the `_savings.json` ledger all live under `CODESIGHT_INDEX_DIR`. The `check` subcommand inspects and reports on every piece of it; see [`CONFIGURATION.md`](CONFIGURATION.md) for the env knobs and per-workspace `.codesight.toml` overrides.
 
 ## When to reach for codesight-mcp vs Read / Grep / Glob
 
 **Reach for codesight-mcp when** you're asking a *structural* question: "where is this symbol defined / called / imported?", "what breaks if I rename `Foo`?", "give me an outline of `crates/codesight-storage`", "search the catalog for handlers that mention 'envelope'", "show me the dependency cycle between these modules". Those are the calls that replace expensive full-file reads with small, targeted responses and save the most tokens.
 
-**Reach for Read / Grep / Glob when** you need the exact bytes of a specific file you already know about, you're editing a file, or you're looking for a string that isn't a symbol or declaration. codesight-mcp never replaces `Read` for in-context editing — it replaces the *exploration* phase that precedes editing.
+**Reach for Read / Grep / Glob when** you need the exact bytes of a specific file you already know about, you're editing in a client that insists on its own native-read acknowledgement, or you're looking for a string that isn't a symbol or declaration. codesight-mcp should cover the exploration and targeted-retrieval phase; client-native reads are a harness quirk, not the discovery path.
 
 To get the token savings to actually land, add a short instruction to your workspace `CLAUDE.md` (or `~/.claude/CLAUDE.md`) so the agent prefers codesight-mcp tools by default:
 
@@ -92,6 +92,8 @@ This workspace has codesight-mcp wired up (see `.mcp.json`). Prefer its tools
 over `Read` / `Grep` / `Glob` for code exploration once the index is built:
 
 - `search_catalog` for keyword and fuzzy symbol/file lookup.
+- `search_catalog include_body=true` when you want the symbol/section body in the same response.
+- `search_catalog exclude=[...]` to suppress plan/generated/vendor noise without over-tightening `scope`.
 - `inspect_structure view=file_outline` instead of `Read` for "what's in this file?".
 - `inspect_graph graph=references` or `inspect_graph graph=importers` instead of grepping for callers.
 - `evaluate_impact analysis=blast_radius|rename_safety` before risky refactors.

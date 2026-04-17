@@ -1,0 +1,9 @@
+---
+description: codesight-hooks active — native Read/Grep/Glob intercepted
+alwaysApply: true
+---
+
+codesight-hooks are active in this workspace. Native Read, Grep, Glob, and
+Bash code-exploration calls are intercepted and redirected to codesight-mcp
+tools. If a hook warns or blocks, follow its suggestion — it's pointing to
+a cheaper, structured alternative.

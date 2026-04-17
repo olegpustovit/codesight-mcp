@@ -1,0 +1,86 @@
+---
+description: codesight-mcp code exploration routing — use structured retrieval instead of native file tools
+alwaysApply: true
+---
+
+## Code Exploration Policy — codesight-mcp
+
+codesight-mcp is available in this workspace. **Use it instead of native file
+tools for all code exploration.** The `Grep`, `Glob`, and exploration-style
+`Bash` tools are blocked by the codesight hooks; `Read` is left unblocked only
+because Claude's Edit/Write flow requires a prior Read in session state.
+
+### Start any session
+
+1. `catalog_sources` — list indexed sources and pick up each `source_id`
+   (every other tool needs it).
+2. If `catalog_sources` returns nothing, or the source you care about is
+   missing → `ingest_sources path=<abs-path>` to index it.
+3. `manage_indexes action=session_stats` — when you want current
+   token-savings metrics or to verify the index is fresh.
+
+### Finding code
+
+- Symbol by name (function / class / type / method)
+  → `search_catalog query_mode=keyword query="<name>"` (add `scope=`,
+  `file_pattern=`, `unit_kinds=` to narrow).
+- String / comment / config value / regex pattern
+  → `search_catalog query_mode=regex query="<pattern>"`.
+- Natural-language question about the codebase
+  → `search_catalog query_mode=natural_language domain=hybrid`.
+- Unsure of the exact name
+  → `search_catalog fuzzy=true`.
+
+### Reading code
+
+- Before opening a file at all → `inspect_structure view=file_outline file_path=<path>`.
+  Pick the symbols you need, then read only those.
+- One or many symbols (batch in one call)
+  → `read_content refs=[{kind:"symbol", ...}, ...]`.
+- A specific line range
+  → `read_content refs=[{kind:"file", path:"<path>", start_line:N, end_line:M}]`.
+- A symbol plus its imports as a ready-to-reason-about bundle
+  → `assemble_context mode=context_bundle`.
+
+### Repo structure
+
+- Repo overview (dirs, languages, symbol counts)
+  → `inspect_structure view=repo_outline`.
+- File layout (browse directories)
+  → `inspect_structure view=file_tree`.
+
+### Relationships & impact
+
+- Who imports a file → `inspect_graph graph=importers`.
+- What a file imports → `inspect_graph graph=imports`.
+- Where a symbol is referenced → `inspect_graph graph=references`.
+- What a function calls → `inspect_graph graph=calls`.
+- Pre-refactor blast radius (what breaks if this changes)
+  → `evaluate_impact analysis=blast_radius`.
+- Rename safety check → `evaluate_impact analysis=rename_safety`.
+
+### Quality & health
+
+- Complexity / churn hotspots → `evaluate_quality analysis=hotspots`.
+- Unreachable / dead code → `evaluate_quality analysis=dead_code`.
+- Repo health + doc coverage → `evaluate_quality analysis=repo_health`.
+
+### After editing
+
+- **No manual reindex needed.** The codesight `PostToolUse` hook fires on
+  Edit/Write and spawns an incremental reingest of the touched file in the
+  background. Your next `search_catalog` / `inspect_structure` /
+  `read_content` call will see the updated source.
+
+### Efficiency rules
+
+- **Outline before reading.** `inspect_structure view=file_outline` first,
+  then `read_content` on the specific symbols — never dump the whole file.
+- **Batch reads.** `read_content` takes an array of `refs` — one call, not N.
+- **Narrow scope.** Pass `scope=`, `file_pattern=`, or `unit_kinds=` to
+  `search_catalog` to shrink result size.
+- **Budget tokens.** `max_tokens=4000` for browsing, `8000` for deep reads.
+- **Check `_meta.tokens_saved`.** If zero or negative, your query is wider than
+  it should be — narrow it.
+- **Pick the right `query_mode`.** `keyword` for identifiers (fastest), `regex`
+  for patterns, `natural_language` for questions (slower, more tokens).

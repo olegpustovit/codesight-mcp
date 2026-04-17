@@ -22,18 +22,18 @@ pub const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Threshold for emitting a "No .gitignore" warning during ingest.
 pub const GITIGNORE_WARNING_FILE_THRESHOLD: usize = 500;
 
-/// Maximum number of files to index from a local folder (0 = unlimited).
-pub const DEFAULT_MAX_FOLDER_FILES: usize = 0;
+/// Per-handler wall-clock timeout (milliseconds). Exceeding it yields a
+/// categorized `TIMEOUT` error.
+pub const HANDLER_TIMEOUT_MS: u64 = 2_000;
 
-/// Default per-handler timeout (seconds). Applied to every `tools/call`
-/// dispatch; exceeding it yields `ToolError::Transient` with code `TIMEOUT`.
-pub const DEFAULT_HANDLER_TIMEOUT_SECS: u64 = 60;
+/// How long a shutdown drain waits for in-flight dispatches before
+/// checkpointing and exiting anyway.
+pub const SHUTDOWN_DRAIN_SECS: u64 = 5;
 
-/// Default bound on how long a shutdown drain waits for an in-flight
-/// dispatch to finish before we checkpoint and exit anyway.
-pub const DEFAULT_SHUTDOWN_DRAIN_SECS: u64 = 5;
-
-/// Default bound on in-flight `tools/call` dispatches. Small enough to avoid
-/// SQLite contention under watch mode or batch tools, large enough that quick
+/// Bound on in-flight `tools/call` dispatches. Small enough to avoid SQLite
+/// contention under watch mode or batch tools, large enough that quick
 /// list-style reads don't queue behind a slow ingest.
-pub const DEFAULT_DISPATCH_CONCURRENCY: usize = 4;
+pub const DISPATCH_CONCURRENCY: usize = 4;
+
+/// Byte threshold above which whole-file reads emit `TOKEN_HEAVY_READ`.
+pub const TOKEN_HEAVY_READ_BYTES: u64 = 4096;

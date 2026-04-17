@@ -4,13 +4,13 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use codesight_analysis::impact;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::agent_v1::util_graph::build_call_chain;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
+use codesight_analysis::impact;
 
 impl CodeService {
     pub(in crate::service) fn evaluate_impact_change_velocity(

@@ -4,9 +4,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use crate::agent_readiness::{
-    AgentReadinessSignal, compute_agent_readiness, is_fn_method,
-};
+use crate::agent_readiness::{AgentReadinessSignal, compute_agent_readiness, is_fn_method};
 use crate::complexity::cyclomatic_complexity;
 use crate::dead_code;
 use crate::graph::find_cycles;

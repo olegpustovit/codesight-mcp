@@ -6,4 +6,5 @@ version = "0.0.1"
 [dependencies]
 "github.com/oleghq/agent-configs/plugins/rust-dev" = {}
 "github.com/oleghq/agent-configs/plugins/simplifier" = {}
+codesight-mcp-dev = { path = "plugins/codesight-mcp-dev" }
 # "github.com/owner/repo/path" = {}

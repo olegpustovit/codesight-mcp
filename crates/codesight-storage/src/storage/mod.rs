@@ -29,6 +29,7 @@ pub use types::{AnalysisSymbol, RetrievedSymbol, SearchSymbol, SymbolSourceRecor
 pub struct IndexStore {
     pub(crate) db_path: PathBuf,
     pub(crate) cached_total_bytes: std::sync::Arc<std::sync::OnceLock<u64>>,
+    pub(crate) cached_root_path: std::sync::Arc<std::sync::OnceLock<PathBuf>>,
     pub(crate) ro_conn: std::sync::Arc<crate::db::RoConnCache>,
 }
 

@@ -2,7 +2,6 @@
 
 use serde_json::{Value, json};
 
-use codesight_retrieval::fuzzy;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::agent_v1::util_graph::graph_ref_symbol_id;
@@ -11,6 +10,7 @@ use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 use crate::storage::SearchSymbol;
+use codesight_retrieval::fuzzy;
 
 impl CodeService {
     pub(in crate::service) fn inspect_graph(&self, v: Value) -> anyhow::Result<Value> {

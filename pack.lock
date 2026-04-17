@@ -5,6 +5,18 @@ name = "mcp-impl"
 version = "0.0.1"
 
 [[packages]]
+module = "codesight-mcp-dev"
+direct = true
+kind = "plugin"
+url = "file:///Users/snowbear/WORK/GIT/mcp-impl/plugins/codesight-mcp-dev"
+owner = "path"
+repo = "codesight-mcp-dev"
+path = ""
+commit = "81bd0c2eb66d8d556a171badba3654f56765dfbf"
+cache_key = "3d39f4222793a3a259b317947b4331d1a8360e5d230fd9e79a02ff1fc3b1038d"
+name = ""
+
+[[packages]]
 module = "github.com/oleghq/agent-configs/plugins/rust-dev"
 direct = true
 kind = "plugin"

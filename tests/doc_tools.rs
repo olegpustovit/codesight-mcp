@@ -4,8 +4,8 @@ use std::fs;
 use std::path::Path;
 
 use codesight_mcp::config::AppConfig;
-use codesight_retrieval::sections::should_skip_relative_doc_path;
 use codesight_mcp::service::CodeService;
+use codesight_retrieval::sections::should_skip_relative_doc_path;
 use serde_json::json;
 use tempfile::tempdir;
 

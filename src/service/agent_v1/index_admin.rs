@@ -140,25 +140,66 @@ impl CodeService {
                     .per_tool
                     .into_iter()
                     .map(|(tool, stats)| {
-                        (
-                            tool,
-                            json!({
-                                "calls": stats.calls,
-                                "tokens_saved": stats.tokens_saved,
-                                "timing_ms_sum": stats.timing_ms_sum,
-                                "error_count": stats.error_count,
-                            }),
-                        )
+                        let mut v = json!({
+                            "calls": stats.calls,
+                            "tokens_saved": stats.tokens_saved,
+                            "timing_ms_sum": stats.timing_ms_sum,
+                            "error_count": stats.error_count,
+                        });
+                        if let Some(detail) = &stats.read_content_detail {
+                            v["read_content_detail"] = json!({
+                                "symbol_reads": detail.symbol_reads,
+                                "section_reads": detail.section_reads,
+                                "file_range_reads": detail.file_range_reads,
+                                "file_full_reads": detail.file_full_reads,
+                                "warning_count": detail.warning_count,
+                                "bytes_returned": detail.bytes_returned,
+                            });
+                        }
+                        (tool, v)
                     })
                     .collect();
-                self.success_response(
-                    &timer,
-                    json!({
-                        "action": "session_stats",
-                        "started_at": session.started_at,
-                        "per_tool": per_tool,
-                    }),
-                )
+
+                // Compute read efficiency score from read_content detail.
+                let read_efficiency = per_tool.get("read_content")
+                    .and_then(|v| v.get("read_content_detail"))
+                    .map(|d| {
+                        let sym = d["symbol_reads"].as_u64().unwrap_or(0) as f64;
+                        let sec = d["section_reads"].as_u64().unwrap_or(0) as f64;
+                        let range = d["file_range_reads"].as_u64().unwrap_or(0) as f64;
+                        let full = d["file_full_reads"].as_u64().unwrap_or(0) as f64;
+                        let total = sym + sec + range + full;
+                        if total == 0.0 {
+                            return json!({ "score": 1.0, "label": "excellent", "detail": "No reads recorded." });
+                        }
+                        // Weighted: symbol=1.0, section=1.0, file_range=0.8, file_full=0.0
+                        let score = (sym * 1.0 + sec * 1.0 + range * 0.8) / total;
+                        let score = (score * 100.0).round() / 100.0;
+                        let label = if score >= 0.9 { "excellent" }
+                            else if score >= 0.7 { "good" }
+                            else if score >= 0.5 { "fair" }
+                            else { "poor" };
+                        let full_u = full as u64;
+                        let warns = d["warning_count"].as_u64().unwrap_or(0);
+                        json!({
+                            "score": score,
+                            "label": label,
+                            "detail": format!(
+                                "{}% of reads were targeted (symbol/section/range). {} whole-file read(s), {} warning(s).",
+                                (score * 100.0) as u64, full_u, warns
+                            )
+                        })
+                    });
+
+                let mut data = json!({
+                    "action": "session_stats",
+                    "started_at": session.started_at,
+                    "per_tool": per_tool,
+                });
+                if let Some(eff) = read_efficiency {
+                    data["read_efficiency"] = eff;
+                }
+                self.success_response(&timer, data)
             }
             _ => self.error_response(
                 &timer,

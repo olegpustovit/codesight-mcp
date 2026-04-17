@@ -447,3 +447,66 @@ fn case_sha_staleness_in_meta() {
     assert!(health["ok"].as_bool().unwrap(), "{health:?}");
     assert_eq!(health["data"]["analysis"], "repo_health");
 }
+
+/// `total_matches` must reflect the true pre-cap cardinality, not the clipped
+/// `items.len()`. Fixture: 30 functions sharing a common name token with a
+/// tiny `limit=3`.
+#[test]
+fn search_catalog_total_matches_is_pre_cap() {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().join("many");
+    fs::create_dir_all(&root).unwrap();
+    let mut body = String::new();
+    for i in 0..30 {
+        body.push_str(&format!("def hotfn_{i}():\n    return {i}\n"));
+    }
+    fs::write(root.join("mod.py"), body).unwrap();
+
+    let cfg = AppConfig::new(workspace.path().join("idx"));
+    let svc = CodeService::new(cfg).unwrap();
+    let sid = ingest_code(&svc, &root);
+
+    let r = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": sid,
+                "query": "hotfn",
+                "query_mode": "keyword",
+                "unit_kinds": ["symbol"],
+                "limit": 3,
+            }),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
+    let items_len = r["data"]["items"].as_array().unwrap().len();
+    let total = r["data"]["total_matches"].as_u64().unwrap() as usize;
+    assert!(
+        items_len <= 3,
+        "items should be clipped by limit: {items_len}"
+    );
+    assert!(
+        total >= 30,
+        "total_matches must report pre-cap count (got {total}, items_len={items_len})"
+    );
+    assert_eq!(
+        r["data"]["total_files_with_matches"].as_u64(),
+        Some(1),
+        "all 30 symbols live in one file"
+    );
+    assert_eq!(
+        r["data"]["truncated"].as_bool(),
+        Some(true),
+        "should flag truncation when pre-cap exceeds limit"
+    );
+    let by: Vec<String> = r["data"]["truncated_by"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        by.contains(&"limit".to_string()),
+        "truncated_by should include 'limit': {by:?}"
+    );
+}

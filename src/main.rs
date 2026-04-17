@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use codesight_mcp::{
-    cli::{check, init},
+    cli::{check, hooks, init},
     config::AppConfig,
     mcp::run_stdio,
     service::CodeService,
@@ -66,11 +66,17 @@ enum Command {
         #[arg(long)]
         domain: Option<String>,
     },
+    /// Claude Code hook: PreToolUse interceptor for Read/Grep/Glob/Bash.
+    #[command(name = "hook-pretooluse")]
+    HookPreToolUse,
+    /// Claude Code hook: PostToolUse auto-reindex after Edit/Write.
+    #[command(name = "hook-posttooluse")]
+    HookPostToolUse,
+    /// Claude Code hook: PreCompact session snapshot injection.
+    #[command(name = "hook-precompact")]
+    HookPreCompact,
     /// Generate a commented config template or wire this binary into Claude Code.
     Init {
-        /// Write to `$XDG_CONFIG_HOME/codesight/config.toml` (machine-wide).
-        #[arg(long, conflicts_with_all = ["workspace", "claude_code"])]
-        global: bool,
         /// Write to `./.codesight.toml` (current workspace). Default scope.
         #[arg(long)]
         workspace: bool,
@@ -127,12 +133,14 @@ fn main() {
                 1
             }
         },
+        Command::HookPreToolUse => hooks::run_pretooluse(),
+        Command::HookPostToolUse => hooks::run_posttooluse(),
+        Command::HookPreCompact => hooks::run_precompact(),
         Command::Init {
-            global,
             workspace,
             claude_code,
             force,
-        } => match init::run(global, workspace, claude_code, force) {
+        } => match init::run(workspace, claude_code, force) {
             Ok(()) => 0,
             Err(error) => {
                 eprintln!("codesight-mcp init: {error:#}");
@@ -178,6 +186,7 @@ fn run() -> anyhow::Result<()> {
     let service = CodeService::new(config)?;
     service.enable_background_watch();
     let service = Arc::new(service);
+    service.install_arc_handle();
     run_stdio(service)
 }
 

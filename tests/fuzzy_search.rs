@@ -3,8 +3,8 @@
 use std::fs;
 
 use codesight_mcp::config::AppConfig;
-use codesight_retrieval::fuzzy::{edit_distance, trigrams};
 use codesight_mcp::service::CodeService;
+use codesight_retrieval::fuzzy::{edit_distance, trigrams};
 use serde_json::json;
 use tempfile::tempdir;
 

@@ -30,6 +30,7 @@ impl IndexStore {
         let store = Self {
             db_path,
             cached_total_bytes: Default::default(),
+            cached_root_path: Default::default(),
             ro_conn: Default::default(),
         };
         let conn = db::open_rw(&store.db_path)?;
@@ -44,6 +45,7 @@ impl IndexStore {
         let store = Self {
             db_path,
             cached_total_bytes: Default::default(),
+            cached_root_path: Default::default(),
             ro_conn: Default::default(),
         };
         {
@@ -243,12 +245,17 @@ impl IndexStore {
     }
 
     pub fn root_path(&self) -> anyhow::Result<PathBuf> {
+        if let Some(cached) = self.cached_root_path.get() {
+            return Ok(cached.clone());
+        }
         let conn = self.open_read_only()?;
         let value: String =
             conn.query_row("SELECT root_path FROM repo_info LIMIT 1", [], |row| {
                 row.get(0)
             })?;
-        Ok(PathBuf::from(value))
+        let path = PathBuf::from(value);
+        let _ = self.cached_root_path.set(path.clone());
+        Ok(path)
     }
 
     /// KNN over code-symbol embeddings. Returns `(stable_id, distance)` pairs.

@@ -1,8 +1,6 @@
 //! `codesight-mcp init` — generate an operator config template.
 //!
-//! Three scopes:
-//! - `--global` writes `$XDG_CONFIG_HOME/codesight/config.toml` (applies to all
-//!   workspaces on this machine).
+//! Two scopes:
 //! - `--workspace` writes `./.codesight.toml` (applies to the current repo).
 //! - `--claude-code` writes `./.mcp.json` with a `codesight` server entry so
 //!   Claude Code picks up this binary in the current workspace.
@@ -16,13 +14,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
-use crate::config::loader::global_config_path;
-
 const WORKSPACE_TEMPLATE: &str = r#"# codesight-mcp workspace configuration.
 #
-# This file is read from the current workspace root and overrides machine-wide
-# settings in $XDG_CONFIG_HOME/codesight/config.toml. See CONFIGURATION.md for
-# the full precedence chain and every available knob.
+# This file is read from the current workspace root. See CONFIGURATION.md for
+# every available knob.
 
 # If true, the indexer regenerates the `languages` list below from whatever
 # languages it detects in the workspace on each reindex. Set to false to pin
@@ -50,37 +45,8 @@ languages = [
 # ]
 "#;
 
-const GLOBAL_TEMPLATE: &str = r#"# codesight-mcp global configuration.
-#
-# Applies to every workspace on this machine. Per-workspace `.codesight.toml`
-# files override individual keys. See CONFIGURATION.md for the precedence
-# chain.
-
-# Where the SQLite indexes are stored. Defaults to $XDG_DATA_HOME/codesight.
-# index_dir = "~/.local/share/codesight"
-
-# Strict freshness mode: read tools block until the repo is fresh instead of
-# annotating stale results with a warning. Useful for CI-style automation.
-# strict_freshness = false
-
-# Default enrollment for cross-repo index lookups when a workspace has not
-# opted in via `.codesight.toml`.
-# cross_repo_default = false
-
-# Trusted workspace roots that bypass the "indexing a broad path" warning.
-# Paths are compared after canonicalization.
-# [trust]
-# roots = [
-#     # "/Users/me/code",
-# ]
-"#;
-
 /// Run `codesight-mcp init` with the given flags.
-pub fn run(global: bool, workspace: bool, claude_code: bool, force: bool) -> anyhow::Result<()> {
-    if global && (workspace || claude_code) {
-        bail!("--global cannot be combined with --workspace or --claude-code");
-    }
-
+pub fn run(_workspace: bool, claude_code: bool, force: bool) -> anyhow::Result<()> {
     if claude_code {
         let cwd = std::env::current_dir().context("failed to resolve current directory")?;
         let path = write_claude_code_entry(&cwd, force)?;
@@ -89,16 +55,9 @@ pub fn run(global: bool, workspace: bool, claude_code: bool, force: bool) -> any
         return Ok(());
     }
 
-    let (path, template) = if global {
-        let path = global_config_path()
-            .context("could not resolve a global config directory (set CODESIGHT_GLOBAL_CONFIG)")?;
-        (path, GLOBAL_TEMPLATE)
-    } else {
-        let cwd = std::env::current_dir().context("failed to resolve current directory")?;
-        (cwd.join(".codesight.toml"), WORKSPACE_TEMPLATE)
-    };
-
-    write_template(&path, template, force)?;
+    let cwd = std::env::current_dir().context("failed to resolve current directory")?;
+    let path = cwd.join(".codesight.toml");
+    write_template(&path, WORKSPACE_TEMPLATE, force)?;
     println!("wrote {}", path.display());
     Ok(())
 }

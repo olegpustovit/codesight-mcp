@@ -9,7 +9,7 @@ mod helpers;
 pub mod savings;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 use serde_json::{Value, json};
 use tracing::instrument;
@@ -65,6 +65,12 @@ pub struct CodeService {
     reindex_states: Arc<ReindexStateManager>,
     watchers: file_watcher::WatcherManager,
     embedder: codesight_retrieval::embedder::EmbedderSlot,
+    /// Weak back-reference installed by [`CodeService::install_arc_handle`].
+    /// Populated on the production path (Arc-wrapped server, watchers, hooks)
+    /// so handlers can spawn background work that upgrades the pointer and
+    /// calls back into the service. Uninstalled in unit tests that drive
+    /// `CodeService` directly by value — those take the synchronous fallback.
+    self_weak: OnceLock<Weak<CodeService>>,
 }
 
 impl CodeService {
@@ -74,13 +80,6 @@ impl CodeService {
             .map_err(|e| anyhow::anyhow!("tools.json schema init failed: {e}"))?;
         let ledger = SavingsLedger::new(config.savings_file());
         let reindex_states = Arc::new(ReindexStateManager::new());
-        if config.strict_freshness {
-            // Honor the global flag; individual handlers can still block on
-            // `await_freshness_if_strict` without plumbing the config down.
-            if let Err(error) = reindex_states.set_freshness_mode("strict") {
-                tracing::warn!(error = %error, "failed to apply strict freshness mode");
-            }
-        }
         Ok(Self {
             config,
             ledger,
@@ -88,13 +87,30 @@ impl CodeService {
             reindex_states,
             watchers: file_watcher::WatcherManager::new(),
             embedder: codesight_retrieval::embedder::EmbedderSlot::new(),
+            self_weak: OnceLock::new(),
         })
+    }
+
+    /// Install the back-pointer so handlers can dispatch background work that
+    /// outlives the current request. Call once after wrapping the service in
+    /// `Arc`; subsequent calls are no-ops.
+    pub fn install_arc_handle(self: &Arc<Self>) {
+        let _ = self.self_weak.set(Arc::downgrade(self));
+    }
+
+    /// Upgrade the installed weak pointer, if any. Returns `None` for bare
+    /// (non-Arc) services, which signals callers to take the synchronous
+    /// fallback rather than spawn.
+    pub(crate) fn shared_handle(&self) -> Option<Arc<Self>> {
+        self.self_weak.get().and_then(Weak::upgrade)
     }
 
     /// Lazy-init access to the dense embedder. `Err` means the model could
     /// not be loaded in this session — callers translate to
     /// `SEMANTIC_FALLBACK` warnings rather than erroring the request.
-    pub fn embedder(&self) -> Result<&std::sync::Arc<codesight_retrieval::embedder::Embedder>, &str> {
+    pub fn embedder(
+        &self,
+    ) -> Result<&std::sync::Arc<codesight_retrieval::embedder::Embedder>, &str> {
         self.embedder.get()
     }
 
@@ -190,6 +206,26 @@ impl CodeService {
                 let ok = value["ok"].as_bool().unwrap_or(false);
                 self.with_ledger_locked(|ledger| {
                     let _ = ledger.record_tool_call(tool_name, tokens_saved, timing_ms, ok);
+                    // Record read_content-specific detail when present.
+                    if tool_name == "read_content"
+                        && let Some(scopes) = value.pointer("/_meta/read_scopes")
+                    {
+                        let detail = savings::ReadContentStats {
+                            symbol_reads: scopes["symbol"].as_u64().unwrap_or(0),
+                            section_reads: scopes["section"].as_u64().unwrap_or(0),
+                            file_range_reads: scopes["file_range"].as_u64().unwrap_or(0),
+                            file_full_reads: scopes["file_full"].as_u64().unwrap_or(0),
+                            warning_count: value
+                                .pointer("/_meta/warned_full_file_reads")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0),
+                            bytes_returned: value
+                                .pointer("/_meta/returned_bytes")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0),
+                        };
+                        let _ = ledger.record_read_content_detail(detail);
+                    }
                 });
                 Ok(value)
             }

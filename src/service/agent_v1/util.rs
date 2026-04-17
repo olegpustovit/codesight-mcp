@@ -17,7 +17,11 @@ pub(in crate::service) fn round_score(score: f64) -> f64 {
     }
 }
 
-pub(in crate::service) fn search_hit_symbol(source_id: &str, s: &SearchSymbol) -> Value {
+pub(in crate::service) fn search_hit_symbol(
+    source_id: &str,
+    s: &SearchSymbol,
+    body: Option<&str>,
+) -> Value {
     let mut hit = serde_json::Map::new();
     hit.insert(
         "ref".to_string(),
@@ -44,12 +48,21 @@ pub(in crate::service) fn search_hit_symbol(source_id: &str, s: &SearchSymbol) -
     if let Some(v) = s.edit_distance {
         hit.insert("edit_distance".to_string(), json!(v));
     }
+    if let Some(body) = body {
+        hit.insert("body".to_string(), json!(body));
+    }
     Value::Object(hit)
 }
 
-pub(in crate::service) fn search_hit_section(source_id: &str, s: &SearchSection) -> Value {
-    json!({
-        "ref": {
+pub(in crate::service) fn search_hit_section(
+    source_id: &str,
+    s: &SearchSection,
+    body: Option<&str>,
+) -> Value {
+    let mut hit = serde_json::Map::new();
+    hit.insert(
+        "ref".to_string(),
+        json!({
             "id": s.id,
             "stable_id": s.id,
             "source_id": source_id,
@@ -58,11 +71,15 @@ pub(in crate::service) fn search_hit_section(source_id: &str, s: &SearchSection)
             "path": s.file,
             "title": s.heading,
             "summary": s.summary,
-        },
-        "snippet": s.heading_path,
-        "score": round_score(s.score),
-        "line": s.line,
-    })
+        }),
+    );
+    hit.insert("snippet".to_string(), json!(s.heading_path));
+    hit.insert("score".to_string(), json!(round_score(s.score)));
+    hit.insert("line".to_string(), json!(s.line));
+    if let Some(body) = body {
+        hit.insert("body".to_string(), json!(body));
+    }
+    Value::Object(hit)
 }
 
 /// Rough token count for ranked `total_tokens` / budget checks (`BYTES_PER_TOKEN` bytes ≈ one token).

@@ -12,7 +12,7 @@ use crate::error::StorageResult;
 use super::schema::{EMBEDDING_DIM, INDEX_STORE_INIT_SQL};
 
 /// Bump when adding a migration; keep in sync with [`apply_code_index_migrations`].
-pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 6;
+pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 7;
 
 /// Apply migrations so `PRAGMA user_version == CODE_INDEX_TARGET_USER_VERSION`.
 #[instrument(level = "debug", skip(conn), fields(kind = "migrate_code_index"))]
@@ -74,6 +74,16 @@ pub fn apply_code_index_migrations(conn: &Connection) -> StorageResult<()> {
             "CREATE VIRTUAL TABLE IF NOT EXISTS vec_symbol_embeddings USING vec0(symbol_rowid INTEGER PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIM}]);"
         ))?;
         conn.execute("PRAGMA user_version = 6", [])?;
+    }
+    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if v < 7 {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_symbols_file_line
+                 ON symbols(file_path, start_line, end_line);
+             CREATE INDEX IF NOT EXISTS idx_symbols_file_path
+                 ON symbols(file_path);",
+        )?;
+        conn.execute("PRAGMA user_version = 7", [])?;
     }
     Ok(())
 }

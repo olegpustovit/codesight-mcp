@@ -39,7 +39,7 @@
   },
   {
     "name": "search_catalog",
-    "description": "Unified search over symbols, sections, and file text. When `domain` is omitted, defaults to `code` for `keyword`/`regex` query modes and `hybrid` for `natural_language`. The effective values are echoed back in `_meta.domain_effective` and `_meta.query_mode_effective`.",
+    "description": "Unified search over symbols, sections, and file text. Preferred over native Grep for all code exploration — returns structured results with token savings. Use query_mode=keyword for identifiers (fastest), regex for patterns, natural_language for questions. When `domain` is omitted, defaults to `code` for `keyword`/`regex` and `hybrid` for `natural_language`. Effective values are echoed in `_meta`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "query"],
@@ -56,6 +56,11 @@
           "items": { "type": "string" }
         },
         "scope": { "type": "string" },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Repo-relative prefixes or substrings to skip. Complements `scope` (inclusion)."
+        },
         "limit": { "type": "integer", "default": 10 },
         "query_mode": {
           "type": "string",
@@ -64,7 +69,11 @@
         },
         "context_lines": {
           "type": "integer",
-          "description": "Lines of context before/after for file text hits (code domain, unit_kinds file)."
+          "description": "Lines of before/after context for file-text hits always, and for symbol/section hits when include_body=true."
+        },
+        "include_body": {
+          "type": "boolean",
+          "description": "Include the full source span (symbols) or section text (sections). Default false."
         },
         "file_pattern": { "type": "string" },
         "max_tokens": {
@@ -103,7 +112,7 @@
   },
   {
     "name": "read_content",
-    "description": "Batch read symbols, sections, or files by ref.",
+    "description": "Batch read symbols, sections, or bounded file ranges. Whole-file reads work but are a last resort — prefer inspect_structure view=file_outline first, then symbol/section reads or bounded ranges. May emit TOKEN_HEAVY_READ warning when a full-file read exceeds the configured threshold.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "refs"],
@@ -138,7 +147,7 @@
   },
   {
     "name": "inspect_structure",
-    "description": "Tree, outline, TOC, and document structure views.",
+    "description": "Tree, outline, TOC, and document structure views. Use view=file_outline before reading a whole file — decide which symbols you need, then read those with read_content. Use view=file_tree instead of native Glob for project structure.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "view"],
@@ -188,7 +197,7 @@
   },
   {
     "name": "inspect_graph",
-    "description": "Reference, import, and dependency graph queries.",
+    "description": "Reference, import, and dependency graph queries. Prefer over manual Grep-based reference tracking — returns structured graph data with cross-file resolution.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "graph"],

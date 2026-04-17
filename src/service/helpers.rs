@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use walkdir::DirEntry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -11,7 +10,7 @@ pub enum ToolErrorCategory {
     InvalidArgument,
     NotFound,
     /// Retryable I/O, timeouts, rate limits. Surfaced on `_meta.error_category`
-    /// when a handler exceeds `CODESIGHT_HANDLER_TIMEOUT_SECS` or otherwise
+    /// when a handler exceeds the `HANDLER_TIMEOUT_MS` budget or otherwise
     /// fails in a retryable way.
     Transient,
     Internal,
@@ -73,14 +72,6 @@ pub fn canonicalize_root(path: &str) -> anyhow::Result<PathBuf> {
         anyhow::bail!("path '{}' is not a directory", canonical.display());
     }
     Ok(canonical)
-}
-
-pub fn should_descend(entry: &DirEntry) -> bool {
-    if !entry.file_type().is_dir() {
-        return true;
-    }
-    let name = entry.file_name().to_string_lossy();
-    !crate::db::SKIP_DIRS.iter().any(|skip| *skip == name)
 }
 
 pub fn to_repo_relative(path: &Path, root: &Path) -> anyhow::Result<String> {

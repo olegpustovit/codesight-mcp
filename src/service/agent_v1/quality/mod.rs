@@ -3,13 +3,13 @@ mod repo_health;
 
 use serde_json::{Value, json};
 
-use codesight_analysis::{dead_code, quality, quality_signal};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
+use codesight_analysis::{dead_code, quality, quality_signal};
 
 impl CodeService {
     pub(in crate::service) fn evaluate_quality(&self, v: Value) -> anyhow::Result<Value> {

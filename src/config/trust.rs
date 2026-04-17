@@ -1,5 +1,8 @@
 //! Path-trust policy. Enforces that indexing cannot touch broad filesystem
 //! roots unless an operator has explicitly trusted the path.
+//!
+//! `trusted_folders` is a whitelist: when non-empty, only paths under the
+//! listed folders may be indexed; when empty, any non-broad path is allowed.
 
 use std::path::{Path, PathBuf};
 
@@ -56,82 +59,45 @@ pub fn is_broad_path(path: &Path) -> bool {
 
 pub fn check_trust(config: &AppConfig, resolved_path: &Path) -> TrustCheckResult {
     let folders = &config.trusted_folders;
-    let whitelist = config.trusted_folders_whitelist_mode;
 
-    if whitelist {
-        if folders.is_empty() {
-            if is_broad_path(resolved_path) {
-                return TrustCheckResult::Untrusted {
-                    error: format!(
-                        "Path '{}' is too broad to index safely. \
-                         Configure trusted_folders or use a more specific path.",
-                        resolved_path.display()
-                    ),
-                };
-            }
-            return TrustCheckResult::Trusted;
-        }
-
-        let is_trusted = folders
-            .iter()
-            .any(|tf| resolved_path == tf.as_path() || resolved_path.starts_with(tf));
-
-        if !is_trusted {
+    if folders.is_empty() {
+        if is_broad_path(resolved_path) {
             return TrustCheckResult::Untrusted {
                 error: format!(
-                    "Path '{}' is not under trusted_folders. \
-                     Add it to trusted_folders to allow indexing.",
+                    "Path '{}' is too broad to index safely. \
+                     Configure trusted_folders or use a more specific path.",
                     resolved_path.display()
                 ),
             };
         }
-
-        if is_broad_path(resolved_path) {
-            return TrustCheckResult::TrustedBroadRoot {
-                warning: format!(
-                    "Path '{}' matched trusted_folders and was allowed, \
-                     but would normally be rejected as too broad to index safely.",
-                    resolved_path.display()
-                ),
-            };
-        }
-
-        TrustCheckResult::Trusted
-    } else {
-        if folders.is_empty() {
-            return TrustCheckResult::Untrusted {
-                error: "trusted_folders_whitelist_mode is False (blacklist mode) \
-                     but trusted_folders list is empty. \
-                     In blacklist mode you must list at least one untrusted path."
-                    .to_string(),
-            };
-        }
-
-        let is_blacklisted = folders
-            .iter()
-            .any(|tf| resolved_path == tf.as_path() || resolved_path.starts_with(tf));
-
-        if is_blacklisted {
-            return TrustCheckResult::Untrusted {
-                error: format!(
-                    "Path '{}' is not under trusted_folders (blacklisted).",
-                    resolved_path.display()
-                ),
-            };
-        }
-
-        if is_broad_path(resolved_path) {
-            return TrustCheckResult::TrustedBroadRoot {
-                warning: format!(
-                    "Path '{}' is not blacklisted and was allowed, \
-                     but would normally be rejected as too broad to index safely.",
-                    resolved_path.display()
-                ),
-            };
-        }
-
-        TrustCheckResult::Trusted
+        return TrustCheckResult::Trusted;
     }
+
+    let is_trusted = folders
+        .iter()
+        .any(|tf| resolved_path == tf.as_path() || resolved_path.starts_with(tf));
+
+    if !is_trusted {
+        return TrustCheckResult::Untrusted {
+            error: format!(
+                "Path '{}' is not under trusted_folders. \
+                 Add it to trusted_folders to allow indexing.",
+                resolved_path.display()
+            ),
+        };
+    }
+
+    if is_broad_path(resolved_path) {
+        return TrustCheckResult::TrustedBroadRoot {
+            warning: format!(
+                "Path '{}' matched trusted_folders and was allowed, \
+                 but would normally be rejected as too broad to index safely.",
+                resolved_path.display()
+            ),
+        };
+    }
+
+    TrustCheckResult::Trusted
 }
 
 /// Validate project-config trusted_folders: reject any entry that escapes

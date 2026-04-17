@@ -1,0 +1,3 @@
+name = "codesight-hooks"
+version = "0.1.0"
+description = "Claude Code hooks that steer agents toward codesight-mcp tools instead of native Read/Grep/Glob"

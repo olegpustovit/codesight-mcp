@@ -4,59 +4,38 @@ use std::path::PathBuf;
 
 use crate::path_map::PathPair;
 
-use super::defaults::{
-    DEFAULT_DISPATCH_CONCURRENCY, DEFAULT_HANDLER_TIMEOUT_SECS, DEFAULT_MAX_FOLDER_FILES,
-    DEFAULT_SHUTDOWN_DRAIN_SECS,
-};
+use super::env;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub(super) index_root: PathBuf,
-    pub auto_reindex: bool,
-    /// Whitelist mode (default): only paths under these folders can be indexed.
-    /// When empty and whitelist mode, all non-broad paths are allowed.
+    /// Whitelist of folders allowed to be indexed. When empty, all non-broad
+    /// paths are allowed.
     pub trusted_folders: Vec<PathBuf>,
-    /// When true (default), `trusted_folders` is a whitelist: only listed paths are trusted.
-    /// When false, `trusted_folders` is a blacklist: listed paths are untrusted.
-    pub trusted_folders_whitelist_mode: bool,
-    /// Maximum number of files to discover from a local folder (0 = unlimited).
-    pub max_folder_files: usize,
     /// Path-prefix remapping pairs from `CODESIGHT_PATH_MAP`.
     pub path_map: Vec<PathPair>,
-    /// Default value for `cross_repo` parameter on inspect_graph modes.
-    pub cross_repo_default: bool,
-    /// When true, read tools block (or warn) while a reindex is in flight on
-    /// the same repo. When false (default), read tools proceed and attach a
-    /// `stale_data_warning` to the response envelope.
-    pub strict_freshness: bool,
-    /// Per-handler wall-clock timeout. `0` disables the timeout.
-    pub handler_timeout_secs: u64,
-    /// How long a shutdown drain waits for an in-flight dispatch before
-    /// checkpointing and exiting anyway.
-    pub shutdown_drain_secs: u64,
-    /// Maximum number of in-flight `tools/call` dispatches.
-    pub dispatch_concurrency: usize,
+}
+
+fn default_index_root() -> PathBuf {
+    dirs::home_dir()
+        .map(|home| home.join(".code-index").join("codesight"))
+        .unwrap_or_else(|| PathBuf::from(".code-index").join("codesight"))
 }
 
 impl AppConfig {
     pub fn new(index_root: PathBuf) -> Self {
         Self {
             index_root,
-            auto_reindex: true,
             trusted_folders: Vec::new(),
-            trusted_folders_whitelist_mode: true,
-            max_folder_files: DEFAULT_MAX_FOLDER_FILES,
             path_map: Vec::new(),
-            cross_repo_default: false,
-            strict_freshness: false,
-            handler_timeout_secs: DEFAULT_HANDLER_TIMEOUT_SECS,
-            shutdown_drain_secs: DEFAULT_SHUTDOWN_DRAIN_SECS,
-            dispatch_concurrency: DEFAULT_DISPATCH_CONCURRENCY,
         }
     }
 
     pub fn load() -> Self {
-        super::loader::load_from_env_and_disk()
+        let index_root = env::opt_path(env::INDEX_DIR).unwrap_or_else(default_index_root);
+        let mut config = Self::new(index_root);
+        config.path_map = crate::path_map::parse_path_map_from_env();
+        config
     }
 
     pub fn ensure_layout(&self) -> std::io::Result<()> {

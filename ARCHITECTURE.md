@@ -152,10 +152,12 @@ crates/codesight-storage
 `ingest_sources` wraps its actual indexing work in a RAII
 `ReindexGuard` that calls `ReindexStateManager::mark_reindex_start` at entry
 and either `mark_reindex_done` on success or `mark_reindex_failed` on drop.
-The manager exposes strict / relaxed freshness mode. When
-`CODESIGHT_STRICT_FRESHNESS=true` (or the equivalent config), the manager
-is initialized in strict mode; read handlers that opt into
-`await_freshness_if_strict` block until a mid-flight reindex completes.
+When a read tool detects a stale code store, `ensure_repo_store` kicks off
+`do_index_folder` on a detached background thread via the
+[`CodeService::install_arc_handle`] back-pointer and returns the current
+(stale) store immediately — handlers never block on the reindex. Responses
+that overlap an in-flight reindex are annotated with `STALE_DATA_WARNING`
+(see `src/service/agent_v1/freshness.rs`).
 
 ## MCP contract
 

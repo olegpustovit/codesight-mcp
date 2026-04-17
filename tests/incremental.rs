@@ -17,6 +17,7 @@ fn run_all() {
     run_modified_file_updates_symbol_count();
     run_new_file_increases_counts();
     run_deleted_file_decreases_counts();
+    run_renamed_file_updates_path();
     run_full_reindex_succeeds_on_existing();
     run_language_counts_updated_on_change();
     run_crlf_preserved_in_cached_files();
@@ -136,6 +137,67 @@ fn run_deleted_file_decreases_counts() {
     let r2 = ingest(&svc, ws.path(), true);
     let count2 = r2["data"]["symbol_count"].as_u64().unwrap();
     assert_eq!(count2, 1, "deleting a file should decrease symbol_count");
+}
+
+/// Renaming a file moves it in the index: the new path appears, the old
+/// path disappears, and the ingest `delta` surfaces one removal + one reindex.
+fn run_renamed_file_updates_path() {
+    let ws = tempdir().unwrap();
+    let src = ws.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("a.py"), "def tagged():\n    return 'rename-me'\n").unwrap();
+
+    let (_idx, svc) = make_svc();
+    let r1 = ingest(&svc, ws.path(), true);
+    assert_eq!(r1["data"]["symbol_count"].as_u64().unwrap(), 1);
+
+    fs::rename(src.join("a.py"), src.join("b.py")).unwrap();
+
+    let r2 = ingest(&svc, ws.path(), true);
+    assert_eq!(
+        r2["data"]["symbol_count"].as_u64().unwrap(),
+        1,
+        "rename preserves symbol count"
+    );
+    let files_removed = r2["data"]["delta"]["files_removed"].as_u64().unwrap();
+    let files_reindexed = r2["data"]["delta"]["files_reindexed"].as_u64().unwrap();
+    assert!(
+        files_removed >= 1,
+        "rename should surface delta.files_removed >= 1 (got {files_removed})"
+    );
+    assert!(
+        files_reindexed >= 1,
+        "rename should surface delta.files_reindexed >= 1 (got {files_reindexed})"
+    );
+
+    // Catalog confirms path moved.
+    let sid = r2["data"]["source_id"].as_str().unwrap();
+    let hit = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": sid,
+                "query": "tagged",
+                "query_mode": "keyword",
+                "unit_kinds": ["symbol"],
+                "limit": 5,
+            }),
+        )
+        .unwrap();
+    let paths: Vec<String> = hit["data"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i.pointer("/ref/path")?.as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        paths.iter().any(|p| p.ends_with("b.py")),
+        "renamed file should appear under new path: {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p.ends_with("a.py")),
+        "old path must not linger: {paths:?}"
+    );
 }
 
 /// Full re-index (incremental=false) on an already-indexed tree succeeds.

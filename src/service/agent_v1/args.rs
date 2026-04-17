@@ -50,6 +50,8 @@ pub struct SearchCatalogArgs {
     #[serde(default)]
     pub scope: Option<String>,
     #[serde(default)]
+    pub exclude: Option<Vec<String>>,
+    #[serde(default)]
     pub file_pattern: Option<String>,
     #[serde(default)]
     pub kind: Option<String>,
@@ -57,9 +59,12 @@ pub struct SearchCatalogArgs {
     pub limit: usize,
     #[serde(default)]
     pub query_mode: Option<String>,
-    /// Surrounding lines for `unit_kinds: ["file"]` text hits (clamped).
+    /// Surrounding lines for file hits, and symbol/section bodies when requested (clamped).
     #[serde(default)]
     pub context_lines: Option<usize>,
+    /// Include full symbol/section body text in each hit.
+    #[serde(default)]
+    pub include_body: Option<bool>,
     /// Cap total serialized size of returned `items` (~bytes / BYTES_PER_TOKEN). Alias: `token_budget`.
     #[serde(default, alias = "token_budget")]
     pub max_tokens: Option<u32>,

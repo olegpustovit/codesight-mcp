@@ -149,8 +149,7 @@ impl CodeService {
     ) -> Result<DocStore, ToolError> {
         match self.open_doc_store(repo) {
             Ok(store) => {
-                if self.config.auto_reindex
-                    && let Ok(root) = store.root_path()
+                if let Ok(root) = store.root_path()
                     && root.is_dir()
                     && store.is_stale(&root).unwrap_or(false)
                 {

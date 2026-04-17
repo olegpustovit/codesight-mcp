@@ -6,6 +6,124 @@ archive. See [`AGENTS.md`](AGENTS.md) for the policies that govern this work.
 
 ---
 
+## 2026-04-17 — aggressive config-knob reduction (defaults-only)
+
+Only the operator-relevant three env vars survive; everything else is a
+compile-time constant.
+
+- **Env surface: 14 → 3.** `CODESIGHT_{INDEX_DIR,LOG_FORMAT,PATH_MAP}` stay.
+  Deleted: `STORAGE_DIR` (dupe of `INDEX_DIR`), `AUTO_REINDEX`,
+  `MAX_FOLDER_FILES`, `CROSS_REPO_DEFAULT`, `HANDLER_TIMEOUT_MS`,
+  `SHUTDOWN_DRAIN_SECS`, `DISPATCH_CONCURRENCY`, `TOKEN_HEAVY_READ_BYTES`,
+  `GLOBAL_CONFIG`, `SUMMARIZER_PROVIDER`, `SUMMARIZER_MODEL`.
+- **`AppConfig` fields: 10 → 3.** Keeps `index_root`, `trusted_folders`,
+  `path_map`. Dropped: `auto_reindex` (always on), `max_folder_files`
+  (only `SecurityConfig` caps remain), `cross_repo_default` (per-call
+  `cross_repo` arg suffices), `handler_timeout_ms`, `shutdown_drain_secs`,
+  `dispatch_concurrency` (all → consts in `defaults.rs`),
+  `trusted_folders_whitelist_mode` (always whitelist — blacklist mode
+  deleted from `trust.rs`).
+- **Global TOML loader gone.** `src/config/loader.rs` deleted.
+  `AppConfig::load()` now reads env only (12 lines). `codesight-mcp init
+  --global` flag + `GLOBAL_TEMPLATE` removed; only `--workspace` and
+  `--claude-code` remain.
+- **Constants.** `defaults.rs` exposes `HANDLER_TIMEOUT_MS=2000`,
+  `SHUTDOWN_DRAIN_SECS=5`, `DISPATCH_CONCURRENCY=4`,
+  `TOKEN_HEAVY_READ_BYTES=4096`. `mcp.rs` + `content.rs` read them directly.
+- **Tests pruned.** `cross_repo.rs` Phase 7 cases (2) and
+  `tools_trusted_folders.rs` blacklist + `max_folder_files` cases (7) gone.
+  `search_perf.rs` no longer special-cases `auto_reindex=false`.
+
+Net: config module shrinks from 6 files to 5 (loader deleted); env.rs
+from 47 lines to 15; app.rs loses 4 fields + field plumbing.
+`CONFIGURATION.md` drops the precedence chain and global-TOML section.
+
+---
+
+## 2026-04-17 — no-more-hangs: handler timeouts, regex walker, async reindex
+
+Three-part fix after `search_catalog query_mode=regex query=codesight_retrieval`
+hung the MCP loop on this repo. All three land together; no back-compat.
+
+- **Timeout knob is millisecond-resolution, default 2 s.**
+  `CODESIGHT_HANDLER_TIMEOUT_SECS` → `CODESIGHT_HANDLER_TIMEOUT_MS` (u64 ms).
+  `AppConfig::handler_timeout_secs` → `handler_timeout_ms`. Default was
+  60 s, which is an eternity for an agent UX — 2 s comfortably covers cold
+  reads on this repo while bounding any future foot-gun. `0` disables.
+  `TIMEOUT` error now carries `{tool, budget_ms, hint}` in its `detail`
+  payload.
+- **Regex file search is gitignore-aware, binary-skipping, single-pass.**
+  `search_code_files_text` now walks with `ignore::WalkBuilder` (same policy
+  as ingest), skips files >2 MB and null-byte-containing headers before
+  paying `read_to_string`, and returns `(items, total_matches,
+  files_with_matches, more_file_hits)` in one walk. `count_code_files_text_matches`
+  was a duplicate walk — deleted. Skipping the 30 MB `model.safetensors` in
+  `crates/codesight-retrieval/assets/` alone dropped a regex query from
+  single-digit seconds to single-digit ms on this repo.
+- **Auto-reindex runs on a background thread.** `ensure_repo_store`, when
+  stale, spawns `do_index_folder` via a new `Weak<CodeService>`
+  self-pointer and returns the current (stale) store immediately. The
+  response envelope carries `STALE_DATA_WARNING` via the existing freshness
+  annotation path. `CodeService::install_arc_handle(self: &Arc<Self>)` is
+  called once from `main.rs` after wrapping in `Arc`; bare-service test
+  callers fall back to synchronous reindex.
+- **Strict freshness mode removed.** `FreshnessMode` enum + the
+  `set_freshness_mode` / `get_freshness_mode` /
+  `await_freshness_if_strict` API gone. `CODESIGHT_STRICT_FRESHNESS` env
+  var and `strict_freshness` config key gone. `await_if_strict` and
+  `await_all_if_strict` in `freshness.rs` gone. There is now exactly one
+  freshness behavior: don't block, annotate the envelope with
+  `STALE_DATA_WARNING`. Fewer knobs, no hang path.
+
+Net: −~170 LoC (reindex_state.rs simplification + count walker deletion +
+freshness strict plumbing removal) despite gaining a new `kick_off_reindex`
+helper and the weak-self plumbing.
+
+---
+
+## 2026-04-16 — token-inefficient read mitigation plan
+
+Added [`MITIGATION_PLAN.md`](MITIGATION_PLAN.md) as the implementation plan for
+warn-not-block mitigation of token-heavy reads.
+
+- Scope is intentionally narrow and product-shaped:
+  - response-level warnings in `read_content`
+  - better `_meta.next_step_hint` on expensive plain reads
+  - contract/docs tightening
+  - `session_stats` telemetry for read scope and warning counts
+  - later follow-up via `evaluate_quality analysis=plan_turn`
+- This is the right comparison lesson from prior-art: keep whole-file reads
+  available, but treat them as the expensive fallback and make the cheaper path
+  obvious in both docs and responses.
+- No code landed yet from this plan. It is the execution spec for the next
+  implementation patch.
+
+---
+
+## 2026-04-15 — EXCEL_PLAN_V2 search_catalog friction pass
+
+Implemented the V2 dogfood fixes for `search_catalog` and adjacent envelope
+polish.
+
+- **V1 landed.** `search_catalog` now accepts `include_body`; symbol and doc
+  section hits can carry `body`, and `context_lines` expands those bodies when
+  requested. Dense lexical fusion materializes bodies on the same contract.
+- **V2 landed.** `search_catalog` now accepts `exclude`; symbol FTS, doc FTS,
+  and file-text walks all honor repo-relative path exclusions, and counts stay
+  aligned with the filtered result set.
+- **V3 landed.** `_meta` now echoes `unit_kinds_effective` and
+  `fuzzy_applied` so agents can see which lanes actually ran.
+- **V4 landed.** `src/tools.json` and `README.md` now document
+  `include_body` / `exclude`, and the context-line description matches the
+  shipped behavior.
+- **V5 landed.** `read_content`'s `next_step_hint` no longer pushes agents off
+  codesight for normal lookup, and `_meta.cost_avoided` /
+  `_meta.total_cost_avoided` are rounded to stable 4-decimal values.
+- **Operator note.** Restart the MCP connection after rebuilding the server;
+  long-lived clients can keep serving an older binary within the same session.
+
+---
+
 ## 2026-04-15 — codesight-retrieval crate split
 
 Carved `src/retrieval/**` into `crates/codesight-retrieval/`.

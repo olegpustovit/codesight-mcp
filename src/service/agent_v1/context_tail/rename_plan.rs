@@ -66,7 +66,13 @@ impl CodeService {
         }
 
         fn file_rank(b: &FileBucket) -> u8 {
-            if b.has_definition { 0 } else if b.symbol_body_count > 0 { 1 } else { 2 }
+            if b.has_definition {
+                0
+            } else if b.symbol_body_count > 0 {
+                1
+            } else {
+                2
+            }
         }
 
         let mut files: Vec<(String, FileBucket)> = buckets.into_iter().collect();
@@ -102,23 +108,19 @@ impl CodeService {
         if let Some(new_name) = new_name.as_deref() {
             // Try to resolve a single symbol with `old_name` for collision checks.
             let all = store.all_symbols_with_source()?;
-            let defs: Vec<&codesight_analysis::graph::SymbolInfo> = all
-                .iter()
-                .filter(|s| s.name == old_name)
-                .collect();
+            let defs: Vec<&codesight_analysis::graph::SymbolInfo> =
+                all.iter().filter(|s| s.name == old_name).collect();
             if let [sym] = defs.as_slice()
                 && let Ok(Some(payload)) =
                     codesight_analysis::impact::rename_safety_payload(&store, &sym.id, new_name)
+                && let Some(conflicts) = payload.get("conflicts").and_then(|v| v.as_array())
+                && !conflicts.is_empty()
             {
-                if let Some(conflicts) = payload.get("conflicts").and_then(|v| v.as_array())
-                    && !conflicts.is_empty()
-                {
-                    warnings.push(json!({
-                        "code": "RENAME_COLLISION",
-                        "message": format!("Proposed new name '{new_name}' collides with existing symbols."),
-                        "conflicts": conflicts,
-                    }));
-                }
+                warnings.push(json!({
+                    "code": "RENAME_COLLISION",
+                    "message": format!("Proposed new name '{new_name}' collides with existing symbols."),
+                    "conflicts": conflicts,
+                }));
             }
         }
 

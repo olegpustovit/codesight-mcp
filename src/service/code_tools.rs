@@ -15,7 +15,7 @@ use crate::{
     indexing::code_index,
     repo_id::normalize_repo_id,
     savings::MetaBuilder,
-    storage::{self, IndexStore, RetrievedSymbol, SearchSymbol},
+    storage::{self, DocStore, IndexStore, RetrievedSymbol, SearchSymbol},
 };
 
 fn semantic_embed_warning(message: impl Into<String>) -> Value {
@@ -182,6 +182,7 @@ impl CodeService {
         store: &IndexStore,
         query: String,
         scope: Option<String>,
+        exclude: &[String],
         kind: Option<String>,
         max_results: usize,
     ) -> Result<Vec<SearchSymbol>, ToolError> {
@@ -199,9 +200,52 @@ impl CodeService {
                 effective_query,
                 kind.as_deref(),
                 scope.as_deref(),
+                exclude,
                 max_results,
             )
             .map_err(index_error)
+    }
+
+    pub(super) fn symbol_body_with_context(
+        &self,
+        store: &IndexStore,
+        symbol_id: &str,
+        context_lines: usize,
+    ) -> anyhow::Result<Option<String>> {
+        let Some(record) = store.symbol_record(symbol_id)? else {
+            return Ok(None);
+        };
+        let file_path = record.root_path.join(&record.file_path);
+        let bytes = fs::read(&file_path)?;
+        let source = String::from_utf8_lossy(&bytes).into_owned();
+        if context_lines == 0 {
+            return Ok(source
+                .get(record.start_byte..record.end_byte)
+                .map(ToOwned::to_owned));
+        }
+        let (_, _, body) =
+            expand_context(&source, record.start_line, record.end_line, context_lines);
+        Ok(Some(body))
+    }
+
+    pub(super) fn section_body_with_context(
+        &self,
+        store: &DocStore,
+        section_id: &str,
+        context_lines: usize,
+    ) -> anyhow::Result<Option<String>> {
+        let Some(record) = store.section_record(section_id)? else {
+            return Ok(None);
+        };
+        if context_lines == 0 {
+            return Ok(Some(record.content_text));
+        }
+        let file_path = record.root_path.join(&record.file_path);
+        let bytes = fs::read(&file_path)?;
+        let source = String::from_utf8_lossy(&bytes).into_owned();
+        let (_, _, body) =
+            expand_context(&source, record.start_line, record.end_line, context_lines);
+        Ok(Some(body))
     }
 
     pub(super) fn retrieve_symbol(
@@ -222,6 +266,25 @@ impl CodeService {
                 detail: json!({ "id": symbol_id }),
             })?;
 
+        // Fast path: use stored source from index when no verification or
+        // context expansion is needed. Avoids reading the entire file from disk.
+        if !verify && context_lines == 0 {
+            let current_hash = blake3::hash(record.stored_source.as_bytes())
+                .to_hex()
+                .to_string();
+            return Ok(RetrievedSymbol {
+                id: record.id,
+                kind: record.kind,
+                file: record.file_path,
+                line: record.start_line,
+                end_line: record.end_line,
+                source: record.stored_source,
+                content_hash: current_hash,
+                source_drift: None,
+            });
+        }
+
+        // Slow path: read file from disk for verify/context_lines.
         let file_path = record.root_path.join(&record.file_path);
         let bytes = fs::read(&file_path).map_err(|_| ToolError {
             category: ToolErrorCategory::NotFound,
@@ -274,6 +337,53 @@ impl CodeService {
         Ok(())
     }
 
+    /// Claim the reindex slot and run `do_index_folder`. When the service is
+    /// behind an `Arc` (production path), the reindex runs on a detached
+    /// background thread and the caller returns its current (stale) store
+    /// right away — handlers never block on the reindex. Bare-service test
+    /// callers take the synchronous fallback because there is no shared
+    /// handle to hand the worker.
+    fn kick_off_reindex(&self, repo: &str, repo_id: String, root: std::path::PathBuf) {
+        if self
+            .reindex_states
+            .try_mark_reindex_start(&repo_id)
+            .is_err()
+        {
+            // Another call beat us to it; let its result drive the lifecycle.
+            return;
+        }
+
+        if let Some(arc) = self.shared_handle() {
+            info!(repo = %repo, "spawning background auto-reindex for stale code repo");
+            let states = self.reindex_states.clone();
+            std::thread::spawn(move || match arc.do_index_folder(&root) {
+                Ok(_) => states.mark_reindex_done(&repo_id),
+                Err(error) => {
+                    tracing::warn!(
+                        repo = %repo_id,
+                        error = %error,
+                        "background auto-reindex failed"
+                    );
+                    states.mark_reindex_failed(&repo_id, &format!("{error:#}"));
+                }
+            });
+        } else {
+            info!(repo = %repo, "auto-reindexing stale code repo (synchronous fallback)");
+            match self.do_index_folder(&root) {
+                Ok(_) => self.reindex_states.mark_reindex_done(&repo_id),
+                Err(error) => {
+                    tracing::warn!(
+                        repo = %repo_id,
+                        error = %error,
+                        "synchronous auto-reindex failed"
+                    );
+                    self.reindex_states
+                        .mark_reindex_failed(&repo_id, &format!("{error:#}"));
+                }
+            }
+        }
+    }
+
     pub(crate) fn ensure_repo_store(
         &self,
         repo: &str,
@@ -281,8 +391,7 @@ impl CodeService {
     ) -> Result<IndexStore, ToolError> {
         match self.open_repo_store(repo) {
             Ok(store) => {
-                if self.config.auto_reindex
-                    && let Ok(root) = store.root_path()
+                if let Ok(root) = store.root_path()
                     && root.is_dir()
                 {
                     let extractors = self.extractors_for_root(&root);
@@ -290,26 +399,8 @@ impl CodeService {
                         .is_stale(&root, |p| extractors.extractor_for_path(p).is_some())
                         .unwrap_or(false)
                     {
-                        // Coordinate with ReindexStateManager so N concurrent
-                        // reads don't each kick off their own full reindex.
-                        // If another thread already holds the slot, skip our
-                        // reindex and hand back the current store — freshness
-                        // gating will annotate the response as stale in
-                        // relaxed mode, and block in strict mode.
                         let repo_id = crate::repo_id::normalize_repo_id(&root);
-                        if self.reindex_states.try_mark_reindex_start(&repo_id).is_ok() {
-                            info!(repo = %repo, "auto-reindexing stale code repo");
-                            let result = self.do_index_folder(&root);
-                            if result.is_err() {
-                                self.reindex_states.mark_reindex_failed(
-                                    &repo_id,
-                                    "auto-reindex on stale read failed",
-                                );
-                            } else {
-                                self.reindex_states.mark_reindex_done(&repo_id);
-                            }
-                            return self.open_repo_store(repo);
-                        }
+                        self.kick_off_reindex(repo, repo_id, root);
                     }
                 }
                 Ok(store)

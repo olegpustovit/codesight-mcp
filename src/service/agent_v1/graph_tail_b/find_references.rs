@@ -38,7 +38,7 @@ pub(crate) fn collect_references(
         if sym.name.eq_ignore_ascii_case(name) {
             out.push(RefMatch {
                 file: sym.file.clone(),
-                line: sym.line as u32,
+                line: sym.line,
                 kind: "definition",
                 preview: sym.source.lines().next().unwrap_or("").to_string(),
             });
@@ -48,7 +48,7 @@ pub(crate) fn collect_references(
         if ci_word_match(&sym.source, name) {
             out.push(RefMatch {
                 file: sym.file.clone(),
-                line: sym.line as u32,
+                line: sym.line,
                 kind: "symbol_body_match",
                 preview: sym.name.clone(),
             });

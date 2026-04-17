@@ -12,6 +12,48 @@ use crate::{config::BYTES_PER_TOKEN, core::pipeline::FileFingerprint, db};
 
 use super::{DocStore, SearchSection, SectionRecord};
 
+fn normalize_doc_scope(scope: &str) -> String {
+    scope
+        .replace('\\', "/")
+        .trim_matches('*')
+        .trim()
+        .to_string()
+}
+
+fn push_doc_scope_clause(
+    sql: &mut String,
+    params: &mut Vec<rusqlite::types::Value>,
+    column: &str,
+    scope: Option<&str>,
+) {
+    let Some(scope) = scope else {
+        return;
+    };
+    let scope = normalize_doc_scope(scope);
+    sql.push_str(&format!(
+        " AND ({column} = ? OR {column} LIKE ? OR {column} LIKE ?)"
+    ));
+    params.push(rusqlite::types::Value::from(scope.clone()));
+    params.push(rusqlite::types::Value::from(format!("{scope}%")));
+    params.push(rusqlite::types::Value::from(format!("%{scope}%")));
+}
+
+fn push_doc_exclude_clause(
+    sql: &mut String,
+    params: &mut Vec<rusqlite::types::Value>,
+    column: &str,
+    exclude: &[String],
+) {
+    for pattern in exclude {
+        let pattern = normalize_doc_scope(pattern);
+        sql.push_str(&format!(
+            " AND ({column} NOT LIKE ? AND {column} NOT LIKE ?)"
+        ));
+        params.push(rusqlite::types::Value::from(format!("{pattern}%")));
+        params.push(rusqlite::types::Value::from(format!("%{pattern}%")));
+    }
+}
+
 impl DocStore {
     pub fn file_fingerprints(&self) -> anyhow::Result<HashMap<String, FileFingerprint>> {
         let conn = self.open_connection()?;
@@ -39,6 +81,7 @@ impl DocStore {
         &self,
         query: &str,
         scope: Option<&str>,
+        exclude: &[String],
         max_results: usize,
     ) -> anyhow::Result<Vec<SearchSection>> {
         let query_tokens = db::tokenize(query);
@@ -54,7 +97,7 @@ impl DocStore {
         let row_limit = (max_results.clamp(1, 25) * 6) as i64;
 
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare_cached(
+        let mut sql = String::from(
             r#"
             SELECT
                 s.id, s.heading, s.heading_path, s.level, s.file_path,
@@ -62,34 +105,27 @@ impl DocStore {
                 bm25(section_fts, 8.0, 6.0, 3.0, 1.0, 2.0) AS rank
             FROM section_fts
             JOIN sections s ON s.row_id = section_fts.rowid
-            WHERE section_fts MATCH :fts
-              AND (:scope IS NULL OR s.file_path LIKE :scope_prefix)
-            ORDER BY rank ASC
-            LIMIT :row_limit
+            WHERE section_fts MATCH ?
         "#,
-        )?;
-
-        let scope_prefix = scope.map(|s| format!("{s}%"));
-        let rows = stmt.query_map(
-            rusqlite::named_params! {
-                ":fts": &fts_query,
-                ":scope": &scope,
-                ":scope_prefix": &scope_prefix.as_deref(),
-                ":row_limit": &row_limit,
-            },
-            |row| {
-                Ok(SearchSection {
-                    id: row.get(0)?,
-                    heading: row.get(1)?,
-                    heading_path: row.get(2)?,
-                    level: row.get::<_, i64>(3)? as u8,
-                    file: row.get(4)?,
-                    line: row.get::<_, u32>(5)?,
-                    summary: row.get(6)?,
-                    score: 1.0 / (1.0 + row.get::<_, f64>(7)?.max(0.0)),
-                })
-            },
-        )?;
+        );
+        let mut params = vec![rusqlite::types::Value::from(fts_query)];
+        push_doc_scope_clause(&mut sql, &mut params, "s.file_path", scope);
+        push_doc_exclude_clause(&mut sql, &mut params, "s.file_path", exclude);
+        sql.push_str(" ORDER BY rank ASC LIMIT ?");
+        params.push(rusqlite::types::Value::Integer(row_limit));
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(SearchSection {
+                id: row.get(0)?,
+                heading: row.get(1)?,
+                heading_path: row.get(2)?,
+                level: row.get::<_, i64>(3)? as u8,
+                file: row.get(4)?,
+                line: row.get::<_, u32>(5)?,
+                summary: row.get(6)?,
+                score: 1.0 / (1.0 + row.get::<_, f64>(7)?.max(0.0)),
+            })
+        })?;
 
         let mut results: Vec<SearchSection> = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -101,6 +137,62 @@ impl DocStore {
         }
         results.truncate(max_results.clamp(1, 25));
         Ok(results)
+    }
+
+    /// True pre-cap cardinality for the same FTS WHERE clause as `search_sections`.
+    /// Returns `(total_matches, files_with_matches)`.
+    pub fn count_sections(
+        &self,
+        query: &str,
+        scope: Option<&str>,
+        exclude: &[String],
+    ) -> anyhow::Result<(usize, usize)> {
+        let query_tokens = db::tokenize(query);
+        if query_tokens.is_empty() {
+            return Ok((0, 0));
+        }
+        let fts_query = query_tokens
+            .iter()
+            .map(|t| format!("{t}*"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let conn = self.open_read_only()?;
+        let mut sql = String::from(
+            r#"
+            SELECT COUNT(DISTINCT s.id), COUNT(DISTINCT s.file_path)
+            FROM section_fts
+            JOIN sections s ON s.row_id = section_fts.rowid
+            WHERE section_fts MATCH ?
+        "#,
+        );
+        let mut params = vec![rusqlite::types::Value::from(fts_query)];
+        push_doc_scope_clause(&mut sql, &mut params, "s.file_path", scope);
+        push_doc_exclude_clause(&mut sql, &mut params, "s.file_path", exclude);
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let (total, files): (i64, i64) = stmt
+            .query_row(rusqlite::params_from_iter(params.iter()), |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?;
+        Ok((total.max(0) as usize, files.max(0) as usize))
+    }
+
+    pub fn sum_file_sizes_for_paths(&self, paths: &[String]) -> anyhow::Result<u64> {
+        if paths.is_empty() {
+            return Ok(0);
+        }
+
+        let placeholders = std::iter::repeat_n("?", paths.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT COALESCE(SUM(size_bytes), 0) FROM doc_files WHERE file_path IN ({placeholders})"
+        );
+        let conn = self.open_read_only()?;
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let total = stmt.query_row(rusqlite::params_from_iter(paths.iter()), |row| {
+            row.get::<_, i64>(0)
+        })?;
+        Ok(total.max(0) as u64)
     }
 
     pub fn section_record(&self, id: &str) -> anyhow::Result<Option<SectionRecord>> {

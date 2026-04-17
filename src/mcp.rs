@@ -3,12 +3,12 @@
 //! The loop is driven by a Tokio `current_thread` runtime. Each incoming
 //! `tools/call` is spawned onto a [`JoinSet`] under a bounded
 //! [`Semaphore`], so independent dispatches can progress concurrently up to
-//! `CODESIGHT_DISPATCH_CONCURRENCY`. Writes to the shared output stream are
+//! [`DISPATCH_CONCURRENCY`]. Writes to the shared output stream are
 //! serialized through a [`tokio::sync::Mutex`] so framed JSON-RPC lines are
 //! never interleaved.
 //!
 //! On `SIGINT` or `SIGTERM` we stop accepting new stdin frames, wait up to
-//! `CODESIGHT_SHUTDOWN_DRAIN_SECS` for in-flight dispatches to finish, abort
+//! [`SHUTDOWN_DRAIN_SECS`] for in-flight dispatches to finish, abort
 //! anything still running past the budget, passive-checkpoint all known WAL
 //! files, and return cleanly.
 
@@ -24,6 +24,7 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{info, warn};
 
+use crate::config::defaults::{DISPATCH_CONCURRENCY, HANDLER_TIMEOUT_MS, SHUTDOWN_DRAIN_SECS};
 use crate::service::{CodeService, dispatch_timeout::dispatch_with_timeout};
 
 type SharedWriter<W> = Arc<Mutex<W>>;
@@ -86,11 +87,7 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
     S: Future<Output = ()>,
 {
-    let timeout_secs = service.config().handler_timeout_secs;
-    let drain_secs = service.config().shutdown_drain_secs;
-    let concurrency = service.config().dispatch_concurrency.max(1);
-
-    let semaphore = Arc::new(Semaphore::new(concurrency));
+    let semaphore = Arc::new(Semaphore::new(DISPATCH_CONCURRENCY));
     let writer: SharedWriter<W> = Arc::new(Mutex::new(writer));
     let mut join_set: JoinSet<()> = JoinSet::new();
     let mut lines = reader.lines();
@@ -121,7 +118,9 @@ where
                         let out = writer.clone();
                         join_set.spawn(async move {
                             let _permit = permit;
-                            if let Err(err) = handle_request(&svc, out, request, timeout_secs).await {
+                            if let Err(err) =
+                                handle_request(&svc, out, request, HANDLER_TIMEOUT_MS).await
+                            {
                                 tracing::error!(error = %err, "dispatch task failed");
                             }
                         });
@@ -134,7 +133,7 @@ where
     }
 
     // ── Phase 2: drain with timeout, then abort ─────────────────────────
-    let drain = tokio::time::timeout(Duration::from_secs(drain_secs), async {
+    let drain = tokio::time::timeout(Duration::from_secs(SHUTDOWN_DRAIN_SECS), async {
         while let Some(joined) = join_set.join_next().await {
             log_joined(Some(joined));
         }
@@ -142,7 +141,7 @@ where
     .await;
     if drain.is_err() {
         warn!(
-            drain_secs,
+            drain_secs = SHUTDOWN_DRAIN_SECS,
             "shutdown drain exceeded budget, aborting in-flight dispatches"
         );
         join_set.abort_all();
@@ -168,7 +167,7 @@ async fn handle_request<W>(
     service: &Arc<CodeService>,
     out: SharedWriter<W>,
     request: RpcRequest,
-    timeout_secs: u64,
+    timeout_ms: u64,
 ) -> anyhow::Result<()>
 where
     W: AsyncWrite + Unpin,
@@ -206,7 +205,7 @@ where
         "tools/call" => {
             let params: ToolCallParams = serde_json::from_value(request.params)?;
             let payload =
-                dispatch_with_timeout(service.clone(), params.name, params.arguments, timeout_secs)
+                dispatch_with_timeout(service.clone(), params.name, params.arguments, timeout_ms)
                     .await?;
             write_json(
                 &out,
@@ -274,20 +273,19 @@ mod tests {
 
     use crate::config::AppConfig;
 
-    fn test_service(drain_secs: u64) -> Arc<CodeService> {
+    fn test_service() -> Arc<CodeService> {
         let dir = tempdir().expect("tempdir");
-        let mut config = AppConfig::new(dir.path().join("index"));
-        config.shutdown_drain_secs = drain_secs;
-        config.handler_timeout_secs = 30;
-        config.dispatch_concurrency = 4;
+        let config = AppConfig::new(dir.path().join("index"));
         // Leak the tempdir so the index root survives for the loop's lifetime.
         std::mem::forget(dir);
-        Arc::new(CodeService::new(config).expect("service"))
+        let service = Arc::new(CodeService::new(config).expect("service"));
+        service.install_arc_handle();
+        service
     }
 
     #[tokio::test]
     async fn drain_returns_quickly_when_idle() {
-        let service = test_service(5);
+        let service = test_service();
         let reader = tokio::io::BufReader::new(&b""[..]);
         let writer = tokio::io::sink();
         let start = Instant::now();
