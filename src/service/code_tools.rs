@@ -10,12 +10,13 @@ use super::helpers::{slice_file_lines, *};
 use super::{CodeService, MAX_QUERY_LEN};
 use codesight_imports::imports::language_for_path;
 
+use codesight_storage::storage::{self, IndexStore, RetrievedSymbol, SearchSymbol, doc_index::DocStore};
+
 use crate::{
     core::pipeline::IndexedFileUpdate,
     indexing::code_index,
     repo_id::normalize_repo_id,
     savings::MetaBuilder,
-    storage::{self, DocStore, IndexStore, RetrievedSymbol, SearchSymbol},
 };
 
 fn semantic_embed_warning(message: impl Into<String>) -> Value {

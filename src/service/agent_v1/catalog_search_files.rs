@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::helpers::{normalize_search_scope, to_repo_relative};
-use crate::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 
 /// Hard cap on individual file size for text search. Anything above this is
 /// treated as binary regardless of contents: loading a multi-MB blob into a

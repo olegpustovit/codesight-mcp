@@ -101,7 +101,7 @@ fn bench_search(c: &mut Criterion) {
     group.bench_function("symbol_fts_token", |b| {
         b.iter(|| {
             let hits = store
-                .search_symbols(black_box("process"), None, None, 25)
+                .search_symbols(black_box("process"), None, None, &[], 25)
                 .expect("search");
             black_box(hits);
         });
@@ -109,7 +109,7 @@ fn bench_search(c: &mut Criterion) {
     group.bench_function("symbol_fts_phrase", |b| {
         b.iter(|| {
             let hits = store
-                .search_symbols(black_box("process_request"), None, None, 25)
+                .search_symbols(black_box("process_request"), None, None, &[], 25)
                 .expect("search");
             black_box(hits);
         });

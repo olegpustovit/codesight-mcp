@@ -232,7 +232,7 @@ impl CodeService {
         let store = require_store!(repo: self, sid, args.root_hint.as_deref(), timer);
         let gov = codesight_analysis::quality_signal::compute_governance_signal(&store)?;
         let snapshot_name = args.snapshot_name.as_deref().unwrap_or("session");
-        let snap = crate::storage::QualitySnapshot {
+        let snap = codesight_storage::storage::QualitySnapshot {
             source_id: sid.clone(),
             name: snapshot_name.to_string(),
             created_at: String::new(), // filled by DEFAULT in SQLite

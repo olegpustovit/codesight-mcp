@@ -5,7 +5,7 @@ use std::process::Command;
 use codesight_analysis::quality::hotspots_payload;
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::service::CodeService;
-use codesight_mcp::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 use codesight_mcp::test_support::{index_code_fixture, open_code_store, write_files};
 use serde_json::{Value, json};
 use tempfile::tempdir;

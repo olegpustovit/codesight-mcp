@@ -4,7 +4,7 @@ use std::fs;
 
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::service::CodeService;
-use codesight_mcp::storage::class_hierarchy::parse_bases;
+use codesight_storage::class_hierarchy::parse_bases;
 use codesight_mcp::test_support;
 use serde_json::json;
 use tempfile::tempdir;

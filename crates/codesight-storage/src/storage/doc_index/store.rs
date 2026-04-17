@@ -4,11 +4,10 @@ use std::path::Path;
 
 use rusqlite::{Transaction, params};
 
-use codesight_retrieval::sections::Section;
-
 use crate::config::SCHEMA_VERSION;
+use crate::storage::vector_index::{self, Domain, OwnedVectorRow};
 
-use super::{DocFileUpdate, DocStore};
+use super::{DocFileUpdate, DocSectionInput, DocStore};
 
 impl DocStore {
     #[allow(clippy::too_many_arguments)]
@@ -20,7 +19,7 @@ impl DocStore {
         index_version: u32,
         updated_files: &[DocFileUpdate],
         removed_files: &[String],
-        section_vectors: &[codesight_storage::storage::vector_index::OwnedVectorRow],
+        section_vectors: &[OwnedVectorRow],
     ) -> anyhow::Result<()> {
         let mut conn = self.open_connection()?;
         let tx = conn.transaction()?;
@@ -50,15 +49,8 @@ impl DocStore {
             }
         }
         if !section_vectors.is_empty() {
-            let rows: Vec<_> = section_vectors
-                .iter()
-                .map(codesight_storage::storage::vector_index::OwnedVectorRow::borrowed)
-                .collect();
-            codesight_storage::storage::vector_index::upsert_vectors(
-                &tx,
-                codesight_storage::storage::vector_index::Domain::Section,
-                &rows,
-            )?;
+            let rows: Vec<_> = section_vectors.iter().map(OwnedVectorRow::borrowed).collect();
+            vector_index::upsert_vectors(&tx, Domain::Section, &rows)?;
         }
 
         tx.execute("DELETE FROM repo_info", [])?;
@@ -70,7 +62,11 @@ impl DocStore {
         Ok(())
     }
 
-    fn insert_section(tx: &Transaction<'_>, section: &Section, source: &str) -> anyhow::Result<()> {
+    fn insert_section(
+        tx: &Transaction<'_>,
+        section: &DocSectionInput,
+        source: &str,
+    ) -> anyhow::Result<()> {
         let content_text = source
             .get(section.start_byte..section.end_byte)
             .unwrap_or("");

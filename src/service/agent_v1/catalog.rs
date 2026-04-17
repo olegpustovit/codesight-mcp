@@ -8,8 +8,8 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::CatalogSourcesArgs;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::savings::MetaBuilder;
-use crate::storage::doc_index::{DocStore, list_doc_summaries};
-use crate::storage::{IndexStore, list_repo_summaries};
+use codesight_storage::storage::doc_index::{DocStore, list_doc_summaries};
+use codesight_storage::storage::{IndexStore, list_repo_summaries};
 
 fn index_metadata_staleness_warning(indexed_at: &str) -> Option<String> {
     let dt = DateTime::parse_from_rfc3339(indexed_at).ok()?;

@@ -1,12 +1,7 @@
 //! SQLite storage layer for documentation sections.
 
-mod ingest;
-mod migrations;
 mod query;
 mod store;
-
-pub use ingest::{DocIndexSummary, index_local_docs, index_local_docs_with_section_vectors};
-pub use migrations::{DOC_INDEX_TARGET_USER_VERSION, apply_doc_index_migrations};
 
 use std::{
     fs,
@@ -17,19 +12,44 @@ use anyhow::Context;
 use rusqlite::Connection;
 use serde_json::Value;
 
-use codesight_retrieval::sections::Section;
-
 use crate::db;
+use crate::storage::doc_schema::apply_doc_index_migrations;
+
+/// Raw section data the doc index persists. The orchestration layer builds
+/// these from parsed sections before handing them to [`DocStore::apply_index`]
+/// — this keeps the storage crate free of the section-parsing crate graph.
+#[derive(Debug, Clone)]
+pub struct DocSectionInput {
+    pub id: String,
+    pub file_path: String,
+    pub heading: String,
+    pub heading_path: String,
+    pub level: u8,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub content_hash: String,
+    pub summary: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct DocFileUpdate {
     pub file_path: String,
-    pub format: String, // stored in the `format` DB column
+    pub format: String,
     pub size_bytes: u64,
     pub modified_ns: u64,
     pub content_hash: String,
-    pub sections: Vec<Section>,
+    pub sections: Vec<DocSectionInput>,
     pub source: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DocIndexSummary {
+    pub repo: String,
+    pub indexed_at: String,
+    pub file_count: usize,
+    pub section_count: usize,
 }
 
 #[derive(Clone)]
@@ -145,7 +165,7 @@ impl DocStore {
 
     /// KNN over section embeddings.
     pub fn query_section_knn(&self, query: &[f32], k: usize) -> anyhow::Result<Vec<(String, f64)>> {
-        use codesight_storage::storage::vector_index::{Domain, query_knn};
+        use crate::storage::vector_index::{Domain, query_knn};
         let conn = self.open_read_only()?;
         Ok(query_knn(&conn, Domain::Section, query, k)?)
     }
@@ -166,4 +186,49 @@ pub fn list_doc_summaries(docs_root: &Path) -> anyhow::Result<Vec<Value>> {
         }
     }
     Ok(repos)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::DocStore;
+    use crate::storage::doc_schema::DOC_INDEX_TARGET_USER_VERSION;
+
+    #[test]
+    fn doc_index_uses_wal_and_migration_version() {
+        let base = std::env::temp_dir().join(format!(
+            "codesight_doc_wal_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        let path = base.join("doc_index.sqlite3");
+        DocStore::open(path.clone()).unwrap();
+
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
+
+        let uv: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(uv, DOC_INDEX_TARGET_USER_VERSION);
+
+        // Idempotent re-open should not advance the version or fail.
+        DocStore::open(path.clone()).unwrap();
+        let uv2: i32 = rusqlite::Connection::open(&path)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(uv2, DOC_INDEX_TARGET_USER_VERSION);
+
+        let _ = fs::remove_dir_all(&base);
+    }
 }

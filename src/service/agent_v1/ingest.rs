@@ -11,7 +11,7 @@ use crate::service::agent_v1::util::doc_format_to_type_label;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory, canonicalize_root};
 use crate::service::savings::MetaBuilder;
-use crate::storage::doc_index::DocStore;
+use codesight_storage::storage::doc_index::DocStore;
 
 impl CodeService {
     pub(in crate::service) fn ingest_sources(&self, v: Value) -> anyhow::Result<Value> {

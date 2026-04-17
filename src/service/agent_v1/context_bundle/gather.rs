@@ -8,7 +8,7 @@ use crate::service::agent_v1::args::ContentRef;
 use crate::service::agent_v1::util::resolve_symbol_id;
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
 use crate::service::savings::MetaBuilder;
-use crate::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 use codesight_imports::imports::context_bundle_import_lines;
 
 #[derive(Clone)]

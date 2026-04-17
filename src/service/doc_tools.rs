@@ -1,25 +1,20 @@
 use std::fs;
 
+use codesight_retrieval::sections::is_doc_file;
+use codesight_storage::storage::doc_index::{DocFileUpdate, DocStore, RetrievedSection};
 use codesight_storage::storage::vector_index::OwnedVectorRow;
 use tracing::info;
 
 use super::CodeService;
 use super::args::*;
 use super::helpers::*;
-use crate::{
-    repo_id::normalize_repo_id,
-    savings::MetaBuilder,
-    storage::{
-        DocFileUpdate,
-        doc_index::{self, DocStore},
-    },
-};
+use crate::{indexing::doc_index as ingest, repo_id::normalize_repo_id, savings::MetaBuilder};
 use serde_json::{Value, json};
 
 impl CodeService {
     pub(crate) fn do_index_local(&self, root: &std::path::Path) -> anyhow::Result<DocIndexResult> {
         let mut embed_warning = None;
-        let summary = doc_index::index_local_docs_with_section_vectors(
+        let summary = ingest::index_local_docs_with_section_vectors(
             self.config.doc_db_path(&normalize_repo_id(root)),
             root,
             |_source_id, updated_files| match self.section_vectors_for_updates(updated_files) {
@@ -126,7 +121,7 @@ impl CodeService {
         let source_drift = args.verify && current_hash != record.content_hash;
 
         let hash_verified = args.verify.then(|| current_hash == record.content_hash);
-        let result = doc_index::RetrievedSection {
+        let result = RetrievedSection {
             id: record.id,
             heading: record.heading,
             file: record.file_path,
@@ -151,7 +146,7 @@ impl CodeService {
             Ok(store) => {
                 if let Ok(root) = store.root_path()
                     && root.is_dir()
-                    && store.is_stale(&root).unwrap_or(false)
+                    && store.is_stale(&root, is_doc_file).unwrap_or(false)
                 {
                     info!(repo = %repo, "auto-reindexing stale doc source");
                     let _ = self.do_index_local(&root);

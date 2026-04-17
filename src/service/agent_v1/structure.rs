@@ -20,8 +20,8 @@ use crate::service::agent_v1::util_graph::build_toc_tree;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::savings::MetaBuilder;
-use crate::storage::IndexStore;
-use crate::storage::doc_index::DocStore;
+use codesight_storage::storage::IndexStore;
+use codesight_storage::storage::doc_index::DocStore;
 
 /// Default token budget applied to `inspect_structure view=repo_outline`
 /// when the caller does not pass `max_tokens`. Sized to stay well under
@@ -389,7 +389,7 @@ impl CodeService {
             }
         };
         let Some(view) =
-            crate::storage::class_hierarchy::compute_hierarchy_view(&rows, &class_name)
+            codesight_storage::class_hierarchy::compute_hierarchy_view(&rows, &class_name)
         else {
             return self.error_response(
                 &timer,

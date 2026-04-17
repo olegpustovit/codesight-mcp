@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use crate::service::agent_v1::args::SearchCatalogArgs;
-use crate::storage::{IndexStore, SearchSymbol};
+use codesight_storage::storage::{IndexStore, SearchSymbol};
 use codesight_retrieval::fuzzy;
 
 pub(super) fn augment_with_fuzzy(

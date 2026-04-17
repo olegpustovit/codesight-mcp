@@ -37,7 +37,7 @@ struct ReadOpts<'a> {
     want_hash: bool,
 }
 
-use crate::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 
 impl CodeService {
     fn read_symbol_item(

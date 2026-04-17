@@ -9,7 +9,7 @@ use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
-use crate::storage::SearchSymbol;
+use codesight_storage::storage::SearchSymbol;
 use codesight_retrieval::fuzzy;
 
 impl CodeService {

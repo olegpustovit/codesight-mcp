@@ -3,3 +3,4 @@
 
 pub mod code_index;
 pub mod dep_graph;
+pub mod doc_index;

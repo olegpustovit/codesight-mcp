@@ -26,7 +26,7 @@ pub(crate) struct RefMatch {
 /// Collect whole-word references to `name` in the indexed workspace.
 /// `definition_id` (optional) is excluded from symbol-body matches.
 pub(crate) fn collect_references(
-    store: &crate::storage::IndexStore,
+    store: &codesight_storage::storage::IndexStore,
     name: &str,
 ) -> anyhow::Result<Vec<RefMatch>> {
     let sym_infos = store.all_symbols_with_source()?;
@@ -96,7 +96,7 @@ impl CodeService {
 
     fn find_references_batch(
         &self,
-        store: &crate::storage::IndexStore,
+        store: &codesight_storage::storage::IndexStore,
         identifiers: &[String],
         ci_word_match: fn(&str, &str) -> bool,
     ) -> anyhow::Result<Value> {
@@ -160,7 +160,7 @@ impl CodeService {
 
     fn find_references_single(
         &self,
-        store: &crate::storage::IndexStore,
+        store: &codesight_storage::storage::IndexStore,
         identifier: &str,
         args: &InspectGraphArgs,
         ci_word_match: fn(&str, &str) -> bool,

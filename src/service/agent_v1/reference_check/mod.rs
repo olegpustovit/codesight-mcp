@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use codesight_analysis::evidence::EvidenceNote;
 
-use crate::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 
 use self::evidence::{IdentifierReferenceEvidence, ReferenceEvidenceProvider};
 

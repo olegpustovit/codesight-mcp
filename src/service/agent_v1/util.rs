@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 
 use crate::config::BYTES_PER_TOKEN;
-use crate::storage::{SearchSection, SearchSymbol};
+use codesight_storage::storage::{SearchSymbol, doc_index::SearchSection};
 
 /// Round a ranker score to 3 decimal places for JSON serialization so f64
 /// round-trip artifacts (e.g. `0.5299999999999999`) don't leak into the
@@ -126,7 +126,7 @@ pub(in crate::service) fn pack_catalog_items_to_token_budget(
 /// against the symbol index. Returns `None` when none of the above produce a
 /// usable id (callers turn that into a `MISSING_REF` error).
 pub(in crate::service) fn resolve_symbol_id(
-    store: &crate::storage::IndexStore,
+    store: &codesight_storage::storage::IndexStore,
     stable_id: Option<&str>,
     id: Option<&str>,
     path: Option<&str>,

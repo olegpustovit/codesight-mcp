@@ -1,4 +1,4 @@
-//! Domain-owned documentation indexing orchestration.
+//! Documentation indexing orchestration: crawl, parse sections, persist.
 
 use std::{
     collections::HashSet,
@@ -9,21 +9,14 @@ use std::{
 
 use walkdir::{DirEntry, WalkDir};
 
+use codesight_retrieval::sections::{Section, extract_sections, is_doc_file};
+use codesight_storage::db::SKIP_DIRS;
+use codesight_storage::storage::doc_index::{
+    DocFileUpdate, DocIndexSummary, DocSectionInput, DocStore,
+};
 use codesight_storage::storage::vector_index::OwnedVectorRow;
 
-use codesight_retrieval::sections::{extract_sections, is_doc_file};
-
 use crate::repo_id::normalize_repo_id;
-
-use super::{DocFileUpdate, DocStore};
-
-#[derive(Debug, Clone)]
-pub struct DocIndexSummary {
-    pub repo: String,
-    pub indexed_at: String,
-    pub file_count: usize,
-    pub section_count: usize,
-}
 
 pub fn index_local_docs(db_path: PathBuf, root: &Path) -> anyhow::Result<DocIndexSummary> {
     index_local_docs_with_section_vectors(db_path, root, |_, _| Ok(Vec::new()))
@@ -80,7 +73,10 @@ where
         }
 
         let source = String::from_utf8_lossy(&bytes).into_owned();
-        let sections = extract_sections(&relative_path, &source);
+        let sections = extract_sections(&relative_path, &source)
+            .into_iter()
+            .map(section_to_input)
+            .collect();
 
         let format = if relative_path.ends_with(".md") || relative_path.ends_with(".markdown") {
             "markdown"
@@ -139,6 +135,22 @@ where
     })
 }
 
+fn section_to_input(section: Section) -> DocSectionInput {
+    DocSectionInput {
+        id: section.id,
+        file_path: section.file_path,
+        heading: section.heading,
+        heading_path: section.heading_path,
+        level: section.level,
+        start_line: section.start_line,
+        end_line: section.end_line,
+        start_byte: section.start_byte,
+        end_byte: section.end_byte,
+        content_hash: section.content_hash,
+        summary: section.summary,
+    }
+}
+
 fn modified_ns(time: &SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos() as u64)
@@ -150,7 +162,7 @@ fn should_descend(entry: &DirEntry) -> bool {
         return true;
     }
     let name = entry.file_name().to_string_lossy();
-    !crate::db::SKIP_DIRS.iter().any(|skip| *skip == name)
+    !SKIP_DIRS.iter().any(|skip| *skip == name)
 }
 
 fn to_repo_relative(path: &Path, root: &Path) -> anyhow::Result<String> {

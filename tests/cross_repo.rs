@@ -10,7 +10,7 @@ use codesight_imports::packages::{
 use codesight_mcp::config::AppConfig;
 use codesight_mcp::db;
 use codesight_mcp::service::CodeService;
-use codesight_mcp::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 use serde_json::json;
 
 // ── helpers ──────────────────────────────────────────────────────────────

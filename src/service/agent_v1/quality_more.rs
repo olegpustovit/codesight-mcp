@@ -276,7 +276,7 @@ impl CodeService {
 }
 
 fn check_internal_link(
-    sec: &crate::storage::doc_index::SectionRecord,
+    sec: &codesight_storage::storage::doc_index::SectionRecord,
     target: &str,
     all_files: &HashSet<String>,
     file_headings: &HashMap<String, HashSet<String>>,

@@ -43,7 +43,7 @@ def main() -> None:
         "use regex::Regex;\n"
         "use serde_json::{Value, json};\n\n"
         "use crate::config::BYTES_PER_TOKEN;\n"
-        "use crate::storage::SearchSymbol;\n\n"
+        "use codesight_storage::storage::SearchSymbol;\n\n"
         + "".join(util_parts)
     )
 
@@ -86,10 +86,10 @@ def main() -> None:
             "use chrono::{DateTime, Utc};\n"
             "use walkdir::WalkDir;\n\n"
             "use crate::config::BYTES_PER_TOKEN;\n"
-            "use crate::storage::doc_index::{DocStore, list_doc_summaries};\n"
+            "use codesight_storage::storage::doc_index::{DocStore, list_doc_summaries};\n"
             "use crate::path_map;\n"
             "use crate::repo_id::normalize_repo_id;\n"
-            "use crate::storage::{IndexStore, list_repo_summaries};\n\n"
+            "use codesight_storage::storage::{IndexStore, list_repo_summaries};\n\n"
         ),
     )
     # search + search_code_files_text
@@ -103,11 +103,11 @@ def main() -> None:
             "use regex::Regex;\n"
             "use walkdir::WalkDir;\n\n"
             "use crate::config::BYTES_PER_TOKEN;\n"
-            "use crate::storage::doc_index::DocStore;\n"
+            "use codesight_storage::storage::doc_index::DocStore;\n"
             "use codesight_retrieval::fuzzy;\n"
-            "use crate::storage::SearchSymbol;\n"
+            "use codesight_storage::storage::SearchSymbol;\n"
             "use codesight_retrieval::semantic;\n"
-            "use crate::storage::IndexStore;\n\n"
+            "use codesight_storage::storage::IndexStore;\n\n"
             "use crate::service::helpers::{canonicalize_root, should_descend, to_repo_relative, normalize_search_scope};\n\n"
         ),
     )
@@ -115,12 +115,12 @@ def main() -> None:
         "content",
         impl_block(1333, 1508),
         extra_use=(
-            "use crate::storage::doc_index::DocStore;\n"
+            "use codesight_storage::storage::doc_index::DocStore;\n"
             "use crate::core::symbols::SymbolKind;\n"
-            "use crate::storage::SearchSymbol;\n"
+            "use codesight_storage::storage::SearchSymbol;\n"
             "use crate::repo_id::normalize_repo_id;\n"
             "use codesight_retrieval::sections;\n"
-            "use crate::storage::IndexStore;\n\n"
+            "use codesight_storage::storage::IndexStore;\n\n"
         ),
     )
     write_handler(
@@ -129,12 +129,12 @@ def main() -> None:
         extra_use=(
             "use std::collections::BTreeMap;\n\n"
             "use walkdir::WalkDir;\n\n"
-            "use crate::storage::class_hierarchy;\n"
-            "use crate::storage::doc_index::DocStore;\n"
+            "use codesight_storage::class_hierarchy;\n"
+            "use codesight_storage::storage::doc_index::DocStore;\n"
             "use codesight_framework;\n"
             "use crate::repo_id::normalize_repo_id;\n"
             "use codesight_retrieval::sections;\n"
-            "use crate::storage::IndexStore;\n\n"
+            "use codesight_storage::storage::IndexStore;\n\n"
         ),
     )
 

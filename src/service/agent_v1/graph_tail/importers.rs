@@ -9,7 +9,7 @@ use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
-use crate::storage::{IndexStore, list_repo_summaries};
+use codesight_storage::storage::{IndexStore, list_repo_summaries};
 use codesight_imports::imports::{extract_imports, language_for_path, package_reference_evidence};
 
 impl CodeService {

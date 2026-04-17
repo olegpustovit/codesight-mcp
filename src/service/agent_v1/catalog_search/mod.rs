@@ -13,8 +13,8 @@ use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
 use crate::service::savings::MetaBuilder;
 use crate::service::{CodeService, MAX_QUERY_LEN};
-use crate::storage::DocStore;
-use crate::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
+use codesight_storage::storage::doc_index::DocStore;
 
 use semantic::{DenseRankedHit, run_dense_lane, semantic_fallback_warning};
 

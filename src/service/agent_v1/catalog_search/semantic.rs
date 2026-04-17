@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
-use crate::storage::{DocStore, IndexStore};
+use codesight_storage::storage::{IndexStore, doc_index::DocStore};
 
 #[derive(Clone, Debug)]
 pub(super) struct DenseRankedHit {

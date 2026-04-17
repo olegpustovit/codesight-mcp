@@ -7,9 +7,11 @@ use anyhow::{Context, Result, bail};
 
 use crate::config::AppConfig;
 use crate::indexing::code_index::{CodeIndexOutcome, index_workspace};
+use crate::indexing::doc_index;
 use crate::repo_id::normalize_repo_id;
 use crate::service::CodeService;
-use crate::storage::{IndexStore, doc_index, doc_index::DocStore};
+use codesight_storage::storage::IndexStore;
+use codesight_storage::storage::doc_index::{DocIndexSummary, DocStore};
 
 /// Write a set of repo-relative files under `root`.
 pub fn write_files(root: &Path, files: &[(&str, &str)]) -> Result<()> {
@@ -75,7 +77,7 @@ pub fn open_code_store(config: &AppConfig, source_id: &str) -> Result<IndexStore
 pub fn index_doc_fixture(
     index_root: &Path,
     repo_root: &Path,
-) -> Result<(AppConfig, String, doc_index::DocIndexSummary)> {
+) -> Result<(AppConfig, String, DocIndexSummary)> {
     let config = AppConfig::new(index_root.to_path_buf());
     let summary =
         doc_index::index_local_docs(config.doc_db_path(&normalize_repo_id(repo_root)), repo_root)?;

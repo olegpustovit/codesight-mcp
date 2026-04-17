@@ -7,7 +7,7 @@ use codesight_imports::{
     packages::extract_root_package_from_specifier,
 };
 
-use crate::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 
 #[derive(Debug, Clone)]
 pub struct IdentifierReferenceEvidence {

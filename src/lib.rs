@@ -8,7 +8,6 @@ pub mod model;
 pub mod security;
 pub mod server_support;
 pub mod service;
-pub mod storage;
 /// Synthetic repos and checked-in fixture paths for integration tests.
 pub mod test_support;
 

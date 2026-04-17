@@ -9,10 +9,9 @@ use codesight_imports::{
     packages,
 };
 
-use crate::{
-    config::AppConfig,
-    storage::{IndexStore, list_repo_summaries},
-};
+use codesight_storage::storage::{IndexStore, list_repo_summaries};
+
+use crate::config::AppConfig;
 
 pub enum BuildCrossRepoOutcome {
     Found {

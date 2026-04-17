@@ -8,7 +8,9 @@ use std::{
 use rusqlite::OptionalExtension;
 use serde_json::Value;
 
-use crate::{config::BYTES_PER_TOKEN, core::pipeline::FileFingerprint, db};
+use crate::config::BYTES_PER_TOKEN;
+use crate::core::pipeline::FileFingerprint;
+use crate::db;
 
 use super::{DocStore, SearchSection, SectionRecord};
 
@@ -428,11 +430,20 @@ impl DocStore {
         Ok(n as usize)
     }
 
-    /// Fast stat-based staleness check for doc files.
-    pub fn is_stale(&self, root_path: &Path) -> anyhow::Result<bool> {
+    /// Fast stat-based staleness check for doc files. The caller supplies the
+    /// doc-file predicate so the storage crate doesn't depend on the section
+    /// parsers.
+    pub fn is_stale(
+        &self,
+        root_path: &Path,
+        is_doc_file: impl Fn(&str) -> bool,
+    ) -> anyhow::Result<bool> {
         let conn = self.open_read_only()?;
-        Ok(db::check_staleness(&conn, root_path, "doc_files", |rel| {
-            codesight_retrieval::sections::is_doc_file(rel)
-        })?)
+        Ok(db::check_staleness(
+            &conn,
+            root_path,
+            "doc_files",
+            is_doc_file,
+        )?)
     }
 }

@@ -5,7 +5,7 @@ use crate::service::agent_v1::args::{AssembleContextArgs, ContentRef};
 use crate::service::agent_v1::util::{resolve_symbol_id, token_estimate_for_context};
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
 use crate::service::savings::MetaBuilder;
-use crate::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 
 use super::gather::BundleRow;
 

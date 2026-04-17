@@ -11,7 +11,7 @@ use notify_debouncer_full::{DebounceEventResult, new_debouncer, notify::Recursiv
 use crate::config::AppConfig;
 use crate::extractors::ExtractorRegistry;
 use crate::indexing::code_index;
-use crate::storage::IndexStore;
+use codesight_storage::storage::IndexStore;
 
 struct WatchHandle {
     _thread: std::thread::JoinHandle<()>,

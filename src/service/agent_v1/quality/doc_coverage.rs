@@ -1,15 +1,9 @@
 //! Doc-coverage payload builder.
-//!
-//! Lives in the root crate because it reads from `DocStore`, which is owned
-//! by the root crate's `storage::doc_index` module. Every other quality
-//! payload builder lives in `codesight-analysis`; this one stays here until
-//! `DocStore` is promoted into `codesight-storage`.
 
 use serde_json::{Value, json};
 
 use codesight_analysis::quality::extract_symbol_name_from_id;
-
-use crate::storage::doc_index::DocStore;
+use codesight_storage::storage::doc_index::DocStore;
 
 pub fn doc_coverage_payload(doc_store: &DocStore, symbol_ids: &[String]) -> anyhow::Result<Value> {
     if symbol_ids.is_empty() {
