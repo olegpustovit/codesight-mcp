@@ -16,10 +16,20 @@ pub struct AppConfig {
     pub path_map: Vec<PathPair>,
 }
 
-fn default_index_root() -> PathBuf {
-    dirs::home_dir()
-        .map(|home| home.join(".code-index").join("codesight"))
-        .unwrap_or_else(|| PathBuf::from(".code-index").join("codesight"))
+/// OS-native application data directory for codesight's index state.
+///
+/// - macOS: `~/Library/Application Support/codesight-mcp`
+/// - Linux: `$XDG_DATA_HOME/codesight-mcp` or `~/.local/share/codesight-mcp`
+/// - Windows: `%APPDATA%\codesight-mcp`
+///
+/// Falls back to `~/.local/share/codesight-mcp` if `dirs::data_dir()` cannot
+/// resolve (e.g. no HOME set). Never falls back to a repo-local path so the
+/// index does not leak into the workspace being indexed.
+pub fn default_index_root() -> PathBuf {
+    dirs::data_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local").join("share")))
+        .expect("no OS data dir and no home dir available for codesight index")
+        .join("codesight-mcp")
 }
 
 impl AppConfig {

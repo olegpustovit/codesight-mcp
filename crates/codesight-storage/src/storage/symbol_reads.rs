@@ -153,9 +153,9 @@ impl IndexStore {
     /// Resolve a `(file_path, name)` pair to an indexed symbol id.
     ///
     /// Agents often know where a symbol lives and what it's called but
-    /// don't have the stable id or its start line (MUNCH's `symbol_id="name"`
-    /// ergonomics). Prefers the outermost match (smallest depth, largest
-    /// span) so overloaded / nested symbols surface the top-level one.
+    /// don't have the stable id or its start line. Prefers the outermost
+    /// match (smallest depth, largest span) so overloaded / nested symbols
+    /// surface the top-level one.
     pub fn symbol_id_at_name(
         &self,
         file_path: &str,

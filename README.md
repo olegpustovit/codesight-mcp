@@ -47,7 +47,7 @@ For manual wiring (or if `claude mcp add` isn't available in your environment), 
 }
 ```
 
-`CODESIGHT_INDEX_DIR` is optional — it defaults to `~/.code-index/codesight`. `CODESIGHT_LOG_FORMAT=json` switches stderr output to structured JSON for log aggregators. These two plus `CODESIGHT_PATH_MAP` (Docker / remote-dev path remapping) are the only env knobs; everything else is a compiled-in default. See [`CONFIGURATION.md`](CONFIGURATION.md).
+`CODESIGHT_INDEX_DIR` is optional — it defaults to the OS-native application data directory (`~/Library/Application Support/codesight-mcp` on macOS, `$XDG_DATA_HOME/codesight-mcp` or `~/.local/share/codesight-mcp` on Linux, `%APPDATA%\codesight-mcp` on Windows). `CODESIGHT_LOG_FORMAT=json` switches stderr output to structured JSON for log aggregators. These two plus `CODESIGHT_PATH_MAP` (Docker / remote-dev path remapping) are the only env knobs; everything else is a compiled-in default. See [`CONFIGURATION.md`](CONFIGURATION.md).
 
 ## First run
 

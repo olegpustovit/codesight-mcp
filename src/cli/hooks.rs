@@ -453,7 +453,7 @@ fn use_path_prefix(line: &str) -> Option<String> {
 fn index_storage_dir() -> PathBuf {
     std::env::var_os(crate::config::env::INDEX_DIR)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(".codesight-index"))
+        .unwrap_or_else(crate::config::default_index_root)
 }
 
 fn should_emit_refactor_hint(prefix: &str) -> bool {

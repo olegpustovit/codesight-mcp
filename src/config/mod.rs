@@ -15,7 +15,7 @@ pub mod trust;
 mod app;
 mod paths;
 
-pub use app::AppConfig;
+pub use app::{AppConfig, default_index_root};
 pub use defaults::{
     BUILD_SHA, BUILD_TIME, BUILD_VERSION, BYTES_PER_TOKEN, GITIGNORE_WARNING_FILE_THRESHOLD,
     RETRIEVAL_ENGINE, RETRIEVAL_VERSION, SCHEMA_VERSION, timeout_for_tool,

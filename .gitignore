@@ -8,8 +8,5 @@ inc_test
 inc_test2
 t
 
-<<<<<<< HEAD
 .claude/
-=======
-.claude/worktrees/
->>>>>>> worktree-agent-a715e8fb
+.codesight-index/
