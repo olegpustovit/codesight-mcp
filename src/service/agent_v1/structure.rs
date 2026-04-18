@@ -117,6 +117,20 @@ impl CodeService {
             rows.truncate(max_files);
         }
         let listed = rows.len();
+        // Precompute the C++-reclassification set in one batched query
+        // (was: per-file `file_has_cpp_symbols` call inside the loop).
+        let h_file_paths: Vec<&str> = rows
+            .iter()
+            .filter(|(p, lang, _, sym_count)| {
+                lang == "cpp" && p.ends_with(".h") && *sym_count > 0
+            })
+            .map(|(p, _, _, _)| p.as_str())
+            .collect();
+        let cpp_file_set = if h_file_paths.is_empty() {
+            std::collections::HashSet::new()
+        } else {
+            store.files_with_cpp_symbols_batch(&h_file_paths)?
+        };
         let mut root: BTreeMap<String, FileTreeBuildNode> = BTreeMap::new();
         for (path, mut lang, size, sym_count) in rows {
             // Heuristic: .h files reported as cpp may actually be C. If a .h
@@ -126,7 +140,7 @@ impl CodeService {
             if lang == "cpp"
                 && path.ends_with(".h")
                 && sym_count > 0
-                && !store.file_has_cpp_symbols(&path).unwrap_or(true)
+                && !cpp_file_set.contains(path.as_str())
             {
                 lang = "c".to_string();
             }
@@ -234,15 +248,23 @@ impl CodeService {
             );
         }
         if let Some(paths) = args.file_paths.as_ref() {
+            // Batch the two lookups. Replaces 2N DB round-trips with 2.
+            let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+            let mut outlines = store.file_outlines_batch(&refs)?;
+            let languages = store.file_languages_batch(&refs)?;
             let mut results = Vec::with_capacity(paths.len());
             for p in paths {
-                let symbols = store.file_outline(p)?;
-                let lang = store.file_language(p)?.unwrap_or_default();
+                let symbols = outlines.remove(p.as_str()).unwrap_or_default();
+                let lang = languages
+                    .get(p.as_str())
+                    .cloned()
+                    .unwrap_or_default();
+                let count = symbols.len();
                 results.push(json!({
                     "file": p,
                     "language": lang,
                     "items": symbols,
-                    "symbol_count": symbols.len(),
+                    "symbol_count": count,
                 }));
             }
             return self.success_response(

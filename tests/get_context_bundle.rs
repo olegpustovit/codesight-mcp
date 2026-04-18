@@ -81,7 +81,7 @@ fn first_symbol_id(svc: &CodeService, source_id: &str, query: &str) -> String {
     assert!(s["ok"].as_bool().unwrap(), "{s:?}");
     let items = s["data"]["items"].as_array().unwrap();
     assert!(!items.is_empty(), "no symbols for query {query:?}");
-    items[0]["ref"]["stable_id"].as_str().unwrap().to_string()
+    items[0]["ref"]["id"].as_str().unwrap().to_string()
 }
 
 fn read_symbol_source(svc: &CodeService, source_id: &str, stable_id: &str) -> String {
@@ -186,6 +186,7 @@ fn case_meta_envelope() {
                 "source_id": sid,
                 "mode": "context_bundle",
                 "refs": [{ "kind": "symbol", "stable_id": sym }],
+                "_meta_verbose": true,
             }),
         )
         .unwrap();

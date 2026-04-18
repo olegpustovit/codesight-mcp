@@ -22,6 +22,7 @@ impl CodeService {
             "changed_units" => self.evaluate_impact_changed_units(&args),
             "change_velocity" => self.evaluate_impact_change_velocity(&args),
             "impact_preview" => self.evaluate_impact_impact_preview(&args),
+            "path_rename" => self.evaluate_impact_path_rename(&args),
             "rename_safety" => self.evaluate_impact_rename_safety(&args),
             _ => {
                 let timer = MetaBuilder::new(0);

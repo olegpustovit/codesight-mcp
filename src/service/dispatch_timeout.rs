@@ -17,17 +17,20 @@ use tokio::time::timeout;
 
 use super::CodeService;
 use super::helpers::{ToolError, ToolErrorCategory};
+use crate::config::timeout_for_tool;
 
 /// Run `service.dispatch(tool_name, arguments)` under a wall-clock deadline.
 ///
-/// A `timeout_ms` of `0` disables the deadline and waits forever.
+/// `timeout_override` lets callers force a budget; `None` picks the per-tool
+/// default via [`timeout_for_tool`]. A resolved budget of `0` waits forever.
 pub async fn dispatch_with_timeout(
     service: Arc<CodeService>,
     tool_name: String,
     arguments: Value,
-    timeout_ms: u64,
+    timeout_override: Option<u64>,
 ) -> anyhow::Result<Value> {
     let tool_label = tool_name.clone();
+    let budget_ms = timeout_override.unwrap_or_else(|| timeout_for_tool(&tool_name));
     let work = async move {
         task::spawn_blocking(move || service.dispatch(&tool_name, arguments))
             .await
@@ -40,7 +43,7 @@ pub async fn dispatch_with_timeout(
                 ))
             })?
     };
-    run_with_deadline(work, timeout_ms, &tool_label).await
+    run_with_deadline(work, budget_ms, &tool_label).await
 }
 
 /// Deadline helper extracted for hermetic tests: resolves `work` normally, or
@@ -65,9 +68,30 @@ where
             json!({
                 "tool": tool_name,
                 "budget_ms": timeout_ms,
-                "hint": "narrow the query (scope, unit_kinds, limit) — the handler budget is a compile-time constant.",
+                "hint": "narrow the query (scope, unit_kinds, limit), or if a reindex is in progress wait for it to settle and retry.",
+                "recovery_hint": recovery_hint_for(tool_name),
             }),
         ))),
+    }
+}
+
+/// Tool-specific suggestion agents can act on when the deadline elapses.
+fn recovery_hint_for(tool_name: &str) -> &'static str {
+    match tool_name {
+        "read_content" | "inspect_structure" => {
+            "fall back to a native Read of the file; the index is likely contended by an in-flight reindex."
+        }
+        "search_catalog" => {
+            "narrow the query via scope=, file_pattern=, or unit_kinds=; a regex mode often hits too many matches."
+        }
+        "inspect_graph" => {
+            "narrow via scope, reduce limit, or target a single file_path/symbol_id."
+        }
+        "evaluate_quality" | "evaluate_impact" | "assemble_context" => {
+            "target a single file via scope= or refs=, or lower top_n/depth."
+        }
+        "ingest_sources" => "large workspaces take tens of seconds; retry with incremental=true.",
+        _ => "retry with narrower arguments or after current activity settles.",
     }
 }
 

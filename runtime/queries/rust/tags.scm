@@ -26,6 +26,15 @@
 ; ── Functions & Methods ───────────────────────────────────
 (function_item name: (identifier) @name) @definition.function
 
+; ── Public reexports ──────────────────────────────────────
+(use_declaration
+  (visibility_modifier)
+  argument: (identifier) @name) @definition.reexport
+
+(use_declaration
+  (visibility_modifier)
+  argument: (scoped_identifier) @name) @definition.reexport
+
 ; ── Constants & Statics ───────────────────────────────────
 (const_item name: (identifier) @name) @definition.constant
 (static_item name: (identifier) @name) @definition.constant

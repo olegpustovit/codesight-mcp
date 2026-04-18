@@ -279,3 +279,105 @@ fn language_lookup_priority(tier: ExtractionTier) -> u8 {
         ExtractionTier::Profiled => 3,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn registry() -> ExtractorRegistry {
+        ExtractorRegistry::default()
+    }
+
+    #[test]
+    fn extractor_for_path_matches_rust() {
+        let reg = registry();
+        let e = reg.extractor_for_path(&PathBuf::from("src/lib.rs"));
+        assert!(e.is_some(), "rust extractor should be registered");
+        assert_eq!(e.unwrap().language_name().to_ascii_lowercase(), "rust");
+    }
+
+    #[test]
+    fn extractor_for_path_returns_none_for_unknown_extension() {
+        let reg = registry();
+        assert!(
+            reg.extractor_for_path(&PathBuf::from("data.xyznope"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn extractor_for_path_handles_compound_extension_blade() {
+        let reg = registry();
+        let e = reg.extractor_for_path(&PathBuf::from("views/layout.blade.php"));
+        assert!(
+            e.is_some(),
+            "compound .blade.php should resolve to a registered extractor"
+        );
+    }
+
+    #[test]
+    fn apply_extra_extensions_rejects_empty_extension() {
+        let mut reg = registry();
+        let mut map = HashMap::new();
+        map.insert("".to_string(), "rust".to_string());
+        let warnings = reg.apply_extra_extensions(&map);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("empty extension"));
+    }
+
+    #[test]
+    fn apply_extra_extensions_rejects_dot_only_extension() {
+        let mut reg = registry();
+        let mut map = HashMap::new();
+        map.insert(".".to_string(), "rust".to_string());
+        let warnings = reg.apply_extra_extensions(&map);
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn apply_extra_extensions_rejects_empty_language() {
+        let mut reg = registry();
+        let mut map = HashMap::new();
+        map.insert(".ext".to_string(), "".to_string());
+        let warnings = reg.apply_extra_extensions(&map);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("empty language"));
+    }
+
+    #[test]
+    fn apply_extra_extensions_rejects_unknown_language() {
+        let mut reg = registry();
+        let mut map = HashMap::new();
+        map.insert(".klingon".to_string(), "klingon".to_string());
+        let warnings = reg.apply_extra_extensions(&map);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unknown language"));
+    }
+
+    #[test]
+    fn apply_extra_extensions_registers_valid_mapping_and_routes_path() {
+        let mut reg = registry();
+        let mut map = HashMap::new();
+        map.insert(".rsx".to_string(), "rust".to_string());
+        let warnings = reg.apply_extra_extensions(&map);
+        assert!(warnings.is_empty(), "valid mapping should emit no warnings");
+        let e = reg.extractor_for_path(&PathBuf::from("something.rsx"));
+        assert!(e.is_some());
+        assert_eq!(e.unwrap().language_name().to_ascii_lowercase(), "rust");
+    }
+
+    #[test]
+    fn apply_extra_extensions_normalizes_extension_case_and_strips_dot() {
+        let mut reg = registry();
+        let mut map = HashMap::new();
+        // mixed case, no leading dot — should still route lowercased
+        map.insert("RSX".to_string(), "rust".to_string());
+        let warnings = reg.apply_extra_extensions(&map);
+        assert!(warnings.is_empty());
+        assert!(
+            reg.extractor_for_path(&PathBuf::from("file.rsx"))
+                .is_some()
+        );
+    }
+}

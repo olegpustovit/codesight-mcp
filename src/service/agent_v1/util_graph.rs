@@ -72,14 +72,20 @@ pub(in crate::service) fn extract_symbol_names_from_content(
     }
 }
 
-/// Build a call chain from target_id to caller_id using BFS on call edges.
-pub(in crate::service) fn build_call_chain(
+/// BFS once from `target_id` across reverse call edges, returning a
+/// `caller_id → parent_caller_id` map rooted at the target. Cheap chain
+/// reconstruction for any caller is then an O(path_len) walk via
+/// [`reconstruct_caller_chain`].
+///
+/// Replaces a per-caller BFS that rebuilt the reverse edge map and
+/// cloned the entire path vector on every queue push — the combination
+/// timed out `evaluate_impact analysis=impact_preview` for high-fan-in
+/// targets (`search_catalog`, etc.) against the 2000 ms handler cap.
+pub(in crate::service) fn build_caller_parents(
     target_id: &str,
-    caller_id: &str,
     edges: &[codesight_analysis::graph::CallEdge],
-) -> Vec<String> {
+) -> std::collections::HashMap<String, String> {
     use std::collections::{HashMap, VecDeque};
-    // Build reverse edge map: callee -> callers
     let mut callee_to_callers: HashMap<&str, Vec<&str>> = HashMap::new();
     for edge in edges {
         callee_to_callers
@@ -87,30 +93,45 @@ pub(in crate::service) fn build_call_chain(
             .or_default()
             .push(edge.caller_id.as_str());
     }
-    // BFS from target_id to caller_id through callers
-    let mut queue: VecDeque<Vec<String>> = VecDeque::new();
-    queue.push_back(vec![target_id.to_string()]);
-    let mut visited = HashSet::new();
-    visited.insert(target_id.to_string());
-    while let Some(path) = queue.pop_front() {
-        let Some(last) = path.last() else {
-            continue;
-        };
-        let current = last.clone();
-        if current == caller_id {
-            return path;
-        }
-        if let Some(callers) = callee_to_callers.get(current.as_str()) {
+    let mut parents: HashMap<String, String> = HashMap::new();
+    let mut visited: HashSet<&str> = HashSet::new();
+    visited.insert(target_id);
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    queue.push_back(target_id);
+    while let Some(current) = queue.pop_front() {
+        if let Some(callers) = callee_to_callers.get(current) {
             for &c in callers {
-                if visited.insert(c.to_string()) {
-                    let mut new_path = path.clone();
-                    new_path.push(c.to_string());
-                    queue.push_back(new_path);
+                if visited.insert(c) {
+                    parents.insert(c.to_string(), current.to_string());
+                    queue.push_back(c);
                 }
             }
         }
     }
-    // Fallback: just [target, caller]
+    parents
+}
+
+/// Walk the precomputed parent map back from `caller_id` to `target_id`
+/// to reconstruct the call chain. Falls back to `[target, caller]` when
+/// the caller is not reachable in the parent map (unchanged semantics).
+pub(in crate::service) fn reconstruct_caller_chain(
+    target_id: &str,
+    caller_id: &str,
+    parents: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    if caller_id == target_id {
+        return vec![target_id.to_string()];
+    }
+    let mut chain = vec![caller_id.to_string()];
+    let mut current = caller_id.to_string();
+    while let Some(parent) = parents.get(&current) {
+        chain.push(parent.clone());
+        if parent == target_id {
+            chain.reverse();
+            return chain;
+        }
+        current = parent.clone();
+    }
     vec![target_id.to_string(), caller_id.to_string()]
 }
 

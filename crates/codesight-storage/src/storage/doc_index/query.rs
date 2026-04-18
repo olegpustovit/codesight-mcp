@@ -439,11 +439,6 @@ impl DocStore {
         is_doc_file: impl Fn(&str) -> bool,
     ) -> anyhow::Result<bool> {
         let conn = self.open_read_only()?;
-        Ok(db::check_staleness(
-            &conn,
-            root_path,
-            "doc_files",
-            is_doc_file,
-        )?)
+        Ok(!db::check_staleness_detail(&conn, root_path, "doc_files", is_doc_file, 1)?.is_empty())
     }
 }

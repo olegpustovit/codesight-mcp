@@ -153,22 +153,24 @@ pub fn tokenize(text: &str) -> Vec<String> {
 
 /// Fast stat-based staleness check. Returns true if any indexed file has
 /// a different size or mtime on disk, or if new relevant files exist that
-/// aren't in the index.
-pub fn check_staleness(
+/// aren't in the index. Pass `limit = 1` for a bool-style probe.
+pub fn check_staleness_detail(
     conn: &Connection,
     root_path: &Path,
     file_table: &str,
     is_relevant: impl Fn(&str) -> bool,
-) -> StorageResult<bool> {
+    limit: usize,
+) -> StorageResult<Vec<String>> {
     let count_sql = format!("SELECT COUNT(*) FROM {file_table}");
     let file_count = conn.query_row(&count_sql, [], |r| r.get::<_, i64>(0))? as usize;
     if file_count > 10_000 {
-        return Ok(false);
+        return Ok(Vec::new());
     }
 
     let select_sql = format!("SELECT file_path, size_bytes, modified_ns FROM {file_table}");
     let mut stmt = conn.prepare_cached(&select_sql)?;
     let mut indexed_paths = HashSet::new();
+    let mut stale_paths = Vec::new();
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -205,10 +207,18 @@ pub fn check_staleness(
                     .map(|d| d.as_nanos() as u64)
                     .unwrap_or(0);
                 if disk_size != db_size || disk_mtime != db_mtime {
-                    return Ok(true);
+                    stale_paths.push(file_path);
+                    if stale_paths.len() >= limit {
+                        return Ok(stale_paths);
+                    }
                 }
             }
-            Err(_) => return Ok(true),
+            Err(_) => {
+                stale_paths.push(file_path);
+                if stale_paths.len() >= limit {
+                    return Ok(stale_paths);
+                }
+            }
         }
     }
 
@@ -239,9 +249,12 @@ pub fn check_staleness(
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
         if is_relevant(&rel) && !indexed_paths.contains(&rel) {
-            return Ok(true);
+            stale_paths.push(rel);
+            if stale_paths.len() >= limit {
+                return Ok(stale_paths);
+            }
         }
     }
 
-    Ok(false)
+    Ok(stale_paths)
 }

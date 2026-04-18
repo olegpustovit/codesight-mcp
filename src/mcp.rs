@@ -24,7 +24,7 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{info, warn};
 
-use crate::config::defaults::{DISPATCH_CONCURRENCY, HANDLER_TIMEOUT_MS, SHUTDOWN_DRAIN_SECS};
+use crate::config::defaults::{DISPATCH_CONCURRENCY, SHUTDOWN_DRAIN_SECS};
 use crate::service::{CodeService, dispatch_timeout::dispatch_with_timeout};
 
 type SharedWriter<W> = Arc<Mutex<W>>;
@@ -52,6 +52,26 @@ struct RpcResponse<T> {
     id: Value,
     result: T,
 }
+
+#[derive(Debug, Serialize)]
+struct RpcErrorResponse {
+    jsonrpc: &'static str,
+    id: Value,
+    error: RpcError,
+}
+
+#[derive(Debug, Serialize)]
+struct RpcError {
+    code: i32,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<Value>,
+}
+
+/// JSON-RPC 2.0 reserved error codes we use.
+const RPC_METHOD_NOT_FOUND: i32 = -32601;
+const RPC_INVALID_PARAMS: i32 = -32602;
+const RPC_INTERNAL_ERROR: i32 = -32603;
 
 /// Synchronous entry point: builds a `current_thread` runtime and drives the
 /// async stdio loop on it. Blocking handler work continues to run on the
@@ -118,9 +138,7 @@ where
                         let out = writer.clone();
                         join_set.spawn(async move {
                             let _permit = permit;
-                            if let Err(err) =
-                                handle_request(&svc, out, request, HANDLER_TIMEOUT_MS).await
-                            {
+                            if let Err(err) = handle_request(&svc, out, request).await {
                                 tracing::error!(error = %err, "dispatch task failed");
                             }
                         });
@@ -167,67 +185,136 @@ async fn handle_request<W>(
     service: &Arc<CodeService>,
     out: SharedWriter<W>,
     request: RpcRequest,
-    timeout_ms: u64,
 ) -> anyhow::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
-    match request.method.as_str() {
-        "initialize" => {
+    // Every path below MUST produce a response for non-notification requests.
+    // Returning `Err` without writing causes the MCP client to hang until its
+    // own watchdog fires (observed as 120s "tool call timed out" errors).
+    let id = request.id.clone().unwrap_or_else(|| json!(0));
+    let method = request.method.clone();
+    let is_notification = matches!(method.as_str(), "notifications/initialized")
+        || method.starts_with("notifications/");
+    match dispatch_method(service, request).await {
+        Ok(Some(result)) => {
             write_json(
                 &out,
                 RpcResponse {
                     jsonrpc: "2.0",
-                    id: request.id.unwrap_or_else(|| json!(0)),
-                    result: json!({
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": { "tools": { "listChanged": false } },
-                        "serverInfo": {
-                            "name": env!("CARGO_PKG_NAME"),
-                            "version": env!("CARGO_PKG_VERSION")
-                        }
-                    }),
+                    id,
+                    result,
                 },
             )
             .await?;
         }
-        "tools/list" => {
-            write_json(
-                &out,
-                RpcResponse {
-                    jsonrpc: "2.0",
-                    id: request.id.unwrap_or_else(|| json!(0)),
-                    result: json!({ "tools": crate::service::agent_v1::validate::tool_definitions() }),
-                },
-            )
-            .await?;
+        Ok(None) => {
+            // Notification — JSON-RPC requires no response.
         }
-        "tools/call" => {
-            let params: ToolCallParams = serde_json::from_value(request.params)?;
-            let payload =
-                dispatch_with_timeout(service.clone(), params.name, params.arguments, timeout_ms)
-                    .await?;
-            write_json(
-                &out,
-                RpcResponse {
-                    jsonrpc: "2.0",
-                    id: request.id.unwrap_or_else(|| json!(0)),
-                    result: json!({
-                        "content": [
-                            { "type": "text", "text": serde_json::to_string(&payload)? }
-                        ],
-                        "isError": payload.get("error").is_some()
-                    }),
-                },
-            )
-            .await?;
+        Err(err) if is_notification => {
+            warn!(method = %method, error = %err, "notification handler failed");
         }
-        "notifications/initialized" => {}
-        _ => {
-            warn!(method = %request.method, "ignoring unsupported JSON-RPC method");
+        Err(err) => {
+            let (code, data) = classify_error(&method, &err);
+            let payload = RpcErrorResponse {
+                jsonrpc: "2.0",
+                id,
+                error: RpcError {
+                    code,
+                    message: format!("{err:#}"),
+                    data,
+                },
+            };
+            if let Err(write_err) = write_json(&out, payload).await {
+                warn!(
+                    method = %method,
+                    error = %err,
+                    write_error = %write_err,
+                    "failed to send JSON-RPC error response"
+                );
+            }
         }
     }
     Ok(())
+}
+
+/// Map an internal error to a JSON-RPC error code + `data` payload so clients
+/// can distinguish method-not-found, bad params, timeouts, and unexpected
+/// internal failures at the protocol level.
+fn classify_error(method: &str, err: &anyhow::Error) -> (i32, Option<Value>) {
+    if err
+        .downcast_ref::<MethodNotFound>()
+        .map(|m| m.method == method)
+        .unwrap_or(false)
+    {
+        return (
+            RPC_METHOD_NOT_FOUND,
+            Some(json!({ "method": method })),
+        );
+    }
+    if err.downcast_ref::<InvalidParams>().is_some() || err.is::<serde_json::Error>() {
+        return (RPC_INVALID_PARAMS, Some(json!({ "method": method })));
+    }
+    (
+        RPC_INTERNAL_ERROR,
+        Some(json!({
+            "method": method,
+            "cause": err.to_string(),
+        })),
+    )
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("unsupported JSON-RPC method: {method}")]
+struct MethodNotFound {
+    method: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("invalid params for {method}: {reason}")]
+struct InvalidParams {
+    method: String,
+    reason: String,
+}
+
+/// Returns `Ok(Some(result))` for request methods, `Ok(None)` for notifications.
+/// Any `Err` is routed through `classify_error` to become a JSON-RPC error reply.
+async fn dispatch_method(
+    service: &Arc<CodeService>,
+    request: RpcRequest,
+) -> anyhow::Result<Option<Value>> {
+    match request.method.as_str() {
+        "initialize" => Ok(Some(json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": { "listChanged": false } },
+            "serverInfo": {
+                "name": env!("CARGO_PKG_NAME"),
+                "version": env!("CARGO_PKG_VERSION")
+            }
+        }))),
+        "tools/list" => Ok(Some(json!({
+            "tools": crate::service::agent_v1::validate::tool_definitions()
+        }))),
+        "tools/call" => {
+            let params: ToolCallParams =
+                serde_json::from_value(request.params).map_err(|e| InvalidParams {
+                    method: "tools/call".into(),
+                    reason: e.to_string(),
+                })?;
+            let payload =
+                dispatch_with_timeout(service.clone(), params.name, params.arguments, None)
+                    .await?;
+            Ok(Some(json!({
+                "content": [
+                    { "type": "text", "text": serde_json::to_string(&payload)? }
+                ],
+                "isError": payload.get("error").is_some()
+            })))
+        }
+        "notifications/initialized" => Ok(None),
+        other if other.starts_with("notifications/") => Ok(None),
+        other => Err(MethodNotFound { method: other.to_string() }.into()),
+    }
 }
 
 async fn write_json<W, T>(out: &SharedWriter<W>, value: T) -> anyhow::Result<()>
@@ -270,6 +357,7 @@ mod tests {
     use super::*;
     use std::time::Instant;
     use tempfile::tempdir;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 
     use crate::config::AppConfig;
 
@@ -281,6 +369,39 @@ mod tests {
         let service = Arc::new(CodeService::new(config).expect("service"));
         service.install_arc_handle();
         service
+    }
+
+    /// Drive `run_dispatch_loop` with a single JSON-RPC line and collect the
+    /// response(s) it writes before EOF-triggered shutdown.
+    async fn roundtrip(request_line: &str) -> Vec<Value> {
+        let service = test_service();
+        let (mut client_in, server_in) = duplex(64 * 1024);
+        let (server_out, mut client_out) = duplex(64 * 1024);
+
+        client_in.write_all(request_line.as_bytes()).await.unwrap();
+        client_in.write_all(b"\n").await.unwrap();
+        drop(client_in);
+
+        let reader = tokio::io::BufReader::new(server_in);
+        // Reader task: collect everything the server writes before EOF.
+        let drain = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            client_out.read_to_end(&mut buf).await.unwrap();
+            buf
+        });
+        // `async {}` would resolve immediately and bias-lose every select —
+        // use `pending::<()>()` so the loop exits only on stdin EOF.
+        run_dispatch_loop(service, reader, server_out, std::future::pending::<()>())
+            .await
+            .expect("dispatch loop ok");
+        let buf = drain.await.expect("drain joined");
+
+        String::from_utf8(buf)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("valid JSON-RPC frame"))
+            .collect()
     }
 
     #[tokio::test]
@@ -297,6 +418,42 @@ mod tests {
             "idle drain should be near-instant, took {:?}",
             start.elapsed()
         );
+    }
+
+    #[tokio::test]
+    async fn unknown_method_returns_method_not_found_not_hang() {
+        let frames = roundtrip(
+            r#"{"jsonrpc":"2.0","id":42,"method":"definitely_not_real","params":{}}"#,
+        )
+        .await;
+        assert_eq!(frames.len(), 1, "client must see exactly one response frame");
+        let f = &frames[0];
+        assert_eq!(f["id"], json!(42));
+        assert_eq!(f["error"]["code"], json!(RPC_METHOD_NOT_FOUND));
+        assert_eq!(f["error"]["data"]["method"], json!("definitely_not_real"));
+    }
+
+    #[tokio::test]
+    async fn malformed_tools_call_params_returns_invalid_params_not_hang() {
+        // `params` is a string where an object is expected — serde fails;
+        // pre-fix, `handle_request` swallowed the error via `?` and the
+        // client hung until its own watchdog.
+        let frames = roundtrip(
+            r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":"not-an-object"}"#,
+        )
+        .await;
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0]["id"], json!(7));
+        assert_eq!(frames[0]["error"]["code"], json!(RPC_INVALID_PARAMS));
+    }
+
+    #[tokio::test]
+    async fn unknown_notification_is_silently_accepted() {
+        let frames = roundtrip(
+            r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{}}"#,
+        )
+        .await;
+        assert!(frames.is_empty(), "notifications must not receive a reply");
     }
 
     #[tokio::test(start_paused = true)]

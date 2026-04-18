@@ -91,9 +91,11 @@ fn hotspots_hotspot_fields() {
     let (_ws, _config, _sid, store) = build_repo();
     let r = get_hotspots(&store, 1, 50);
     for hotspot in r["hotspots"].as_array().unwrap() {
-        assert!(hotspot["symbol_id"].is_string(), "missing symbol_id");
+        // PLAN2 §3.3a dropped `symbol_id` — reconstructible from file+name.
+        assert!(hotspot.get("symbol_id").is_none(), "symbol_id should be dropped");
         assert!(hotspot["name"].is_string(), "missing name");
         assert!(hotspot["file"].is_string(), "missing file");
+        assert!(hotspot["line"].is_number(), "missing line");
         assert!(hotspot["cyclomatic"].is_number(), "missing cyclomatic");
         assert!(hotspot["churn"].is_number(), "missing churn");
         assert!(

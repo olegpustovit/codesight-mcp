@@ -87,8 +87,12 @@ impl CodeService {
         let mut truncated = false;
         let mut used_tokens: u64 = 0;
         let budget = args.max_tokens.unwrap_or(0) as u64;
+        // Batch-fetch sizes for all affected files up front (was: one DB
+        // round trip per iteration of the rank-and-truncate loop).
+        let file_path_refs: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        let file_bytes_map = store.file_bytes_batch(&file_path_refs)?;
         for (path, bucket) in files {
-            let bytes = store.file_bytes(&path)?.unwrap_or(0);
+            let bytes = file_bytes_map.get(path.as_str()).copied().unwrap_or(0);
             let est_tokens = bytes / BYTES_PER_TOKEN;
             if budget > 0 && used_tokens.saturating_add(est_tokens) > budget {
                 truncated = true;

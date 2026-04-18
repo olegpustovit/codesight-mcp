@@ -42,14 +42,27 @@ pub fn check_refs_existence(
     store: &IndexStore,
     refs: &[(String, String)],
 ) -> anyhow::Result<Value> {
-    let mut results: Vec<Value> = Vec::new();
+    // Two batch queries replace 2N single-key calls
+    // (symbol_record + file_exists per ref).
+    let symbol_ids: Vec<&str> = refs
+        .iter()
+        .filter(|(k, _)| k == "symbol")
+        .map(|(_, id)| id.as_str())
+        .collect();
+    let file_ids: Vec<&str> = refs
+        .iter()
+        .filter(|(k, _)| k == "file")
+        .map(|(_, id)| id.as_str())
+        .collect();
+    let symbol_hits = store.symbol_records_batch(&symbol_ids)?;
+    let file_hits = store.files_exist_batch(&file_ids)?;
+
+    let mut results: Vec<Value> = Vec::with_capacity(refs.len());
     for (kind, id) in refs {
-        let exists = if kind == "symbol" {
-            store.symbol_record(id)?.is_some()
-        } else if kind == "file" {
-            store.file_exists(id)?
-        } else {
-            false
+        let exists = match kind.as_str() {
+            "symbol" => symbol_hits.contains_key(id.as_str()),
+            "file" => file_hits.contains(id.as_str()),
+            _ => false,
         };
         results.push(json!({
             "ref": { "stable_id": id, "kind": kind },

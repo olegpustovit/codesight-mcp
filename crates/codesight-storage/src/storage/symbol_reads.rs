@@ -150,6 +150,48 @@ impl IndexStore {
         Ok(enclosing)
     }
 
+    /// Resolve a `(file_path, name)` pair to an indexed symbol id.
+    ///
+    /// Agents often know where a symbol lives and what it's called but
+    /// don't have the stable id or its start line (MUNCH's `symbol_id="name"`
+    /// ergonomics). Prefers the outermost match (smallest depth, largest
+    /// span) so overloaded / nested symbols surface the top-level one.
+    pub fn symbol_id_at_name(
+        &self,
+        file_path: &str,
+        name: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let conn = self.open_read_only()?;
+        let picked: Option<String> = conn
+            .query_row(
+                "SELECT id FROM symbols
+                 WHERE file_path = ?1 AND name = ?2
+                 ORDER BY (end_line - start_line) DESC, start_line ASC LIMIT 1",
+                params![file_path, name],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(picked)
+    }
+
+    /// Resolve a bare `name` to an indexed symbol id when unique across the
+    /// whole index. Returns `None` when the name matches zero or ≥2 rows so
+    /// callers can surface an ambiguity error instead of guessing.
+    pub fn symbol_id_by_unique_name(&self, name: &str) -> anyhow::Result<Option<String>> {
+        let conn = self.open_read_only()?;
+        let mut stmt =
+            conn.prepare_cached("SELECT id FROM symbols WHERE name = ?1 LIMIT 2")?;
+        let mut rows = stmt.query([name])?;
+        let Some(first) = rows.next()? else {
+            return Ok(None);
+        };
+        let id: String = first.get(0)?;
+        if rows.next()?.is_some() {
+            return Ok(None);
+        }
+        Ok(Some(id))
+    }
+
     pub fn symbol_metadata(&self, id: &str) -> anyhow::Result<Option<SymbolMetadata>> {
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare_cached(
@@ -229,8 +271,11 @@ impl IndexStore {
 
     pub fn repo_outline(&self) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
+        // `extraction_tier` is implementation detail (curated SCM vs
+        // heuristic) — the agent only needs to know the symbol exists. Drop
+        // from per-row output; surface repo-level only if needed.
         let mut stmt = conn.prepare_cached(
-            "SELECT file_path, id, kind, extraction_tier, name, signature, start_line FROM symbols ORDER BY file_path, start_line",
+            "SELECT file_path, id, kind, name, signature, start_line FROM symbols ORDER BY file_path, start_line",
         )?;
         let rows = stmt.query_map([], |row| {
             let file_path: String = row.get(0)?;
@@ -240,10 +285,9 @@ impl IndexStore {
                     "file": row.get::<_, String>(0)?,
                     "id": row.get::<_, String>(1)?,
                     "kind": row.get::<_, String>(2)?,
-                    "extraction_tier": row.get::<_, String>(3)?,
-                    "name": row.get::<_, String>(4)?,
-                    "signature": row.get::<_, String>(5)?,
-                    "line": row.get::<_, u32>(6)?,
+                    "name": row.get::<_, String>(3)?,
+                    "signature": row.get::<_, String>(4)?,
+                    "line": row.get::<_, u32>(5)?,
                 }),
             ))
         })?;
@@ -259,17 +303,16 @@ impl IndexStore {
     pub fn file_outline(&self, file_path: &str) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare_cached(
-            "SELECT id, kind, extraction_tier, name, signature, start_line, end_line FROM symbols WHERE file_path = ?1 ORDER BY start_line",
+            "SELECT id, kind, name, signature, start_line, end_line FROM symbols WHERE file_path = ?1 ORDER BY start_line",
         )?;
         let rows = stmt.query_map([file_path], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, String>(0)?,
                 "kind": row.get::<_, String>(1)?,
-                "extraction_tier": row.get::<_, String>(2)?,
-                "name": row.get::<_, String>(3)?,
-                "signature": row.get::<_, String>(4)?,
-                "line": row.get::<_, u32>(5)?,
-                "end_line": row.get::<_, u32>(6)?,
+                "name": row.get::<_, String>(2)?,
+                "signature": row.get::<_, String>(3)?,
+                "line": row.get::<_, u32>(4)?,
+                "end_line": row.get::<_, u32>(5)?,
             }))
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -351,5 +394,93 @@ impl IndexStore {
             )
             .optional()?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn ensure_file_row(conn: &rusqlite::Connection, file_path: &str) {
+        conn.execute(
+            "INSERT OR IGNORE INTO files (file_path, language, size_bytes, modified_ns, content_hash) \
+             VALUES (?1, 'rust', 0, 0, 'h')",
+            [file_path],
+        )
+        .unwrap();
+    }
+
+    fn insert_raw_symbol(
+        store: &IndexStore,
+        id: &str,
+        name: &str,
+        file_path: &str,
+        start_line: u32,
+        end_line: u32,
+    ) {
+        let conn = store.open_connection().unwrap();
+        ensure_file_row(&conn, file_path);
+        conn.execute(
+            "INSERT INTO symbols (id, file_path, language, extraction_tier, kind, \
+             qualified_name, name, signature, summary, source_text, start_line, end_line, \
+             start_byte, end_byte, source_hash, file_size_bytes) \
+             VALUES (?1, ?2, 'rust', 'curated_query_pack', 'function', '', ?3, '', '', '', ?4, ?5, 0, 0, 'h', 0)",
+            params![id, file_path, name, start_line as i64, end_line as i64],
+        )
+        .unwrap();
+    }
+
+    fn new_store() -> (tempfile::TempDir, IndexStore) {
+        let dir = tempdir().unwrap();
+        let store = IndexStore::open(dir.path().join("x.sqlite")).unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn symbol_id_at_name_returns_match_for_path_and_name() {
+        let (_d, store) = new_store();
+        insert_raw_symbol(&store, "f.rs::open_rw#function", "open_rw", "f.rs", 10, 20);
+        let got = store.symbol_id_at_name("f.rs", "open_rw").unwrap();
+        assert_eq!(got.as_deref(), Some("f.rs::open_rw#function"));
+    }
+
+    #[test]
+    fn symbol_id_at_name_returns_none_when_absent() {
+        let (_d, store) = new_store();
+        assert!(store.symbol_id_at_name("missing.rs", "no_such").unwrap().is_none());
+    }
+
+    #[test]
+    fn symbol_id_at_name_prefers_largest_span() {
+        // Nested method inside a struct impl: both share (file, name) in some
+        // extractors. We want the outer one (larger span) to win.
+        let (_d, store) = new_store();
+        insert_raw_symbol(&store, "f.rs::inner#function", "work", "f.rs", 5, 7);
+        insert_raw_symbol(&store, "f.rs::outer#function", "work", "f.rs", 1, 100);
+        let got = store.symbol_id_at_name("f.rs", "work").unwrap();
+        assert_eq!(got.as_deref(), Some("f.rs::outer#function"));
+    }
+
+    #[test]
+    fn symbol_id_by_unique_name_returns_match_when_single() {
+        let (_d, store) = new_store();
+        insert_raw_symbol(&store, "f.rs::unique#function", "unique", "f.rs", 1, 2);
+        let got = store.symbol_id_by_unique_name("unique").unwrap();
+        assert_eq!(got.as_deref(), Some("f.rs::unique#function"));
+    }
+
+    #[test]
+    fn symbol_id_by_unique_name_none_when_ambiguous() {
+        let (_d, store) = new_store();
+        insert_raw_symbol(&store, "a.rs::dup#function", "dup", "a.rs", 1, 2);
+        insert_raw_symbol(&store, "b.rs::dup#function", "dup", "b.rs", 1, 2);
+        assert!(store.symbol_id_by_unique_name("dup").unwrap().is_none());
+    }
+
+    #[test]
+    fn symbol_id_by_unique_name_none_when_absent() {
+        let (_d, store) = new_store();
+        assert!(store.symbol_id_by_unique_name("no_such").unwrap().is_none());
     }
 }

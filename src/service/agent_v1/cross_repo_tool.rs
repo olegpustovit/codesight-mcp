@@ -19,7 +19,11 @@ impl CodeService {
         let args: Args = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
 
-        match cross_repo_map::build_cross_repo_map(&self.config, args.source_id.as_deref())? {
+        match cross_repo_map::build_cross_repo_map(
+            &self.config,
+            self.source_registry(),
+            args.source_id.as_deref(),
+        )? {
             BuildCrossRepoOutcome::FilterMissing { source_id } => self.error_response(
                 &timer,
                 ToolError {

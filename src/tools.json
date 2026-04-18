@@ -62,6 +62,11 @@
           "description": "Repo-relative prefixes or substrings to skip. Complements `scope` (inclusion)."
         },
         "limit": { "type": "integer", "default": 10 },
+        "offset": {
+          "type": "integer",
+          "default": 0,
+          "description": "Skip the first N ranked hits before applying limit. Useful for pagination; applies after ranking and before truncation."
+        },
         "query_mode": {
           "type": "string",
           "enum": ["keyword", "natural_language", "regex"],
@@ -112,7 +117,7 @@
   },
   {
     "name": "read_content",
-    "description": "Batch read symbols, sections, or bounded file ranges. Whole-file reads work but are a last resort — prefer inspect_structure view=file_outline first, then symbol/section reads or bounded ranges. May emit TOKEN_HEAVY_READ warning when a full-file read exceeds the configured threshold.",
+    "description": "Batch read symbols, sections, or bounded file ranges. Whole-file reads work but are a last resort — prefer inspect_structure view=file_outline first, then symbol/section reads or bounded ranges. Each `refs` entry may be an object (see properties) OR a shorthand string: \"path:N-M\" for a file range, \"path:N\" for a single line, or \"path::Name#kind\" for a symbol. May emit TOKEN_HEAVY_READ warning when a full-file read exceeds the configured threshold.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "refs"],
@@ -130,7 +135,8 @@
               "path": { "type": "string" },
               "source_id": { "type": "string" },
               "start_line": { "type": "integer" },
-              "end_line": { "type": "integer" }
+              "end_line": { "type": "integer" },
+              "symbol_name": { "type": "string", "description": "Bare symbol name. Combine with `path` (preferred) or pass alone for a globally unique name." }
             }
           }
         },
@@ -273,7 +279,7 @@
   },
   {
     "name": "evaluate_impact",
-    "description": "Change-oriented analysis: blast radius, rename safety, diffs, and since-commit change reports.",
+    "description": "Change-oriented analysis: blast radius, rename safety, module-path rewrites, diffs, and since-commit change reports.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
@@ -285,6 +291,7 @@
             "blast_radius",
             "impact_preview",
             "rename_safety",
+            "path_rename",
             "changed_units",
             "diff",
             "change_velocity"
@@ -303,6 +310,7 @@
               "path": { "type": "string" },
               "start_line": { "type": "integer" },
               "end_line": { "type": "integer" },
+              "symbol_name": { "type": "string", "description": "Bare symbol name. Combine with `path` (preferred) or pass alone for a globally unique name." },
               "new_name": {
                 "type": "string",
                 "description": "rename_safety only: the proposed new symbol name."
@@ -310,13 +318,34 @@
             }
           }
         },
-        "repo_path": { "type": "string" }
+        "repo_path": { "type": "string" },
+        "from": {
+          "type": "string",
+          "description": "path_rename: fully-qualified Rust path prefix to rewrite."
+        },
+        "to": {
+          "type": "string",
+          "description": "path_rename: replacement fully-qualified Rust path prefix."
+        },
+        "apply": {
+          "type": "boolean",
+          "description": "path_rename: when true, write edits to disk and reindex the repo. Default false (dry-run)."
+        },
+        "scope": {
+          "type": "string",
+          "description": "path_rename: optional file or directory prefix to limit candidate files."
+        },
+        "handle_partial_group_imports": {
+          "type": "string",
+          "enum": ["warn", "split", "skip"],
+          "description": "path_rename: how to handle grouped imports that only partially match the old prefix."
+        }
       }
     }
   },
   {
     "name": "evaluate_quality",
-    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links, quality_signal, regression_check, test_gaps. `quality_signal` returns structural root causes plus 4 agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) and their sub-metrics; `regression_check` compares the same snapshot dimensions.",
+    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links, quality_signal, regression_check, test_gaps. `quality_signal` returns structural root causes plus 4 agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) and their sub-metrics; when `scope` is provided it reports the targeted file or directory slice, weakest dimension, threshold failures, and top offenders. With `_meta_verbose=true`, `_meta.thresholds` echoes the active defaults from `crates/codesight-analysis/src/thresholds.rs` plus any `CODESIGHT_THRESHOLD_*` overrides. `regression_check` compares the same snapshot dimensions.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
@@ -387,6 +416,10 @@
           "type": "string",
           "description": "regression_check: baseline snapshot name (default \"session\")."
         },
+        "scope": {
+          "type": "string",
+          "description": "quality_signal: optional file or directory prefix to score instead of the whole repo."
+        },
         "repo_path": { "type": "string" }
       }
     }
@@ -447,13 +480,13 @@
   },
   {
     "name": "manage_indexes",
-    "description": "Invalidate, delete, rebuild, status, snapshot_quality, or session_stats. Most actions target a single source and require `source_id`; `session_stats` is global and does not. `rebuild` additionally requires `root_hint`.",
+    "description": "Invalidate, delete, rebuild, status, snapshot_quality, session_stats, or session_end. Most actions target a single source and require `source_id`; `session_stats` is global and does not. `session_end` captures the end-of-session quality snapshot, closes the active session ledger, and returns the same rollup as `session_stats` plus `quality_delta` warnings when quality regressed. `rebuild` additionally requires `root_hint`.",
     "inputSchema": {
       "type": "object",
       "required": ["action"],
       "properties": {
-        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status", "snapshot_quality", "session_stats"] },
-        "source_id": { "type": "string", "description": "Required for invalidate/delete/rebuild/status/snapshot_quality; ignored for session_stats." },
+        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status", "snapshot_quality", "session_stats", "session_end"] },
+        "source_id": { "type": "string", "description": "Required for invalidate/delete/rebuild/status/snapshot_quality; ignored for session_stats/session_end unless needed for snapshot capture." },
         "root_hint": { "type": "string", "description": "Filesystem path; required for `rebuild`." },
         "domains": { "type": "string" },
         "snapshot_name": { "type": "string", "description": "snapshot_quality: logical name for the snapshot (default \"session\"). Overwrites existing." }

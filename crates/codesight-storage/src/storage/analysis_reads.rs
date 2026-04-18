@@ -103,6 +103,23 @@ impl IndexStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Cached, shared-Arc variant of [`IndexStore::all_symbols_for_analysis`].
+    /// First call loads from SQL; subsequent calls on the same store instance
+    /// (including clones) return a cheap `Arc::clone`. Cleared automatically
+    /// after each `apply_index_with_deps` commit.
+    pub fn all_symbols_cached(&self) -> anyhow::Result<std::sync::Arc<Vec<AnalysisSymbol>>> {
+        let mut guard = self
+            .cached_all_symbols
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(existing) = guard.as_ref() {
+            return Ok(existing.clone());
+        }
+        let loaded = std::sync::Arc::new(self.all_symbols_for_analysis()?);
+        *guard = Some(loaded.clone());
+        Ok(loaded)
+    }
+
     /// Count how many *other* symbols reference the given `needle` in their source text.
     /// Returns the count and the distinct set of files containing references.
     pub fn reference_count_and_files(

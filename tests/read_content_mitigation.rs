@@ -67,10 +67,14 @@ fn symbol_read_has_symbol_scope() {
         "symbol read should have read_scope=symbol"
     );
 
-    // _meta.read_scopes should count 1 symbol.
-    let scopes = &r["_meta"]["read_scopes"];
-    assert_eq!(scopes["symbol"].as_u64().unwrap(), 1);
-    assert_eq!(scopes["file_full"].as_u64().unwrap(), 0);
+    // Per-tool counters live under session_stats after the WS-2 envelope slim
+    // (not on each per-call `_meta`). Verify the scope tally there.
+    let stats = svc
+        .dispatch("manage_indexes", json!({ "action": "session_stats" }))
+        .unwrap();
+    let detail = &stats["data"]["per_tool"]["read_content"]["read_content_detail"];
+    assert_eq!(detail["symbol_reads"].as_u64().unwrap(), 1);
+    assert_eq!(detail["file_full_reads"].as_u64().unwrap(), 0);
 }
 
 #[test]
@@ -94,9 +98,12 @@ fn file_full_read_has_full_scope() {
         "whole-file read should have read_scope=file_full"
     );
 
-    let scopes = &r["_meta"]["read_scopes"];
-    assert_eq!(scopes["file_full"].as_u64().unwrap(), 1);
-    assert_eq!(scopes["symbol"].as_u64().unwrap(), 0);
+    let stats = svc
+        .dispatch("manage_indexes", json!({ "action": "session_stats" }))
+        .unwrap();
+    let detail = &stats["data"]["per_tool"]["read_content"]["read_content_detail"];
+    assert_eq!(detail["file_full_reads"].as_u64().unwrap(), 1);
+    assert_eq!(detail["symbol_reads"].as_u64().unwrap(), 0);
 }
 
 #[test]
@@ -120,9 +127,12 @@ fn file_range_read_has_range_scope() {
         "bounded read should have read_scope=file_range"
     );
 
-    let scopes = &r["_meta"]["read_scopes"];
-    assert_eq!(scopes["file_range"].as_u64().unwrap(), 1);
-    assert_eq!(scopes["file_full"].as_u64().unwrap(), 0);
+    let stats = svc
+        .dispatch("manage_indexes", json!({ "action": "session_stats" }))
+        .unwrap();
+    let detail = &stats["data"]["per_tool"]["read_content"]["read_content_detail"];
+    assert_eq!(detail["file_range_reads"].as_u64().unwrap(), 1);
+    assert_eq!(detail["file_full_reads"].as_u64().unwrap(), 0);
 }
 
 // ── TOKEN_HEAVY_READ warning ─────────────────────────────────────────
@@ -155,10 +165,14 @@ fn heavy_full_file_read_emits_warning() {
         "returned_bytes should exceed threshold"
     );
 
-    // _meta should track warned count.
+    // session_stats now tracks aggregate warning / byte counts across calls.
+    let stats = svc
+        .dispatch("manage_indexes", json!({ "action": "session_stats" }))
+        .unwrap();
+    let detail = &stats["data"]["per_tool"]["read_content"]["read_content_detail"];
     assert!(
-        r["_meta"]["warned_full_file_reads"].as_u64().unwrap() > 0,
-        "warned_full_file_reads should be > 0"
+        detail["warning_count"].as_u64().unwrap() > 0,
+        "warning_count should be > 0 after a TOKEN_HEAVY_READ: {detail}"
     );
 }
 
@@ -185,7 +199,11 @@ fn small_full_file_read_no_warning() {
         heavy.is_empty(),
         "small file should not trigger TOKEN_HEAVY_READ: {warnings:?}"
     );
-    assert_eq!(r["_meta"]["warned_full_file_reads"].as_u64().unwrap(), 0);
+    let stats = svc
+        .dispatch("manage_indexes", json!({ "action": "session_stats" }))
+        .unwrap();
+    let detail = &stats["data"]["per_tool"]["read_content"]["read_content_detail"];
+    assert_eq!(detail["warning_count"].as_u64().unwrap(), 0);
 }
 
 #[test]
@@ -329,9 +347,13 @@ fn meta_returned_bytes_is_positive() {
         )
         .unwrap();
     assert!(r["ok"].as_bool().unwrap());
+    let stats = svc
+        .dispatch("manage_indexes", json!({ "action": "session_stats" }))
+        .unwrap();
+    let detail = &stats["data"]["per_tool"]["read_content"]["read_content_detail"];
     assert!(
-        r["_meta"]["returned_bytes"].as_u64().unwrap() > 0,
-        "returned_bytes should be positive"
+        detail["bytes_returned"].as_u64().unwrap() > 0,
+        "bytes_returned should be positive: {detail}"
     );
 }
 
@@ -353,8 +375,11 @@ fn mixed_refs_have_correct_scope_counts() {
         .unwrap();
     assert!(r["ok"].as_bool().unwrap());
 
-    let scopes = &r["_meta"]["read_scopes"];
-    assert_eq!(scopes["symbol"].as_u64().unwrap(), 1);
-    assert_eq!(scopes["file_full"].as_u64().unwrap(), 1);
-    assert_eq!(scopes["file_range"].as_u64().unwrap(), 1);
+    let stats = svc
+        .dispatch("manage_indexes", json!({ "action": "session_stats" }))
+        .unwrap();
+    let detail = &stats["data"]["per_tool"]["read_content"]["read_content_detail"];
+    assert_eq!(detail["symbol_reads"].as_u64().unwrap(), 1);
+    assert_eq!(detail["file_full_reads"].as_u64().unwrap(), 1);
+    assert_eq!(detail["file_range_reads"].as_u64().unwrap(), 1);
 }

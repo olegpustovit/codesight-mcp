@@ -67,6 +67,14 @@ fn session_stats_tracks_per_tool_calls() {
             .is_empty(),
         "started_at should be populated: {stats:?}"
     );
+    assert!(
+        stats["data"]["session_id"].is_string(),
+        "session_id should be populated: {stats:?}"
+    );
+    assert!(
+        stats["data"]["tokens_saved_total"].is_u64(),
+        "tokens_saved_total should be present: {stats:?}"
+    );
 }
 
 #[test]
@@ -78,5 +86,72 @@ fn session_stats_does_not_require_source_id() {
     assert!(
         r["ok"].as_bool().unwrap(),
         "session_stats without source_id should succeed: {r:?}"
+    );
+}
+
+#[test]
+fn session_end_sets_ended_at() {
+    let (svc, ws) = build_service();
+    let sid = svc
+        .dispatch(
+            "ingest_sources",
+            json!({
+                "path": ws.path().join("src").to_string_lossy(),
+                "domains": "code",
+                "incremental": true,
+            }),
+        )
+        .unwrap()["data"]["source_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let _ = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": sid,
+                "query": "hello",
+            }),
+        )
+        .unwrap();
+
+    let ended = svc
+        .dispatch("manage_indexes", json!({ "action": "session_end" }))
+        .unwrap();
+    assert!(ended["ok"].as_bool().unwrap(), "session_end failed: {ended:?}");
+    assert!(
+        ended["data"]["ended_at"].is_string(),
+        "session_end should set ended_at: {ended:?}"
+    );
+}
+
+#[test]
+fn catalog_sources_starts_quality_session_when_source_is_unambiguous() {
+    let (svc, ws) = build_service();
+    let _sid = svc
+        .dispatch(
+            "ingest_sources",
+            json!({
+                "path": ws.path().join("src").to_string_lossy(),
+                "domains": "code",
+                "incremental": true,
+            }),
+        )
+        .unwrap()["data"]["source_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let catalog = svc.dispatch("catalog_sources", json!({})).unwrap();
+    assert!(catalog["ok"].as_bool().unwrap(), "catalog_sources failed: {catalog:?}");
+
+    let ended = svc
+        .dispatch("manage_indexes", json!({ "action": "session_end" }))
+        .unwrap();
+    assert!(ended["ok"].as_bool().unwrap(), "session_end failed: {ended:?}");
+    assert!(
+        ended["data"]["quality_delta"].is_object(),
+        "catalog_sources should have seeded session_start for the only source: {ended:?}"
     );
 }

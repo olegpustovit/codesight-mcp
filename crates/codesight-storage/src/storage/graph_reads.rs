@@ -191,11 +191,32 @@ impl IndexStore {
         F: Fn(&Path) -> bool,
     {
         let conn = self.open_read_only()?;
-        Ok(crate::db::check_staleness(
+        Ok(!crate::db::check_staleness_detail(
             &conn,
             root_path,
             "files",
             |rel| is_source_file(Path::new(rel)),
+            1,
+        )?
+        .is_empty())
+    }
+
+    pub fn stale_paths<F>(
+        &self,
+        root_path: &Path,
+        is_source_file: F,
+        limit: usize,
+    ) -> anyhow::Result<Vec<String>>
+    where
+        F: Fn(&Path) -> bool,
+    {
+        let conn = self.open_read_only()?;
+        Ok(crate::db::check_staleness_detail(
+            &conn,
+            root_path,
+            "files",
+            |rel| is_source_file(Path::new(rel)),
+            limit,
         )?)
     }
 

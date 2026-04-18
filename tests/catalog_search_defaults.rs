@@ -38,9 +38,12 @@ fn dispatch_search(svc: &CodeService, args: Value) -> Value {
 #[test]
 fn default_query_mode_keyword_routes_to_code() {
     let (svc, _ws, sid) = build_service_with_code();
+    // Slim _meta suppresses defaults: domain=code + query_mode=keyword +
+    // domain_explicit=false all match the default, so none appear unless the
+    // caller explicitly requests verbose mode.
     let r = dispatch_search(
         &svc,
-        json!({ "source_id": sid, "query": "hello", "limit": 5 }),
+        json!({ "source_id": sid, "query": "hello", "limit": 5, "_meta_verbose": true }),
     );
     assert_eq!(r["_meta"]["domain_effective"], "code");
     assert_eq!(r["_meta"]["query_mode_effective"], "keyword");
@@ -57,6 +60,7 @@ fn explicit_keyword_routes_to_code() {
             "query": "hello",
             "query_mode": "keyword",
             "limit": 5,
+            "_meta_verbose": true,
         }),
     );
     assert_eq!(r["_meta"]["domain_effective"], "code");
@@ -66,6 +70,8 @@ fn explicit_keyword_routes_to_code() {
 #[test]
 fn regex_routes_to_code() {
     let (svc, _ws, sid) = build_service_with_code();
+    // `regex` is non-default and survives the slim filter, but domain=code is
+    // default — verify with verbose to assert both values.
     let r = dispatch_search(
         &svc,
         json!({
@@ -73,6 +79,7 @@ fn regex_routes_to_code() {
             "query": "hello",
             "query_mode": "regex",
             "limit": 5,
+            "_meta_verbose": true,
         }),
     );
     assert_eq!(r["_meta"]["domain_effective"], "code");
@@ -82,6 +89,9 @@ fn regex_routes_to_code() {
 #[test]
 fn natural_language_routes_to_hybrid() {
     let (svc, _ws, sid) = build_service_with_code();
+    // hybrid + natural_language + domain_explicit=false — only the non-default
+    // ones survive the slim filter. domain_explicit=false matches the default
+    // so verify it via verbose.
     let r = dispatch_search(
         &svc,
         json!({
@@ -89,6 +99,7 @@ fn natural_language_routes_to_hybrid() {
             "query": "what does hello return",
             "query_mode": "natural_language",
             "limit": 5,
+            "_meta_verbose": true,
         }),
     );
     assert_eq!(r["_meta"]["domain_effective"], "hybrid");
@@ -99,6 +110,9 @@ fn natural_language_routes_to_hybrid() {
 #[test]
 fn explicit_domain_wins_over_autoroute() {
     let (svc, _ws, sid) = build_service_with_code();
+    // domain_explicit=true is non-default so it stays in the slim envelope,
+    // but domain_effective=code matches the default and is stripped — use
+    // verbose to assert both.
     let r = dispatch_search(
         &svc,
         json!({
@@ -107,6 +121,7 @@ fn explicit_domain_wins_over_autoroute() {
             "query_mode": "natural_language",
             "domain": "code",
             "limit": 5,
+            "_meta_verbose": true,
         }),
     );
     assert_eq!(r["_meta"]["domain_effective"], "code");

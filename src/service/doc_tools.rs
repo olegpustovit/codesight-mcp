@@ -137,6 +137,55 @@ impl CodeService {
         self.success_response(&timer, serde_json::to_value(result)?)
     }
 
+    /// Spawn a background worker that runs `do_index_local` for stale docs.
+    /// Mirrors `kick_off_reindex` on the code side so read-path handlers
+    /// never block on doc re-ingestion. Read tools keep serving the prior
+    /// index snapshot while the worker refreshes it; the envelope carries
+    /// a `STALE_DATA_WARNING` via `freshness::annotate` so callers know.
+    fn kick_off_doc_reindex(&self, repo: &str, repo_id: String, root: std::path::PathBuf) {
+        // Re-use the shared reindex_states tracker so `STALE_DATA_WARNING`
+        // annotations and freshness gates match the code-side behavior.
+        // Track against the repo_id with an empty files_in_flight — we do
+        // not walk the doc tree here to collect specific paths (doc sets
+        // are small enough that per-file churn isn't useful telemetry).
+        if self
+            .reindex_states
+            .try_mark_reindex_start(&repo_id, &[])
+            .is_err()
+        {
+            return;
+        }
+        if let Some(arc) = self.shared_handle() {
+            info!(repo = %repo, "spawning background auto-reindex for stale doc source");
+            let states = self.reindex_states.clone();
+            std::thread::spawn(move || match arc.do_index_local(&root) {
+                Ok(_) => states.mark_reindex_done(&repo_id),
+                Err(error) => {
+                    tracing::warn!(
+                        repo = %repo_id,
+                        error = %error,
+                        "background doc reindex failed"
+                    );
+                    states.mark_reindex_failed(&repo_id, &format!("{error:#}"));
+                }
+            });
+        } else {
+            info!(repo = %repo, "auto-reindexing stale doc source (synchronous fallback)");
+            match self.do_index_local(&root) {
+                Ok(_) => self.reindex_states.mark_reindex_done(&repo_id),
+                Err(error) => {
+                    tracing::warn!(
+                        repo = %repo_id,
+                        error = %error,
+                        "synchronous doc reindex failed"
+                    );
+                    self.reindex_states
+                        .mark_reindex_failed(&repo_id, &format!("{error:#}"));
+                }
+            }
+        }
+    }
+
     pub(crate) fn ensure_doc_store(
         &self,
         repo: &str,
@@ -148,9 +197,8 @@ impl CodeService {
                     && root.is_dir()
                     && store.is_stale(&root, is_doc_file).unwrap_or(false)
                 {
-                    info!(repo = %repo, "auto-reindexing stale doc source");
-                    let _ = self.do_index_local(&root);
-                    return self.open_doc_store(repo);
+                    let repo_id = normalize_repo_id(&root);
+                    self.kick_off_doc_reindex(repo, repo_id, root);
                 }
                 Ok(store)
             }

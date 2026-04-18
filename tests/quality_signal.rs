@@ -116,6 +116,28 @@ fn quality_signal_score_in_range() {
 }
 
 #[test]
+fn quality_signal_scope_returns_file_level_agent_readiness() {
+    let (svc, _ws, sid) = build_multi_module_repo();
+    let r = svc
+        .dispatch(
+            "evaluate_quality",
+            json!({
+                "source_id": sid,
+                "analysis": "quality_signal",
+                "scope": "src_a/core.py",
+            }),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap(), "quality_signal(scope) failed: {r:?}");
+    let data = &r["data"];
+    assert_eq!(data["scope"], "src_a/core.py");
+    assert!(data["agent_readiness"].is_object());
+    assert!(data["weakest_dimension"].is_string());
+    assert!(data["top_offenders"].is_array());
+    assert!(data["thresholds_failed"].is_array());
+}
+
+#[test]
 fn repo_health_includes_quality_signal_finding() {
     let (svc, _ws, sid) = build_multi_module_repo();
     let r = svc
@@ -203,6 +225,93 @@ fn regression_check_without_baseline_errors() {
         .unwrap();
     assert!(!r["ok"].as_bool().unwrap());
     assert_eq!(r["error"]["code"], "NO_BASELINE");
+}
+
+#[test]
+fn session_end_reports_quality_regression() {
+    let (svc, ws, sid) = build_multi_module_repo();
+
+    let baseline = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": sid,
+                "query": "complex_func",
+            }),
+        )
+        .unwrap();
+    assert!(baseline["ok"].as_bool().unwrap(), "baseline probe failed: {baseline:?}");
+
+    fs::write(
+        ws.path().join("src_a").join("core.py"),
+        r#"
+from src_b.helper import do_work
+
+def complex_func(x, y, z):
+    if x > 0:
+        if y > 0:
+            for i in range(z):
+                if i % 2 == 0:
+                    while x > i:
+                        if x % 3 == 0:
+                            if y % 2 == 0:
+                                x -= 1
+    return x
+
+def simple_func():
+    total = 0
+    for outer in range(5):
+        for inner in range(5):
+            if outer % 2 == 0 and inner % 2 == 0:
+                total += outer + inner
+    return total
+"#,
+    )
+    .unwrap();
+    let reingest = svc
+        .dispatch(
+            "ingest_sources",
+            json!({
+                "path": ws.path().to_string_lossy(),
+                "domains": "code",
+                "incremental": true,
+            }),
+        )
+        .unwrap();
+    assert!(reingest["ok"].as_bool().unwrap(), "reingest failed: {reingest:?}");
+
+    let ended = svc
+        .dispatch("manage_indexes", json!({ "action": "session_end" }))
+        .unwrap();
+    assert!(ended["ok"].as_bool().unwrap(), "session_end failed: {ended:?}");
+    assert_eq!(
+        ended["data"]["quality_delta"]["verdict"].as_str(),
+        Some("regressed"),
+        "expected a regressed quality delta: {ended:?}"
+    );
+    assert!(
+        ended["data"]["quality_delta"]["new_hotspots"]
+            .as_array()
+            .is_some_and(|hotspots| !hotspots.is_empty()),
+        "expected session_end to surface at least one hotspot regression: {ended:?}"
+    );
+    assert!(
+        ended["data"]["quality_delta"]["avg_complexity"]["after"]
+            .as_f64()
+            .unwrap_or(0.0)
+            > ended["data"]["quality_delta"]["avg_complexity"]["before"]
+                .as_f64()
+                .unwrap_or(0.0),
+        "expected avg complexity to increase across the regressed session: {ended:?}"
+    );
+    assert!(
+        ended["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning["code"] == "QUALITY_REGRESSION"),
+        "expected QUALITY_REGRESSION warning: {ended:?}"
+    );
 }
 
 #[test]

@@ -14,76 +14,89 @@ use super::schema::{EMBEDDING_DIM, INDEX_STORE_INIT_SQL};
 /// Bump when adding a migration; keep in sync with [`apply_code_index_migrations`].
 pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 7;
 
+type MigrationStep = fn(&Connection) -> StorageResult<()>;
+
+fn migrate_v1_initial(conn: &Connection) -> StorageResult<()> {
+    conn.execute_batch(INDEX_STORE_INIT_SQL.as_str())?;
+    Ok(())
+}
+
+fn migrate_v2_import_fact_quality(conn: &Connection) -> StorageResult<()> {
+    add_import_fact_quality_if_missing(conn)
+}
+
+fn migrate_v3_extractor_version(conn: &Connection) -> StorageResult<()> {
+    add_extractor_version_column_if_missing(conn)
+}
+
+fn migrate_v4_quality_snapshots(conn: &Connection) -> StorageResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS quality_snapshots (
+            source_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            score INTEGER NOT NULL,
+            structural_score INTEGER NOT NULL,
+            agent_readiness_score INTEGER NOT NULL,
+            modularity REAL,
+            acyclicity REAL,
+            depth REAL,
+            equality REAL,
+            redundancy REAL,
+            navigability REAL,
+            comprehensibility REAL,
+            verifiability REAL,
+            change_safety REAL,
+            cycle_count INTEGER NOT NULL,
+            dead_count INTEGER NOT NULL,
+            dup_count INTEGER NOT NULL,
+            file_count INTEGER NOT NULL,
+            symbol_count INTEGER NOT NULL,
+            confidence TEXT NOT NULL,
+            avg_complexity REAL NOT NULL,
+            PRIMARY KEY (source_id, name)
+        );",
+    )?;
+    Ok(())
+}
+
+fn migrate_v6_vec_symbol_embeddings(conn: &Connection) -> StorageResult<()> {
+    conn.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS vec_symbol_embeddings USING vec0(symbol_rowid INTEGER PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIM}]);"
+    ))?;
+    Ok(())
+}
+
+fn migrate_v7_symbol_indexes(conn: &Connection) -> StorageResult<()> {
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_symbols_file_line
+             ON symbols(file_path, start_line, end_line);
+         CREATE INDEX IF NOT EXISTS idx_symbols_file_path
+             ON symbols(file_path);",
+    )?;
+    Ok(())
+}
+
+const CODE_INDEX_MIGRATIONS: &[(i32, MigrationStep)] = &[
+    (1, migrate_v1_initial),
+    (2, migrate_v2_import_fact_quality),
+    (3, migrate_v3_extractor_version),
+    (4, migrate_v4_quality_snapshots),
+    (5, rebuild_quality_snapshots_v5),
+    (6, migrate_v6_vec_symbol_embeddings),
+    (7, migrate_v7_symbol_indexes),
+];
+
 /// Apply migrations so `PRAGMA user_version == CODE_INDEX_TARGET_USER_VERSION`.
 #[instrument(level = "debug", skip(conn), fields(kind = "migrate_code_index"))]
 pub fn apply_code_index_migrations(conn: &Connection) -> StorageResult<()> {
-    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if v < 1 {
-        conn.execute_batch(INDEX_STORE_INIT_SQL.as_str())?;
-        conn.execute("PRAGMA user_version = 1", [])?;
-    }
-    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if v < 2 {
-        add_import_fact_quality_if_missing(conn)?;
-        conn.execute("PRAGMA user_version = 2", [])?;
-    }
-    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if v < 3 {
-        add_extractor_version_column_if_missing(conn)?;
-        conn.execute("PRAGMA user_version = 3", [])?;
-    }
-    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if v < 4 {
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS quality_snapshots (
-                source_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                score INTEGER NOT NULL,
-                structural_score INTEGER NOT NULL,
-                agent_readiness_score INTEGER NOT NULL,
-                modularity REAL,
-                acyclicity REAL,
-                depth REAL,
-                equality REAL,
-                redundancy REAL,
-                navigability REAL,
-                comprehensibility REAL,
-                verifiability REAL,
-                change_safety REAL,
-                cycle_count INTEGER NOT NULL,
-                dead_count INTEGER NOT NULL,
-                dup_count INTEGER NOT NULL,
-                file_count INTEGER NOT NULL,
-                symbol_count INTEGER NOT NULL,
-                confidence TEXT NOT NULL,
-                avg_complexity REAL NOT NULL,
-                PRIMARY KEY (source_id, name)
-            );",
-        )?;
-        conn.execute("PRAGMA user_version = 4", [])?;
-    }
-    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if v < 5 {
-        rebuild_quality_snapshots_v5(conn)?;
-        conn.execute("PRAGMA user_version = 5", [])?;
-    }
-    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if v < 6 {
-        conn.execute_batch(&format!(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS vec_symbol_embeddings USING vec0(symbol_rowid INTEGER PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIM}]);"
-        ))?;
-        conn.execute("PRAGMA user_version = 6", [])?;
-    }
-    let v: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if v < 7 {
-        conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_symbols_file_line
-                 ON symbols(file_path, start_line, end_line);
-             CREATE INDEX IF NOT EXISTS idx_symbols_file_path
-                 ON symbols(file_path);",
-        )?;
-        conn.execute("PRAGMA user_version = 7", [])?;
+    let mut current: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    for &(target, step) in CODE_INDEX_MIGRATIONS {
+        if current < target {
+            step(conn)?;
+            conn.execute(&format!("PRAGMA user_version = {target}"), [])?;
+            current = target;
+        }
     }
     Ok(())
 }

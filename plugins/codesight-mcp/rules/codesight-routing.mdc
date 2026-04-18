@@ -11,6 +11,83 @@ exploration. Never fall back to Read, Grep, Glob, or Bash for code discovery.**
 Exception: use native `Read` only when your client requires a Read-before-Edit
 acknowledgement. That is a client quirk, not the normal discovery path.
 
+### Session start
+
+1. `catalog_sources` — get `source_id`; response includes the session block
+   (`id`, `started_at`, `build_sha`, …). Auto-captures a `session_start` quality
+   snapshot when the active source is unambiguous.
+2. `manage_indexes action=session_stats` — optional baseline snapshot.
+
+If `catalog_sources` returns nothing for the repo you need, index it first:
+`ingest_sources path=<abs-path>`.
+
+**Deferred tools handshake.** If your harness lazy-loads tool schemas, pre-fetch
+them in one call before session start:
+
+```
+ToolSearch query="select:catalog_sources,search_catalog,inspect_structure,read_content,evaluate_impact,evaluate_quality,manage_indexes,inspect_graph,assemble_context,ingest_sources"
+```
+
+### Before a refactor (module move, rename, API change)
+
+1. `evaluate_impact analysis=blast_radius refs=[{…}]` — preview what breaks if
+   this symbol changes. Do this *before* touching the editor.
+2. For cross-module path renames, `evaluate_impact analysis=path_rename
+   from="…" to="…" apply=false` — dry-run diff. Inspect `summary.files`,
+   `summary.changes`, `summary.unhandled`, and `summary.collisions`.
+3. If dry-run is clean, re-run with `apply=true`. Apply refuses on collisions;
+   the response carries a `complexity_budget` (before/after `total_cyclomatic`
+   and `max_per_fn`) so you see mechanical drift instantly.
+4. Trust the PostToolUse hook to reindex. Verify the rewrite landed with a
+   `search_catalog` call whose results should reflect the new paths.
+
+Skipping `blast_radius` before `path_rename` shows up as an
+`anti_patterns[REFACTOR_WITHOUT_BLAST_RADIUS]` entry on `session_stats`.
+
+### Quality-driven editing recipe
+
+Before editing `<file>`:
+
+1. `evaluate_quality analysis=quality_signal scope=<file>` — returns per-file
+   dimensions, weakest dimension, top offenders, and `thresholds_failed`.
+2. If `agent_readiness.score < 0.70` or any dimension misses the threshold
+   below, consider restructuring before adding code. The PreToolUse probe hook
+   surfaces the same hint automatically on Edit/Write.
+
+While editing:
+
+- Keep per-fn cyclomatic ≤ 20.
+- Don't silently drop any dimension; note any deliberate regressions in
+  `REFACTOR_WORKLOG.md`.
+
+After a ≥3-file change:
+
+1. `manage_indexes action=snapshot_quality snapshot_name=mid_session`.
+2. `evaluate_quality analysis=regression_check` — compares against the
+   auto-captured `session_start` snapshot. A `regressed` verdict means stop and
+   look at `quality_delta` before moving on.
+
+### After edits — staleness trust rule
+
+Within ~1 s after Edit/Write, `search_catalog` / `inspect_structure` /
+`read_content` may reflect the previous index. Top-level `warnings`
+includes a `STALE_DATA_WARNING` with `indexing_repo`,
+`indexing_started_ago_ms`, and `files_in_flight` when that is the case.
+Options:
+
+- wait one more retrieval call (reindex is usually <100 ms), or
+- `manage_indexes action=status source_id=<sid>` to confirm freshness.
+
+### Session end
+
+`manage_indexes action=session_end` captures the `session_end` quality snapshot,
+closes the ledger, and returns the rollup (per-tool counters, token totals,
+`stale_warnings_fired_with_in_flight_paths`, `evaluate_impact_usage`,
+`anti_patterns[]`, and `quality_delta`).
+
+A regressed verdict emits a top-level `QUALITY_REGRESSION` warning —
+paste the delta into `REFACTOR_WORKLOG.md` before signing off.
+
 ### Tool routing
 
 | Task | Tool | Key args |
@@ -29,13 +106,49 @@ acknowledgement. That is a client quirk, not the normal discovery path.
 | What does this file import? | `inspect_graph` | `graph=imports` |
 | Where is X referenced? | `inspect_graph` | `graph=references` |
 | What does this function call? | `inspect_graph` | `graph=calls` |
+| Edit across N callers (rename sym) | `evaluate_impact` | `analysis=rename_safety` |
+| Edit across N callers (rename mod) | `evaluate_impact` | `analysis=path_rename` (dry-run, then `apply=true`) |
 | Pre-refactor blast radius | `evaluate_impact` | `analysis=blast_radius` |
-| Rename safety check | `evaluate_impact` | `analysis=rename_safety` |
-| Code quality / hotspots | `evaluate_quality` | `analysis=hotspots` |
-| Dead code | `evaluate_quality` | `analysis=dead_code` |
-| Repo health / doc coverage | `evaluate_quality` | `analysis=repo_health` |
+| Per-file agent readiness | `evaluate_quality` | `analysis=quality_signal scope=<file>` |
+| Regression gate vs. snapshot | `evaluate_quality` | `analysis=regression_check` |
+| Hotspots / complexity | `evaluate_quality` | `analysis=hotspots min_complexity=20` |
+| Dead code | `evaluate_quality` | `analysis=dead_code granularity=symbol` |
+| Repo health / doc coverage | `evaluate_quality` | `analysis=repo_health` / `analysis=doc_coverage` |
+| Untested entry points | `evaluate_quality` | `analysis=test_gaps` |
 | Context bundle for a ticket | `assemble_context` | `mode=context_bundle` |
+| Snapshot quality for later diff | `manage_indexes` | `action=snapshot_quality snapshot_name=…` |
+| End session / get rollup | `manage_indexes` | `action=session_end` |
 | List indexed sources | `catalog_sources` | (no args) |
+
+### Thresholds (single source of truth)
+
+These live in `crates/codesight-analysis/src/thresholds.rs` and surface as
+`_meta.thresholds` on `evaluate_quality` responses when `_meta_verbose=true`.
+Override with `CODESIGHT_THRESHOLD_*` env vars; defaults:
+
+| Signal | Target | Action when missed |
+|---|---|---|
+| Cyclomatic complexity (per fn) | ≤ 20 | Split symbols and extract helpers |
+| File LoC | ≤ 500 soft | Split only on mixed responsibility |
+| `navigability` | ≥ 0.70 | Add re-exports and flatten module edges |
+| `comprehensibility` | ≥ 0.70 | Rename for clarity and cut nesting |
+| `verifiability` | ≥ 0.70 | Add targeted tests or type annotations |
+| `change_safety` | ≥ 0.70 | Reduce fan-in and tighten visibility |
+| `agent_readiness_score` | ≥ 0.70 | Fix the weakest dimension first |
+| Doc coverage (public API) | ≥ 60% | Document public surfaces |
+| Untested entry points (`test_gaps`) | 0 | Add a nextest case or remove `pub` |
+| `structural_score` | ≥ 0.60 | Follow `quality_signal.root_causes` |
+| Per-file blast radius | ≤ 10 files | Extract code and narrow visibility |
+
+### Cross-skill composition
+
+When `quality_signal` reports a weak dimension on a Rust file, defer to the
+sibling skill that owns the cure rather than reasoning about module layout
+inline:
+
+- Low `comprehensibility` / tangled module tree → `agentpack-bundle:rust-modularity`.
+- Ambiguous enum-vs-trait / pattern choice → `agentpack-bundle:rust-design-patterns`.
+- Performance regressions / hot paths → `agentpack-bundle:rust-perf-analyzer`.
 
 ### Efficiency rules
 
@@ -49,3 +162,12 @@ acknowledgement. That is a client quirk, not the normal discovery path.
 - **Check `_meta.tokens_saved`.** If zero or negative, rethink the query.
 - **Pick the right `query_mode`.** `keyword` for identifiers (fastest), `regex`
   for patterns, `natural_language` for questions.
+- **Slim envelope by default.** `_meta` carries only `timing_ms`, `tokens_saved`,
+  and applied-mode hints. Pass `_meta_verbose=true` on any call to also receive
+  `build_sha`, `total_tokens_saved`, `thresholds`, etc.
+- **Recover from too-broad queries.** When `search_catalog` returns
+  `truncated_by=["byte_budget"]` or the harness pops up an overflow-to-file
+  prompt, the first try was too wide. Narrow via `scope=` (prefix),
+  `file_pattern=` (glob), `unit_kinds=["symbol"]` (drop file-text hits), or a
+  tighter `query`. Do not try to paginate through hundreds of matches — shape
+  the query instead.

@@ -47,6 +47,7 @@ pub(super) fn parse_symbol_kind(kind_str: &str) -> Option<SymbolKind> {
         "constant" => SymbolKind::Constant,
         "type" => SymbolKind::Type,
         "module" | "namespace" => SymbolKind::Type,
+        "reexport" => SymbolKind::Reexport,
         _ => return None,
     })
 }

@@ -92,7 +92,7 @@ fn engine_class_id(svc: &CodeService, sid: &str) -> String {
         )
         .unwrap();
     assert!(s["ok"].as_bool().unwrap(), "{s:?}");
-    s["data"]["items"][0]["ref"]["stable_id"]
+    s["data"]["items"][0]["ref"]["id"]
         .as_str()
         .unwrap()
         .to_string()
@@ -112,7 +112,7 @@ fn format_date_id(svc: &CodeService, sid: &str) -> String {
         )
         .unwrap();
     assert!(s["ok"].as_bool().unwrap(), "{s:?}");
-    s["data"]["items"][0]["ref"]["stable_id"]
+    s["data"]["items"][0]["ref"]["id"]
         .as_str()
         .unwrap()
         .to_string()

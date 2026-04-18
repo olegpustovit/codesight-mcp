@@ -170,6 +170,7 @@ impl CodeService {
             sym_refs[0].id.as_deref(),
             sym_refs[0].path.as_deref(),
             sym_refs[0].start_line,
+            sym_refs[0].symbol_name.as_deref(),
         ) {
             Ok(Some(s)) => s,
             Ok(None) => {
@@ -178,7 +179,7 @@ impl CodeService {
                     ToolError {
                         category: ToolErrorCategory::InvalidArgument,
                         code: "INVALID_REQUEST",
-                        message: "symbol ref needs id/stable_id, or path + start_line.".to_string(),
+                        message: "symbol ref needs id/stable_id, path + start_line, or path + symbol_name.".to_string(),
                         detail: json!({}),
                     },
                 );

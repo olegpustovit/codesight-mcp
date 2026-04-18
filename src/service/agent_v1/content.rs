@@ -53,12 +53,19 @@ impl CodeService {
             pref.id.as_deref(),
             pref.path.as_deref(),
             pref.start_line,
+            pref.symbol_name.as_deref(),
         )?;
         let Some(ref sym_id) = resolved_id else {
-            return Ok(err_item(
-                "MISSING_REF",
-                "symbol ref needs id/stable_id, or path + start_line that resolves to an indexed symbol",
-            ));
+            let msg = match (pref.symbol_name.as_deref(), pref.path.as_deref()) {
+                (Some(name), Some(path)) => format!(
+                    "no symbol named '{name}' in {path} — try inspect_structure view=file_outline file_path=\"{path}\""
+                ),
+                (Some(name), None) => format!(
+                    "symbol name '{name}' is ambiguous or not indexed — pass path + symbol_name or a stable_id"
+                ),
+                _ => "symbol ref needs id/stable_id, path + start_line, or path + symbol_name that resolves to an indexed symbol".to_string(),
+            };
+            return Ok(err_item("MISSING_REF", &msg));
         };
         *raw_bytes += store
             .symbol_metadata(sym_id)?
@@ -183,28 +190,22 @@ impl CodeService {
         let want_body = include.iter().any(|x| x == "body");
         let want_hash = include.iter().any(|x| x == "hash");
         let repo_path = args.repo_path.as_deref();
-
-        let heavy_threshold = TOKEN_HEAVY_READ_BYTES;
-
-        // Resolve the default repo store ONCE before the loop. This avoids
-        // repeated staleness checks + potential reindexes per ref.
         let default_repo_store = self.ensure_repo_store(&args.source_id, repo_path).ok();
 
         let mut items = Vec::new();
         let mut raw_bytes_total = 0u64;
         let mut warnings = Vec::new();
-
-        // Read scope counters.
-        let mut scope_symbol = 0u64;
-        let mut scope_section = 0u64;
-        let mut scope_file_range = 0u64;
-        let mut scope_file_full = 0u64;
-        let mut warned_full_file_reads = 0u64;
+        let mut scopes = ReadScopeCounters::default();
         let mut returned_bytes = 0u64;
+        let mut warned_full_file_reads = 0u64;
 
         for pref in &args.refs {
             let sid = pref.source_id.as_deref().unwrap_or(&args.source_id);
-            let id = pref.stable_id.clone().or(pref.id.clone());
+            let repo_store_for_ref = if sid == args.source_id {
+                default_repo_store.clone()
+            } else {
+                self.ensure_repo_store(sid, repo_path).ok()
+            };
             let opts = ReadOpts {
                 sid,
                 repo_path,
@@ -213,168 +214,213 @@ impl CodeService {
                 want_body,
                 want_hash,
             };
-
-            // Reuse pre-resolved store when source_id matches; resolve on
-            // demand only for cross-source refs.
-            let repo_store_for_ref = if sid == args.source_id {
-                default_repo_store.clone()
-            } else {
-                self.ensure_repo_store(sid, repo_path).ok()
-            };
-
-            let (mut item, scope) = match pref.kind.to_ascii_lowercase().as_str() {
-                "symbol" => {
-                    scope_symbol += 1;
-                    let Some(ref store) = repo_store_for_ref else {
-                        items.push(err_item(
-                            "NOT_INDEXED",
-                            &format!("Code source '{sid}' has not been indexed."),
-                        ));
-                        continue;
-                    };
-                    (
-                        self.read_symbol_item(pref, store, &opts, &mut raw_bytes_total)?,
-                        "symbol",
-                    )
-                }
-                "section" => {
-                    scope_section += 1;
-                    let Some(ref sec_id) = id else {
-                        items.push(err_item("MISSING_REF", "section ref needs id/stable_id"));
-                        continue;
-                    };
-                    (
-                        self.read_section_item(sec_id, &opts, &mut raw_bytes_total)?,
-                        "section",
-                    )
-                }
-                "file" => {
-                    let Some(file_path) = pref.path.as_deref().or(id.as_deref()) else {
-                        items.push(err_item("MISSING_REF", "file ref needs path or id"));
-                        continue;
-                    };
-                    let is_bounded = pref.start_line.is_some() && pref.end_line.is_some();
-                    if is_bounded {
-                        scope_file_range += 1;
-                    } else {
-                        scope_file_full += 1;
+            match self.read_one_ref(
+                pref,
+                &opts,
+                repo_store_for_ref.as_ref(),
+                &mut scopes,
+                &mut raw_bytes_total,
+            )? {
+                RefReadResult::Err(e) => items.push(e),
+                RefReadResult::Ok { mut item, scope } => {
+                    let item_bytes = extract_item_bytes(&item);
+                    returned_bytes += item_bytes;
+                    if let Some(obj) = item.as_object_mut() {
+                        obj.insert("read_scope".to_string(), json!(scope));
                     }
-                    let scope_label = if is_bounded {
-                        "file_range"
-                    } else {
-                        "file_full"
-                    };
-                    (
-                        self.read_file_item(pref, file_path, &opts, &mut raw_bytes_total)?,
-                        scope_label,
-                    )
-                }
-                other => {
-                    items.push(err_item(
-                        "UNSUPPORTED_KIND",
-                        &format!("kind '{}' is not supported", other),
-                    ));
-                    continue;
-                }
-            };
-
-            // Track returned bytes per item.
-            let item_bytes = item
-                .get("content")
-                .and_then(|v| v.as_str())
-                .map(|s| s.len() as u64)
-                .or_else(|| {
-                    item.get("source")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.len() as u64)
-                })
-                .unwrap_or(0);
-            returned_bytes += item_bytes;
-
-            // Inject read_scope into item.
-            if let Some(obj) = item.as_object_mut() {
-                obj.insert("read_scope".to_string(), json!(scope));
-            }
-
-            // TOKEN_HEAVY_READ: only on file_full above threshold.
-            if scope == "file_full" && item_bytes > heavy_threshold {
-                let path_str = pref.path.as_deref().or(id.as_deref()).unwrap_or("unknown");
-                warnings.push(json!({
-                    "code": "TOKEN_HEAVY_READ",
-                    "message": format!(
-                        "Whole-file read returned {} bytes. Token-efficient alternatives: \
-                         inspect_structure view=file_outline, search_catalog with include_body=true, \
-                         or read_content with start_line/end_line.",
-                        item_bytes
-                    ),
-                    "detail": {
-                        "read_scope": "file_full",
-                        "path": path_str,
-                        "returned_bytes": item_bytes,
-                        "threshold_bytes": heavy_threshold
+                    if scope == "file_full" && item_bytes > TOKEN_HEAVY_READ_BYTES {
+                        warnings.push(token_heavy_read_warning(pref, item_bytes));
+                        warned_full_file_reads += 1;
                     }
-                }));
-                warned_full_file_reads += 1;
+                    items.push(item);
+                }
             }
-
-            items.push(item);
         }
 
         let timer = MetaBuilder::new(raw_bytes_total.max(1));
-        let mut extra: Vec<(String, Value)> = Vec::new();
-
-        // Read scope counters in _meta.
-        extra.push((
-            "read_scopes".to_string(),
-            json!({
-                "symbol": scope_symbol,
-                "section": scope_section,
-                "file_range": scope_file_range,
-                "file_full": scope_file_full
-            }),
-        ));
-        extra.push(("returned_bytes".to_string(), json!(returned_bytes)));
-        extra.push((
-            "warned_full_file_reads".to_string(),
-            json!(warned_full_file_reads),
-        ));
-
-        if args.verify || want_hash {
-            extra.push((
-                "next_step_hint".to_string(),
-                json!({
-                    "tool": "read_content",
-                    "reason": "This response includes verification/hash-backed bytes that some clients reuse for edit-safety checks.",
-                    "when": "before editing the same file only if your client requires an explicit native-read acknowledgement beyond MCP retrieval",
-                }),
-            ));
-        } else if warned_full_file_reads > 0 {
-            extra.push((
-                "next_step_hint".to_string(),
-                json!({
-                    "tool": "inspect_structure",
-                    "reason": "This response included whole-file reads that could be replaced with targeted retrieval.",
-                    "alternatives": [
-                        {
-                            "tool": "inspect_structure",
-                            "args": {"view": "file_outline"},
-                            "when": "to see what's in a file without reading all of it"
-                        },
-                        {
-                            "tool": "search_catalog",
-                            "args": {"query_mode": "keyword", "include_body": true},
-                            "when": "to find and read a specific symbol or pattern"
-                        },
-                        {
-                            "tool": "read_content",
-                            "args": {"refs": [{"kind": "file", "start_line": "N", "end_line": "M"}]},
-                            "when": "to read a bounded range instead of the whole file"
-                        }
-                    ]
-                }),
-            ));
-        }
-
+        let extra = build_read_meta_extras(
+            &scopes,
+            returned_bytes,
+            warned_full_file_reads,
+            args.verify,
+            want_hash,
+        );
         self.success_response_with_meta_extra(&timer, json!({ "items": items }), warnings, extra)
     }
+
+    fn read_one_ref(
+        &self,
+        pref: &ContentRef,
+        opts: &ReadOpts<'_>,
+        repo_store: Option<&IndexStore>,
+        scopes: &mut ReadScopeCounters,
+        raw_bytes: &mut u64,
+    ) -> anyhow::Result<RefReadResult> {
+        let id = pref.stable_id.clone().or(pref.id.clone());
+        match pref.kind.to_ascii_lowercase().as_str() {
+            "symbol" => {
+                scopes.symbol += 1;
+                let Some(store) = repo_store else {
+                    return Ok(RefReadResult::Err(err_item(
+                        "NOT_INDEXED",
+                        &format!("Code source '{}' has not been indexed.", opts.sid),
+                    )));
+                };
+                let item = self.read_symbol_item(pref, store, opts, raw_bytes)?;
+                Ok(RefReadResult::Ok {
+                    item,
+                    scope: "symbol",
+                })
+            }
+            "section" => {
+                scopes.section += 1;
+                let Some(sec_id) = id.as_deref() else {
+                    return Ok(RefReadResult::Err(err_item(
+                        "MISSING_REF",
+                        "section ref needs id/stable_id",
+                    )));
+                };
+                let item = self.read_section_item(sec_id, opts, raw_bytes)?;
+                Ok(RefReadResult::Ok {
+                    item,
+                    scope: "section",
+                })
+            }
+            "file" => {
+                let Some(file_path) = pref.path.as_deref().or(id.as_deref()) else {
+                    return Ok(RefReadResult::Err(err_item(
+                        "MISSING_REF",
+                        "file ref needs path or id",
+                    )));
+                };
+                let scope = if pref.start_line.is_some() && pref.end_line.is_some() {
+                    scopes.file_range += 1;
+                    "file_range"
+                } else {
+                    scopes.file_full += 1;
+                    "file_full"
+                };
+                let item = self.read_file_item(pref, file_path, opts, raw_bytes)?;
+                Ok(RefReadResult::Ok { item, scope })
+            }
+            other => Ok(RefReadResult::Err(err_item(
+                "UNSUPPORTED_KIND",
+                &format!("kind '{other}' is not supported"),
+            ))),
+        }
+    }
+}
+
+#[derive(Default)]
+struct ReadScopeCounters {
+    symbol: u64,
+    section: u64,
+    file_range: u64,
+    file_full: u64,
+}
+
+enum RefReadResult {
+    Ok {
+        item: Value,
+        scope: &'static str,
+    },
+    Err(Value),
+}
+
+fn extract_item_bytes(item: &Value) -> u64 {
+    item.get("content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.len() as u64)
+        .or_else(|| {
+            item.get("source")
+                .and_then(|v| v.as_str())
+                .map(|s| s.len() as u64)
+        })
+        .unwrap_or(0)
+}
+
+fn token_heavy_read_warning(pref: &ContentRef, item_bytes: u64) -> Value {
+    let path_str = pref
+        .path
+        .as_deref()
+        .or(pref.stable_id.as_deref())
+        .or(pref.id.as_deref())
+        .unwrap_or("unknown");
+    json!({
+        "code": "TOKEN_HEAVY_READ",
+        "message": format!(
+            "Whole-file read returned {} bytes. Token-efficient alternatives: \
+             inspect_structure view=file_outline, search_catalog with include_body=true, \
+             or read_content with start_line/end_line.",
+            item_bytes
+        ),
+        "detail": {
+            "read_scope": "file_full",
+            "path": path_str,
+            "returned_bytes": item_bytes,
+            "threshold_bytes": TOKEN_HEAVY_READ_BYTES
+        }
+    })
+}
+
+fn build_read_meta_extras(
+    scopes: &ReadScopeCounters,
+    returned_bytes: u64,
+    warned_full_file_reads: u64,
+    verify: bool,
+    want_hash: bool,
+) -> Vec<(String, Value)> {
+    let mut extra: Vec<(String, Value)> = vec![
+        (
+            "read_scopes".to_string(),
+            json!({
+                "symbol": scopes.symbol,
+                "section": scopes.section,
+                "file_range": scopes.file_range,
+                "file_full": scopes.file_full
+            }),
+        ),
+        ("returned_bytes".to_string(), json!(returned_bytes)),
+        (
+            "warned_full_file_reads".to_string(),
+            json!(warned_full_file_reads),
+        ),
+    ];
+
+    if verify || want_hash {
+        extra.push((
+            "next_step_hint".to_string(),
+            json!({
+                "tool": "read_content",
+                "reason": "This response includes verification/hash-backed bytes that some clients reuse for edit-safety checks.",
+                "when": "before editing the same file only if your client requires an explicit native-read acknowledgement beyond MCP retrieval",
+            }),
+        ));
+    } else if warned_full_file_reads > 0 {
+        extra.push((
+            "next_step_hint".to_string(),
+            json!({
+                "tool": "inspect_structure",
+                "reason": "This response included whole-file reads that could be replaced with targeted retrieval.",
+                "alternatives": [
+                    {
+                        "tool": "inspect_structure",
+                        "args": {"view": "file_outline"},
+                        "when": "to see what's in a file without reading all of it"
+                    },
+                    {
+                        "tool": "search_catalog",
+                        "args": {"query_mode": "keyword", "include_body": true},
+                        "when": "to find and read a specific symbol or pattern"
+                    },
+                    {
+                        "tool": "read_content",
+                        "args": {"refs": [{"kind": "file", "start_line": "N", "end_line": "M"}]},
+                        "when": "to read a bounded range instead of the whole file"
+                    }
+                ]
+            }),
+        ));
+    }
+    extra
 }

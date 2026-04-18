@@ -18,22 +18,20 @@ pub(in crate::service) fn round_score(score: f64) -> f64 {
 }
 
 pub(in crate::service) fn search_hit_symbol(
-    source_id: &str,
+    _source_id: &str,
     s: &SearchSymbol,
     body: Option<&str>,
 ) -> Value {
+    // `ref` carries only the fields that can't be reconstructed from the
+    // stable id's `path::name#kind` format. `stable_id`, `source_id`,
+    // `domain`, `kind`, and `summary` are redundant (see PLAN2 §3.1).
     let mut hit = serde_json::Map::new();
     hit.insert(
         "ref".to_string(),
         json!({
             "id": s.id,
-            "stable_id": s.id,
-            "source_id": source_id,
-            "domain": "code",
-            "kind": "symbol",
             "path": s.file,
             "title": s.name,
-            "summary": s.summary,
         }),
     );
     hit.insert("snippet".to_string(), json!(s.signature));
@@ -55,22 +53,20 @@ pub(in crate::service) fn search_hit_symbol(
 }
 
 pub(in crate::service) fn search_hit_section(
-    source_id: &str,
+    _source_id: &str,
     s: &SearchSection,
     body: Option<&str>,
 ) -> Value {
+    // Ref carries only what the id doesn't — heading (title), file, line,
+    // and heading_path as a snippet. `summary` duplicates heading_path;
+    // `stable_id` / `source_id` / `domain` / `kind` are redundant.
     let mut hit = serde_json::Map::new();
     hit.insert(
         "ref".to_string(),
         json!({
             "id": s.id,
-            "stable_id": s.id,
-            "source_id": source_id,
-            "domain": "docs",
-            "kind": "section",
             "path": s.file,
             "title": s.heading,
-            "summary": s.summary,
         }),
     );
     hit.insert("snippet".to_string(), json!(s.heading_path));
@@ -123,14 +119,15 @@ pub(in crate::service) fn pack_catalog_items_to_token_budget(
 /// `evaluate_impact`, etc.) to its indexed stable id.
 ///
 /// Order: explicit `stable_id` → explicit `id` → `path` + `start_line` lookup
-/// against the symbol index. Returns `None` when none of the above produce a
-/// usable id (callers turn that into a `MISSING_REF` error).
+/// → `path` + `symbol_name` → unique bare `symbol_name`. Returns `None` when
+/// nothing resolves (callers turn that into a `MISSING_REF` / ambiguity error).
 pub(in crate::service) fn resolve_symbol_id(
     store: &codesight_storage::storage::IndexStore,
     stable_id: Option<&str>,
     id: Option<&str>,
     path: Option<&str>,
     start_line: Option<u32>,
+    symbol_name: Option<&str>,
 ) -> anyhow::Result<Option<String>> {
     if let Some(s) = stable_id.filter(|s| !s.is_empty()) {
         return Ok(Some(s.to_string()));
@@ -142,6 +139,12 @@ pub(in crate::service) fn resolve_symbol_id(
         && line > 0
     {
         return store.symbol_id_at_location(p, line);
+    }
+    if let Some(name) = symbol_name.filter(|s| !s.is_empty()) {
+        if let Some(p) = path.filter(|s| !s.is_empty()) {
+            return store.symbol_id_at_name(p, name);
+        }
+        return store.symbol_id_by_unique_name(name);
     }
     Ok(None)
 }
@@ -295,4 +298,267 @@ pub(in crate::service) fn outline_neighbors(
         offset += 1;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codesight_core::symbols::SymbolKind;
+
+    fn sym(id: &str, name: &str, file: &str, line: u32) -> SearchSymbol {
+        SearchSymbol {
+            id: id.to_string(),
+            kind: SymbolKind::Function,
+            name: name.to_string(),
+            file: file.to_string(),
+            line,
+            signature: format!("fn {name}()"),
+            summary: String::new(),
+            score: 0.7654321,
+            match_type: Some("exact".to_string()),
+            fuzzy_similarity: None,
+            edit_distance: None,
+        }
+    }
+
+    fn section_row(id: &str, heading: &str, heading_path: &str, line: u32, level: u32) -> Value {
+        json!({
+            "id": id,
+            "heading": heading,
+            "heading_path": heading_path,
+            "line": line,
+            "level": level,
+            "summary": format!("summary of {heading}"),
+        })
+    }
+
+    #[test]
+    fn round_score_truncates_and_passes_through_nonfinite() {
+        assert_eq!(round_score(0.5299999999999999), 0.53);
+        assert_eq!(round_score(1.2345678), 1.235);
+        assert!(round_score(f64::NAN).is_nan());
+        assert_eq!(round_score(f64::INFINITY), f64::INFINITY);
+    }
+
+    #[test]
+    fn search_hit_symbol_shapes_ref_and_rounds_score() {
+        let s = sym("my_id", "do_thing", "src/lib.rs", 42);
+        let hit = search_hit_symbol("src-1", &s, Some("fn body"));
+        assert_eq!(hit["ref"]["id"], "my_id");
+        assert_eq!(hit["ref"]["path"], "src/lib.rs");
+        assert_eq!(hit["ref"]["title"], "do_thing");
+        // Redundant envelope fields are dropped (PLAN2 §3.1).
+        let r = hit["ref"].as_object().unwrap();
+        assert!(r.get("stable_id").is_none());
+        assert!(r.get("source_id").is_none());
+        assert!(r.get("domain").is_none());
+        assert!(r.get("kind").is_none());
+        assert!(r.get("summary").is_none());
+        assert_eq!(hit["score"], 0.765);
+        assert_eq!(hit["line"], 42);
+        assert_eq!(hit["match_type"], "exact");
+        assert_eq!(hit["body"], "fn body");
+    }
+
+    #[test]
+    fn search_hit_symbol_omits_optional_fields_when_absent() {
+        let mut s = sym("id", "n", "f.rs", 1);
+        s.match_type = None;
+        let hit = search_hit_symbol("src", &s, None);
+        assert!(hit.as_object().unwrap().get("match_type").is_none());
+        assert!(hit.as_object().unwrap().get("body").is_none());
+    }
+
+    #[test]
+    fn token_estimate_ceil_divides_and_clamps_empty() {
+        assert_eq!(token_estimate_for_context(""), 0);
+        assert_eq!(token_estimate_for_context("a"), 1);
+        assert_eq!(token_estimate_for_context("abcd"), 1);
+        assert_eq!(token_estimate_for_context("abcde"), 2);
+        assert_eq!(
+            token_estimate_for_context(&"x".repeat(4000)),
+            (4000 / BYTES_PER_TOKEN) as u32
+        );
+    }
+
+    #[test]
+    fn pack_catalog_items_respects_zero_budget() {
+        let items = vec![json!({"a": 1}), json!({"b": 2})];
+        let (kept, truncated) = pack_catalog_items_to_token_budget(items, 0);
+        assert!(kept.is_empty());
+        assert!(truncated);
+    }
+
+    #[test]
+    fn pack_catalog_items_zero_budget_zero_items_not_truncated() {
+        let (kept, truncated) = pack_catalog_items_to_token_budget(Vec::new(), 0);
+        assert!(kept.is_empty());
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn pack_catalog_items_stops_when_exceeding_budget() {
+        let items = vec![json!({"k": "a".repeat(30)}), json!({"k": "b".repeat(30)})];
+        // first item ~40 bytes serialized → 10 tokens; budget=10 tokens ≈ 40 bytes keeps one
+        let (kept, truncated) = pack_catalog_items_to_token_budget(items, 10);
+        assert_eq!(kept.len(), 1);
+        assert!(truncated);
+    }
+
+    #[test]
+    fn pack_catalog_items_keeps_all_when_budget_generous() {
+        let items = vec![json!({"a": 1}), json!({"b": 2})];
+        let (kept, truncated) = pack_catalog_items_to_token_budget(items, 1_000);
+        assert_eq!(kept.len(), 2);
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn truncate_content_honors_char_boundary() {
+        let content = "αβγδ"; // each char is 2 bytes in UTF-8
+        // 2 tokens * 4 bytes = 8 bytes cap → full content kept (8 bytes)
+        let (out, truncated) = truncate_content_to_token_budget(content, 2);
+        assert_eq!(out, content);
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn truncate_content_drops_past_budget_and_aligns_boundary() {
+        let content = "αβγδ"; // 8 bytes
+        // 1 token * 4 bytes = 4 bytes cap; 4 bytes = 2 full chars → aligned
+        let (out, truncated) = truncate_content_to_token_budget(content, 1);
+        assert_eq!(out, "αβ");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn truncate_content_rolls_back_to_valid_boundary() {
+        // 5 bytes would land mid-char; ensure output is a valid prefix.
+        let content = "αβγ"; // 6 bytes
+        let per = BYTES_PER_TOKEN as u32; // 4
+        let (out, truncated) = truncate_content_to_token_budget(content, per + 1);
+        assert!(truncated || out == content);
+        assert!(content.starts_with(&out));
+    }
+
+    #[test]
+    fn doc_format_to_type_label_maps_known_and_fallbacks() {
+        assert_eq!(doc_format_to_type_label("markdown"), ".md");
+        assert_eq!(doc_format_to_type_label("text"), ".txt");
+        assert_eq!(doc_format_to_type_label("rst"), ".rst");
+        assert_eq!(doc_format_to_type_label("asciidoc"), ".adoc");
+        assert_eq!(doc_format_to_type_label("org"), ".org");
+    }
+
+    #[test]
+    fn err_item_wraps_code_and_message() {
+        let v = err_item("BAD", "oops");
+        assert_eq!(v["error"]["code"], "BAD");
+        assert_eq!(v["error"]["message"], "oops");
+    }
+
+    #[test]
+    fn heading_path_ancestors_returns_chain_excluding_self() {
+        let all = vec![
+            section_row("r", "Root", "Root", 1, 1),
+            section_row("c", "Child", "Root > Child", 2, 2),
+            section_row("g", "Grand", "Root > Child > Grand", 3, 3),
+        ];
+        let anc = heading_path_ancestors(&all, "Root > Child > Grand");
+        assert_eq!(anc.len(), 2);
+        assert_eq!(anc[0]["id"], "r");
+        assert_eq!(anc[1]["id"], "c");
+    }
+
+    #[test]
+    fn heading_path_ancestors_empty_for_top_level() {
+        let all = vec![section_row("r", "Root", "Root", 1, 1)];
+        assert!(heading_path_ancestors(&all, "Root").is_empty());
+    }
+
+    #[test]
+    fn direct_child_sections_only_returns_depth_one_descendants() {
+        let all = vec![
+            section_row("r", "Root", "Root", 1, 1),
+            section_row("c1", "Child1", "Root > Child1", 2, 2),
+            section_row("c2", "Child2", "Root > Child2", 4, 2),
+            section_row("g", "Grand", "Root > Child1 > Grand", 3, 3),
+        ];
+        let kids = direct_child_sections(&all, "Root");
+        assert_eq!(kids.len(), 2);
+        let ids: Vec<&str> = kids.iter().map(|k| k["id"].as_str().unwrap()).collect();
+        assert!(ids.contains(&"c1"));
+        assert!(ids.contains(&"c2"));
+    }
+
+    #[test]
+    fn outline_neighbors_walks_symmetrically_and_skips_self() {
+        let all = vec![
+            section_row("a", "A", "A", 1, 1),
+            section_row("b", "B", "A > B", 2, 2),
+            section_row("c", "C", "A > C", 3, 2),
+            section_row("d", "D", "A > D", 4, 2),
+            section_row("e", "E", "A > E", 5, 2),
+        ];
+        let out = outline_neighbors(&all, "c", 4, "src");
+        // order: c-1 (b), c+1 (d), c-2 (a), c+2 (e)
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0]["ref"]["stable_id"], "b");
+        assert_eq!(out[1]["ref"]["stable_id"], "d");
+        assert_eq!(out[2]["ref"]["stable_id"], "a");
+        assert_eq!(out[3]["ref"]["stable_id"], "e");
+        for item in &out {
+            assert_eq!(item["ref"]["kind"], "section");
+            assert_eq!(item["ref"]["source_id"], "src");
+        }
+    }
+
+    #[test]
+    fn outline_neighbors_returns_empty_when_anchor_missing() {
+        let all = vec![section_row("a", "A", "A", 1, 1)];
+        assert!(outline_neighbors(&all, "missing", 5, "src").is_empty());
+    }
+
+    #[test]
+    fn outline_neighbors_stops_at_max() {
+        let all: Vec<Value> = (0..10)
+            .map(|i| section_row(&format!("s{i}"), "S", "S", i, 1))
+            .collect();
+        let out = outline_neighbors(&all, "s5", 2, "src");
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn resolve_symbol_id_prefers_stable_id_over_others() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let store = codesight_storage::storage::IndexStore::open(tmp.path().join("x.sqlite"))?;
+        let got = resolve_symbol_id(&store, Some("S"), Some("I"), Some("f"), Some(1), Some("n"))?;
+        assert_eq!(got, Some("S".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_symbol_id_falls_back_to_id() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let store = codesight_storage::storage::IndexStore::open(tmp.path().join("x.sqlite"))?;
+        let got = resolve_symbol_id(&store, None, Some("I"), None, None, None)?;
+        assert_eq!(got, Some("I".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_symbol_id_returns_none_when_insufficient() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let store = codesight_storage::storage::IndexStore::open(tmp.path().join("x.sqlite"))?;
+        assert!(resolve_symbol_id(&store, None, None, None, None, None)?.is_none());
+        assert!(resolve_symbol_id(&store, Some(""), Some(""), None, None, None)?.is_none());
+        assert!(resolve_symbol_id(&store, None, None, Some("f"), Some(0), None)?.is_none());
+        // No DB rows — (path+name) and (name alone) both resolve to None
+        // without erroring. Populated-store cases live in the storage crate.
+        assert!(
+            resolve_symbol_id(&store, None, None, Some("f.rs"), None, Some("no_such"))?.is_none()
+        );
+        assert!(resolve_symbol_id(&store, None, None, None, None, Some("no_such"))?.is_none());
+        Ok(())
+    }
 }

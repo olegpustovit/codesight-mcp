@@ -148,6 +148,7 @@ pub fn coerce_and_validate(tool: &str, mut arguments: Value) -> Result<Value, To
     let Some(tool_schema) = schemas().and_then(|s| s.get(tool)) else {
         return Ok(arguments);
     };
+    expand_shorthand_refs(&mut arguments);
     coerce(&mut arguments, &tool_schema.schema);
     if let Err(error) = tool_schema.validator.validate(&arguments) {
         let pointer = error.instance_path.to_string();
@@ -236,6 +237,61 @@ fn coerce_object(map: &mut Map<String, Value>, props: &Map<String, Value>) {
     }
 }
 
+/// Expand shorthand ref strings inside a `refs` array.
+///
+/// - `"path/to/file.rs:40-120"` → `{kind: "file", path, start_line, end_line}`
+/// - `"path/to/file.rs:40"` → `{kind: "file", path, start_line, end_line=start_line}`
+/// - `"path/to/file.rs::Foo.bar#function"` → `{kind: "symbol", path, stable_id}`
+/// - Anything else is left untouched so the validator can report it.
+fn expand_shorthand_refs(arguments: &mut Value) {
+    if let Value::Object(map) = arguments
+        && let Some(Value::Array(arr)) = map.get_mut("refs")
+    {
+        for v in arr.iter_mut() {
+            if let Value::String(s) = v
+                && let Some(obj) = shorthand_ref_to_object(s)
+            {
+                *v = obj;
+            }
+        }
+    }
+}
+
+fn shorthand_ref_to_object(s: &str) -> Option<Value> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some((path, rest)) = trimmed.rsplit_once("::")
+        && !path.is_empty()
+        && !rest.is_empty()
+    {
+        return Some(json!({
+            "kind": "symbol",
+            "path": path,
+            "stable_id": trimmed,
+        }));
+    }
+    if let Some((path, range)) = trimmed.rsplit_once(':')
+        && !path.is_empty()
+    {
+        // Reject Windows drive letters: `C:\...` has range that isn't numeric.
+        let (start, end) = if let Some((a, b)) = range.split_once('-') {
+            (a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)
+        } else {
+            let n = range.parse::<u32>().ok()?;
+            (n, n)
+        };
+        return Some(json!({
+            "kind": "file",
+            "path": path,
+            "start_line": start,
+            "end_line": end,
+        }));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,5 +343,53 @@ mod tests {
     fn tool_without_schema_passes_through() {
         let v = coerce_and_validate("nonexistent_tool", json!({ "x": 1 })).unwrap();
         assert_eq!(v, json!({ "x": 1 }));
+    }
+
+    #[test]
+    fn shorthand_range_ref_expands() {
+        let got = shorthand_ref_to_object("src/foo.rs:40-120").unwrap();
+        assert_eq!(got["kind"], "file");
+        assert_eq!(got["path"], "src/foo.rs");
+        assert_eq!(got["start_line"], 40);
+        assert_eq!(got["end_line"], 120);
+    }
+
+    #[test]
+    fn shorthand_single_line_ref_expands() {
+        let got = shorthand_ref_to_object("src/foo.rs:42").unwrap();
+        assert_eq!(got["start_line"], 42);
+        assert_eq!(got["end_line"], 42);
+    }
+
+    #[test]
+    fn shorthand_symbol_ref_expands() {
+        let got = shorthand_ref_to_object("src/foo.rs::Foo.bar#function").unwrap();
+        assert_eq!(got["kind"], "symbol");
+        assert_eq!(got["path"], "src/foo.rs");
+        assert_eq!(got["stable_id"], "src/foo.rs::Foo.bar#function");
+    }
+
+    #[test]
+    fn shorthand_invalid_returns_none() {
+        assert!(shorthand_ref_to_object("").is_none());
+        assert!(shorthand_ref_to_object("just-a-path.rs").is_none());
+        assert!(shorthand_ref_to_object("C:\\windows\\file.rs").is_none());
+    }
+
+    #[test]
+    fn read_content_accepts_string_refs() {
+        let out = coerce_and_validate(
+            "read_content",
+            json!({
+                "source_id": "r",
+                "refs": ["src/foo.rs:40-120", "src/bar.rs::X#function"],
+            }),
+        )
+        .unwrap();
+        let refs = out["refs"].as_array().unwrap();
+        assert_eq!(refs[0]["kind"], "file");
+        assert_eq!(refs[0]["start_line"], 40);
+        assert_eq!(refs[1]["kind"], "symbol");
+        assert_eq!(refs[1]["stable_id"], "src/bar.rs::X#function");
     }
 }

@@ -105,16 +105,17 @@ impl CodeService {
         let cross_repo = args.cross_repo.unwrap_or(false);
         if cross_repo {
             let summaries = list_repo_summaries(&self.config.repos_dir())?;
+            let registry = self.source_registry();
             let mut repo_entries = Vec::new();
             for summary in &summaries {
                 let db_path = self.config.repo_db_path(&summary.repo);
                 if db_path.exists()
                     && let Ok(s) = IndexStore::open(db_path)
+                    && let Ok(snap) = registry.snapshot(&summary.repo, &s)
                 {
-                    let pkg_names = s.get_package_names().unwrap_or_default();
                     repo_entries.push(codesight_imports::packages::RepoEntry {
                         repo_id: summary.repo.clone(),
-                        package_names: pkg_names,
+                        package_names: snap.package_names.clone(),
                     });
                 }
             }

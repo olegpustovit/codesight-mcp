@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "prior-art": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["prior-art-mcp", "serve", "--transport", "stdio"],
+      "env": {
+        "JPRIOR_ART_LOG_LEVEL": "WARNING"
+      }
+    }
+  }
+}

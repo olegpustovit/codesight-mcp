@@ -21,12 +21,12 @@ fn build_reverse_adj(adj: &HashMap<String, Vec<String>>) -> HashMap<String, Vec<
     reverse
 }
 
-/// Resolve the file that contains the target symbol.
+/// Resolve the file that contains the target symbol via a single indexed
+/// `WHERE name = ?` lookup against the `symbols` table.
 fn resolve_symbol_file(
     store: &IndexStore,
     stable_id: &str,
     symbol_name: &str,
-    all_files: &[String],
 ) -> anyhow::Result<Option<String>> {
     if !stable_id.is_empty()
         && let Ok(Some(rec)) = store.symbol_record(stable_id)
@@ -34,15 +34,7 @@ fn resolve_symbol_file(
         return Ok(Some(rec.file_path));
     }
     if !symbol_name.is_empty() {
-        for file in all_files {
-            let outline = store.file_outline(file)?;
-            if outline
-                .iter()
-                .any(|sym| sym["name"].as_str() == Some(symbol_name))
-            {
-                return Ok(Some(file.clone()));
-            }
-        }
+        return store.file_for_symbol_name(symbol_name);
     }
     Ok(None)
 }
@@ -136,7 +128,7 @@ impl CodeService {
         let adj = store.dependency_graph()?;
         let reverse_adj = build_reverse_adj(&adj);
         let all_files = store.all_file_paths()?;
-        let symbol_file = resolve_symbol_file(&store, stable_id, symbol_name, &all_files)?;
+        let symbol_file = resolve_symbol_file(&store, stable_id, symbol_name)?;
 
         let bfs = symbol_file
             .as_deref()

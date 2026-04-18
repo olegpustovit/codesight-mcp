@@ -43,10 +43,22 @@ fn state_different_repos_are_independent() {
 #[test]
 fn mark_start_sets_reindex_in_progress() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     let status = mgr.get_status("repo/a");
     assert!(status.reindex_in_progress);
     assert!(status.index_stale);
+}
+
+#[test]
+fn mark_start_for_files_records_paths() {
+    let mgr = ReindexStateManager::new();
+    mgr.mark_reindex_start(
+        "repo/a",
+        &["src/lib.rs".to_string(), "src/main.rs".to_string()],
+    );
+    let status = mgr.get_status("repo/a");
+    assert_eq!(status.files_in_flight.len(), 2);
+    assert!(status.files_in_flight.iter().any(|p| p == "src/lib.rs"));
 }
 
 #[test]
@@ -54,7 +66,7 @@ fn mark_start_clears_event() {
     // After mark_reindex_start, wait_for_fresh_result should block (event cleared).
     // We verify by attempting a short-timeout wait that should NOT return fresh.
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     let result = mgr.wait_for_fresh_result("repo/a", Some(10));
     assert!(!result.fresh);
     assert_eq!(result.reason.as_deref(), Some("timeout"));
@@ -63,7 +75,7 @@ fn mark_start_clears_event() {
 #[test]
 fn mark_start_sets_stale_since() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     let status = mgr.get_status("repo/a");
     assert!(status.stale_since_ms.is_some());
 }
@@ -74,13 +86,13 @@ fn mark_start_increments_deferred_generation() {
     let state = mgr.get_state("repo/a");
 
     // Check initial generation is 0 via a start/check cycle
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     // After one start, generation should be 1
     // We can't directly read deferred_generation from outside, but we can
     // verify via successive starts that generation increments.
     mgr.mark_reindex_done("repo/a");
 
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_done("repo/a");
 
     // Verify the state is the same Arc (generation tracked internally)
@@ -91,7 +103,7 @@ fn mark_start_increments_deferred_generation() {
 #[test]
 fn mark_start_stale_since_not_overwritten_on_consecutive_starts() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     let status1 = mgr.get_status("repo/a");
     let stale1 = status1.stale_since_ms.unwrap();
 
@@ -99,7 +111,7 @@ fn mark_start_stale_since_not_overwritten_on_consecutive_starts() {
     thread::sleep(Duration::from_millis(20));
 
     // Second start without done
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     let status2 = mgr.get_status("repo/a");
     let stale2 = status2.stale_since_ms.unwrap();
 
@@ -120,18 +132,19 @@ fn mark_start_stale_since_not_overwritten_on_consecutive_starts() {
 #[test]
 fn mark_done_clears_in_progress_and_stale() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &["src/lib.rs".to_string()]);
     mgr.mark_reindex_done("repo/a");
     let status = mgr.get_status("repo/a");
     assert!(!status.reindex_in_progress);
     assert!(!status.index_stale);
     assert!(status.stale_since_ms.is_none());
+    assert!(status.files_in_flight.is_empty());
 }
 
 #[test]
 fn mark_done_sets_event() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_done("repo/a");
     let result = mgr.wait_for_fresh_result("repo/a", Some(10));
     assert!(result.fresh);
@@ -141,11 +154,11 @@ fn mark_done_sets_event() {
 fn mark_done_resets_consecutive_failures() {
     let mgr = ReindexStateManager::new();
     // start -> fail -> start -> fail -> start -> done
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "err1");
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "err2");
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_done("repo/a");
 
     let status = mgr.get_status("repo/a");
@@ -156,9 +169,9 @@ fn mark_done_resets_consecutive_failures() {
 #[test]
 fn mark_done_clears_error_on_success() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "some error");
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_done("repo/a");
 
     let status = mgr.get_status("repo/a");
@@ -172,7 +185,7 @@ fn mark_done_clears_error_on_success() {
 #[test]
 fn first_failure_no_error_in_status() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "disk full");
 
     let status = mgr.get_status("repo/a");
@@ -185,9 +198,9 @@ fn first_failure_no_error_in_status() {
 #[test]
 fn second_failure_exposes_error() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "error 1");
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "error 2");
 
     let status = mgr.get_status("repo/a");
@@ -199,7 +212,7 @@ fn second_failure_exposes_error() {
 #[test]
 fn failed_reindex_sets_event_so_waiters_unblock() {
     let mgr = Arc::new(ReindexStateManager::new());
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
 
     let mgr2 = mgr.clone();
     let handle = thread::spawn(move || {
@@ -216,7 +229,7 @@ fn failed_reindex_sets_event_so_waiters_unblock() {
 #[test]
 fn stale_since_preserved_on_failure() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "err");
 
     let status = mgr.get_status("repo/a");
@@ -239,7 +252,7 @@ fn status_idle_state() {
 #[test]
 fn status_in_progress_state() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     let status = mgr.get_status("repo/a");
     assert!(status.reindex_in_progress);
     assert!(status.index_stale);
@@ -250,8 +263,8 @@ fn is_any_reindex_in_progress_tracks_multiple_repos() {
     let mgr = ReindexStateManager::new();
     assert!(!mgr.is_any_reindex_in_progress());
 
-    mgr.mark_reindex_start("repo/a");
-    mgr.mark_reindex_start("repo/b");
+    mgr.mark_reindex_start("repo/a", &[]);
+    mgr.mark_reindex_start("repo/b", &[]);
     assert!(mgr.is_any_reindex_in_progress());
 
     mgr.mark_reindex_done("repo/a");
@@ -276,7 +289,7 @@ fn wait_returns_fresh_for_unknown_repo() {
 #[test]
 fn wait_returns_fresh_after_done() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_done("repo/a");
     let result = mgr.wait_for_fresh_result("repo/a", Some(100));
     assert!(result.fresh);
@@ -285,7 +298,7 @@ fn wait_returns_fresh_after_done() {
 #[test]
 fn wait_returns_fresh_after_waiting() {
     let mgr = Arc::new(ReindexStateManager::new());
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
 
     let mgr2 = mgr.clone();
     let handle = thread::spawn(move || {
@@ -307,7 +320,7 @@ fn wait_returns_fresh_after_waiting() {
 #[test]
 fn wait_returns_timeout_when_reindex_never_finishes() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
 
     let result = mgr.wait_for_fresh_result("repo/a", Some(50));
     assert!(!result.fresh);
@@ -322,7 +335,7 @@ fn wait_returns_timeout_when_reindex_never_finishes() {
 #[test]
 fn wait_first_failure_returns_fresh() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "disk full");
 
     let result = mgr.wait_for_fresh_result("repo/a", Some(100));
@@ -332,9 +345,9 @@ fn wait_first_failure_returns_fresh() {
 #[test]
 fn wait_persistent_failure_returns_error() {
     let mgr = ReindexStateManager::new();
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "error 1");
-    mgr.mark_reindex_start("repo/a");
+    mgr.mark_reindex_start("repo/a", &[]);
     mgr.mark_reindex_failed("repo/a", "error 2");
 
     let result = mgr.wait_for_fresh_result("repo/a", Some(100));

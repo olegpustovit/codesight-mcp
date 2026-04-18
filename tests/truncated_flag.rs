@@ -79,6 +79,10 @@ fn search_symbols(
     args.insert("domain".to_string(), json!("code"));
     args.insert("unit_kinds".to_string(), json!(["symbol"]));
     args.insert("limit".to_string(), json!(limit));
+    // Tests assert on `_meta.truncated == false` / `true`. The slim envelope
+    // strips `truncated=false` (default value), so request the verbose shape
+    // wherever we inspect that key directly.
+    args.insert("_meta_verbose".to_string(), json!(true));
     for (k, v) in extra {
         args.insert(k, v);
     }

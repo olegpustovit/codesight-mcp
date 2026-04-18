@@ -344,10 +344,16 @@ impl CodeService {
     /// right away — handlers never block on the reindex. Bare-service test
     /// callers take the synchronous fallback because there is no shared
     /// handle to hand the worker.
-    fn kick_off_reindex(&self, repo: &str, repo_id: String, root: std::path::PathBuf) {
+    fn kick_off_reindex(
+        &self,
+        repo: &str,
+        repo_id: String,
+        root: std::path::PathBuf,
+        files_in_flight: Vec<String>,
+    ) {
         if self
             .reindex_states
-            .try_mark_reindex_start(&repo_id)
+            .try_mark_reindex_start(&repo_id, &files_in_flight)
             .is_err()
         {
             // Another call beat us to it; let its result drive the lifecycle.
@@ -401,7 +407,10 @@ impl CodeService {
                         .unwrap_or(false)
                     {
                         let repo_id = crate::repo_id::normalize_repo_id(&root);
-                        self.kick_off_reindex(repo, repo_id, root);
+                        let files_in_flight = store
+                            .stale_paths(&root, |p| extractors.extractor_for_path(p).is_some(), 5)
+                            .unwrap_or_default();
+                        self.kick_off_reindex(repo, repo_id, root, files_in_flight);
                     }
                 }
                 Ok(store)

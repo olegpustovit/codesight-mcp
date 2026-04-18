@@ -36,6 +36,9 @@ fn run_all() {
 
     // INDEX_VERSION (1)
     test_index_version_bumped();
+
+    // Rust re-exports (1)
+    test_file_outline_includes_rust_reexports();
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -177,6 +180,27 @@ fn test_generate_file_summaries_empty_fallback() {
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/c.py");
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
+}
+
+fn test_file_outline_includes_rust_reexports() {
+    let ws = tempdir().unwrap();
+    let src = ws.path().join("src").join("config");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(ws.path().join("src").join("inner.rs"), "pub struct Thing;\n").unwrap();
+    fs::write(
+        src.join("mod.rs"),
+        "pub use crate::inner::Thing;\n",
+    )
+    .unwrap();
+    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let sid = ingest(&svc, ws.path());
+    let r = get_file_outline(&svc, &sid, "src/config/mod.rs");
+    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
+    let outline = serde_json::to_string(&r["data"]).unwrap();
+    assert!(
+        outline.contains("\"kind\":\"reexport\""),
+        "expected reexport symbol in outline: {outline}"
+    );
 }
 
 // ── Context provider integration ─────────────────────────────────────────────

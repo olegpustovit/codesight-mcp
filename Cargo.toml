@@ -67,6 +67,7 @@ tree-sitter-nix = "0.3.0"
 tree-sitter-elixir = "0.3.5"
 tree-sitter-fortran = "0.5.1"
 tree-sitter-gleam = "1.0.0"
+uuid = { version = "1", features = ["v4"] }
 notify = "8"
 notify-debouncer-full = "0.5"
 

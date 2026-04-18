@@ -36,6 +36,7 @@ fn search_args(source_id: &str, query: &str, repo_path: Option<&str>) -> SearchC
         sort_by: None,
         output_mode: None,
         pattern: None,
+        offset: 0,
     }
 }
 
@@ -74,6 +75,7 @@ fn read_args_for_ref(
             start_line: None,
             end_line: None,
             new_name: None,
+            symbol_name: None,
         }],
         include: Some(include.iter().map(|s| s.to_string()).collect()),
         verify: false,

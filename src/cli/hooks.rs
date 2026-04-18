@@ -4,7 +4,7 @@
 //! action, and write JSON/stderr. They must complete in <50ms with no network
 //! I/O. The only runtime dependency is the codesight-mcp binary on PATH.
 //!
-//! Policy (modeled on prior-art's AGENT_HOOKS.md):
+//! Policy:
 //!   - `Read` is **never** intercepted. Claude's Edit/Write tools require a
 //!     prior Read in session state, so blocking Read breaks the edit workflow.
 //!   - `Grep`, `Glob`, and exploration-style `Bash` commands (grep/rg/find/
@@ -15,11 +15,16 @@
 //!     through without inspection.
 
 use std::io::{self, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Value, json};
+
+use crate::server_support::agent_readiness_cache;
+use crate::service::savings::SavingsLedger;
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -32,6 +37,9 @@ const CODE_EXTENSIONS: &[&str] = &[
     "v", "sv", "vhd", "zig", "nim", "cr", "purs", "dhall", "toml", "yaml", "yml", "json", "xml",
     "al",
 ];
+
+/// Doc file extensions — indexed as sections via the retrieval crate.
+const DOC_EXTENSIONS: &[&str] = &["md", "mdx", "rst", "adoc", "asciidoc", "txt", "org", "tex"];
 
 /// Commands that are always safe (build tools, VCS, runtimes).
 const SAFE_BASH_PREFIXES: &[&str] = &[
@@ -69,13 +77,15 @@ pub fn run_pretooluse() -> i32 {
         "Grep" => handle_grep(&input.tool_input),
         "Glob" => handle_glob(&input.tool_input),
         "Bash" => handle_bash(&input.tool_input),
+        "Edit" | "Write" => handle_edit_probe(&input.tool_input),
         // Read is intentionally NOT intercepted: Edit/Write require a prior
         // Read in Claude's session state, so blocking it breaks edit flows.
         _ => 0,
     }
 }
 
-/// `codesight-mcp hook-posttooluse` — fires after Edit/Write to auto-reindex.
+/// `codesight-mcp hook-posttooluse` — fires after Edit/Write to auto-reindex
+/// and surface refactor-shaped edit hints.
 pub fn run_posttooluse() -> i32 {
     let input = match read_hook_input() {
         Some(v) => v,
@@ -104,6 +114,23 @@ pub fn run_posttooluse() -> i32 {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
+
+    // Count the double-read: Claude Code's Edit contract forces a native
+    // Read of `file_path` before the Edit fires. If we had already returned
+    // that file via `read_content`, those bytes are now superseded.
+    let ledger_path = index_storage_dir().join("_savings.json");
+    let ledger = SavingsLedger::new(ledger_path);
+    let _ = ledger.record_edit_and_check_double_read(file_path);
+
+    if let Some(prefix) = detect_use_prefix_rewrite(&input.tool_input)
+        && should_emit_refactor_hint(&prefix)
+    {
+        emit_additional_context(&format!(
+            "PostToolUse: this edit rewrote `use {prefix}::…` imports across 5+ files. \
+             Consider `evaluate_impact analysis=path_rename from=\"{prefix}::…\" to=\"…\" apply=false` \
+             (or `analysis=blast_radius` to preview impact) to avoid hand-editing every caller."
+        ));
+    }
 
     0
 }
@@ -137,25 +164,32 @@ fn handle_grep(tool_input: &Value) -> i32 {
         return 0;
     }
 
-    // Target path that obviously doesn't contain code → pass through.
     let target_path = tool_input
         .get("path")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    if !target_path.is_empty() && !could_contain_code(target_path) {
-        return 0;
-    }
 
-    let suggestion = if is_identifier_pattern(pattern) {
-        format!(
-            "Grep for '{}' → use: search_catalog query_mode=keyword query=\"{}\"",
-            pattern, pattern
-        )
+    // Classify target: code → deny with code hint, docs → deny with docs hint,
+    // truly non-indexable (binary/lock/image) → pass through.
+    let domain = if target_path.is_empty() {
+        IndexableDomain::Code
     } else {
-        format!(
-            "Grep for '{}' → use: search_catalog query_mode=regex query=\"{}\"",
-            pattern, pattern
-        )
+        match indexable_domain(target_path) {
+            Some(d) => d,
+            None => return 0,
+        }
+    };
+
+    let suggestion = match domain {
+        IndexableDomain::Docs => format!(
+            "Grep for '{pattern}' on docs → use: search_catalog query_mode=regex query=\"{pattern}\" unit_kinds=[\"section\"] domain=docs"
+        ),
+        IndexableDomain::Code if is_identifier_pattern(pattern) => format!(
+            "Grep for '{pattern}' → use: search_catalog query_mode=keyword query=\"{pattern}\""
+        ),
+        IndexableDomain::Code => format!(
+            "Grep for '{pattern}' → use: search_catalog query_mode=regex query=\"{pattern}\""
+        ),
     };
 
     emit_deny(&suggestion);
@@ -227,13 +261,35 @@ fn handle_bash(tool_input: &Value) -> i32 {
             "Bash '{}' → use: read_content refs=[{{kind:\"file\", path:\"...\", start_line:N, end_line:M}}]",
             cmd_name
         ),
-        _ => format!(
-            "Bash '{}' → use codesight-mcp tools instead",
-            cmd_name
-        ),
+        _ => format!("Bash '{}' → use codesight-mcp tools instead", cmd_name),
     };
 
     emit_deny(&suggestion);
+    0
+}
+
+fn handle_edit_probe(tool_input: &Value) -> i32 {
+    let file_path = tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if file_path.is_empty() || !is_code_file(file_path) {
+        return 0;
+    }
+
+    let Some(entry) = load_agent_readiness_probe(file_path) else {
+        return 0;
+    };
+    if entry.score >= entry.threshold {
+        return 0;
+    }
+
+    let message = format!(
+        "Editing `{}`: file agent_readiness={:.2} (threshold {:.2}), weakest={}. Consider refactor before adding code. Run `evaluate_quality analysis=quality_signal scope={}` for detail.",
+        file_path, entry.score, entry.threshold, entry.weakest_dimension, file_path
+    );
+    emit_allow(&message);
     0
 }
 
@@ -254,16 +310,31 @@ fn is_code_file(path: &str) -> bool {
     CODE_EXTENSIONS.contains(&ext.as_str())
 }
 
-/// Check whether a target path could contain code files (not obviously non-code).
-fn could_contain_code(path: &str) -> bool {
+#[derive(Copy, Clone)]
+enum IndexableDomain {
+    Code,
+    Docs,
+}
+
+/// Classify a target path. `None` means truly non-indexable (binary, lock,
+/// image) — the hook should pass through. `Some(_)` means codesight can
+/// handle it and the hook should deny with the matching suggestion.
+fn indexable_domain(path: &str) -> Option<IndexableDomain> {
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .unwrap_or("");
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if ext.is_empty() {
-        return true;
+        return Some(IndexableDomain::Code);
     }
-    is_code_file(path)
+    if CODE_EXTENSIONS.contains(&ext.as_str()) {
+        return Some(IndexableDomain::Code);
+    }
+    if DOC_EXTENSIONS.contains(&ext.as_str()) {
+        return Some(IndexableDomain::Docs);
+    }
+    None
 }
 
 fn is_identifier_pattern(pattern: &str) -> bool {
@@ -274,6 +345,7 @@ fn is_identifier_pattern(pattern: &str) -> bool {
 }
 
 fn emit_deny(message: &str) {
+    record_native_tool_fallback();
     let deny = json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -284,12 +356,130 @@ fn emit_deny(message: &str) {
     let _ = serde_json::to_writer(io::stdout().lock(), &deny);
 }
 
-fn build_session_snapshot() -> String {
-    // Try to read _savings.json from the default storage dir
-    let storage_dir = std::env::var(crate::config::env::INDEX_DIR)
-        .unwrap_or_else(|_| ".codesight-index".to_string());
+fn emit_allow(message: &str) {
+    let allow = json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "additionalContext": message
+        }
+    });
+    let _ = serde_json::to_writer(io::stdout().lock(), &allow);
+}
 
-    let savings_path = Path::new(&storage_dir).join("_savings.json");
+fn emit_additional_context(message: &str) {
+    let response = json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": message
+        }
+    });
+    let _ = serde_json::to_writer(io::stdout().lock(), &response);
+}
+
+/// Parse an Edit/Write `tool_input` and, if the change rewrites one or more
+/// `use foo::bar::…;` lines, return the common source prefix so the
+/// PostToolUse hook can track rename-shaped edits.
+fn detect_use_prefix_rewrite(tool_input: &Value) -> Option<String> {
+    let (old_src, new_src) = if let Some(old) = tool_input.get("old_string").and_then(Value::as_str)
+    {
+        (
+            old.to_string(),
+            tool_input
+                .get("new_string")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        )
+    } else if let Some(edits) = tool_input.get("edits").and_then(Value::as_array) {
+        let mut old = String::new();
+        let mut new = String::new();
+        for edit in edits {
+            if let Some(o) = edit.get("old_string").and_then(Value::as_str) {
+                old.push_str(o);
+                old.push('\n');
+            }
+            if let Some(n) = edit.get("new_string").and_then(Value::as_str) {
+                new.push_str(n);
+                new.push('\n');
+            }
+        }
+        (old, new)
+    } else {
+        return None;
+    };
+    let mut old_prefixes = std::collections::HashMap::<String, u32>::new();
+    let mut new_prefixes = std::collections::HashMap::<String, u32>::new();
+    for line in old_src.lines() {
+        if let Some(prefix) = use_path_prefix(line) {
+            *old_prefixes.entry(prefix).or_default() += 1;
+        }
+    }
+    for line in new_src.lines() {
+        if let Some(prefix) = use_path_prefix(line) {
+            *new_prefixes.entry(prefix).or_default() += 1;
+        }
+    }
+    for (prefix, count) in old_prefixes {
+        if count >= 1 && new_prefixes.get(&prefix).copied().unwrap_or(0) < count {
+            return Some(prefix);
+        }
+    }
+    None
+}
+
+/// Return the leading two path segments of a `use foo::bar::…;` statement,
+/// e.g. `use crate::storage::X;` → `Some("crate::storage")`.
+fn use_path_prefix(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let rest = trimmed
+        .strip_prefix("pub use")
+        .or_else(|| trimmed.strip_prefix("use"))?;
+    let rest = rest.trim_start();
+    let head = rest
+        .split(|c: char| c == ';' || c == '{' || c.is_whitespace())
+        .next()?;
+    let segments: Vec<&str> = head.split("::").collect();
+    if segments.len() < 2 {
+        return None;
+    }
+    Some(format!("{}::{}", segments[0], segments[1]))
+}
+
+/// Record the rewrite in the session ledger and decide whether the hint
+/// should fire. Emits when the running count for a prefix reaches 5 and
+/// `evaluate_impact analysis=blast_radius` has not yet been called in this
+/// session. Returns `false` on any I/O error so the hook stays silent.
+fn index_storage_dir() -> PathBuf {
+    std::env::var_os(crate::config::env::INDEX_DIR)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(".codesight-index"))
+}
+
+fn should_emit_refactor_hint(prefix: &str) -> bool {
+    let ledger_path = index_storage_dir().join("_savings.json");
+    let ledger = SavingsLedger::new(ledger_path.clone());
+    let count = match ledger.record_use_prefix_edit(prefix) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    if count < 5 {
+        return false;
+    }
+    // Skip the hint when the agent already ran blast_radius in this session.
+    let Ok(bytes) = std::fs::read(&ledger_path) else {
+        return true;
+    };
+    let state: Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    let blast = state
+        .pointer("/current_session/evaluate_impact_usage/blast_radius")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    blast == 0
+}
+
+fn build_session_snapshot() -> String {
+    let savings_path = index_storage_dir().join("_savings.json");
 
     let state: Value = match std::fs::read(&savings_path) {
         Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
@@ -337,6 +527,26 @@ fn build_session_snapshot() -> String {
         format_number(total_saved),
         tools_str
     )
+}
+
+fn record_native_tool_fallback() {
+    let ledger = SavingsLedger::new(index_storage_dir().join("_savings.json"));
+    let _ = ledger.record_fallback_to_native_tool();
+}
+
+fn load_agent_readiness_probe(path: &str) -> Option<agent_readiness_cache::Entry> {
+    let cache_path = index_storage_dir().join(agent_readiness_cache::FILE_NAME);
+    let bytes = std::fs::read(cache_path).ok()?;
+    let state: agent_readiness_cache::State = serde_json::from_slice(&bytes).ok()?;
+    let entry = state.entries.get(path)?;
+    let computed_at = DateTime::parse_from_rfc3339(&entry.computed_at).ok()?;
+    let age = SystemTime::now()
+        .duration_since(computed_at.with_timezone(&Utc).into())
+        .ok()?;
+    if age > agent_readiness_cache::TTL {
+        return None;
+    }
+    Some(entry.clone())
 }
 
 fn format_number(n: u64) -> String {

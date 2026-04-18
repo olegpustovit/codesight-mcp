@@ -162,7 +162,7 @@ fn sym_complexity_timing_present() {
             }),
         )
         .unwrap();
-    let sym = search["data"]["items"][0]["ref"]["stable_id"]
+    let sym = search["data"]["items"][0]["ref"]["id"]
         .as_str()
         .unwrap()
         .to_string();

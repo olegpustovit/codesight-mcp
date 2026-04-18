@@ -58,6 +58,8 @@ pub struct SearchCatalogArgs {
     #[serde(default = "crate::service::args::default_max_results")]
     pub limit: usize,
     #[serde(default)]
+    pub offset: usize,
+    #[serde(default)]
     pub query_mode: Option<String>,
     /// Surrounding lines for file hits, and symbol/section bodies when requested (clamped).
     #[serde(default)]
@@ -113,6 +115,11 @@ pub struct ContentRef {
     pub end_line: Option<u32>,
     #[serde(default)]
     pub new_name: Option<String>,
+    /// Bare symbol name — used in combination with `path` (preferred) or on
+    /// its own for unique names across the index. Lets callers that know the
+    /// call site but not its `start_line` / `stable_id` skip a lookup step.
+    #[serde(default, alias = "name")]
+    pub symbol_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -204,6 +211,17 @@ pub struct InspectGraphArgs {
     /// `dependencies` (≈4 bytes/token). Alias `token_budget`.
     #[serde(default, alias = "token_budget")]
     pub max_tokens: Option<u32>,
+    /// `find_references`: path-prefix / substring inclusion filter.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// `find_references`: path prefixes / substrings to skip.
+    #[serde(default)]
+    pub exclude: Option<Vec<String>>,
+    /// `find_references`: when true, include hits in data-format files
+    /// (`json`, `yaml`, `toml`, `xml`, `md`). Default false — those files
+    /// are almost never the right answer for "who references fn X".
+    #[serde(default)]
+    pub include_non_code: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,6 +249,21 @@ pub struct EvaluateImpactArgs {
     /// Enable cross-repo analysis.
     #[serde(default)]
     pub cross_repo: Option<bool>,
+    /// `path_rename`: existing fully-qualified Rust path to rewrite.
+    #[serde(default)]
+    pub from: Option<String>,
+    /// `path_rename`: replacement fully-qualified Rust path.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// `path_rename`: when true, write edits to disk and reindex.
+    #[serde(default)]
+    pub apply: Option<bool>,
+    /// `path_rename`: behavior for partial grouped imports.
+    #[serde(default)]
+    pub handle_partial_group_imports: Option<String>,
+    /// `path_rename`: optional path/file prefix scope.
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -271,6 +304,8 @@ pub struct EvaluateQualityArgs {
     // regression_check fields
     #[serde(default)]
     pub snapshot_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

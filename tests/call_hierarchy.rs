@@ -180,7 +180,9 @@ fn call_hierarchy_returns_expected_shape() {
     let r = call_hierarchy(&svc, &sid, &helper_id, None, None);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let data = &r["data"];
-    // Must have: symbol, callers, callees, depth_reached, caller_count, callee_count, _meta
+    // Must have: symbol, callers, callees, depth_reached, caller_count, callee_count.
+    // The inner `data._meta.source = "text_heuristic"` signal was dropped in
+    // favor of the CALL_GRAPH_HEURISTIC top-level warning (PLAN2 §3.6).
     assert!(data["symbol"].is_object(), "should have symbol field");
     assert!(data["callers"].is_array(), "should have callers array");
     assert!(data["callees"].is_array(), "should have callees array");
@@ -190,7 +192,8 @@ fn call_hierarchy_returns_expected_shape() {
     );
     assert!(data["caller_count"].is_number(), "should have caller_count");
     assert!(data["callee_count"].is_number(), "should have callee_count");
-    assert!(data["_meta"].is_object(), "should have _meta");
+    // Envelope `_meta` is at the top level of the response, not inside data.
+    assert!(r["_meta"].is_object(), "should have envelope _meta");
 }
 
 #[test]
@@ -347,14 +350,19 @@ fn call_hierarchy_unknown_symbol_returns_error() {
 }
 
 #[test]
-fn call_hierarchy_meta_source_is_text_heuristic() {
+fn call_hierarchy_surfaces_heuristic_warning() {
     let (_ws, svc, sid) = build_call_repo();
     let helper_id = find_symbol_id(&svc, &sid, "helper").expect("helper should be indexed");
     let r = call_hierarchy(&svc, &sid, &helper_id, None, None);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    assert_eq!(
-        r["data"]["_meta"]["source"].as_str().unwrap(),
-        "text_heuristic"
+    // The text-heuristic signal moved from `data._meta.source` to a
+    // top-level `CALL_GRAPH_HEURISTIC` warning (PLAN2 §3.6).
+    let warnings = r["warnings"].as_array().expect("warnings array");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w["code"].as_str() == Some("CALL_GRAPH_HEURISTIC")),
+        "expected CALL_GRAPH_HEURISTIC warning, got {warnings:?}"
     );
 }
 
@@ -701,52 +709,49 @@ fn blast_radius_call_depth_clamped_to_3() {
 // find_references include_call_chain tests  (TestFindReferencesCallChain, 6 tests)
 // ===========================================================================
 
+// After PLAN2 §3.4b, `find_references` returns flat per-match rows
+// (`{file, line, name}` + optional `kind`) and, when `include_call_chain=true`,
+// a sibling `call_chain: [{file, calling_symbols: [...]}]` array. `matches`
+// nested arrays and per-row `symbol_id` are gone.
+
 #[test]
-fn find_references_default_no_calling_symbols() {
+fn find_references_default_no_call_chain() {
     let (_ws, svc, sid) = build_call_repo();
     let r = find_refs(&svc, &sid, "helper", false);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    for refentry in r["data"]["references"].as_array().unwrap() {
-        assert!(
-            refentry["calling_symbols"].is_null(),
-            "calling_symbols should not be present by default"
-        );
-    }
-}
-
-#[test]
-fn find_references_include_call_chain_adds_calling_symbols() {
-    let (_ws, svc, sid) = build_call_repo();
-    let r = find_refs(&svc, &sid, "helper", true);
-    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let mut found = false;
-    for refentry in r["data"]["references"].as_array().unwrap() {
-        if refentry["calling_symbols"].is_array() {
-            found = true;
-            assert!(!refentry["calling_symbols"].as_array().unwrap().is_empty());
-        }
-    }
     assert!(
-        found,
-        "No reference had calling_symbols when include_call_chain=true"
+        r["data"]["call_chain"].is_null(),
+        "call_chain must be absent when include_call_chain=false"
     );
 }
 
 #[test]
-fn find_references_calling_symbols_contain_process() {
+fn find_references_include_call_chain_adds_call_chain_block() {
     let (_ws, svc, sid) = build_call_repo();
     let r = find_refs(&svc, &sid, "helper", true);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    // Find the services.py reference
-    let services_ref = r["data"]["references"]
+    let chain = r["data"]["call_chain"]
         .as_array()
-        .unwrap()
+        .expect("call_chain array");
+    assert!(
+        chain.iter().any(|c| c["calling_symbols"]
+            .as_array()
+            .is_some_and(|v| !v.is_empty())),
+        "expected at least one non-empty calling_symbols entry"
+    );
+}
+
+#[test]
+fn find_references_call_chain_contains_process_for_services() {
+    let (_ws, svc, sid) = build_call_repo();
+    let r = find_refs(&svc, &sid, "helper", true);
+    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
+    let chain = r["data"]["call_chain"].as_array().unwrap();
+    let services = chain
         .iter()
-        .find(|r| r["file"].as_str().unwrap_or("").contains("services"));
-    assert!(services_ref.is_some(), "Expected services.py in references");
-    let services_ref = services_ref.unwrap();
-    assert!(services_ref["calling_symbols"].is_array());
-    let calling_names: Vec<&str> = services_ref["calling_symbols"]
+        .find(|c| c["file"].as_str().unwrap_or("").contains("services"))
+        .expect("services.py in call_chain");
+    let calling_names: Vec<&str> = services["calling_symbols"]
         .as_array()
         .unwrap()
         .iter()
@@ -763,12 +768,9 @@ fn find_references_calling_symbols_have_id_name_kind_line() {
     let (_ws, svc, sid) = build_call_repo();
     let r = find_refs(&svc, &sid, "helper", true);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    for refentry in r["data"]["references"].as_array().unwrap() {
-        for cs in refentry
-            .get("calling_symbols")
-            .and_then(|v| v.as_array())
-            .unwrap_or(&vec![])
-        {
+    let chain = r["data"]["call_chain"].as_array().unwrap();
+    for entry in chain {
+        for cs in entry["calling_symbols"].as_array().unwrap() {
             assert!(cs["id"].is_string(), "missing id in calling_symbol");
             assert!(cs["name"].is_string(), "missing name in calling_symbol");
             assert!(cs["kind"].is_string(), "missing kind in calling_symbol");
@@ -789,7 +791,7 @@ fn find_references_batch_mode_ignores_include_call_chain() {
 }
 
 #[test]
-fn find_references_existing_reference_fields_unchanged() {
+fn find_references_reference_rows_are_flat() {
     let (_ws, svc, sid) = build_call_repo();
     let r = find_refs(&svc, &sid, "helper", true);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
@@ -797,10 +799,19 @@ fn find_references_existing_reference_fields_unchanged() {
         r["data"]["reference_count"].is_number(),
         "missing reference_count"
     );
-    assert!(r["data"]["references"].is_array(), "missing references");
-    assert!(r["_meta"].is_object(), "missing _meta");
-    for refentry in r["data"]["references"].as_array().unwrap() {
-        assert!(refentry["file"].is_string(), "missing file");
-        assert!(refentry["matches"].is_array(), "missing matches");
+    let refs = r["data"]["references"].as_array().expect("references array");
+    assert!(r["_meta"].is_object(), "missing envelope _meta");
+    for refentry in refs {
+        assert!(refentry["file"].is_string(), "missing file on row");
+        assert!(refentry["name"].is_string(), "missing name on row");
+        assert!(refentry["line"].is_number(), "missing line on row");
+        assert!(
+            refentry.get("matches").is_none(),
+            "nested matches[] should not be present after flattening"
+        );
+        assert!(
+            refentry.get("symbol_id").is_none(),
+            "symbol_id should be dropped from per-row shape"
+        );
     }
 }

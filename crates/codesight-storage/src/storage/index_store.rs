@@ -32,6 +32,7 @@ impl IndexStore {
             cached_total_bytes: Default::default(),
             cached_root_path: Default::default(),
             ro_conn: Default::default(),
+            cached_all_symbols: Default::default(),
         };
         let conn = db::open_rw(&store.db_path)?;
         migrations::apply_code_index_migrations(&conn)?;
@@ -47,6 +48,7 @@ impl IndexStore {
             cached_total_bytes: Default::default(),
             cached_root_path: Default::default(),
             ro_conn: Default::default(),
+            cached_all_symbols: Default::default(),
         };
         {
             let conn = store.open_read_only()?;
@@ -106,7 +108,7 @@ impl IndexStore {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn apply_index(
+    pub fn apply_code_index(
         &self,
         repo: &str,
         root_path: &std::path::Path,
@@ -152,32 +154,68 @@ impl IndexStore {
         for file in updated_files {
             Self::replace_file(&tx, file)?;
         }
-        if !symbol_vectors.is_empty() {
-            let rows: Vec<_> = symbol_vectors
-                .iter()
-                .map(super::vector_index::OwnedVectorRow::borrowed)
-                .collect();
-            super::vector_index::upsert_vectors(&tx, super::vector_index::Domain::Symbol, &rows)?;
+        Self::upsert_symbol_vectors(&tx, symbol_vectors)?;
+        Self::replace_dep_edges_for_updated_files(&tx, updated_files, dep_edges)?;
+        Self::reset_repo_info(
+            &tx,
+            repo,
+            root_path,
+            indexed_at,
+            index_version,
+            extractor_version,
+        )?;
+        tx.commit()?;
+        // Symbols may have shifted under us — drop the cached snapshot so the
+        // next analytic tool rebuilds from the new commit.
+        if let Ok(mut guard) = self.cached_all_symbols.lock() {
+            *guard = None;
         }
+        Ok(())
+    }
 
-        // Replace dependency edges for updated files
-        {
-            let mut del =
-                tx.prepare_cached("DELETE FROM dependency_edges WHERE source_file = ?1")?;
-            for file in updated_files {
-                del.execute([&file.file_path])?;
-            }
+    fn upsert_symbol_vectors(
+        tx: &Transaction<'_>,
+        symbol_vectors: &[super::vector_index::OwnedVectorRow],
+    ) -> anyhow::Result<()> {
+        if symbol_vectors.is_empty() {
+            return Ok(());
         }
-        {
-            let mut ins = tx.prepare_cached(
-                "INSERT INTO dependency_edges (source_file, target_file, import_fact_quality) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(source_file, target_file) DO UPDATE SET import_fact_quality = excluded.import_fact_quality",
-            )?;
-            for (source, target, quality) in dep_edges {
-                ins.execute(params![source, target, quality.as_str()])?;
-            }
-        }
+        let rows: Vec<_> = symbol_vectors
+            .iter()
+            .map(super::vector_index::OwnedVectorRow::borrowed)
+            .collect();
+        super::vector_index::upsert_vectors(tx, super::vector_index::Domain::Symbol, &rows)?;
+        Ok(())
+    }
 
+    fn replace_dep_edges_for_updated_files(
+        tx: &Transaction<'_>,
+        updated_files: &[IndexedFileUpdate],
+        dep_edges: &[(String, String, FactQuality)],
+    ) -> anyhow::Result<()> {
+        let mut del = tx.prepare_cached("DELETE FROM dependency_edges WHERE source_file = ?1")?;
+        for file in updated_files {
+            del.execute([&file.file_path])?;
+        }
+        drop(del);
+        let mut ins = tx.prepare_cached(
+            "INSERT INTO dependency_edges (source_file, target_file, import_fact_quality) VALUES (?1, ?2, ?3)
+             ON CONFLICT(source_file, target_file) DO UPDATE SET import_fact_quality = excluded.import_fact_quality",
+        )?;
+        for (source, target, quality) in dep_edges {
+            ins.execute(params![source, target, quality.as_str()])?;
+        }
+        Ok(())
+    }
+
+    fn reset_repo_info(
+        tx: &Transaction<'_>,
+        repo: &str,
+        root_path: &std::path::Path,
+        indexed_at: &str,
+        index_version: u32,
+        extractor_version: &str,
+    ) -> anyhow::Result<()> {
         tx.execute("DELETE FROM repo_info", [])?;
         tx.execute(
             "INSERT INTO repo_info (repo, root_path, indexed_at, index_version, schema_version, extractor_version) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -190,7 +228,6 @@ impl IndexStore {
                 extractor_version,
             ],
         )?;
-        tx.commit()?;
         Ok(())
     }
 

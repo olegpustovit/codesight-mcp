@@ -5,6 +5,8 @@
 //! - **CTE names** — when `tree-sitter-sequel` omits `common_table_expression` nodes, we match
 //!   `WITH name AS (` / `, name AS (` and skip spans already emitted by the structural pass.
 
+use std::sync::LazyLock;
+
 use anyhow::Result;
 use regex::Regex;
 
@@ -16,8 +18,6 @@ pub(super) fn extract_ctes(
     source: &str,
     symbols: &mut Vec<StoredSymbol>,
 ) -> Result<()> {
-    use std::sync::LazyLock;
-
     static CTE_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)(?:WITH|,)\s+(\w+)\s+AS\s*\(").expect("infallible: sql CTE name regex")
     });
@@ -60,150 +60,105 @@ pub(super) fn extract_ctes(
     Ok(())
 }
 
+struct DbtBlockSpec {
+    regex: Regex,
+    kind: SymbolKind,
+    id_tag: &'static str,
+    with_docstring: bool,
+}
+
+static DBT_BLOCK_SPECS: LazyLock<[DbtBlockSpec; 4]> = LazyLock::new(|| {
+    [
+        DbtBlockSpec {
+            regex: Regex::new(
+                r"(?s)\{%-?\s*macro\s+(\w+)\s*\(([^)]*)\)\s*-?%\}.*?\{%-?\s*endmacro\s*-?%\}",
+            )
+            .expect("infallible: dbt macro regex"),
+            kind: SymbolKind::Function,
+            id_tag: "function",
+            with_docstring: true,
+        },
+        DbtBlockSpec {
+            regex: Regex::new(
+                r"(?s)\{%-?\s*test\s+(\w+)\s*\([^)]*\)\s*-?%\}.*?\{%-?\s*endtest\s*-?%\}",
+            )
+            .expect("infallible: dbt test regex"),
+            kind: SymbolKind::Function,
+            id_tag: "function",
+            with_docstring: false,
+        },
+        DbtBlockSpec {
+            regex: Regex::new(
+                r"(?s)\{%-?\s*snapshot\s+(\w+)\s*-?%\}.*?\{%-?\s*endsnapshot\s*-?%\}",
+            )
+            .expect("infallible: dbt snapshot regex"),
+            kind: SymbolKind::Type,
+            id_tag: "type",
+            with_docstring: false,
+        },
+        DbtBlockSpec {
+            regex: Regex::new(
+                r"(?s)\{%-?\s*materialization\s+(\w+)\s*,.*?-?%\}.*?\{%-?\s*endmaterialization\s*-?%\}",
+            )
+            .expect("infallible: dbt materialization regex"),
+            kind: SymbolKind::Function,
+            id_tag: "function",
+            with_docstring: false,
+        },
+    ]
+});
+
+fn collect_dbt_blocks(
+    spec: &DbtBlockSpec,
+    file_path: &str,
+    source: &str,
+    symbols: &mut Vec<StoredSymbol>,
+) -> Result<()> {
+    for cap in spec.regex.captures_iter(source) {
+        let (Some(full_match), Some(name_m)) = (cap.get(0), cap.get(1)) else {
+            continue;
+        };
+        let name = name_m.as_str();
+        let start_byte = full_match.start();
+        let end_byte = full_match.end();
+        let source_text = full_match.as_str().to_string();
+        let sig_line = source_text.lines().next().unwrap_or("").trim().to_string();
+        let summary = if spec.with_docstring {
+            extract_block_comment_before(source, start_byte).unwrap_or_else(|| sig_line.clone())
+        } else {
+            sig_line.clone()
+        };
+        let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
+        symbols.push(StoredSymbol {
+            id: format!("{file_path}::{name}#{}", spec.id_tag),
+            extraction_tier: ExtractionTier::ManualOverride,
+            language: "sql".to_string(),
+            file_path: file_path.to_string(),
+            qualified_name: name.to_string(),
+            name: name.to_string(),
+            kind: spec.kind,
+            signature: sig_line,
+            summary,
+            start_line: source[..start_byte].lines().count() as u32,
+            end_line: source[..end_byte].lines().count() as u32,
+            start_byte,
+            end_byte,
+            source_hash,
+            source_text,
+            file_size_bytes: source.len() as u64,
+        });
+    }
+    Ok(())
+}
+
 pub(super) fn extract_dbt_macros(
     file_path: &str,
     source: &str,
     symbols: &mut Vec<StoredSymbol>,
 ) -> Result<()> {
-    let macro_re =
-        Regex::new(r"(?s)\{%-?\s*macro\s+(\w+)\s*\(([^)]*)\)\s*-?%\}.*?\{%-?\s*endmacro\s*-?%\}")?;
-    for cap in macro_re.captures_iter(source) {
-        let (Some(full_match), Some(name_m)) = (cap.get(0), cap.get(1)) else {
-            continue;
-        };
-        let name = name_m.as_str();
-        let start_byte = full_match.start();
-        let end_byte = full_match.end();
-        let start_line = source[..start_byte].lines().count() as u32;
-        let end_line = source[..end_byte].lines().count() as u32;
-        let source_text = full_match.as_str().to_string();
-        let sig_line = source_text.lines().next().unwrap_or("").trim().to_string();
-        let docstring = extract_block_comment_before(source, start_byte);
-        let summary = docstring.unwrap_or_else(|| sig_line.clone());
-        let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
-        symbols.push(StoredSymbol {
-            id: format!("{file_path}::{name}#function"),
-            extraction_tier: ExtractionTier::ManualOverride,
-            language: "sql".to_string(),
-            file_path: file_path.to_string(),
-            qualified_name: name.to_string(),
-            name: name.to_string(),
-            kind: SymbolKind::Function,
-            signature: sig_line,
-            summary,
-            start_line,
-            end_line,
-            start_byte,
-            end_byte,
-            source_hash,
-            source_text,
-            file_size_bytes: source.len() as u64,
-        });
+    for spec in DBT_BLOCK_SPECS.iter() {
+        collect_dbt_blocks(spec, file_path, source, symbols)?;
     }
-
-    let test_re =
-        Regex::new(r"(?s)\{%-?\s*test\s+(\w+)\s*\([^)]*\)\s*-?%\}.*?\{%-?\s*endtest\s*-?%\}")?;
-    for cap in test_re.captures_iter(source) {
-        let (Some(full_match), Some(name_m)) = (cap.get(0), cap.get(1)) else {
-            continue;
-        };
-        let name = name_m.as_str();
-        let start_byte = full_match.start();
-        let end_byte = full_match.end();
-        let start_line = source[..start_byte].lines().count() as u32;
-        let end_line = source[..end_byte].lines().count() as u32;
-        let source_text = full_match.as_str().to_string();
-        let sig_line = source_text.lines().next().unwrap_or("").trim().to_string();
-        let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
-        symbols.push(StoredSymbol {
-            id: format!("{file_path}::{name}#function"),
-            extraction_tier: ExtractionTier::ManualOverride,
-            language: "sql".to_string(),
-            file_path: file_path.to_string(),
-            qualified_name: name.to_string(),
-            name: name.to_string(),
-            kind: SymbolKind::Function,
-            signature: sig_line.clone(),
-            summary: sig_line,
-            start_line,
-            end_line,
-            start_byte,
-            end_byte,
-            source_hash,
-            source_text,
-            file_size_bytes: source.len() as u64,
-        });
-    }
-
-    let snap_re =
-        Regex::new(r"(?s)\{%-?\s*snapshot\s+(\w+)\s*-?%\}.*?\{%-?\s*endsnapshot\s*-?%\}")?;
-    for cap in snap_re.captures_iter(source) {
-        let (Some(full_match), Some(name_m)) = (cap.get(0), cap.get(1)) else {
-            continue;
-        };
-        let name = name_m.as_str();
-        let start_byte = full_match.start();
-        let end_byte = full_match.end();
-        let start_line = source[..start_byte].lines().count() as u32;
-        let end_line = source[..end_byte].lines().count() as u32;
-        let source_text = full_match.as_str().to_string();
-        let sig_line = source_text.lines().next().unwrap_or("").trim().to_string();
-        let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
-        symbols.push(StoredSymbol {
-            id: format!("{file_path}::{name}#type"),
-            extraction_tier: ExtractionTier::ManualOverride,
-            language: "sql".to_string(),
-            file_path: file_path.to_string(),
-            qualified_name: name.to_string(),
-            name: name.to_string(),
-            kind: SymbolKind::Type,
-            signature: sig_line.clone(),
-            summary: sig_line,
-            start_line,
-            end_line,
-            start_byte,
-            end_byte,
-            source_hash,
-            source_text,
-            file_size_bytes: source.len() as u64,
-        });
-    }
-
-    let mat_re = Regex::new(
-        r"(?s)\{%-?\s*materialization\s+(\w+)\s*,.*?-?%\}.*?\{%-?\s*endmaterialization\s*-?%\}",
-    )?;
-    for cap in mat_re.captures_iter(source) {
-        let (Some(full_match), Some(name_m)) = (cap.get(0), cap.get(1)) else {
-            continue;
-        };
-        let name = name_m.as_str();
-        let start_byte = full_match.start();
-        let end_byte = full_match.end();
-        let start_line = source[..start_byte].lines().count() as u32;
-        let end_line = source[..end_byte].lines().count() as u32;
-        let source_text = full_match.as_str().to_string();
-        let sig_line = source_text.lines().next().unwrap_or("").trim().to_string();
-        let source_hash = blake3::hash(source_text.as_bytes()).to_hex().to_string();
-        symbols.push(StoredSymbol {
-            id: format!("{file_path}::{name}#function"),
-            extraction_tier: ExtractionTier::ManualOverride,
-            language: "sql".to_string(),
-            file_path: file_path.to_string(),
-            qualified_name: name.to_string(),
-            name: name.to_string(),
-            kind: SymbolKind::Function,
-            signature: sig_line.clone(),
-            summary: sig_line,
-            start_line,
-            end_line,
-            start_byte,
-            end_byte,
-            source_hash,
-            source_text,
-            file_size_bytes: source.len() as u64,
-        });
-    }
-
     Ok(())
 }
 

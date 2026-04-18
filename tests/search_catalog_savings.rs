@@ -42,6 +42,7 @@ fn search_catalog_savings_use_candidate_files_not_repo_bytes() {
                 "query_mode": "keyword",
                 "unit_kinds": ["symbol"],
                 "limit": 5,
+                "_meta_verbose": true,
             }),
         )
         .unwrap();
@@ -78,6 +79,7 @@ fn search_catalog_count_mode_uses_the_same_candidate_file_baseline() {
                 "unit_kinds": ["symbol"],
                 "output_mode": "count",
                 "limit": 5,
+                "_meta_verbose": true,
             }),
         )
         .unwrap();

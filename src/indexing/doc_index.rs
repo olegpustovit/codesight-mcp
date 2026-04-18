@@ -112,7 +112,7 @@ where
     let indexed_at = chrono::Utc::now().to_rfc3339();
     let file_count = seen_files.len();
     let section_vectors = build_section_vectors(&repo, &updated_files)?;
-    store.apply_index(
+    store.apply_doc_index(
         &repo,
         root,
         &indexed_at,

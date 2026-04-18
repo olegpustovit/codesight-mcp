@@ -1,5 +1,7 @@
 //! List indexed sources (`catalog_sources`).
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
@@ -9,7 +11,7 @@ use crate::service::agent_v1::args::CatalogSourcesArgs;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::savings::MetaBuilder;
 use codesight_storage::storage::doc_index::{DocStore, list_doc_summaries};
-use codesight_storage::storage::{IndexStore, list_repo_summaries};
+use codesight_storage::storage::list_repo_summaries;
 
 fn index_metadata_staleness_warning(indexed_at: &str) -> Option<String> {
     let dt = DateTime::parse_from_rfc3339(indexed_at).ok()?;
@@ -35,13 +37,24 @@ impl CodeService {
         // whenever the on-disk data had drifted since server start because
         // `list_repo_summaries` read raw metadata without triggering the
         // freshness check.
+        //
+        // Per-source `repo_summary()` + `root_path()` both go through
+        // `SourceRegistry::snapshot`, so a 10-source catalog call does one
+        // indexed SELECT per source after the initial warm-up instead of a
+        // fresh DB open + 2 scans each time.
+        let registry = self.source_registry();
         let initial_code_rows = list_repo_summaries(&self.config.repos_dir())?;
         let mut code_rows: Vec<_> = Vec::with_capacity(initial_code_rows.len());
+        let mut root_paths: HashMap<String, String> = HashMap::with_capacity(initial_code_rows.len());
         for m in initial_code_rows {
             if let Ok(store) = self.ensure_repo_store(&m.repo, None)
-                && let Ok(refreshed) = store.repo_summary()
+                && let Ok(snap) = registry.snapshot(&m.repo, &store)
             {
-                code_rows.push(refreshed);
+                code_rows.push(snap.repo_summary.clone());
+                root_paths.insert(
+                    m.repo.clone(),
+                    snap.root_path.to_string_lossy().to_string(),
+                );
             } else {
                 code_rows.push(m);
             }
@@ -51,11 +64,7 @@ impl CodeService {
         let mut sources: Vec<Value> = Vec::new();
 
         for m in code_rows {
-            let raw_root = IndexStore::open(self.config.repo_db_path(&m.repo))
-                .ok()
-                .and_then(|s| s.root_path().ok())
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
+            let raw_root = root_paths.remove(&m.repo).unwrap_or_default();
             let root_hint = path_map::remap(&raw_root, &self.config.path_map, false);
 
             let mut entry = json!({

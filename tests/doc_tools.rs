@@ -301,6 +301,7 @@ fn doc_index_catalog_toc_search_read_outline_delete() {
             json!({
                 "source_id": sid,
                 "refs": ids.iter().take(2).map(|id| json!({ "kind": "section", "stable_id": id })).collect::<Vec<_>>(),
+                "_meta_verbose": true,
             }),
         )
         .unwrap();
@@ -378,6 +379,9 @@ fn doc_section_context_batch_and_meta() {
                 "mode": "section_context",
                 "refs": [{ "kind": "section", "stable_id": prereq_id }],
                 "limit": 4,
+                // Test later asserts on `_meta.ancestor_count` / `child_count`,
+                // which live outside the slim default envelope.
+                "_meta_verbose": true,
             }),
         )
         .unwrap();

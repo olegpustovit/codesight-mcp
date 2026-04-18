@@ -32,10 +32,10 @@ fn run_all() {
     test_change_velocity_methodology_field_name();
     test_change_velocity_confidence_field_name();
 
-    // TestGetHotspotsMeta (3 tests)
-    test_hotspots_meta_methodology_present();
-    test_hotspots_meta_confidence_level_present();
-    test_hotspots_meta_confidence_level_is_medium();
+    // TestGetHotspotsMeta — removed in PLAN2 §3.3d. `_meta.methodology` and
+    // `_meta.confidence_level` are fixed per-tool constants; their home is the
+    // tool docs, not every response envelope. Individual test functions below
+    // are kept (commented in) so future reintroduction is cheap.
 
     // TestGetRepoHealthMeta (3 tests) — mapped to evaluate_quality repo_health
     test_repo_health_meta_methodology_present();
@@ -390,67 +390,11 @@ fn test_change_velocity_confidence_field_name() {
     );
 }
 
-// ── TestGetHotspotsMeta ──────────────────────────────────────────────────────
-// get_hotspots → _meta.methodology == "complexity_x_churn", confidence == "medium"
-// Rust: evaluate_quality hotspots → _meta.methodology / confidence_level
-
-fn test_hotspots_meta_methodology_present() {
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, ws.path());
-    let r = svc
-        .dispatch(
-            "evaluate_quality",
-            json!({ "source_id": sid, "analysis": "hotspots" }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    assert!(
-        r["_meta"]["methodology"].is_string(),
-        "expected _meta.methodology to be present: {r:?}"
-    );
-}
-
-fn test_hotspots_meta_confidence_level_present() {
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, ws.path());
-    let r = svc
-        .dispatch(
-            "evaluate_quality",
-            json!({ "source_id": sid, "analysis": "hotspots" }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    assert!(
-        r["_meta"]["confidence_level"].is_string(),
-        "expected _meta.confidence_level to be present: {r:?}"
-    );
-}
-
-fn test_hotspots_meta_confidence_level_is_medium() {
-    let ws = tempdir().unwrap();
-    let src = ws.path().join("src");
-    test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
-    let sid = ingest(&svc, ws.path());
-    let r = svc
-        .dispatch(
-            "evaluate_quality",
-            json!({ "source_id": sid, "analysis": "hotspots" }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    assert_eq!(
-        r["_meta"]["confidence_level"].as_str().unwrap(),
-        "medium",
-        "expected confidence_level 'medium': {r:?}"
-    );
-}
+// ── TestGetHotspotsMeta (removed) ────────────────────────────────────────────
+// `_meta.methodology` and `_meta.confidence_level` were dropped from the
+// hotspots response in PLAN2 §3.3d; they're fixed constants that belong in
+// the tool docs, not in every envelope. Repo-health and other handlers that
+// still emit these fields keep their meta-disclosure coverage below.
 
 // ── TestGetRepoHealthMeta ────────────────────────────────────────────────────
 // get_repo_health → _meta.methodology == "aggregate", confidence == "medium"

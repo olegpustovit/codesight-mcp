@@ -12,6 +12,7 @@ use codesight_imports::{
 use codesight_storage::storage::{IndexStore, list_repo_summaries};
 
 use crate::config::AppConfig;
+use crate::server_support::source_registry::SourceRegistry;
 
 pub enum BuildCrossRepoOutcome {
     Found {
@@ -24,8 +25,14 @@ pub enum BuildCrossRepoOutcome {
 }
 
 /// Builds repo entries and cross-repo edges for `get_cross_repo_map`.
+///
+/// The `registry` is the process-wide per-source snapshot cache; each source's
+/// `package_names` is read through the registry so repeated `get_cross_repo_map`
+/// calls (and concurrent cross-source tools) skip per-repo SQLite opens when
+/// the fingerprint hasn't moved.
 pub fn build_cross_repo_map(
     config: &AppConfig,
+    registry: &SourceRegistry,
     filter_id: Option<&str>,
 ) -> anyhow::Result<BuildCrossRepoOutcome> {
     let summaries = list_repo_summaries(&config.repos_dir())?;
@@ -44,11 +51,11 @@ pub fn build_cross_repo_map(
         let db_path = config.repo_db_path(&summary.repo);
         if db_path.exists()
             && let Ok(store) = IndexStore::open(db_path)
+            && let Ok(snap) = registry.snapshot(&summary.repo, &store)
         {
-            let pkg_names = store.get_package_names().unwrap_or_default();
             repo_entries.push(packages::RepoEntry {
                 repo_id: summary.repo.clone(),
-                package_names: pkg_names,
+                package_names: snap.package_names.clone(),
             });
         }
     }
@@ -72,18 +79,21 @@ pub fn build_cross_repo_map(
         })
         .collect();
 
-    let registry = packages::build_package_registry(&repo_entries);
+    let package_registry = packages::build_package_registry(&repo_entries);
     let mut cross_repo_edges: Vec<Value> = Vec::new();
 
     for entry in &filtered_entries {
         let db_path = config.repo_db_path(&entry.repo_id);
+        // `all_file_contents()` is intentionally not cached in the registry —
+        // source text for every file across every source would blow the
+        // memory budget; the open + single scan stays per-call.
         if let Ok(store) = IndexStore::open(db_path)
             && let Ok(all_contents) = store.all_file_contents()
         {
             for (file, content) in &all_contents {
                 let lang = language_for_path(file);
                 let edges = extract_imports(content, file, lang);
-                for (pkg_name, target_repos) in &registry {
+                for (pkg_name, target_repos) in &package_registry {
                     if let Some(evidence) = package_reference_evidence(&edges, lang, pkg_name) {
                         for tr in target_repos {
                             if tr != &entry.repo_id {

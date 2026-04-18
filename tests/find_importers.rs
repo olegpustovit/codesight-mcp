@@ -1364,6 +1364,7 @@ fn find_references_meta_tip_present() {
                 "source_id": sid,
                 "graph": "find_references",
                 "identifier": "anything",
+                "_meta_verbose": true,
             }),
         )
         .unwrap();

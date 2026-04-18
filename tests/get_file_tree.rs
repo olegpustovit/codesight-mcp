@@ -51,9 +51,13 @@ fn ingest_code(svc: &CodeService, root: &Path) -> String {
 }
 
 fn inspect_file_tree(svc: &CodeService, sid: &str, extra: Value) -> Value {
+    // Tests assert on `_meta.file_count` (and others) which are stripped from
+    // the slim default envelope — request verbose meta so the tree stats stay
+    // visible to the assertions below.
     let mut base = json!({
         "source_id": sid,
         "view": "file_tree",
+        "_meta_verbose": true,
     });
     if let Value::Object(ref mut m) = base
         && let Value::Object(e) = extra

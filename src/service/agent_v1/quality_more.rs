@@ -57,15 +57,10 @@ impl CodeService {
         let timer = MetaBuilder::new(raw_bytes);
         let data = quality::hotspots_payload(&store, min_complexity, top_n)?;
 
-        self.success_response_with_meta_extra(
-            &timer,
-            data,
-            Vec::new(),
-            [
-                ("methodology".to_string(), json!("cyclomatic_plus_churn")),
-                ("confidence_level".to_string(), json!("medium")),
-            ],
-        )
+        // `methodology` + `confidence_level` are fixed per-tool constants —
+        // belong in the tool docs, not repeated in every response envelope
+        // (PLAN2 §3.3d).
+        self.success_response(&timer, data)
     }
 
     fn quality_refactor_targets(
@@ -80,6 +75,10 @@ impl CodeService {
 
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
+
+        // One symbol load per request, shared with every downstream sweep
+        // (candidate filter + reference tokenizer + scope-file ranking).
+        let all_symbols = store.all_symbols_cached()?;
 
         let scope_files: Vec<String> = if let Some(file_path) = args.file_path.as_deref() {
             let all_files = store.all_file_paths()?;
@@ -105,17 +104,15 @@ impl CodeService {
             vec![resolved_path]
         } else {
             let top_files = args.top_files.unwrap_or(10).max(1);
-            let hotspots = quality::hotspots_payload(&store, 0, top_files)?;
-            let items = hotspots
-                .get("hotspots")
-                .and_then(|v| v.as_array())
-                .cloned()
+            // Rank in-process over the cached symbol vec — saves a second
+            // `all_symbols_for_analysis` round trip + a repeat cyclomatic
+            // pass vs. calling `hotspots_payload`.
+            let root_path = store.root_path().ok();
+            let file_churn = root_path
+                .as_ref()
+                .map(|root| codesight_analysis::agent_readiness::compute_file_churn(root))
                 .unwrap_or_default();
-            items
-                .iter()
-                .filter_map(|h| h.get("file").and_then(|v| v.as_str()).map(String::from))
-                .take(top_files)
-                .collect()
+            quality::top_hotspot_files_from_cached(&all_symbols, &file_churn, top_files)
         };
 
         let scope_tag = if args.file_path.is_some() {
@@ -125,9 +122,15 @@ impl CodeService {
         };
         let file_set: HashSet<&str> = scope_files.iter().map(String::as_str).collect();
 
-        let all_symbols = store.all_symbols_for_analysis()?;
-        let mut candidates: Vec<Value> = Vec::new();
-        for sym in &all_symbols {
+        // Pass 1: filter to candidate functions/methods in scope. Indexed by
+        // position in `cands` so all downstream state (`counts`, `files`) can
+        // use Vec<usize> instead of HashMap<&str, _>.
+        struct Cand<'a> {
+            sym: &'a codesight_storage::storage::AnalysisSymbol,
+            cyclomatic: u64,
+        }
+        let mut cands: Vec<Cand<'_>> = Vec::new();
+        for sym in &*all_symbols {
             if !file_set.contains(sym.file_path.as_str()) {
                 continue;
             }
@@ -139,19 +142,68 @@ impl CodeService {
             if cyclomatic < min_complexity {
                 continue;
             }
-            let (caller_count, caller_files) =
-                store.reference_count_and_files(&sym.name, &sym.id)?;
+            cands.push(Cand { sym, cyclomatic });
+        }
+
+        // Pass 2: tokenize each source_text into identifiers once and look
+        // them up in a `name → cand-indices` map. Replaces an
+        // O(all × cands × contains) substring sweep with O(total_source_bytes).
+        // Mirror `crates/codesight-analysis/src/graph/calls.rs` so call-graph
+        // and reference-count paths share the same cost model.
+        let mut name_to_cands: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (ci, cand) in cands.iter().enumerate() {
+            if cand.sym.name.len() < 2 {
+                continue;
+            }
+            name_to_cands
+                .entry(cand.sym.name.as_str())
+                .or_default()
+                .push(ci);
+        }
+
+        let mut counts: Vec<usize> = vec![0; cands.len()];
+        let mut files: Vec<HashSet<&str>> = vec![HashSet::new(); cands.len()];
+        let mut seen_in_other: HashSet<usize> = HashSet::new();
+        for other in &*all_symbols {
+            if name_to_cands.is_empty() {
+                break;
+            }
+            seen_in_other.clear();
+            for ident in other
+                .source_text
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .filter(|s| !s.is_empty())
+            {
+                if let Some(indices) = name_to_cands.get(ident) {
+                    for &ci in indices {
+                        if cands[ci].sym.id == other.id {
+                            continue;
+                        }
+                        if !seen_in_other.insert(ci) {
+                            continue;
+                        }
+                        counts[ci] += 1;
+                        files[ci].insert(other.file_path.as_str());
+                    }
+                }
+            }
+        }
+
+        let mut candidates: Vec<Value> = Vec::new();
+        for (ci, cand) in cands.iter().enumerate() {
+            let caller_count = counts[ci];
             if (caller_count as u64) < min_callers {
                 continue;
             }
-            let score = cyclomatic as f64 * (1.0 + caller_count as f64);
+            let caller_files: Vec<&&str> = files[ci].iter().collect();
+            let score = cand.cyclomatic as f64 * (1.0 + caller_count as f64);
             candidates.push(json!({
-                "id": sym.id,
-                "name": sym.name,
-                "kind": sym.kind,
-                "file": sym.file_path,
-                "line": sym.start_line,
-                "cyclomatic": cyclomatic,
+                "id": cand.sym.id,
+                "name": cand.sym.name,
+                "kind": cand.sym.kind,
+                "file": cand.sym.file_path,
+                "line": cand.sym.start_line,
+                "cyclomatic": cand.cyclomatic,
                 "caller_count": caller_count,
                 "caller_files": caller_files,
                 "score": score,

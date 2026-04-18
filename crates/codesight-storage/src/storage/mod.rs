@@ -1,6 +1,7 @@
 //! SQLite-backed code index (symbols, FTS, dependency edges).
 
 mod analysis_reads;
+mod batch_reads;
 mod convert;
 pub mod doc_index;
 pub mod doc_schema;
@@ -19,6 +20,7 @@ pub mod vector_index;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub use batch_reads::SymbolEnriched;
 pub use repo_summary::RepoMetadata;
 pub use schema::EMBEDDING_DIM;
 pub use snapshot_store::QualitySnapshot;
@@ -32,6 +34,12 @@ pub struct IndexStore {
     pub(crate) cached_total_bytes: std::sync::Arc<std::sync::OnceLock<u64>>,
     pub(crate) cached_root_path: std::sync::Arc<std::sync::OnceLock<PathBuf>>,
     pub(crate) ro_conn: std::sync::Arc<crate::db::RoConnCache>,
+    /// Lazy cache of the full `all_symbols_for_analysis` result for the
+    /// current `IndexStore` instance. Shared across clones (so every caller
+    /// that unwraps the same store handle sees the same cached vec) and
+    /// cleared by `apply_index_with_deps` after each commit.
+    pub(crate) cached_all_symbols:
+        std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<Vec<AnalysisSymbol>>>>>,
 }
 
 impl std::fmt::Debug for IndexStore {

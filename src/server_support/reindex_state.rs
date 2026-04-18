@@ -18,6 +18,7 @@ pub struct ReindexStatus {
     pub reindex_in_progress: bool,
     pub index_stale: bool,
     pub stale_since_ms: Option<u64>,
+    pub files_in_flight: Vec<String>,
     /// Only populated when `consecutive_failures >= 2`.
     pub reindex_error: Option<String>,
     /// Only populated when `consecutive_failures >= 2`.
@@ -61,6 +62,7 @@ pub struct RepoReindexState {
 struct RepoInner {
     reindexing: bool,
     stale_since: Option<Instant>,
+    files_in_flight: Vec<String>,
     consecutive_failures: u32,
     deferred_generation: u64,
     last_error: Option<String>,
@@ -72,13 +74,14 @@ impl RepoReindexState {
     /// Atomically claim the reindex slot. Returns `Err(())` if a reindex is
     /// already in progress. On success, flips `reindexing=true`, clears the
     /// event, bumps `deferred_generation`, and sets `stale_since` if unset.
-    fn try_begin_reindex(&self) -> Result<(), ()> {
+    fn try_begin_reindex(&self, files_in_flight: &[String]) -> Result<(), ()> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if inner.reindexing {
             return Err(());
         }
         inner.reindexing = true;
         inner.event_set = false;
+        inner.files_in_flight = files_in_flight.to_vec();
         if inner.stale_since.is_none() {
             inner.stale_since = Some(Instant::now());
         }
@@ -91,6 +94,7 @@ impl RepoReindexState {
             inner: Mutex::new(RepoInner {
                 reindexing: false,
                 stale_since: None,
+                files_in_flight: Vec::new(),
                 consecutive_failures: 0,
                 deferred_generation: 0,
                 last_error: None,
@@ -130,11 +134,12 @@ impl ReindexStateManager {
     /// - Clears the event (so waiters block)
     /// - Sets `stale_since` only if not already set
     /// - Increments `deferred_generation`
-    pub fn mark_reindex_start(&self, repo: &str) {
+    pub fn mark_reindex_start(&self, repo: &str, files_in_flight: &[String]) {
         let state = self.get_state(repo);
         let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.reindexing = true;
         inner.event_set = false;
+        inner.files_in_flight = files_in_flight.to_vec();
         if inner.stale_since.is_none() {
             inner.stale_since = Some(Instant::now());
         }
@@ -144,11 +149,17 @@ impl ReindexStateManager {
     /// Atomically claim the reindex slot for this repo. Returns
     /// [`BusyError`] if a reindex is already in flight — the state is left
     /// untouched in that case.
-    pub fn try_mark_reindex_start(&self, repo: &str) -> Result<(), BusyError> {
+    pub fn try_mark_reindex_start(
+        &self,
+        repo: &str,
+        files_in_flight: &[String],
+    ) -> Result<(), BusyError> {
         let state = self.get_state(repo);
-        state.try_begin_reindex().map_err(|()| BusyError {
-            repo: repo.to_string(),
-        })
+        state
+            .try_begin_reindex(files_in_flight)
+            .map_err(|()| BusyError {
+                repo: repo.to_string(),
+            })
     }
 
     /// Mark a reindex as successfully completed.
@@ -161,6 +172,7 @@ impl ReindexStateManager {
         let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.reindexing = false;
         inner.stale_since = None;
+        inner.files_in_flight.clear();
         inner.consecutive_failures = 0;
         inner.last_error = None;
         inner.event_set = true;
@@ -204,6 +216,7 @@ impl ReindexStateManager {
             reindex_in_progress: inner.reindexing,
             index_stale: inner.stale_since.is_some(),
             stale_since_ms,
+            files_in_flight: inner.files_in_flight.clone(),
             reindex_error,
             reindex_failures,
         }
@@ -308,7 +321,7 @@ mod tests {
     #[test]
     fn try_begin_reindex_succeeds_when_idle() {
         let mgr = ReindexStateManager::new();
-        assert!(mgr.try_mark_reindex_start("alpha").is_ok());
+        assert!(mgr.try_mark_reindex_start("alpha", &[]).is_ok());
         let status = mgr.get_status("alpha");
         assert!(status.reindex_in_progress);
         assert!(status.index_stale);
@@ -317,9 +330,10 @@ mod tests {
     #[test]
     fn try_begin_reindex_returns_busy_when_reindexing() {
         let mgr = ReindexStateManager::new();
-        mgr.try_mark_reindex_start("beta").expect("first claim");
+        mgr.try_mark_reindex_start("beta", &[])
+            .expect("first claim");
         let err = mgr
-            .try_mark_reindex_start("beta")
+            .try_mark_reindex_start("beta", &[])
             .expect_err("second claim must fail");
         assert_eq!(err.repo, "beta");
     }
@@ -327,10 +341,11 @@ mod tests {
     #[test]
     fn try_begin_reindex_recovers_after_done() {
         let mgr = ReindexStateManager::new();
-        mgr.try_mark_reindex_start("gamma").expect("first claim");
+        mgr.try_mark_reindex_start("gamma", &[])
+            .expect("first claim");
         mgr.mark_reindex_done("gamma");
         assert!(
-            mgr.try_mark_reindex_start("gamma").is_ok(),
+            mgr.try_mark_reindex_start("gamma", &[]).is_ok(),
             "second claim after done must succeed"
         );
     }
@@ -338,10 +353,11 @@ mod tests {
     #[test]
     fn try_begin_reindex_recovers_after_failed() {
         let mgr = ReindexStateManager::new();
-        mgr.try_mark_reindex_start("delta").expect("first claim");
+        mgr.try_mark_reindex_start("delta", &[])
+            .expect("first claim");
         mgr.mark_reindex_failed("delta", "boom");
         assert!(
-            mgr.try_mark_reindex_start("delta").is_ok(),
+            mgr.try_mark_reindex_start("delta", &[]).is_ok(),
             "second claim after failure must succeed"
         );
     }

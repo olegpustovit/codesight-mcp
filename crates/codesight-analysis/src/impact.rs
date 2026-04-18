@@ -1,5 +1,7 @@
 //! Domain-level impact payload builders used by handlers and slice tests.
 
+pub mod path_rename;
+
 use std::collections::HashSet;
 
 use serde_json::{Value, json};
@@ -53,17 +55,21 @@ pub fn rename_safety_payload(
     }
 
     if let Some(importers) = reverse_adj.get(file_path) {
+        // Batch-fetch all importer outlines in one query instead of N.
+        let importer_refs: Vec<&str> = importers.iter().map(String::as_str).collect();
+        let outlines = store.file_outlines_batch(&importer_refs)?;
         for importer in importers {
             checked_files.insert(importer.clone());
-            let importer_outline = store.file_outline(importer)?;
-            for symbol in &importer_outline {
-                if symbol["name"].as_str() == Some(new_name) {
-                    conflicts.push(json!({
-                        "existing_name": new_name,
-                        "file": importer,
-                        "kind": symbol["kind"],
-                        "id": symbol["id"],
-                    }));
+            if let Some(outline) = outlines.get(importer.as_str()) {
+                for symbol in outline {
+                    if symbol["name"].as_str() == Some(new_name) {
+                        conflicts.push(json!({
+                            "existing_name": new_name,
+                            "file": importer,
+                            "kind": symbol["kind"],
+                            "id": symbol["id"],
+                        }));
+                    }
                 }
             }
         }

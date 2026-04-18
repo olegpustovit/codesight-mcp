@@ -69,8 +69,9 @@ Current `@definition.<kind>` values recognized by the engine:
 - `constant`
 - `module`
 - `namespace`
+- `reexport`
 
-`module` and `namespace` currently map to `SymbolKind::Type` in stored output, with scope behavior handled by the query engine.
+`module` and `namespace` currently map to `SymbolKind::Type` in stored output, with scope behavior handled by the query engine. `reexport` maps to `SymbolKind::Reexport`.
 
 ## Repo-local packs (workspace)
 

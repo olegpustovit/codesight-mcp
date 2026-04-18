@@ -18,6 +18,6 @@ mod paths;
 pub use app::AppConfig;
 pub use defaults::{
     BUILD_SHA, BUILD_TIME, BUILD_VERSION, BYTES_PER_TOKEN, GITIGNORE_WARNING_FILE_THRESHOLD,
-    RETRIEVAL_ENGINE, RETRIEVAL_VERSION, SCHEMA_VERSION,
+    RETRIEVAL_ENGINE, RETRIEVAL_VERSION, SCHEMA_VERSION, timeout_for_tool,
 };
 pub use trust::{TrustCheckResult, check_trust, is_broad_path, sanitize_project_trusted_folders};

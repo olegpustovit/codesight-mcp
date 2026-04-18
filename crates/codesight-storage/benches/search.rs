@@ -79,7 +79,7 @@ fn build_fixture() -> (TempDir, IndexStore) {
     }
 
     store
-        .apply_index(
+        .apply_code_index(
             "bench-repo",
             Path::new("/tmp/bench-repo"),
             "2026-04-10T00:00:00Z",
@@ -89,7 +89,7 @@ fn build_fixture() -> (TempDir, IndexStore) {
             &[],
             &[],
         )
-        .expect("apply_index");
+        .expect("apply_code_index");
 
     (dir, store)
 }

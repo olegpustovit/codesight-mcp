@@ -14,6 +14,7 @@ pub enum SymbolKind {
     Type,
     Template,
     Import,
+    Reexport,
 }
 
 impl SymbolKind {

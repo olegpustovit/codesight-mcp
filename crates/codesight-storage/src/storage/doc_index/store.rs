@@ -11,7 +11,7 @@ use super::{DocFileUpdate, DocSectionInput, DocStore};
 
 impl DocStore {
     #[allow(clippy::too_many_arguments)]
-    pub fn apply_index(
+    pub fn apply_doc_index(
         &self,
         repo: &str,
         root_path: &Path,
@@ -23,42 +23,88 @@ impl DocStore {
     ) -> anyhow::Result<()> {
         let mut conn = self.open_connection()?;
         let tx = conn.transaction()?;
-
-        if !removed_files.is_empty() {
-            let mut del_sec = tx.prepare_cached("DELETE FROM sections WHERE file_path = ?1")?;
-            let mut del_doc = tx.prepare_cached("DELETE FROM doc_files WHERE file_path = ?1")?;
-            for file_path in removed_files {
-                Self::delete_section_vectors_for_file(&tx, file_path)?;
-                del_sec.execute([file_path])?;
-                del_doc.execute([file_path])?;
-            }
-        }
-
+        Self::delete_removed_docs(&tx, removed_files)?;
         for file in updated_files {
-            Self::delete_section_vectors_for_file(&tx, &file.file_path)?;
-            tx.prepare_cached("DELETE FROM sections WHERE file_path = ?1")?
-                .execute([&file.file_path])?;
-            tx.prepare_cached("DELETE FROM doc_files WHERE file_path = ?1")?
-                .execute([&file.file_path])?;
-            tx.prepare_cached(
-                "INSERT INTO doc_files (file_path, format, size_bytes, modified_ns, content_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
-            )?
-            .execute(params![file.file_path, file.format, file.size_bytes as i64, file.modified_ns as i64, file.content_hash])?;
-            for section in &file.sections {
-                Self::insert_section(&tx, section, &file.source)?;
-            }
+            Self::replace_updated_doc_file(&tx, file)?;
         }
-        if !section_vectors.is_empty() {
-            let rows: Vec<_> = section_vectors.iter().map(OwnedVectorRow::borrowed).collect();
-            vector_index::upsert_vectors(&tx, Domain::Section, &rows)?;
-        }
+        Self::upsert_section_vectors(&tx, section_vectors)?;
+        Self::reset_doc_repo_info(&tx, repo, root_path, indexed_at, index_version)?;
+        tx.commit()?;
+        Ok(())
+    }
 
+    fn delete_removed_docs(
+        tx: &Transaction<'_>,
+        removed_files: &[String],
+    ) -> anyhow::Result<()> {
+        if removed_files.is_empty() {
+            return Ok(());
+        }
+        let mut del_sec = tx.prepare_cached("DELETE FROM sections WHERE file_path = ?1")?;
+        let mut del_doc = tx.prepare_cached("DELETE FROM doc_files WHERE file_path = ?1")?;
+        for file_path in removed_files {
+            Self::delete_section_vectors_for_file(tx, file_path)?;
+            del_sec.execute([file_path])?;
+            del_doc.execute([file_path])?;
+        }
+        Ok(())
+    }
+
+    fn replace_updated_doc_file(
+        tx: &Transaction<'_>,
+        file: &DocFileUpdate,
+    ) -> anyhow::Result<()> {
+        Self::delete_section_vectors_for_file(tx, &file.file_path)?;
+        tx.prepare_cached("DELETE FROM sections WHERE file_path = ?1")?
+            .execute([&file.file_path])?;
+        tx.prepare_cached("DELETE FROM doc_files WHERE file_path = ?1")?
+            .execute([&file.file_path])?;
+        tx.prepare_cached(
+            "INSERT INTO doc_files (file_path, format, size_bytes, modified_ns, content_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?
+        .execute(params![
+            file.file_path,
+            file.format,
+            file.size_bytes as i64,
+            file.modified_ns as i64,
+            file.content_hash
+        ])?;
+        for section in &file.sections {
+            Self::insert_section(tx, section, &file.source)?;
+        }
+        Ok(())
+    }
+
+    fn upsert_section_vectors(
+        tx: &Transaction<'_>,
+        section_vectors: &[OwnedVectorRow],
+    ) -> anyhow::Result<()> {
+        if section_vectors.is_empty() {
+            return Ok(());
+        }
+        let rows: Vec<_> = section_vectors.iter().map(OwnedVectorRow::borrowed).collect();
+        vector_index::upsert_vectors(tx, Domain::Section, &rows)?;
+        Ok(())
+    }
+
+    fn reset_doc_repo_info(
+        tx: &Transaction<'_>,
+        repo: &str,
+        root_path: &Path,
+        indexed_at: &str,
+        index_version: u32,
+    ) -> anyhow::Result<()> {
         tx.execute("DELETE FROM repo_info", [])?;
         tx.execute(
             "INSERT INTO repo_info (repo, root_path, indexed_at, index_version, schema_version) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![repo, root_path.to_string_lossy().to_string(), indexed_at, index_version, SCHEMA_VERSION],
+            params![
+                repo,
+                root_path.to_string_lossy().to_string(),
+                indexed_at,
+                index_version,
+                SCHEMA_VERSION
+            ],
         )?;
-        tx.commit()?;
         Ok(())
     }
 

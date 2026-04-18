@@ -9,15 +9,17 @@ use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
-use codesight_analysis::{dead_code, quality, quality_signal};
+use codesight_analysis::{
+    agent_readiness::compute_agent_readiness_for_scope, dead_code, quality, quality_signal,
+    thresholds::current_thresholds,
+};
 
 impl CodeService {
     pub(in crate::service) fn evaluate_quality(&self, v: Value) -> anyhow::Result<Value> {
         let args: EvaluateQualityArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let a = args.analysis.to_ascii_lowercase();
         let timer = MetaBuilder::new(0);
-
-        match a.as_str() {
+        let mut response = match a.as_str() {
             "complexity" => self.quality_complexity(&args, &timer),
             "repo_health" => self.quality_repo_health(&args, &timer),
             "dead_code" => self.quality_dead_code(&args, &timer),
@@ -25,7 +27,14 @@ impl CodeService {
             "quality_signal" => self.quality_signal_handler(&args, &timer),
             "regression_check" => self.quality_regression_check(&args, &timer),
             tail => self.evaluate_quality_tail(&args, tail, &timer),
+        }?;
+        if let Some(meta) = response.get_mut("_meta").and_then(Value::as_object_mut) {
+            meta.insert(
+                "thresholds".to_string(),
+                current_thresholds().as_json(),
+            );
         }
+        Ok(response)
     }
 
     fn quality_complexity(
@@ -153,6 +162,53 @@ impl CodeService {
                 "dimensions_available": gov.structural.coverage.dimensions_available,
             }),
         );
+        if let Some(scope) = args.scope.as_deref()
+            && let Some(scoped) = compute_agent_readiness_for_scope(
+                &store.all_symbols_for_analysis()?,
+                &store.dependency_graph_strict()?,
+                store.root_path().ok().as_deref(),
+                scope,
+            )
+        {
+            obj.insert("scope".into(), json!(scope));
+            obj.insert(
+                "agent_readiness".into(),
+                json!({
+                    "score": scoped.signal.score as f64 / 10_000.0,
+                    "navigability": scoped.signal.dimensions.navigability,
+                    "comprehensibility": scoped.signal.dimensions.comprehensibility,
+                    "verifiability": scoped.signal.dimensions.verifiability,
+                    "change_safety": scoped.signal.dimensions.change_safety,
+                }),
+            );
+            obj.insert(
+                "weakest_dimension".into(),
+                json!(scoped.weakest_dimension),
+            );
+            obj.insert(
+                "top_offenders".into(),
+                json!(scoped
+                    .top_offenders
+                    .into_iter()
+                    .map(|offender| json!({
+                        "symbol": offender.symbol,
+                        "line": offender.line,
+                        "cyclomatic": offender.cyclomatic,
+                        "nesting_depth": offender.nesting_depth,
+                    }))
+                    .collect::<Vec<_>>()),
+            );
+            obj.insert(
+                "thresholds_failed".into(),
+                json!(scoped.thresholds_failed),
+            );
+            self.record_agent_readiness_probe(
+                scope,
+                scoped.signal.score as f64 / 10_000.0,
+                scoped.weakest_dimension,
+                current_thresholds().agent_readiness_min,
+            );
+        }
         self.success_response(&timer, data)
     }
 

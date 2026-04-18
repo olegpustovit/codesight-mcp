@@ -4,7 +4,7 @@
 //! [`codesight_core::symbols::FactQuality::suitable_for_strict_analysis`]. Heuristic-tier
 //! symbols remain available for exploratory graphs via [`build_call_edges_including_heuristic`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
@@ -77,8 +77,29 @@ fn symbol_ok_for_policy(tier: ExtractionTier, policy: CallEdgePolicy) -> bool {
 }
 
 fn build_call_edges_with_policy(symbols: &[SymbolInfo], policy: CallEdgePolicy) -> Vec<CallEdge> {
-    let mut edges = Vec::new();
+    // Build a `name → callee-indices` map once (O(N)). Multiple callees can
+    // share a name (e.g. every `new`); they all participate.
+    //
+    // Replaces a naive O(N²) loop — for a 4.5k-symbol repo the old version
+    // did 20M substring searches and blew past the 2000 ms handler cap on
+    // `graph=calls` and `evaluate_impact analysis=impact_preview`.
+    let mut name_to_callees: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, callee) in symbols.iter().enumerate() {
+        if !symbol_ok_for_policy(callee.extraction_tier, policy) {
+            continue;
+        }
+        if callee.name.len() < 2 {
+            continue;
+        }
+        name_to_callees
+            .entry(callee.name.as_str())
+            .or_default()
+            .push(i);
+    }
 
+    let mut edges = Vec::new();
+    // Reused across callers — one allocation per build, not per caller.
+    let mut seen_callees: HashSet<usize> = HashSet::new();
     for caller in symbols {
         if caller.source.is_empty() {
             continue;
@@ -86,35 +107,47 @@ fn build_call_edges_with_policy(symbols: &[SymbolInfo], policy: CallEdgePolicy) 
         if !symbol_ok_for_policy(caller.extraction_tier, policy) {
             continue;
         }
-        for callee in symbols {
-            if caller.id == callee.id {
-                continue;
-            }
-            if !symbol_ok_for_policy(callee.extraction_tier, policy) {
-                continue;
-            }
-            // Skip very short names to avoid false positives
-            if callee.name.len() < 2 {
-                continue;
-            }
-            if word_match(&caller.source, &callee.name) {
-                edges.push(CallEdge {
-                    caller_id: caller.id.clone(),
-                    caller_name: caller.name.clone(),
-                    caller_file: caller.file.clone(),
-                    caller_line: caller.line,
-                    caller_kind: caller.kind.clone(),
-                    callee_id: callee.id.clone(),
-                    callee_name: callee.name.clone(),
-                    callee_file: callee.file.clone(),
-                    callee_line: callee.line,
-                    callee_kind: callee.kind.clone(),
-                });
+        // Walk identifiers in the caller's source. Each maximal run of
+        // `[A-Za-z0-9_]` is a candidate callee name — O(source_len) to
+        // scan, O(1) hash lookup per identifier. Dedup per caller so we
+        // match the old word_match-bool behavior (one edge per pair).
+        seen_callees.clear();
+        for ident in iter_identifiers(&caller.source) {
+            if let Some(indices) = name_to_callees.get(ident) {
+                for &ci in indices {
+                    let callee = &symbols[ci];
+                    if callee.id == caller.id {
+                        continue;
+                    }
+                    if !seen_callees.insert(ci) {
+                        continue;
+                    }
+                    edges.push(CallEdge {
+                        caller_id: caller.id.clone(),
+                        caller_name: caller.name.clone(),
+                        caller_file: caller.file.clone(),
+                        caller_line: caller.line,
+                        caller_kind: caller.kind.clone(),
+                        callee_id: callee.id.clone(),
+                        callee_name: callee.name.clone(),
+                        callee_file: callee.file.clone(),
+                        callee_line: callee.line,
+                        callee_kind: callee.kind.clone(),
+                    });
+                }
             }
         }
     }
 
     edges
+}
+
+/// Yield every maximal run of `[A-Za-z0-9_]` in `src` — i.e. every
+/// identifier-shaped token. Matches the old `word_match` definition of
+/// "word character" so edge semantics are unchanged.
+fn iter_identifiers(src: &str) -> impl Iterator<Item = &str> {
+    src.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|s| !s.is_empty())
 }
 
 /// Build call edges from a list of symbols by checking if a symbol's body

@@ -36,9 +36,21 @@ fn run_hook(subcommand: &str, input: &str) -> (i32, String, String) {
 
 // ── hook-pretooluse: Read ────────────────────────────────────────────
 
+/// Parse the JSON the hook writes on stdout and return the
+/// `hookSpecificOutput.additionalContext` string, if any.
+fn hook_additional_context(stdout: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
+    parsed
+        .pointer("/hookSpecificOutput/additionalContext")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
 #[test]
-fn pretooluse_read_large_code_file_warns() {
-    // Create a temp file large enough to trigger the warning.
+fn pretooluse_read_passes_through_regardless_of_size() {
+    // Read is intentionally not intercepted: Claude's Edit/Write flow
+    // requires a prior Read in session state, so the hook must stay silent
+    // on Read no matter how large the target file is.
     let dir = tempfile::tempdir().unwrap();
     let large_file = dir.path().join("big.rs");
     std::fs::write(&large_file, "a".repeat(8192)).unwrap();
@@ -50,15 +62,11 @@ fn pretooluse_read_large_code_file_warns() {
         }
     });
 
-    let (code, _stdout, stderr) = run_hook("hook-pretooluse", &input.to_string());
+    let (code, stdout, _stderr) = run_hook("hook-pretooluse", &input.to_string());
     assert_eq!(code, 0);
     assert!(
-        stderr.contains("codesight-hooks"),
-        "expected stderr warning, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("inspect_structure") || stderr.contains("search_catalog"),
-        "expected codesight suggestion in stderr: {stderr}"
+        stdout.trim().is_empty(),
+        "Read should not emit any hook decision: {stdout}"
     );
 }
 
@@ -155,11 +163,56 @@ fn pretooluse_grep_suggests_search_catalog() {
         }
     });
 
-    let (code, _stdout, stderr) = run_hook("hook-pretooluse", &input.to_string());
+    let (code, stdout, _stderr) = run_hook("hook-pretooluse", &input.to_string());
+    assert_eq!(code, 0);
+    let ctx = hook_additional_context(&stdout)
+        .unwrap_or_else(|| panic!("Grep should emit a hookSpecificOutput JSON: {stdout}"));
+    assert!(
+        ctx.contains("search_catalog"),
+        "expected search_catalog suggestion in additionalContext: {ctx}"
+    );
+}
+
+#[test]
+fn pretooluse_grep_on_markdown_suggests_docs_search() {
+    // Regression: `.md`, `.rst`, etc. are indexed as sections — Grep on them
+    // must be redirected, not passed through.
+    let input = serde_json::json!({
+        "tool_name": "Grep",
+        "tool_input": {
+            "pattern": "plan_turn",
+            "path": "REFACTOR_WORKLOG.md"
+        }
+    });
+
+    let (code, stdout, _stderr) = run_hook("hook-pretooluse", &input.to_string());
+    assert_eq!(code, 0);
+    let ctx = hook_additional_context(&stdout).unwrap_or_else(|| {
+        panic!("Grep on .md should emit a hookSpecificOutput JSON (deny): {stdout}")
+    });
+    assert!(
+        ctx.contains("search_catalog") && ctx.contains("docs"),
+        "expected docs-oriented search_catalog suggestion: {ctx}"
+    );
+}
+
+#[test]
+fn pretooluse_grep_on_binary_passes_through() {
+    // Non-indexable extensions (e.g. `.png`) still pass through so Grep can
+    // be used for truly non-code/non-docs content.
+    let input = serde_json::json!({
+        "tool_name": "Grep",
+        "tool_input": {
+            "pattern": "anything",
+            "path": "logo.png"
+        }
+    });
+
+    let (code, stdout, _stderr) = run_hook("hook-pretooluse", &input.to_string());
     assert_eq!(code, 0);
     assert!(
-        stderr.contains("search_catalog"),
-        "expected search_catalog suggestion: {stderr}"
+        stdout.is_empty(),
+        "Grep on non-indexable path should pass through silently: {stdout}"
     );
 }
 
@@ -174,11 +227,13 @@ fn pretooluse_glob_suggests_file_tree() {
         }
     });
 
-    let (code, _stdout, stderr) = run_hook("hook-pretooluse", &input.to_string());
+    let (code, stdout, _stderr) = run_hook("hook-pretooluse", &input.to_string());
     assert_eq!(code, 0);
+    let ctx = hook_additional_context(&stdout)
+        .unwrap_or_else(|| panic!("Glob should emit a hookSpecificOutput JSON: {stdout}"));
     assert!(
-        stderr.contains("inspect_structure"),
-        "expected inspect_structure suggestion: {stderr}"
+        ctx.contains("inspect_structure"),
+        "expected inspect_structure suggestion in additionalContext: {ctx}"
     );
 }
 
@@ -215,11 +270,13 @@ fn pretooluse_bash_grep_suggests_search_catalog() {
         }
     });
 
-    let (code, _stdout, stderr) = run_hook("hook-pretooluse", &input.to_string());
+    let (code, stdout, _stderr) = run_hook("hook-pretooluse", &input.to_string());
     assert_eq!(code, 0);
+    let ctx = hook_additional_context(&stdout)
+        .unwrap_or_else(|| panic!("Bash grep should emit a hookSpecificOutput JSON: {stdout}"));
     assert!(
-        stderr.contains("search_catalog"),
-        "expected search_catalog suggestion for bash grep: {stderr}"
+        ctx.contains("search_catalog"),
+        "expected search_catalog suggestion for bash grep in additionalContext: {ctx}"
     );
 }
 

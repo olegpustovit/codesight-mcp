@@ -133,12 +133,21 @@ pub fn expand_context(
         return (start_line, end_line, String::new());
     }
 
-    let start_index = start_line
-        .saturating_sub(1)
-        .saturating_sub(context_lines as u32) as usize;
-    let end_index = (end_line as usize + context_lines).min(lines.len());
+    // Indexed line numbers can outlive the on-disk file when a record
+    // refers to a range that shrank after reindex — clamp everything to
+    // `lines.len()` so an out-of-range slice can never panic the handler.
+    let len = lines.len();
+    let raw_start = start_line.saturating_sub(1).saturating_sub(context_lines as u32) as usize;
+    let raw_end = (end_line as usize).saturating_add(context_lines);
+    let start_index = raw_start.min(len);
+    let end_index = raw_end.min(len).max(start_index);
     let expanded = lines[start_index..end_index].join("\n");
-    (start_index as u32 + 1, end_index as u32, expanded)
+    let start_1based = if start_index == len {
+        len as u32
+    } else {
+        start_index as u32 + 1
+    };
+    (start_1based, end_index as u32, expanded)
 }
 
 pub fn attach_meta(body: Value, meta: Value) -> anyhow::Result<Value> {
@@ -153,5 +162,38 @@ pub fn attach_meta(body: Value, meta: Value) -> anyhow::Result<Value> {
             object.insert("_meta".to_string(), meta);
             Ok(Value::Object(object))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_context_clamps_when_lines_are_stale_past_eof() {
+        // Simulates the panic we hit in the wild: indexed record says
+        // the symbol starts at line 105_756, but the on-disk file has
+        // only 3 lines. Must not panic; must return empty expansion.
+        let src = "a\nb\nc";
+        let (start, end, body) = expand_context(src, 105_756, 105_800, 20);
+        assert_eq!(start, 3, "start clamped to len");
+        assert_eq!(end, 3);
+        assert_eq!(body, "");
+        assert!(start <= end, "returned range must never invert");
+    }
+
+    #[test]
+    fn expand_context_clamps_when_end_past_eof_but_start_in_range() {
+        let src = "one\ntwo\nthree\nfour";
+        let (start, end, body) = expand_context(src, 3, 99, 0);
+        assert_eq!(start, 3);
+        assert_eq!(end, 4);
+        assert_eq!(body, "three\nfour");
+    }
+
+    #[test]
+    fn expand_context_handles_empty_source() {
+        let (start, end, body) = expand_context("", 1, 5, 10);
+        assert_eq!((start, end, body.as_str()), (1, 5, ""));
     }
 }

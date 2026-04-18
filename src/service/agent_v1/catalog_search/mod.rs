@@ -18,6 +18,12 @@ use codesight_storage::storage::doc_index::DocStore;
 
 use semantic::{DenseRankedHit, run_dense_lane, semantic_fallback_warning};
 
+/// Server-side serialization byte cap for the `items` payload. We stay well
+/// below the MCP client's overflow-to-file guard so broad queries trim on
+/// the server side with a `truncated_by=["byte_budget"]` hint instead of
+/// returning a giant `.txt` pointer.
+const MAX_RESPONSE_BYTES: usize = 12_000;
+
 /// Fuse the already-ranked lexical items with the dense lane's id lists
 /// via RRF. Symbol and section lanes fuse separately; file-text hits
 /// (which the dense lane never produces) pass through unchanged.
@@ -179,6 +185,104 @@ struct CodeSideStats {
     fuzzy_applied: bool,
 }
 
+struct SearchPlan {
+    output_mode: String,
+    scope: Option<String>,
+    offset: usize,
+    lim: usize,
+    query_mode_effective: String,
+    domain_explicit: bool,
+    domain: String,
+    flags: KindFlags,
+    per_kind_cap: usize,
+}
+
+impl SearchPlan {
+    fn build(args: &mut SearchCatalogArgs) -> Result<Self, ToolError> {
+        let output_mode = coerce_search_args(args)?;
+        validate_presearch(args)?;
+        let scope = args.scope.clone().or(args.file_pattern.clone());
+        let counting = output_mode == "count" || output_mode == "files_with_matches";
+        let offset = args.offset;
+        let lim = if counting {
+            args.limit.clamp(1, 10_000)
+        } else {
+            args.limit.clamp(1, 50)
+        };
+        let query_mode_effective = args
+            .query_mode
+            .clone()
+            .unwrap_or_else(|| "keyword".to_string())
+            .to_ascii_lowercase();
+        let domain_explicit = args.domain.is_some();
+        let domain = args
+            .domain
+            .clone()
+            .map(|d| d.to_ascii_lowercase())
+            .unwrap_or_else(|| match query_mode_effective.as_str() {
+                "natural_language" => "hybrid".to_string(),
+                _ => "code".to_string(),
+            });
+        let flags = KindFlags::from_args(args, &domain);
+        let request_cap = lim.saturating_add(offset);
+        let per_kind_cap = if domain == "hybrid" {
+            (request_cap / 2).max(1)
+        } else {
+            request_cap
+        };
+        Ok(Self {
+            output_mode,
+            scope,
+            offset,
+            lim,
+            query_mode_effective,
+            domain_explicit,
+            domain,
+            flags,
+            per_kind_cap,
+        })
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+struct LexicalStats {
+    more_file_hits_exist: bool,
+    fuzzy_applied: bool,
+}
+
+fn build_meta_extras(
+    plan: &SearchPlan,
+    fuzzy_applied: bool,
+    semantic_requested: bool,
+) -> Vec<(String, Value)> {
+    vec![
+        ("domain_effective".to_string(), json!(plan.domain)),
+        (
+            "query_mode_effective".to_string(),
+            json!(plan.query_mode_effective),
+        ),
+        ("domain_explicit".to_string(), json!(plan.domain_explicit)),
+        (
+            "estimate_method".to_string(),
+            json!("byte_approx_candidate_files"),
+        ),
+        (
+            "baseline_scope".to_string(),
+            json!("candidate_files_materialized_pre_output"),
+        ),
+        (
+            "unit_kinds_effective".to_string(),
+            json!({
+                "symbol": plan.flags.want_symbol,
+                "section": plan.flags.want_section,
+                "file": plan.flags.want_file,
+            }),
+        ),
+        ("fuzzy_applied".to_string(), json!(fuzzy_applied)),
+        ("semantic_applied".to_string(), json!(semantic_requested)),
+    ]
+}
+
 fn estimate_candidate_file_bytes(
     code_store: Option<&IndexStore>,
     doc_store: Option<&DocStore>,
@@ -337,6 +441,7 @@ struct FormatCtx<'a> {
     output_mode: &'a str,
     query: &'a str,
     query_mode_effective: &'a str,
+    offset: usize,
     lim: usize,
     max_tokens: Option<u32>,
     more_file_hits_exist: bool,
@@ -378,6 +483,11 @@ fn format_output(
                 .into_iter()
                 .map(|(file, count)| json!({ "file": file, "count": count }))
                 .collect();
+            let file_items = file_items
+                .into_iter()
+                .skip(ctx.offset)
+                .take(ctx.lim)
+                .collect::<Vec<_>>();
             let data = json!({
                 "files": file_items,
                 "total_matches": total_matches,
@@ -389,6 +499,9 @@ fn format_output(
         }
         _ => {
             let mut truncated_by: Vec<&'static str> = Vec::new();
+            if ctx.offset > 0 {
+                items = items.into_iter().skip(ctx.offset).collect();
+            }
             if let Some(mt) = ctx.max_tokens {
                 let (packed, bt) = pack_catalog_items_to_token_budget(items, mt);
                 items = packed;
@@ -414,6 +527,27 @@ fn format_output(
             }
             if overflow || pre_cap_exceeds_lim || ctx.more_file_hits_exist {
                 truncated_by.push("limit");
+            }
+
+            // Server-side byte cap — trim items until serialized size stays
+            // under `MAX_RESPONSE_BYTES` so we don't trip the MCP client's
+            // overflow-to-file guard. Applied even after `limit` truncation.
+            let mut byte_budgeted = false;
+            while items.len() > 1
+                && serde_json::to_vec(&items).map(|v| v.len()).unwrap_or(0)
+                    > MAX_RESPONSE_BYTES
+            {
+                items.pop();
+                byte_budgeted = true;
+            }
+            if byte_budgeted {
+                truncated_by.push("byte_budget");
+                warnings.push(json!({
+                    "code": "TRUNCATED",
+                    "message": format!(
+                        "result trimmed to stay under {MAX_RESPONSE_BYTES}-byte server cap; narrow via scope=, file_pattern=, or a tighter query."
+                    ),
+                }));
             }
 
             let meta_truncated = !truncated_by.is_empty();
@@ -633,197 +767,190 @@ impl CodeService {
 
     pub(in crate::service) fn search_catalog(&self, v: Value) -> anyhow::Result<Value> {
         let mut args: SearchCatalogArgs = ValidatedArgs::from_validated(v)?.into_inner();
-
-        let output_mode = match coerce_search_args(&mut args) {
-            Ok(m) => m,
+        let plan = match SearchPlan::build(&mut args) {
+            Ok(p) => p,
             Err(e) => return self.error_response(&MetaBuilder::new(0), e),
         };
-        if let Err(e) = validate_presearch(&args) {
-            return self.error_response(&MetaBuilder::new(0), e);
-        }
-
-        let scope = args.scope.clone().or(args.file_pattern.clone());
-        let counting = output_mode == "count" || output_mode == "files_with_matches";
-        let lim = if counting {
-            args.limit.clamp(1, 10_000)
-        } else {
-            args.limit.clamp(1, 50)
-        };
-        let query_mode_effective = args
-            .query_mode
-            .clone()
-            .unwrap_or_else(|| "keyword".to_string())
-            .to_ascii_lowercase();
-        let domain_explicit = args.domain.is_some();
-        let domain = match args.domain.clone() {
-            Some(d) => d.to_ascii_lowercase(),
-            None => match query_mode_effective.as_str() {
-                "natural_language" => "hybrid".to_string(),
-                _ => "code".to_string(),
-            },
-        };
-
-        let flags = KindFlags::from_args(&args, &domain);
 
         let mut warnings = Vec::new();
         let (code_store, doc_store) =
-            match self.resolve_stores(&args, &domain, &flags, &mut warnings) {
+            match self.resolve_stores(&args, &plan.domain, &plan.flags, &mut warnings) {
                 Ok(pair) => pair,
                 Err(e) => return self.error_response(&MetaBuilder::new(0), e),
             };
 
-        let per_kind_cap = if domain == "hybrid" {
-            (lim / 2).max(1)
-        } else {
-            lim
+        let mut items: Vec<Value> = Vec::new();
+        let mut counts = SearchCounts::default();
+        self.run_count_pass(
+            &args,
+            &plan,
+            code_store.as_ref(),
+            doc_store.as_ref(),
+            &mut counts,
+        );
+
+        let stats = match self.run_lexical_pass(
+            &args,
+            &plan,
+            code_store.as_ref(),
+            doc_store.as_ref(),
+            &mut items,
+            &mut counts,
+        ) {
+            Ok(s) => s,
+            Err(e) => return self.error_response(&MetaBuilder::new(1), e),
         };
 
-        let mut items: Vec<Value> = Vec::new();
-        let mut raw_bytes = 0u64;
-        let mut more_file_hits_exist = false;
-        let mut fuzzy_applied = false;
-        let mut counts = SearchCounts::default();
-        let exclude = args.exclude.as_deref().unwrap_or(&[]);
+        let semantic_requested = match self.run_semantic_pass(
+            &args,
+            &plan,
+            code_store.as_ref(),
+            doc_store.as_ref(),
+            &mut items,
+            &mut warnings,
+        ) {
+            Ok(b) => b,
+            Err(e) => return self.error_response(&MetaBuilder::new(1), e),
+        };
 
-        if let Some(ref store) = code_store
-            && (flags.want_symbol || (!flags.want_file && !flags.want_section))
+        let raw_bytes =
+            match estimate_candidate_file_bytes(code_store.as_ref(), doc_store.as_ref(), &items) {
+                Ok(bytes) => bytes,
+                Err(e) => return self.error_response(&MetaBuilder::new(1), e),
+            };
+        let timer = MetaBuilder::new(raw_bytes.max(1));
+        let extra = build_meta_extras(&plan, stats.fuzzy_applied, semantic_requested);
+
+        let fmt_ctx = FormatCtx {
+            output_mode: &plan.output_mode,
+            query: &args.query,
+            query_mode_effective: &plan.query_mode_effective,
+            offset: plan.offset,
+            lim: plan.lim,
+            max_tokens: args.max_tokens,
+            more_file_hits_exist: stats.more_file_hits_exist,
+            counts,
+        };
+        format_output(self, &fmt_ctx, items, &timer, warnings, extra)
+    }
+
+    fn run_count_pass(
+        &self,
+        args: &SearchCatalogArgs,
+        plan: &SearchPlan,
+        code_store: Option<&IndexStore>,
+        doc_store: Option<&DocStore>,
+        counts: &mut SearchCounts,
+    ) {
+        let exclude = args.exclude.as_deref().unwrap_or(&[]);
+        if let Some(store) = code_store
+            && (plan.flags.want_symbol
+                || (!plan.flags.want_file && !plan.flags.want_section))
             && let Ok((m, f)) = store.count_symbols(
                 &args.query,
                 args.kind.as_deref(),
-                scope.as_deref(),
+                plan.scope.as_deref(),
                 exclude,
             )
         {
             counts.add(m, f);
         }
-        if let Some(ref dstore) = doc_store
-            && (flags.want_section || domain == "docs" || domain == "hybrid")
-            && let Ok((m, f)) = dstore.count_sections(&args.query, scope.as_deref(), exclude)
+        if let Some(dstore) = doc_store
+            && (plan.flags.want_section || plan.domain == "docs" || plan.domain == "hybrid")
+            && let Ok((m, f)) = dstore.count_sections(&args.query, plan.scope.as_deref(), exclude)
         {
             counts.add(m, f);
         }
+    }
 
-        if let Some(ref store) = code_store {
-            match self.search_code_side(
+    fn run_lexical_pass(
+        &self,
+        args: &SearchCatalogArgs,
+        plan: &SearchPlan,
+        code_store: Option<&IndexStore>,
+        doc_store: Option<&DocStore>,
+        items: &mut Vec<Value>,
+        counts: &mut SearchCounts,
+    ) -> Result<LexicalStats, ToolError> {
+        let mut more_file_hits_exist = false;
+        let mut fuzzy_applied = false;
+        if let Some(store) = code_store {
+            let stats = self.search_code_side(
                 store,
-                &args,
-                scope.as_ref(),
-                &flags,
-                per_kind_cap,
-                &mut items,
-                &mut counts,
-            ) {
-                Ok(stats) => {
-                    more_file_hits_exist = stats.more_file_hits;
-                    fuzzy_applied = stats.fuzzy_applied;
-                }
-                Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
-            }
+                args,
+                plan.scope.as_ref(),
+                &plan.flags,
+                plan.per_kind_cap,
+                items,
+                counts,
+            )?;
+            more_file_hits_exist = stats.more_file_hits;
+            fuzzy_applied = stats.fuzzy_applied;
         }
-
-        if let Some(ref dstore) = doc_store
-            && (flags.want_section || domain == "docs" || domain == "hybrid")
-            && let Err(e) =
-                self.search_doc_side(dstore, &args, scope.as_ref(), per_kind_cap, &mut items)
+        if let Some(dstore) = doc_store
+            && (plan.flags.want_section || plan.domain == "docs" || plan.domain == "hybrid")
         {
-            return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e);
+            self.search_doc_side(dstore, args, plan.scope.as_ref(), plan.per_kind_cap, items)?;
         }
+        Ok(LexicalStats {
+            more_file_hits_exist,
+            fuzzy_applied,
+        })
+    }
 
+    fn run_semantic_pass(
+        &self,
+        args: &SearchCatalogArgs,
+        plan: &SearchPlan,
+        code_store: Option<&IndexStore>,
+        doc_store: Option<&DocStore>,
+        items: &mut Vec<Value>,
+        warnings: &mut Vec<Value>,
+    ) -> Result<bool, ToolError> {
         let semantic_requested =
-            args.semantic.unwrap_or(false) || query_mode_effective == "natural_language";
-        if semantic_requested && !(flags.want_symbol || flags.want_section) {
+            args.semantic.unwrap_or(false) || plan.query_mode_effective == "natural_language";
+        if !semantic_requested {
+            return Ok(false);
+        }
+        if !(plan.flags.want_symbol || plan.flags.want_section) {
             warnings.push(semantic_fallback_warning(
                 "files_only",
                 "request only targets lexical file hits".to_string(),
             ));
-        } else if semantic_requested && (flags.want_symbol || flags.want_section) {
-            let dense = run_dense_lane(
-                self,
-                &args.query,
-                code_store.as_ref(),
-                doc_store.as_ref(),
-                lim,
-            );
-            if let Some(w) = dense.warning {
-                warnings.push(w);
-            } else {
-                let dense_symbol_items = match materialize_dense_symbol_items(
-                    self,
-                    &args.source_id,
-                    code_store.as_ref(),
-                    &dense.symbol_hits,
-                    args.include_body.unwrap_or(false),
-                    args.context_lines.unwrap_or(0).min(50),
-                ) {
-                    Ok(items) => items,
-                    Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
-                };
-                let dense_section_items = match materialize_dense_section_items(
-                    self,
-                    &args.source_id,
-                    doc_store.as_ref(),
-                    &dense.section_hits,
-                    args.include_body.unwrap_or(false),
-                    args.context_lines.unwrap_or(0).min(50),
-                ) {
-                    Ok(items) => items,
-                    Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
-                };
-                items = merge_dense_ranked_items(
-                    items,
-                    &dense.symbol_hits,
-                    &dense.section_hits,
-                    dense_symbol_items,
-                    dense_section_items,
-                );
-                // Final truncation is owned by `format_output` so it sees
-                // the full fused list for reporting `total_matches`.
-            }
+            return Ok(true);
         }
-
-        raw_bytes =
-            match estimate_candidate_file_bytes(code_store.as_ref(), doc_store.as_ref(), &items) {
-                Ok(bytes) => bytes,
-                Err(e) => return self.error_response(&MetaBuilder::new(raw_bytes.max(1)), e),
-            };
-        let timer = MetaBuilder::new(raw_bytes.max(1));
-        let extra: Vec<(String, Value)> = vec![
-            ("domain_effective".to_string(), json!(domain)),
-            (
-                "query_mode_effective".to_string(),
-                json!(query_mode_effective),
-            ),
-            ("domain_explicit".to_string(), json!(domain_explicit)),
-            (
-                "estimate_method".to_string(),
-                json!("byte_approx_candidate_files"),
-            ),
-            (
-                "baseline_scope".to_string(),
-                json!("candidate_files_materialized_pre_output"),
-            ),
-            (
-                "unit_kinds_effective".to_string(),
-                json!({
-                    "symbol": flags.want_symbol,
-                    "section": flags.want_section,
-                    "file": flags.want_file,
-                }),
-            ),
-            ("fuzzy_applied".to_string(), json!(fuzzy_applied)),
-            ("semantic_applied".to_string(), json!(semantic_requested)),
-        ];
-
-        let fmt_ctx = FormatCtx {
-            output_mode: &output_mode,
-            query: &args.query,
-            query_mode_effective: &query_mode_effective,
-            lim,
-            max_tokens: args.max_tokens,
-            more_file_hits_exist,
-            counts,
-        };
-        format_output(self, &fmt_ctx, items, &timer, warnings, extra)
+        let dense = run_dense_lane(self, &args.query, code_store, doc_store, plan.lim);
+        if let Some(w) = dense.warning {
+            warnings.push(w);
+            return Ok(true);
+        }
+        let include_body = args.include_body.unwrap_or(false);
+        let context_lines = args.context_lines.unwrap_or(0).min(50);
+        let dense_symbol_items = materialize_dense_symbol_items(
+            self,
+            &args.source_id,
+            code_store,
+            &dense.symbol_hits,
+            include_body,
+            context_lines,
+        )?;
+        let dense_section_items = materialize_dense_section_items(
+            self,
+            &args.source_id,
+            doc_store,
+            &dense.section_hits,
+            include_body,
+            context_lines,
+        )?;
+        let taken = std::mem::take(items);
+        *items = merge_dense_ranked_items(
+            taken,
+            &dense.symbol_hits,
+            &dense.section_hits,
+            dense_symbol_items,
+            dense_section_items,
+        );
+        Ok(true)
     }
 }
 

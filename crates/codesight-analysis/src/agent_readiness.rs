@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::complexity::cyclomatic_complexity;
+use crate::thresholds::current_thresholds;
 use codesight_storage::storage::AnalysisSymbol;
 
 #[derive(Clone, Copy, Debug)]
@@ -36,6 +37,22 @@ pub struct AgentReadinessSignal {
     pub confidence: &'static str,
     pub type_annotation_method: &'static str,
     pub bottleneck: &'static str,
+}
+
+#[derive(Clone, Debug)]
+pub struct FileTopOffender {
+    pub symbol: String,
+    pub line: u32,
+    pub cyclomatic: usize,
+    pub nesting_depth: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct ScopedAgentReadiness {
+    pub signal: AgentReadinessSignal,
+    pub weakest_dimension: &'static str,
+    pub thresholds_failed: Vec<String>,
+    pub top_offenders: Vec<FileTopOffender>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -238,7 +255,100 @@ pub fn compute_agent_readiness(
     let graph_files = graph_files(adj);
     let fan_in = compute_fan_in(adj);
     let facts = build_function_facts(all_symbols, &fan_in, &graph_files, &churn);
+    agent_signal_from_inputs(all_symbols, adj, &fan_in, &graph_files, &churn, &facts)
+}
 
+pub fn compute_agent_readiness_for_scope(
+    all_symbols: &[AnalysisSymbol],
+    adj: &HashMap<String, Vec<String>>,
+    root: Option<&Path>,
+    scope: &str,
+) -> Option<ScopedAgentReadiness> {
+    let churn = root.map(compute_file_churn).unwrap_or_default();
+    let graph_files = graph_files(adj);
+    let fan_in = compute_fan_in(adj);
+    let facts = build_function_facts(all_symbols, &fan_in, &graph_files, &churn);
+    let filtered_symbols: Vec<AnalysisSymbol> = all_symbols
+        .iter()
+        .filter(|sym| path_matches_scope(&sym.file_path, scope))
+        .cloned()
+        .collect();
+    let filtered_facts: Vec<FunctionFacts<'_>> = facts
+        .into_iter()
+        .filter(|fact| path_matches_scope(&fact.sym.file_path, scope))
+        .collect();
+    if filtered_symbols.is_empty() || filtered_facts.is_empty() {
+        return None;
+    }
+
+    let signal = agent_signal_from_inputs(
+        &filtered_symbols,
+        adj,
+        &fan_in,
+        &graph_files,
+        &churn,
+        &filtered_facts,
+    );
+    let thresholds = current_thresholds();
+    let dimensions = signal.dimensions;
+    let mut thresholds_failed = Vec::new();
+    for (name, value, min) in [
+        ("navigability", dimensions.navigability, thresholds.navigability_min),
+        (
+            "comprehensibility",
+            dimensions.comprehensibility,
+            thresholds.comprehensibility_min,
+        ),
+        ("verifiability", dimensions.verifiability, thresholds.verifiability_min),
+        ("change_safety", dimensions.change_safety, thresholds.change_safety_min),
+    ] {
+        if value < min {
+            thresholds_failed.push(format!("{name}<{min:.2}"));
+        }
+    }
+    let score = signal.score as f64 / 10_000.0;
+    if score < thresholds.agent_readiness_min {
+        thresholds_failed.push(format!(
+            "agent_readiness<{:.2}",
+            thresholds.agent_readiness_min
+        ));
+    }
+
+    let mut top_offenders: Vec<FileTopOffender> = filtered_facts
+        .iter()
+        .filter(|fact| !fact.is_test)
+        .map(|fact| FileTopOffender {
+            symbol: fact.sym.name.clone(),
+            line: fact.sym.start_line,
+            cyclomatic: fact.cyclomatic,
+            nesting_depth: fact.nesting_depth,
+        })
+        .collect();
+    top_offenders.sort_by(|left, right| {
+        right
+            .cyclomatic
+            .cmp(&left.cyclomatic)
+            .then(right.nesting_depth.cmp(&left.nesting_depth))
+            .then(left.line.cmp(&right.line))
+    });
+    top_offenders.truncate(3);
+
+    Some(ScopedAgentReadiness {
+        weakest_dimension: signal.bottleneck,
+        signal,
+        thresholds_failed,
+        top_offenders,
+    })
+}
+
+fn agent_signal_from_inputs(
+    all_symbols: &[AnalysisSymbol],
+    adj: &HashMap<String, Vec<String>>,
+    fan_in: &HashMap<String, usize>,
+    _graph_files: &HashSet<String>,
+    churn: &HashMap<String, u64>,
+    facts: &[FunctionFacts<'_>],
+) -> AgentReadinessSignal {
     if facts.is_empty() {
         return AgentReadinessSignal {
             score: 0,
@@ -265,20 +375,33 @@ pub fn compute_agent_readiness(
         };
     }
 
+    let scope_graph_files: HashSet<String> = facts
+        .iter()
+        .map(|fact| fact.sym.file_path.clone())
+        .collect();
+    let scope_symbols: HashSet<&str> = facts.iter().map(|fact| fact.sym.id.as_str()).collect();
+    let relevant_symbols: Vec<AnalysisSymbol> = all_symbols
+        .iter()
+        .filter(|sym| {
+            scope_graph_files.contains(&sym.file_path) || scope_symbols.contains(sym.id.as_str())
+        })
+        .cloned()
+        .collect();
+
     let submetrics = AgentReadinessSubmetrics {
-        symbol_uniqueness: compute_symbol_uniqueness(all_symbols, &fan_in, &churn),
-        structural_localization: compute_structural_localization(&facts),
-        nesting_depth_health: weighted_health(&facts, |fact| fact.nesting_depth <= 4),
-        function_length_health: weighted_health(&facts, |fact| {
+        symbol_uniqueness: compute_symbol_uniqueness(&relevant_symbols, fan_in, churn),
+        structural_localization: compute_structural_localization(facts),
+        nesting_depth_health: weighted_health(facts, |fact| fact.nesting_depth <= 4),
+        function_length_health: weighted_health(facts, |fact| {
             fact.profile
                 .function_length_warn()
                 .is_some_and(|limit| fact.line_span <= limit)
         }),
-        type_annotation_density: weighted_type_density(&facts),
-        test_oracle_quality: compute_test_oracle_quality(all_symbols, adj, &facts),
-        change_locality: compute_change_locality(&graph_files, &fan_in, &churn),
-        interface_encapsulation: compute_interface_encapsulation(all_symbols),
-        hotspot_containment: compute_hotspot_containment(&facts),
+        type_annotation_density: weighted_type_density(facts),
+        test_oracle_quality: compute_test_oracle_quality(all_symbols, adj, facts),
+        change_locality: compute_change_locality(&scope_graph_files, fan_in, churn),
+        interface_encapsulation: compute_interface_encapsulation(&relevant_symbols),
+        hotspot_containment: compute_hotspot_containment(facts),
     };
 
     let dimensions = AgentReadinessDimensions {
@@ -290,11 +413,6 @@ pub fn compute_agent_readiness(
             submetrics.nesting_depth_health,
             submetrics.function_length_health,
         ]),
-        // Substitute model: types are the primary verification channel.
-        // Tests fill the gap where types are missing. Research shows they
-        // are partial substitutes (Microsoft/DeepMind, Reflexion), not
-        // independent complements — the 50/50 arithmetic mean overpunished
-        // strongly-typed codebases.
         verifiability: submetrics.type_annotation_density
             + (1.0 - submetrics.type_annotation_density) * submetrics.test_oracle_quality,
         change_safety: geometric_mean(&[
@@ -354,7 +472,18 @@ pub fn compute_agent_readiness(
         TypeAnnotationMethod::BaselineFallback.as_str()
     };
 
-    let bottleneck = [
+    AgentReadinessSignal {
+        score,
+        dimensions,
+        submetrics,
+        confidence,
+        type_annotation_method,
+        bottleneck: weakest_dimension(dimensions),
+    }
+}
+
+fn weakest_dimension(dimensions: AgentReadinessDimensions) -> &'static str {
+    [
         (dimensions.navigability, "navigability"),
         (dimensions.comprehensibility, "comprehensibility"),
         (dimensions.verifiability, "verifiability"),
@@ -363,16 +492,15 @@ pub fn compute_agent_readiness(
     .into_iter()
     .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
     .map(|(_, name)| name)
-    .unwrap_or("navigability");
+    .unwrap_or("navigability")
+}
 
-    AgentReadinessSignal {
-        score,
-        dimensions,
-        submetrics,
-        confidence,
-        type_annotation_method,
-        bottleneck,
+fn path_matches_scope(path: &str, scope: &str) -> bool {
+    let trimmed = scope.trim_matches('/');
+    if trimmed.is_empty() {
+        return true;
     }
+    path == trimmed || path.starts_with(&format!("{trimmed}/")) || path.ends_with(&format!("/{trimmed}"))
 }
 
 fn build_function_facts<'a>(

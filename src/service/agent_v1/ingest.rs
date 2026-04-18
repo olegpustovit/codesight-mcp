@@ -124,7 +124,7 @@ impl CodeService {
         let repo_id_for_state = normalize_repo_id(&path_for_index);
         if let Err(busy) = self
             .reindex_states()
-            .try_mark_reindex_start(&repo_id_for_state)
+            .try_mark_reindex_start(&repo_id_for_state, &[])
         {
             return self.error_response(
                 &timer,
@@ -233,6 +233,12 @@ impl CodeService {
         }
 
         reindex_guard.mark_done();
+
+        // The on-disk fingerprint (`repo_info.indexed_at`) just moved, so the
+        // next cross-source reader should refresh. `snapshot()` would catch
+        // the drift on its own, but explicit invalidation skips the extra
+        // SELECT on the next hit.
+        self.source_registry().invalidate(&source_id);
 
         self.watchers
             .ensure_watching(&source_id, path_for_index, self.config.clone());

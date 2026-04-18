@@ -1,10 +1,12 @@
 //! Domain-level quality payload builders used by handlers and slice tests.
 
+use std::collections::HashMap;
+
 use serde_json::{Value, json};
 
 use crate::agent_readiness::{compute_file_churn, max_nesting_depth_for_file};
 use crate::complexity::{complexity_assessment, cyclomatic_complexity};
-use codesight_storage::storage::IndexStore;
+use codesight_storage::storage::{AnalysisSymbol, IndexStore};
 
 pub fn complexity_payload(store: &IndexStore, symbol_id: &str) -> anyhow::Result<Option<Value>> {
     let Some(rec) = store.symbol_record(symbol_id)? else {
@@ -55,8 +57,7 @@ pub fn hotspots_payload(
     min_complexity: u64,
     top_n: usize,
 ) -> anyhow::Result<Value> {
-    let all_symbols = store.all_symbols_for_analysis()?;
-    let file_lines = store.file_max_end_lines().unwrap_or_default();
+    let all_symbols = store.all_symbols_cached()?;
     let root_path = store.root_path().ok();
     let git_available = root_path
         .as_ref()
@@ -68,8 +69,28 @@ pub fn hotspots_payload(
         .map(|root| compute_file_churn(root))
         .unwrap_or_default();
 
+    Ok(hotspots_payload_from_cached(
+        &all_symbols,
+        &file_churn,
+        git_available,
+        min_complexity,
+        top_n,
+    ))
+}
+
+/// Build the `analysis=hotspots` JSON payload from pre-loaded inputs.
+/// Separated from [`hotspots_payload`] so other analytic tools that already
+/// hold the cached symbol vec + churn map can reuse this without another
+/// full-table scan.
+pub fn hotspots_payload_from_cached(
+    all_symbols: &[AnalysisSymbol],
+    file_churn: &HashMap<String, u64>,
+    git_available: bool,
+    min_complexity: u64,
+    top_n: usize,
+) -> Value {
     let mut hotspots = Vec::new();
-    for symbol in &all_symbols {
+    for symbol in all_symbols {
         let kind = symbol.kind.to_ascii_lowercase();
         if kind != "function" && kind != "method" {
             continue;
@@ -92,16 +113,17 @@ pub fn hotspots_payload(
             "low"
         };
 
-        let file_line_count = file_lines.get(&symbol.file_path).copied().unwrap_or(0);
+        // Row shape kept minimal. `symbol_id` is reconstructible from
+        // `file::name#function`; `file_line_count` isn't actionable here —
+        // the agent can inspect_structure if it cares. (PLAN2 §3.3)
+        let rounded_score = (hotspot_score * 100.0).round() / 100.0;
         hotspots.push(json!({
-            "symbol_id": symbol.id,
             "name": symbol.name,
             "file": symbol.file_path,
             "line": symbol.start_line,
-            "file_line_count": file_line_count,
             "cyclomatic": cyclomatic,
             "churn": churn,
-            "hotspot_score": hotspot_score,
+            "hotspot_score": rounded_score,
             "assessment": assessment,
         }));
     }
@@ -115,11 +137,36 @@ pub fn hotspots_payload(
     });
     hotspots.truncate(top_n);
 
-    Ok(json!({
+    json!({
         "analysis": "hotspots",
         "hotspots": hotspots,
         "git_available": git_available,
-    }))
+    })
+}
+
+/// Pick the files containing the top-`top_n` hottest function/method symbols
+/// (ranked by `cyclomatic * log(1+churn)`). Returned order mirrors
+/// [`hotspots_payload_from_cached`] — same scoring, same ranking, so the
+/// "scope_files" for `refactor_targets` stay stable after the plumbing switch.
+pub fn top_hotspot_files_from_cached(
+    all_symbols: &[AnalysisSymbol],
+    file_churn: &HashMap<String, u64>,
+    top_n: usize,
+) -> Vec<String> {
+    let mut scored: Vec<(&str, f64)> = Vec::with_capacity(all_symbols.len());
+    for symbol in all_symbols {
+        let kind = symbol.kind.to_ascii_lowercase();
+        if kind != "function" && kind != "method" {
+            continue;
+        }
+        let cyclomatic = cyclomatic_complexity(&symbol.source_text) as f64;
+        let churn = file_churn.get(&symbol.file_path).copied().unwrap_or(0);
+        let score = cyclomatic * (1.0 + churn as f64).ln();
+        scored.push((symbol.file_path.as_str(), score));
+    }
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(top_n);
+    scored.into_iter().map(|(f, _)| f.to_string()).collect()
 }
 
 pub fn extract_symbol_name_from_id(id: &str) -> String {

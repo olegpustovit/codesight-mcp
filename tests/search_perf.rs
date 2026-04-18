@@ -13,6 +13,11 @@ use tempfile::tempdir;
 // ---------------------------------------------------------------------------
 
 /// Build the same 5-file synthetic repo from the reference test.
+///
+/// Returns the repo root (the `src` subdir). Callers must ingest this path
+/// rather than the shared tempdir — otherwise codesight's own index dir
+/// (a sibling of `src` under the tempdir) gets picked up by the walker and
+/// session-ledger JSON keys leak into the symbol set between calls.
 fn build_search_perf_repo(parent: &std::path::Path) -> std::path::PathBuf {
     let src = parent.join("src");
     fs::create_dir_all(&src).unwrap();
@@ -59,7 +64,7 @@ fn build_search_perf_repo(parent: &std::path::Path) -> std::path::PathBuf {
     )
     .unwrap();
 
-    parent.to_path_buf()
+    src
 }
 
 fn ingest(svc: &CodeService, root: &std::path::Path) -> String {

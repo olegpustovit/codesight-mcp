@@ -2,36 +2,26 @@
   "total_tokens_saved": 372989467,
   "total_cost_avoided": {
     "claude_sonnet": 1118.9678,
-    "claude_opus": 5594.842,
-    "gpt4o": 932.4742
+    "gpt4o": 932.4742,
+    "claude_opus": 5594.842
   },
   "current_session": {
-    "started_at": "2026-04-15T14:26:30.398373+00:00",
-    "per_tool": {
-      "inspect_structure": {
-        "calls": 7,
-        "tokens_saved": 4897273,
-        "timing_ms_sum": 3422.4285820000005,
-        "error_count": 0
-      },
-      "catalog_sources": {
-        "calls": 4,
-        "tokens_saved": 0,
-        "timing_ms_sum": 9374.250167,
-        "error_count": 0
-      },
-      "read_content": {
-        "calls": 33,
-        "tokens_saved": 91757,
-        "timing_ms_sum": 34.933918,
-        "error_count": 0
-      },
-      "search_catalog": {
-        "calls": 76,
-        "tokens_saved": 55962808,
-        "timing_ms_sum": 140.16658599999997,
-        "error_count": 0
-      }
-    }
+    "id": "sess_d4b7b988-6ca8-4cc0-b31e-155d405734da",
+    "started_at": "2026-04-17T12:42:06.703564+00:00",
+    "ended_at": null,
+    "tokens_saved_total": 0,
+    "per_tool": {},
+    "fallbacks_to_grep_or_bash": 64,
+    "evaluate_impact_usage": {},
+    "stale_warnings_fired_with_in_flight_paths": [],
+    "primary_source_id": null,
+    "quality_session_start": null,
+    "quality_session_end": null,
+    "use_prefix_edits": {
+      "codesight_storage::storage": 1,
+      "serde::": 1
+    },
+    "codesight_read_paths": [],
+    "edits_after_codesight_read": 0
   }
 }
