@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use codesight_mcp::config::{AppConfig, TrustCheckResult, check_trust, is_broad_path};
-use codesight_mcp::service::CodeService;
+use codesight_engine::config::{AppConfig, TrustCheckResult, check_trust, is_broad_path};
+use codesight_engine::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -235,7 +235,7 @@ fn index_folder_uses_project_config_trusted_folders() {
 // 10. Project config escape path blocked
 #[test]
 fn index_folder_project_config_escape_blocked() {
-    use codesight_mcp::config::sanitize_project_trusted_folders;
+    use codesight_engine::config::sanitize_project_trusted_folders;
 
     let project_root = PathBuf::from("/projects/myproject");
     let entries = vec![PathBuf::from("../outside")];

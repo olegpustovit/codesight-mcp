@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use codesight_mcp::extractors::ExtractorRegistry;
-use codesight_mcp::extractors::engine::catalogs::GrammarCatalog;
-use codesight_mcp::model::ExtractionTier;
+use codesight_extractors::extractors::ExtractorRegistry;
+use codesight_extractors::extractors::engine::catalogs::GrammarCatalog;
+use codesight_core::ExtractionTier;
 
 #[test]
 fn supported_languages_and_curated_languages_are_distinct() {

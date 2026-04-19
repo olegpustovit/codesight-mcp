@@ -1,6 +1,6 @@
 //! Integration tests: path map.
 
-use codesight_mcp::path_map::{parse_path_map, remap};
+use codesight_engine::path_map::{parse_path_map, remap};
 
 // ===========================================================================
 // parse_path_map tests (9 tests)
@@ -156,8 +156,8 @@ fn remap_does_not_match_across_directory_boundary() {
 
 #[test]
 fn list_repos_source_root_remapped() {
-    use codesight_mcp::config::AppConfig;
-    use codesight_mcp::service::CodeService;
+    use codesight_engine::config::AppConfig;
+    use codesight_engine::service::CodeService;
     use serde_json::json;
 
     let workspace = tempfile::tempdir().expect("tempdir");
@@ -227,7 +227,7 @@ fn index_folder_reverse_remap_finds_existing_index() {
     // Verify that reverse remap produces the same repo_id hash as the original
     // path, so an existing index can be found when the user's path has been
     // remapped.
-    use codesight_mcp::repo_id::normalize_repo_id;
+    use codesight_engine::repo_id::normalize_repo_id;
     use std::path::Path;
 
     let original_path = "/real/projects/myapp";
@@ -249,7 +249,7 @@ fn index_folder_reverse_remap_finds_existing_index() {
 fn watcher_reverse_remap_produces_stored_hash() {
     // Applying reverse remap before normalize_repo_id yields the same hash
     // as the stored path.
-    use codesight_mcp::repo_id::normalize_repo_id;
+    use codesight_engine::repo_id::normalize_repo_id;
     use std::path::Path;
 
     let pairs = vec![("/real/project".to_owned(), "/remapped/project".to_owned())];
@@ -268,7 +268,7 @@ fn watcher_reverse_remap_produces_stored_hash() {
 #[test]
 fn stop_watching_remap_produces_stored_hash() {
     // The reverse remap produces the same hash as the original indexed path.
-    use codesight_mcp::repo_id::normalize_repo_id;
+    use codesight_engine::repo_id::normalize_repo_id;
     use std::path::Path;
 
     let pairs = vec![("/stored/root".to_owned(), "/current/root".to_owned())];

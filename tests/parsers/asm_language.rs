@@ -1,7 +1,7 @@
 //! Integration tests: asm language.
 
-use codesight_mcp::extractors::{AsmExtractor, ExtractorRegistry, LanguageExtractor};
-use codesight_mcp::model::{StoredSymbol, SymbolKind};
+use codesight_extractors::extractors::{AsmExtractor, ExtractorRegistry, LanguageExtractor};
+use codesight_core::{StoredSymbol, SymbolKind};
 use std::path::Path;
 
 // ---------------------------------------------------------------------------

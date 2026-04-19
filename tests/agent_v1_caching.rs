@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 caching.
 
-use codesight_mcp::rate_limit::{RateLimiter, make_rate_limiter};
-use codesight_mcp::result_cache::ResultCache;
+use codesight_engine::rate_limit::{RateLimiter, make_rate_limiter};
+use codesight_engine::result_cache::ResultCache;
 use serde_json::json;
 use std::time::Duration;
 

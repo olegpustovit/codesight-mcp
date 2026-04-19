@@ -23,8 +23,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::server_support::agent_readiness_cache;
-use crate::service::savings::SavingsLedger;
+use codesight_engine::server_support::agent_readiness_cache;
+use codesight_engine::service::savings::SavingsLedger;
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -451,9 +451,9 @@ fn use_path_prefix(line: &str) -> Option<String> {
 /// `evaluate_impact analysis=blast_radius` has not yet been called in this
 /// session. Returns `false` on any I/O error so the hook stays silent.
 fn index_storage_dir() -> PathBuf {
-    std::env::var_os(crate::config::env::INDEX_DIR)
+    std::env::var_os(codesight_engine::config::env::INDEX_DIR)
         .map(PathBuf::from)
-        .unwrap_or_else(crate::config::default_index_root)
+        .unwrap_or_else(codesight_engine::config::default_index_root)
 }
 
 fn should_emit_refactor_hint(prefix: &str) -> bool {

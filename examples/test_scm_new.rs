@@ -1,4 +1,4 @@
-use codesight_mcp::extractors::engine::scm::{ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header};
 
 fn main() {
     for (name, src) in &[

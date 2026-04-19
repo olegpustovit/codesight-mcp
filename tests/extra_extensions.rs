@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use codesight_mcp::extractors::ExtractorRegistry;
+use codesight_extractors::extractors::ExtractorRegistry;
 
 #[test]
 fn extra_extensions_suite() {

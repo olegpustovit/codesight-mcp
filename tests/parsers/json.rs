@@ -3,9 +3,9 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use codesight_mcp::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
-use codesight_mcp::extractors::{ExtractorRegistry, LanguageExtractor};
-use codesight_mcp::model::SymbolKind;
+use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
+use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
     let source = QUERY_FILES
@@ -39,7 +39,7 @@ const PACKAGE_JSON: &str = r#"{
 }"#;
 
 /// Helper: extract symbols from `PACKAGE_JSON` via `JsonExtractor`.
-fn syms() -> Vec<codesight_mcp::model::StoredSymbol> {
+fn syms() -> Vec<codesight_core::StoredSymbol> {
     scm_extractor("json")
         .extract("package.json", PACKAGE_JSON)
         .expect("JsonExtractor should parse the package.json fixture")

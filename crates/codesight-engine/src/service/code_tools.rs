@@ -12,12 +12,9 @@ use codesight_imports::imports::language_for_path;
 
 use codesight_storage::storage::{self, IndexStore, RetrievedSymbol, SearchSymbol, doc_index::DocStore};
 
-use crate::{
-    core::pipeline::IndexedFileUpdate,
-    indexing::code_index,
-    repo_id::normalize_repo_id,
-    savings::MetaBuilder,
-};
+use codesight_core::pipeline::IndexedFileUpdate;
+
+use crate::{indexing::code_index, repo_id::normalize_repo_id, savings::MetaBuilder};
 
 fn semantic_embed_warning(message: impl Into<String>) -> Value {
     json!({
@@ -39,10 +36,12 @@ impl CodeService {
         &self,
         root: &std::path::Path,
     ) -> anyhow::Result<(IndexResult, Vec<Value>)> {
+        let backend = self.require_indexer()?.clone();
         let mut embed_warning = None;
         let outcome = code_index::index_workspace_with_symbol_vectors(
             &self.config,
             root,
+            &backend,
             |_source_id, updated_files| match self.symbol_vectors_for_updates(updated_files) {
                 Ok(rows) => Ok(rows),
                 Err(message) => {
@@ -400,16 +399,13 @@ impl CodeService {
             Ok(store) => {
                 if let Ok(root) = store.root_path()
                     && root.is_dir()
+                    && let Some(backend) = self.indexer()
                 {
-                    let extractors = self.extractors_for_root(&root);
-                    if store
-                        .is_stale(&root, |p| extractors.extractor_for_path(p).is_some())
-                        .unwrap_or(false)
-                    {
+                    let known = |p: &std::path::Path| backend.detect_language(&root, p).is_some();
+                    if store.is_stale(&root, known).unwrap_or(false) {
                         let repo_id = crate::repo_id::normalize_repo_id(&root);
-                        let files_in_flight = store
-                            .stale_paths(&root, |p| extractors.extractor_for_path(p).is_some(), 5)
-                            .unwrap_or_default();
+                        let files_in_flight =
+                            store.stale_paths(&root, known, 5).unwrap_or_default();
                         self.kick_off_reindex(repo, repo_id, root, files_in_flight);
                     }
                 }

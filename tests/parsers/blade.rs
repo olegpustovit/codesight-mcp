@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use codesight_mcp::extractors::ExtractorRegistry;
-use codesight_mcp::model::StoredSymbol;
+use codesight_extractors::extractors::ExtractorRegistry;
+use codesight_core::StoredSymbol;
 use codesight_mcp::test_support::code_reference_fixtures_dir;
 
 fn fixture_source() -> String {
@@ -63,7 +63,7 @@ fn test_blade_extends_extracted() {
     let syms = extract_symbols();
     let extends: Vec<_> = syms
         .iter()
-        .filter(|s| s.name == "layouts.app" && s.kind == codesight_mcp::model::SymbolKind::Type)
+        .filter(|s| s.name == "layouts.app" && s.kind == codesight_core::SymbolKind::Type)
         .collect();
     assert!(!extends.is_empty(), "expected layouts.app type symbol");
 }
@@ -73,7 +73,7 @@ fn test_blade_sections_extracted() {
     let syms = extract_symbols();
     let section_names: std::collections::HashSet<_> = syms
         .iter()
-        .filter(|s| s.kind == codesight_mcp::model::SymbolKind::Method)
+        .filter(|s| s.kind == codesight_core::SymbolKind::Method)
         .map(|s| s.name.as_str())
         .collect();
     assert!(
@@ -91,7 +91,7 @@ fn test_blade_component_extracted() {
     let syms = extract_symbols();
     let components: Vec<_> = syms
         .iter()
-        .filter(|s| s.kind == codesight_mcp::model::SymbolKind::Class && s.name == "alert")
+        .filter(|s| s.kind == codesight_core::SymbolKind::Class && s.name == "alert")
         .collect();
     assert!(!components.is_empty(), "missing component 'alert'");
 }
@@ -101,7 +101,7 @@ fn test_blade_include_extracted() {
     let syms = extract_symbols();
     let includes: std::collections::HashSet<_> = syms
         .iter()
-        .filter(|s| s.kind == codesight_mcp::model::SymbolKind::Function)
+        .filter(|s| s.kind == codesight_core::SymbolKind::Function)
         .map(|s| s.name.as_str())
         .collect();
     assert!(
@@ -119,7 +119,7 @@ fn test_blade_push_extracted() {
     let syms = extract_symbols();
     let pushes: Vec<_> = syms
         .iter()
-        .filter(|s| s.kind == codesight_mcp::model::SymbolKind::Constant && s.name == "scripts")
+        .filter(|s| s.kind == codesight_core::SymbolKind::Constant && s.name == "scripts")
         .collect();
     assert!(
         !pushes.is_empty(),
@@ -132,7 +132,7 @@ fn test_blade_livewire_extracted() {
     let syms = extract_symbols();
     let livewire: Vec<_> = syms
         .iter()
-        .filter(|s| s.kind == codesight_mcp::model::SymbolKind::Class && s.name == "user-stats")
+        .filter(|s| s.kind == codesight_core::SymbolKind::Class && s.name == "user-stats")
         .collect();
     assert_eq!(
         livewire.len(),

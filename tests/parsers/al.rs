@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use codesight_mcp::extractors::ExtractorRegistry;
-use codesight_mcp::model::{StoredSymbol, SymbolKind};
+use codesight_extractors::extractors::ExtractorRegistry;
+use codesight_core::{StoredSymbol, SymbolKind};
 use codesight_mcp::test_support::code_reference_fixtures_dir;
 
 fn fixture_source() -> String {

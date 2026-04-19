@@ -1,8 +1,6 @@
 //! Merged parser-only test binary. See `.cursor/plans/test-suite-speedup-wave2.plan.md` Lever 3.
 //! Each module is a former top-level integration test, kept verbatim under `tests/parsers/`.
 
-#[path = "parsers/adaptive_languages.rs"]
-mod adaptive_languages;
 #[path = "parsers/al.rs"]
 mod al;
 #[path = "parsers/arrow_functions.rs"]

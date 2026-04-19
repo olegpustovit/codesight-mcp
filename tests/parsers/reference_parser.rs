@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use codesight_mcp::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
-use codesight_mcp::extractors::{ExtractorRegistry, LanguageExtractor};
-use codesight_mcp::model::SymbolKind;
+use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
+use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
     let source = QUERY_FILES

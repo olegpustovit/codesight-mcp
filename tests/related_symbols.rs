@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 use std::fs;
 
-use codesight_mcp::config::AppConfig;
-use codesight_mcp::service::CodeService;
+use codesight_engine::config::AppConfig;
+use codesight_engine::service::CodeService;
 use codesight_mcp::test_support;
 use codesight_retrieval::fuzzy::tokenize_name;
 use serde_json::json;

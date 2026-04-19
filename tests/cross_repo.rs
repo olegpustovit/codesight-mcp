@@ -7,9 +7,9 @@ use codesight_imports::packages::{
     RepoEntry, build_package_registry, extract_package_names, extract_root_package_from_specifier,
     find_repos_for_package,
 };
-use codesight_mcp::config::AppConfig;
-use codesight_mcp::db;
-use codesight_mcp::service::CodeService;
+use codesight_engine::config::AppConfig;
+use codesight_storage::db;
+use codesight_engine::service::CodeService;
 use codesight_storage::storage::IndexStore;
 use serde_json::json;
 

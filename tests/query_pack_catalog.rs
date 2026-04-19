@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use codesight_mcp::extractors::ExtractorRegistry;
-use codesight_mcp::extractors::engine::catalogs::QueryPackCatalog;
-use codesight_mcp::extractors::engine::scm::ScmExtractor;
+use codesight_extractors::extractors::ExtractorRegistry;
+use codesight_extractors::extractors::engine::catalogs::QueryPackCatalog;
+use codesight_extractors::extractors::engine::scm::ScmExtractor;
 
 fn query_dirs_on_disk() -> BTreeSet<String> {
     let queries_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/queries");

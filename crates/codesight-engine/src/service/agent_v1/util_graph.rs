@@ -52,19 +52,23 @@ pub(in crate::service) fn git_show_file(
     }
 }
 
-/// Extract symbol names and their source text from raw content using the extractor registry.
+/// Extract symbol names and their source text from raw content using the
+/// backend indexer. Used by git-diff-driven analyses that feed in content
+/// from `git show`, so we can't rely on on-disk reads.
 pub(in crate::service) fn extract_symbol_names_from_content(
     content: &str,
     file_path: &str,
-    extractors: &crate::extractors::ExtractorRegistry,
+    project_root: &std::path::Path,
+    backend: &std::sync::Arc<dyn codesight_backend::CodeBackend>,
 ) -> Vec<(String, String)> {
-    let path = std::path::Path::new(file_path);
-    let extractor = match extractors.extractor_for_path(path) {
-        Some(e) => e,
-        None => return Vec::new(),
-    };
-    match extractor.extract(file_path, content) {
-        Ok(symbols) => symbols
+    let abs = project_root.join(file_path);
+    match backend.index_file(codesight_backend::IndexFileRequest {
+        project_root: project_root.to_path_buf(),
+        file: abs,
+        source: content.to_string(),
+    }) {
+        Ok(indexed) => indexed
+            .symbols
             .into_iter()
             .map(|s| (s.name, s.source_text))
             .collect(),

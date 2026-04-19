@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::config::AppConfig;
+use codesight_engine::config::AppConfig;
 
 #[derive(Debug)]
 struct CheckOutcome {
@@ -80,7 +80,7 @@ pub fn run(workspace: Option<PathBuf>, savings: bool) -> anyhow::Result<bool> {
 /// `_savings.json` as a two-column summary. Always exits 0 — absence of the
 /// ledger file is a legitimate "no activity yet" state, not a failure.
 fn run_savings_only(config: &AppConfig) -> anyhow::Result<bool> {
-    use crate::service::savings::SavingsLedger;
+    use codesight_engine::service::savings::SavingsLedger;
 
     let path = config.savings_file();
     let ledger = SavingsLedger::new(path.clone());

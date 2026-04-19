@@ -1,6 +1,6 @@
 //! Integration tests: agent v1 staleness.
 
-use codesight_mcp::reindex_state::ReindexStateManager;
+use codesight_engine::reindex_state::ReindexStateManager;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;

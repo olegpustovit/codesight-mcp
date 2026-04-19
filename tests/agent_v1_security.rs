@@ -5,7 +5,7 @@ use std::os::unix::fs as unix_fs;
 
 use tempfile::tempdir;
 
-use codesight_mcp::security::*;
+use codesight_engine::security::*;
 
 // ── Path Traversal Prevention (S-01) ────────────────────────────────────────
 

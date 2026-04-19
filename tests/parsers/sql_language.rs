@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use codesight_mcp::extractors::{ExtractorRegistry, LanguageExtractor, SqlExtractor};
-use codesight_mcp::model::SymbolKind;
+use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor, SqlExtractor};
+use codesight_core::SymbolKind;
 
 // ── Inline fixtures (matching reference Python) ─────────────────────────────
 
@@ -118,16 +118,16 @@ const DBT_MULTI_MACRO: &str = "\
 
 // ── Helper ──────────────────────────────────────────────────────────────────
 
-fn extract(source: &str, file: &str) -> Vec<codesight_mcp::model::StoredSymbol> {
+fn extract(source: &str, file: &str) -> Vec<codesight_core::StoredSymbol> {
     SqlExtractor
         .extract(file, source)
         .expect("extraction should not fail")
 }
 
 fn find_by_name<'a>(
-    syms: &'a [codesight_mcp::model::StoredSymbol],
+    syms: &'a [codesight_core::StoredSymbol],
     name: &str,
-) -> Option<&'a codesight_mcp::model::StoredSymbol> {
+) -> Option<&'a codesight_core::StoredSymbol> {
     syms.iter().find(|s| s.name == name)
 }
 

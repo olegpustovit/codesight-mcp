@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use codesight_mcp::extractors::{ExtractorRegistry, LanguageExtractor, YamlExtractor};
-use codesight_mcp::model::SymbolKind;
+use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor, YamlExtractor};
+use codesight_core::SymbolKind;
 
 // ---------------------------------------------------------------------------
 // Inline fixtures (matching the Python module-level constants)
@@ -70,15 +70,15 @@ feature_flags:
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn extract_yaml(source: &str, file_path: &str) -> Vec<codesight_mcp::model::StoredSymbol> {
+fn extract_yaml(source: &str, file_path: &str) -> Vec<codesight_core::StoredSymbol> {
     YamlExtractor
         .extract(file_path, source)
         .expect("yaml extraction should not fail")
 }
 
 fn by_qualified(
-    symbols: &[codesight_mcp::model::StoredSymbol],
-) -> std::collections::HashMap<&str, &codesight_mcp::model::StoredSymbol> {
+    symbols: &[codesight_core::StoredSymbol],
+) -> std::collections::HashMap<&str, &codesight_core::StoredSymbol> {
     symbols
         .iter()
         .map(|s| (s.qualified_name.as_str(), s))

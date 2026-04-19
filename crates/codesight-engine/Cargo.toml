@@ -1,0 +1,45 @@
+[package]
+name = "codesight-engine"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+description = "Engine: MCP tool dispatch, indexing orchestration, tool handlers. Backend-agnostic via codesight-backend trait."
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+blake3 = "1"
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+codesight-analysis = { path = "../codesight-analysis" }
+codesight-backend = { path = "../codesight-backend" }
+codesight-core = { path = "../codesight-core" }
+codesight-framework = { path = "../codesight-framework" }
+codesight-imports = { path = "../codesight-imports" }
+codesight-retrieval = { path = "../codesight-retrieval" }
+codesight-storage = { path = "../codesight-storage" }
+mcp-rpc = { path = "../mcp-rpc" }
+dirs = "6.0.0"
+ignore = "0.4"
+jsonschema = { version = "0.26", default-features = false }
+notify = "8"
+notify-debouncer-full = "0.5"
+regex = "1"
+rusqlite = { version = "0.39.0", features = ["bundled", "chrono"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sqlite-vec = "0.1"
+streaming-iterator = "0.1.9"
+strum = { version = "0.26", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std", "signal", "time", "sync"] }
+toml = "0.8"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+
+[dev-dependencies]
+codesight-backend-treesitter = { path = "../codesight-backend-treesitter" }
+tempfile = "3"
+tokio = { version = "1", features = ["test-util"] }

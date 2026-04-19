@@ -1,0 +1,12 @@
+[package]
+name = "codesight-backend-treesitter"
+version = "0.1.0"
+edition = "2024"
+description = "Tree-sitter implementation of codesight-backend::CodeBackend. Wraps codesight-extractors."
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+codesight-backend = { path = "../codesight-backend" }
+codesight-core = { path = "../codesight-core" }
+codesight-extractors = { path = "../codesight-extractors" }

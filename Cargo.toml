@@ -1,5 +1,19 @@
 [workspace]
-members = [".", "crates/codesight-analysis", "crates/codesight-core", "crates/codesight-extractors", "crates/codesight-framework", "crates/codesight-imports", "crates/codesight-retrieval", "crates/codesight-storage"]
+members = [
+    ".",
+    "crates/codesight-analysis",
+    "crates/codesight-backend",
+    "crates/codesight-backend-lsp",
+    "crates/codesight-backend-treesitter",
+    "crates/codesight-core",
+    "crates/codesight-engine",
+    "crates/codesight-extractors",
+    "crates/codesight-framework",
+    "crates/codesight-imports",
+    "crates/codesight-retrieval",
+    "crates/codesight-storage",
+    "crates/mcp-rpc",
+]
 resolver = "2"
 
 [package]
@@ -11,65 +25,27 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1"
-blake3 = "1"
 clap = { version = "4", features = ["derive", "env"] }
-chrono = { version = "0.4", features = ["serde"] }
 codesight-analysis = { path = "crates/codesight-analysis" }
+codesight-backend = { path = "crates/codesight-backend" }
+codesight-backend-treesitter = { path = "crates/codesight-backend-treesitter" }
 codesight-core = { path = "crates/codesight-core" }
+codesight-engine = { path = "crates/codesight-engine" }
 codesight-extractors = { path = "crates/codesight-extractors" }
 codesight-framework = { path = "crates/codesight-framework" }
 codesight-imports = { path = "crates/codesight-imports" }
 codesight-retrieval = { path = "crates/codesight-retrieval" }
 codesight-storage = { path = "crates/codesight-storage" }
-dirs = "6.0.0"
-rusqlite = { version = "0.39.0", features = ["bundled", "chrono"] }
-sqlite-vec = "0.1"
+mcp-rpc = { path = "crates/mcp-rpc" }
+chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-strum = { version = "0.26", features = ["derive"] }
 thiserror = "2"
-tree-sitter = "0.26.8"
-tree-sitter-bash = "0.25.1"
-tree-sitter-c-sharp = "0.23.1"
-tree-sitter-cpp = "0.23.4"
-tree-sitter-css = "0.25.0"
-tree-sitter-dart = "0.1.0"
-tree-sitter-go = "0.25.0"
-tree-sitter-java = "0.23.5"
-tree-sitter-javascript = "0.25.0"
-tree-sitter-json = "0.24.8"
-tree-sitter-lua = "0.5.0"
-tree-sitter-php = "0.24.2"
-tree-sitter-python = "0.25.0"
-tree-sitter-ruby = "0.23.1"
-tree-sitter-rust = "0.24.2"
-tree-sitter-luau = "1.2.0"
-tree-sitter-sequel = "0.3.11"
-tree-sitter-scss = "1.0.0"
-tree-sitter-yaml = "0.7.2"
-tree-sitter-swift = "0.7.1"
-tree-sitter-typescript = "0.23.2"
-streaming-iterator = "0.1.9"
-ignore = "0.4"
-jsonschema = { version = "0.26", default-features = false }
-walkdir = "2"
-regex = "1"
-serde_yaml = "0.9"
-toml = "0.8"
 tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std", "signal", "time", "sync"] }
+toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tree-sitter-kotlin-ng = "1.1.0"
-tree-sitter-perl = "1.1.2"
-tree-sitter-erlang = "0.15.0"
-tree-sitter-xml = "0.7.0"
-tree-sitter-nix = "0.3.0"
-tree-sitter-elixir = "0.3.5"
-tree-sitter-fortran = "0.5.1"
-tree-sitter-gleam = "1.0.0"
-uuid = { version = "1", features = ["v4"] }
-notify = "8"
-notify-debouncer-full = "0.5"
+walkdir = "2"
 
 [dev-dependencies]
 cargo_metadata = "0.19"
@@ -80,6 +56,22 @@ tempfile = "3"
 # the full test suite). Dev-only: the feature exposes time manipulation
 # that must not ship in the production binary.
 tokio = { version = "1", features = ["test-util"] }
+# Tests directly exercise grammar-loading across the supported language set;
+# they are grammar-consumers, not through-the-extractor tests.
+tree-sitter = "0.26.8"
+tree-sitter-bash = "0.25.1"
+tree-sitter-css = "0.25.0"
+tree-sitter-json = "0.24.8"
+tree-sitter-lua = "0.5.0"
+tree-sitter-luau = "1.2.0"
+tree-sitter-php = "0.24.2"
+tree-sitter-scss = "1.0.0"
+tree-sitter-sequel = "0.3.11"
+tree-sitter-swift = "0.7.1"
+tree-sitter-yaml = "0.7.2"
+tree-sitter-dart = "0.1.0"
+tree-sitter-nix = "0.3.0"
+tree-sitter-xml = "0.7.0"
 
 [profile.release]
 lto = true

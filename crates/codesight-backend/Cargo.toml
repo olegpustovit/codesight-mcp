@@ -1,0 +1,12 @@
+[package]
+name = "codesight-backend"
+version = "0.1.0"
+edition = "2024"
+description = "CodeBackend trait: pluggable code-intelligence provider (tree-sitter, LSP, …)."
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+codesight-core = { path = "../codesight-core" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"

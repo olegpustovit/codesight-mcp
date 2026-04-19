@@ -1,6 +1,6 @@
 //! Integration tests: test tools index.
 
-use codesight_mcp::github_index::{
+use codesight_engine::github_index::{
     DiscoverOpts, discover_github_tree_source_files, parse_github_url, should_skip_file_path,
 };
 

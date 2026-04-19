@@ -137,32 +137,41 @@ roll back the same session.
 
 | Path | Purpose |
 |---|---|
-| [`src/`](src/) | Product crate: runtime, indexing, MCP handlers, CLI. |
-| [`src/cli/`](src/cli/) | Operator subcommands (`check`, `init`). |
-| [`src/config/`](src/config/) | Layered `AppConfig`. `CODESIGHT_*` env names in `src/config/env.rs`. |
-| [`src/service/agent_v1/`](src/service/agent_v1/) | MCP dispatch. `validate.rs` coerces-then-validates against `tools.json`. Handlers consume `ValidatedArgs<T>`. `freshness.rs` gates reads. |
-| [`src/tools.json`](src/tools.json) | **Frozen MCP contract.** Schema + handler ship together. |
-| [`crates/codesight-core/`](crates/codesight-core) | Shared primitives (symbols, `FactQuality`). |
+| [`src/`](src/) | Binary crate: CLI subcommands + stdio MCP entry point. Thin wiring only — all engine logic lives in `crates/codesight-engine`. |
+| [`src/cli/`](src/cli/) | Operator subcommands (`check`, `init`, hooks). |
+| [`crates/codesight-engine/`](crates/codesight-engine) | **L1 engine.** MCP tool dispatch, indexing orchestration, `AppConfig`, security, server support, `tools.json` contract. Backend-agnostic. |
+| [`crates/codesight-engine/src/tools.json`](crates/codesight-engine/src/tools.json) | **Frozen MCP contract.** Schema + handler ship together. |
+| [`crates/codesight-backend/`](crates/codesight-backend) | **L0.5 trait.** `CodeBackend` + `BackendRouter`. One trait; tree-sitter / LSP / hybrid impls plug in. |
+| [`crates/codesight-backend-treesitter/`](crates/codesight-backend-treesitter) | Tree-sitter `CodeBackend`. Wraps `codesight-extractors`. |
+| [`crates/codesight-backend-lsp/`](crates/codesight-backend-lsp) | Config-driven LSP `CodeBackend`. Per-language subprocess spawn + health gate. |
+| [`crates/codesight-core/`](crates/codesight-core) | L0 primitives: `Symbol`, `FactQuality`, pipeline types. |
 | [`crates/codesight-analysis/`](crates/codesight-analysis) | Quality, impact, graph analysis. |
-| [`crates/codesight-extractors/`](crates/codesight-extractors) | SCM engine + curated query packs. |
+| [`crates/codesight-extractors/`](crates/codesight-extractors) | Tree-sitter SCM engine + query packs. Implementation detail of the tree-sitter backend. |
+| [`crates/codesight-framework/`](crates/codesight-framework) | dbt / laravel / nextjs / nuxt detection providers. |
+| [`crates/codesight-imports/`](crates/codesight-imports) | Multilingual import extraction. |
 | [`crates/codesight-retrieval/`](crates/codesight-retrieval) | BM25, fuzzy, embedder, section builders. |
 | [`crates/codesight-storage/`](crates/codesight-storage) | WAL SQLite + forward-only migrations. |
+| [`crates/mcp-rpc/`](crates/mcp-rpc) | L2: stdio JSON-RPC framing. `Dispatcher` trait (server) + `McpClient` (client). No `codesight_*` deps. |
 | [`runtime/queries/`](runtime/queries) | Tree-sitter `.scm` queries (30 langs). |
-| [`tests/`](tests) | Integration tests. Fixtures under `tests/fixtures/`. |
+| [`tests/`](tests) | Integration tests. `tests/crate_graph.rs` enforces layering. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Crate split, data flow, FactQuality, SQLite config. |
 
-Current crate graph: 5 members. Deps point inward — `codesight-core` ←
-`codesight-analysis` / `codesight-extractors` / `codesight-retrieval` /
-`codesight-storage` ← root `codesight-mcp`. Middle crates don't depend on
-each other. Product-only logic (MCP handlers, framework detection, CLI)
-stays in the root crate until a split creates cleaner ownership. New crates
-are allowed when they remove a coherent domain without introducing a
-shared-types dumping ground or upward dependencies.
+Layer invariants (enforced by `tests/crate_graph.rs`):
+
+- **L0** (primitives): `codesight-core` ← `-analysis` / `-extractors` /
+  `-retrieval` / `-storage` / `-imports` / `-framework`. No upward deps.
+- **L0.5** (backend trait): `codesight-backend` ← `-backend-treesitter` /
+  `-backend-lsp`. Concrete backends never depend on the engine.
+- **L1** (engine): `codesight-engine` depends on the trait + L0. **Does not
+  depend on any concrete backend** (Phase C gate — `cargo check -p
+  codesight-engine` pulls no tree-sitter / LSP types through its lib).
+- **L2** (protocol): `mcp-rpc` has zero `codesight_*` deps.
 
 ## Working rules
 
-1. `agent-v1` + `src/tools.json` is the only public MCP surface.
-   Extensibility via `view`/`analysis` enums — never parallel tool names.
+1. `agent-v1` + `crates/codesight-engine/src/tools.json` is the only public
+   MCP surface. Extensibility via `view`/`analysis` enums — never parallel
+   tool names.
 2. **No backwards compatibility. Zero.** No shims, aliases, dual paths,
    re-exports, wrapper fns, `#[deprecated]`, "// removed" comments.
    Renames, moves, field/arg changes: the old identifier disappears in the

@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use codesight_mcp::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
-use codesight_mcp::extractors::{ExtractorRegistry, LanguageExtractor};
-use codesight_mcp::model::SymbolKind;
+use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
+use codesight_core::SymbolKind;
 
 const LUAU_SERVICE: &str = "\
 -- RaidService handles raid mechanics between players
@@ -50,7 +50,7 @@ fn luau_extractor() -> ScmExtractor {
     ScmExtractor::new(&meta, source).expect("luau extractor")
 }
 
-fn luau_symbols() -> Vec<codesight_mcp::model::StoredSymbol> {
+fn luau_symbols() -> Vec<codesight_core::StoredSymbol> {
     luau_extractor()
         .extract("RaidService.luau", LUAU_SERVICE)
         .expect("luau extraction failed")

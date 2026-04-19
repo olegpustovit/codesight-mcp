@@ -8,8 +8,8 @@
 use std::fs;
 use std::sync::OnceLock;
 
-use codesight_mcp::config::AppConfig;
-use codesight_mcp::service::CodeService;
+use codesight_engine::config::AppConfig;
+use codesight_engine::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
@@ -169,7 +169,8 @@ fn file_only_semantic_request_warns_but_succeeds() {
 
 #[test]
 fn tools_json_exposes_semantic_flag() {
-    let tools: Value = serde_json::from_str(include_str!("../src/tools.json")).unwrap();
+    let tools: Value =
+        serde_json::from_str(include_str!("../crates/codesight-engine/src/tools.json")).unwrap();
     let search_catalog = tools
         .as_array()
         .unwrap()

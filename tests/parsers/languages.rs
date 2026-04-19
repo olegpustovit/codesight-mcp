@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use codesight_mcp::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
-use codesight_mcp::extractors::{ExtractorRegistry, LanguageExtractor};
-use codesight_mcp::model::SymbolKind;
+use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
+use codesight_core::SymbolKind;
 
-fn registry_extract(filename: &str, src: &str) -> Vec<codesight_mcp::model::StoredSymbol> {
+fn registry_extract(filename: &str, src: &str) -> Vec<codesight_core::StoredSymbol> {
     let reg = ExtractorRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new(filename))
@@ -180,7 +180,7 @@ fn case_c_cpp_csharp() {
 }
 
 fn has_kind_name(
-    syms: &[codesight_mcp::model::StoredSymbol],
+    syms: &[codesight_core::StoredSymbol],
     name: &str,
     kind: SymbolKind,
 ) -> bool {

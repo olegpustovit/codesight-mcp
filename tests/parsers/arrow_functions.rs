@@ -1,8 +1,8 @@
 //! Integration tests: arrow functions.
 
-use codesight_mcp::extractors::LanguageExtractor;
-use codesight_mcp::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
-use codesight_mcp::model::SymbolKind;
+use codesight_extractors::extractors::LanguageExtractor;
+use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
     let source = QUERY_FILES
@@ -15,9 +15,9 @@ fn scm_extractor(lang_key: &str) -> ScmExtractor {
 }
 
 fn func_by_name<'a>(
-    syms: &'a [codesight_mcp::model::StoredSymbol],
+    syms: &'a [codesight_core::StoredSymbol],
     name: &str,
-) -> &'a codesight_mcp::model::StoredSymbol {
+) -> &'a codesight_core::StoredSymbol {
     syms.iter()
         .find(|s| s.name == name && s.kind == SymbolKind::Function)
         .unwrap_or_else(|| {

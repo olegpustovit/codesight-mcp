@@ -3,14 +3,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use notify_debouncer_full::{DebounceEventResult, new_debouncer, notify::RecursiveMode};
 
 use crate::config::AppConfig;
-use crate::extractors::ExtractorRegistry;
 use crate::indexing::code_index;
+use codesight_backend::CodeBackend;
 use codesight_storage::storage::IndexStore;
 
 struct WatchHandle {
@@ -34,7 +34,13 @@ impl WatcherManager {
         self.enabled.store(true, Ordering::Relaxed);
     }
 
-    pub fn ensure_watching(&self, repo_id: &str, root: PathBuf, config: AppConfig) {
+    pub fn ensure_watching(
+        &self,
+        repo_id: &str,
+        root: PathBuf,
+        config: AppConfig,
+        backend: Arc<dyn CodeBackend>,
+    ) {
         if !self.enabled.load(Ordering::Relaxed) {
             return;
         }
@@ -49,7 +55,7 @@ impl WatcherManager {
         let handle = std::thread::Builder::new()
             .name(format!("watch-{repo_id}"))
             .spawn(move || {
-                if let Err(e) = run_watcher(&repo_id_owned, &root, &config) {
+                if let Err(e) = run_watcher(&repo_id_owned, &root, &config, &backend) {
                     tracing::warn!(repo = %repo_id_owned, error = %e, "file watcher exited");
                 }
             })
@@ -60,9 +66,13 @@ impl WatcherManager {
     }
 }
 
-fn run_watcher(repo_id: &str, root: &Path, config: &AppConfig) -> anyhow::Result<()> {
+fn run_watcher(
+    repo_id: &str,
+    root: &Path,
+    config: &AppConfig,
+    backend: &Arc<dyn CodeBackend>,
+) -> anyhow::Result<()> {
     let store = IndexStore::open(config.repo_db_path(repo_id))?;
-    let extractors = ExtractorRegistry::for_workspace_root(root);
     let storage_dir = config.index_root();
 
     let (tx, rx) = mpsc::channel();
@@ -81,7 +91,7 @@ fn run_watcher(repo_id: &str, root: &Path, config: &AppConfig) -> anyhow::Result
             continue;
         }
         let start = std::time::Instant::now();
-        match code_index::reindex_files(config, root, repo_id, &store, &extractors, &changed) {
+        match code_index::reindex_files(config, root, repo_id, &store, backend, &changed) {
             Ok(stats) => {
                 tracing::debug!(
                     repo = %repo_id,
@@ -130,7 +140,7 @@ fn is_in_skip_dir(path: &Path, root: &Path) -> bool {
     if let Ok(rel) = path.strip_prefix(root) {
         for component in rel.components() {
             let name = component.as_os_str().to_string_lossy();
-            if crate::db::SKIP_DIRS.iter().any(|s| *s == name) {
+            if codesight_storage::db::SKIP_DIRS.iter().any(|s| *s == name) {
                 return true;
             }
         }

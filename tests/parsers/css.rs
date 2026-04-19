@@ -3,11 +3,11 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use codesight_mcp::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
-use codesight_mcp::extractors::{
+use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::{
     ExtractorRegistry, LanguageExtractor, LessExtractor, SassExtractor, StylExtractor,
 };
-use codesight_mcp::model::SymbolKind;
+use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
     let source = QUERY_FILES
@@ -110,7 +110,7 @@ $font-size: 16px;
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn css_syms() -> Vec<codesight_mcp::model::StoredSymbol> {
+fn css_syms() -> Vec<codesight_core::StoredSymbol> {
     scm_extractor("css")
         .extract("styles/main.css", CSS_SRC)
         .expect("CSS extraction should not fail")
@@ -120,7 +120,7 @@ fn scss_extractor() -> ScmExtractor {
     scm_extractor("scss")
 }
 
-fn scss_syms() -> Vec<codesight_mcp::model::StoredSymbol> {
+fn scss_syms() -> Vec<codesight_core::StoredSymbol> {
     scss_extractor()
         .extract("styles/main.scss", SCSS_SRC)
         .expect("SCSS extraction should not fail")

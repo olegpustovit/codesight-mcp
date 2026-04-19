@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use chrono::{Duration, Utc};
-use codesight_mcp::config::AppConfig;
-use codesight_mcp::db;
-use codesight_mcp::service::CodeService;
+use codesight_engine::config::AppConfig;
+use codesight_storage::db;
+use codesight_engine::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -419,8 +419,8 @@ fn case_sha_staleness_in_meta() {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("app.py"), "def main():\n    pass\n").unwrap();
 
-    let cfg = codesight_mcp::config::AppConfig::new(workspace.path().join("idx"));
-    let svc = codesight_mcp::service::CodeService::new(cfg).unwrap();
+    let cfg = codesight_engine::config::AppConfig::new(workspace.path().join("idx"));
+    let svc = codesight_engine::service::CodeService::new(cfg).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

@@ -240,8 +240,14 @@ impl CodeService {
         // SELECT on the next hit.
         self.source_registry().invalidate(&source_id);
 
-        self.watchers
-            .ensure_watching(&source_id, path_for_index, self.config.clone());
+        if let Some(backend) = self.indexer() {
+            self.watchers.ensure_watching(
+                &source_id,
+                path_for_index,
+                self.config.clone(),
+                backend.clone(),
+            );
+        }
 
         self.success_response_with_warnings(&timer, data, warnings)
     }

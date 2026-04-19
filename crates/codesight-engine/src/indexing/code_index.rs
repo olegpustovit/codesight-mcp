@@ -4,20 +4,22 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fs,
     path::Path,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use ignore::WalkBuilder;
 use tracing::instrument;
 
+use codesight_backend::{CodeBackend, IndexFileRequest};
 use codesight_storage::storage::vector_index::OwnedVectorRow;
 
 use codesight_storage::storage::IndexStore;
 
+use codesight_core::pipeline::{FileFingerprint, IndexedFileUpdate};
+
 use crate::{
     config::{AppConfig, GITIGNORE_WARNING_FILE_THRESHOLD},
-    core::pipeline::{FileFingerprint, IndexedFileUpdate},
-    extractors::ExtractorRegistry,
     indexing::dep_graph,
     repo_id::normalize_repo_id,
 };
@@ -54,16 +56,21 @@ pub struct CodeIndexOutcome {
 #[instrument(
     level = "info",
     name = "ingest",
-    skip(config),
+    skip(config, backend),
     fields(root = %root.display())
 )]
-pub fn index_workspace(config: &AppConfig, root: &Path) -> anyhow::Result<CodeIndexOutcome> {
-    index_workspace_with_symbol_vectors(config, root, |_, _| Ok(Vec::new()))
+pub fn index_workspace(
+    config: &AppConfig,
+    root: &Path,
+    backend: &Arc<dyn CodeBackend>,
+) -> anyhow::Result<CodeIndexOutcome> {
+    index_workspace_with_symbol_vectors(config, root, backend, |_, _| Ok(Vec::new()))
 }
 
 pub fn index_workspace_with_symbol_vectors<F>(
     config: &AppConfig,
     root: &Path,
+    backend: &Arc<dyn CodeBackend>,
     build_symbol_vectors: F,
 ) -> anyhow::Result<CodeIndexOutcome>
 where
@@ -72,20 +79,18 @@ where
     let repo = normalize_repo_id(root);
     let store = IndexStore::open(config.repo_db_path(&repo))?;
     let index_version = store.current_index_version()?.saturating_add(1);
-    let extractor_version =
-        codesight_extractors::extractors::engine::catalogs::builtin_extractor_version_stamp();
-    // If the extractor/query-pack stamp changed since the last ingest,
-    // drop cached file fingerprints so every matching file gets re-extracted
+    let extractor_version = backend.version_stamp();
+    // If the backend's version stamp changed since the last ingest, drop
+    // cached file fingerprints so every matching file gets re-extracted
     // even when its content hash hasn't changed. Without this, edits to
-    // `runtime/queries/**/tags.scm` or the Rust extractor pipeline would
-    // leave stale symbol ids in the index until a full rebuild.
+    // `runtime/queries/**/tags.scm` or the extractor pipeline would leave
+    // stale symbol ids in the index until a full rebuild.
     let stored_stamp = store.stored_extractor_version().unwrap_or_default();
     let existing = if stored_stamp == extractor_version {
         store.file_fingerprints()?
     } else {
         std::collections::HashMap::new()
     };
-    let extractors = ExtractorRegistry::for_workspace_root(root);
 
     let mut seen_files = HashSet::new();
     let mut touched_files = Vec::new();
@@ -102,7 +107,7 @@ where
         .filter_entry(|entry| {
             if entry.file_type().is_some_and(|ft| ft.is_dir()) {
                 let name = entry.file_name().to_string_lossy();
-                return !crate::db::SKIP_DIRS.iter().any(|skip| *skip == name);
+                return !codesight_storage::db::SKIP_DIRS.iter().any(|skip| *skip == name);
             }
             true
         })
@@ -122,11 +127,11 @@ where
         }
 
         let path = entry.path();
-        let Some(extractor) = extractors.extractor_for_path(path) else {
+        let Some(language) = backend.detect_language(root, path) else {
             continue;
         };
 
-        indexed_languages.insert(extractor.language_name().to_string());
+        indexed_languages.insert(language.clone());
 
         let metadata = match entry.metadata() {
             Ok(metadata) => metadata,
@@ -163,7 +168,7 @@ where
             if existing_file.content_hash == content_hash {
                 touched_files.push(FileFingerprint {
                     file_path: relative_path,
-                    language: extractor.language_name().to_string(),
+                    language: language.clone(),
                     size_bytes,
                     modified_ns,
                     content_hash,
@@ -172,13 +177,18 @@ where
             }
         }
 
-        let symbols = match extractor.extract(&relative_path, &source) {
-            Ok(symbols) => symbols,
+        let indexed = match backend.index_file(IndexFileRequest {
+            project_root: root.to_path_buf(),
+            file: path.to_path_buf(),
+            source: source.clone(),
+        }) {
+            Ok(indexed) => indexed,
             Err(err) => {
                 tracing::warn!(
                     path = %path.display(),
-                    error = format!("{err:#}"),
-                    "tree-sitter extraction failed"
+                    error = format!("{err}"),
+                    backend = backend.name(),
+                    "backend extraction failed"
                 );
                 continue;
             }
@@ -186,11 +196,11 @@ where
 
         updated_files.push(IndexedFileUpdate {
             file_path: relative_path,
-            language: extractor.language_name().to_string(),
+            language,
             size_bytes,
             modified_ns,
             content_hash,
-            symbols,
+            symbols: indexed.symbols,
         });
     }
 
@@ -233,7 +243,7 @@ where
         &removed_files,
         &symbol_vectors,
         &dep_edges,
-        extractor_version,
+        &extractor_version,
     )?;
 
     let package_names = codesight_imports::packages::extract_package_names(&root.to_string_lossy());
@@ -289,12 +299,11 @@ pub fn reindex_files(
     root: &Path,
     repo: &str,
     store: &IndexStore,
-    extractors: &ExtractorRegistry,
+    backend: &Arc<dyn CodeBackend>,
     changed_paths: &[std::path::PathBuf],
 ) -> anyhow::Result<DeltaReindexStats> {
     let index_version = store.current_index_version()?.saturating_add(1);
-    let extractor_version =
-        codesight_extractors::extractors::engine::catalogs::builtin_extractor_version_stamp();
+    let extractor_version = backend.version_stamp();
 
     let mut updated_files = Vec::new();
     let mut removed_files = Vec::new();
@@ -317,7 +326,7 @@ pub fn reindex_files(
             _ => continue,
         };
 
-        let Some(extractor) = extractors.extractor_for_path(abs_path) else {
+        let Some(language) = backend.detect_language(root, abs_path) else {
             continue;
         };
 
@@ -335,22 +344,26 @@ pub fn reindex_files(
         let source = String::from_utf8_lossy(&bytes).into_owned();
         graph_sources.push((relative_path.clone(), source.clone()));
 
-        let symbols = match extractor.extract(&relative_path, &source) {
-            Ok(s) => s,
+        let indexed = match backend.index_file(IndexFileRequest {
+            project_root: root.to_path_buf(),
+            file: abs_path.clone(),
+            source: source.clone(),
+        }) {
+            Ok(indexed) => indexed,
             Err(err) => {
-                tracing::warn!(path = %abs_path.display(), error = format!("{err:#}"), "extraction failed");
+                tracing::warn!(path = %abs_path.display(), error = format!("{err}"), backend = backend.name(), "extraction failed");
                 continue;
             }
         };
 
-        symbols_extracted += symbols.len();
+        symbols_extracted += indexed.symbols.len();
         updated_files.push(IndexedFileUpdate {
             file_path: relative_path,
-            language: extractor.language_name().to_string(),
+            language,
             size_bytes,
             modified_ns: mod_ns,
             content_hash,
-            symbols,
+            symbols: indexed.symbols,
         });
     }
 
@@ -369,7 +382,7 @@ pub fn reindex_files(
         &removed_files,
         &[],
         &dep_edges,
-        extractor_version,
+        &extractor_version,
     )?;
 
     Ok(DeltaReindexStats {

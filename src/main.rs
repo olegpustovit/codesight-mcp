@@ -2,12 +2,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use codesight_mcp::{
-    cli::{check, hooks, init},
-    config::AppConfig,
-    mcp::run_stdio,
-    service::CodeService,
-};
+use codesight_engine::{config::AppConfig, service::CodeService};
+use codesight_mcp::cli::{check, hooks, init};
+use mcp_rpc::{DispatchConfig, run_stdio};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum)]
@@ -177,21 +174,29 @@ fn run() -> anyhow::Result<()> {
     // long-running MCP server after an on-disk fix has landed. Every
     // response also carries these fields in `_meta` for the same reason.
     tracing::info!(
-        version = codesight_mcp::config::BUILD_VERSION,
-        sha = codesight_mcp::config::BUILD_SHA,
-        build_time = codesight_mcp::config::BUILD_TIME,
+        version = codesight_engine::config::BUILD_VERSION,
+        sha = codesight_engine::config::BUILD_SHA,
+        build_time = codesight_engine::config::BUILD_TIME,
         "codesight-mcp starting"
     );
     let config = AppConfig::load();
-    let service = CodeService::new(config)?;
+    let service = CodeService::with_backends(config, codesight_backend_treesitter::default_router())?;
     service.enable_background_watch();
     let service = Arc::new(service);
     service.install_arc_handle();
-    run_stdio(service)
+    run_stdio(service, dispatch_config())
+}
+
+fn dispatch_config() -> DispatchConfig {
+    use codesight_engine::config::defaults::{DISPATCH_CONCURRENCY, SHUTDOWN_DRAIN_SECS};
+    DispatchConfig::new(
+        DISPATCH_CONCURRENCY,
+        std::time::Duration::from_secs(SHUTDOWN_DRAIN_SECS),
+    )
 }
 
 fn build_service() -> anyhow::Result<CodeService> {
-    CodeService::new(AppConfig::load())
+    CodeService::with_backends(AppConfig::load(), codesight_backend_treesitter::default_router())
 }
 
 fn print_envelope(value: &serde_json::Value) -> anyhow::Result<()> {

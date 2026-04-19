@@ -6,7 +6,7 @@ use codesight_imports::imports::{
     extract_imports, load_tsconfig_aliases, parse_tsconfig_paths, resolve_imports_to_files,
     resolve_specifier,
 };
-use codesight_mcp::indexing::dep_graph::build_dependency_graph;
+use codesight_engine::indexing::dep_graph::build_dependency_graph;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TestExtractImportsJS (8 tests) — JS/TS import extraction
@@ -749,7 +749,7 @@ fn resolve_specifier_find_importers_jsonc_tsconfig_nested_layout() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -870,7 +870,7 @@ fn find_importers_python_importers() {
 #[test]
 fn find_importers_not_indexed_repo() {
     let ws = tempfile::tempdir().unwrap();
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -900,7 +900,7 @@ fn find_importers_old_index_graceful_note() {
     let src = ws.path();
     std::fs::write(src.join("app.js"), "function main() {}\n").unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1065,7 +1065,7 @@ fn find_references_named_import_match() {
     .unwrap();
     std::fs::write(src.join("unrelated.js"), "function foo() {}\n").unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1128,7 +1128,7 @@ fn find_references_specifier_stem_match() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1171,7 +1171,7 @@ fn find_references_case_insensitive_match() {
     std::fs::write(src.join("utils.js"), "export function Helper() {}\n").unwrap();
     std::fs::write(src.join("app.js"), "import { Helper } from './utils';\n").unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1209,7 +1209,7 @@ fn find_references_no_false_positives() {
     std::fs::write(src.join("foo.js"), "export function foo() {}\n").unwrap();
     std::fs::write(src.join("bar.js"), "import { bar } from './something';\n").unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1249,7 +1249,7 @@ fn find_references_no_false_positives() {
 #[test]
 fn find_references_not_indexed() {
     let ws = tempfile::tempdir().unwrap();
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1290,7 +1290,7 @@ fn find_references_dbt_ref_reference() {
     .unwrap();
     std::fs::write(src.join("unrelated.sql"), "SELECT 1\n").unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1344,7 +1344,7 @@ fn find_references_meta_tip_present() {
     let src = ws.path();
     std::fs::write(src.join("app.js"), "function main() {}\n").unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1399,7 +1399,7 @@ fn imports_persistence_saved_in_index() {
     std::fs::write(src.join("utils.js"), "export const x = 1;\n").unwrap();
     std::fs::write(src.join("app.js"), "import { x } from './utils';\n").unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1447,7 +1447,7 @@ fn imports_persistence_dbt_refs_saved_in_index() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1493,7 +1493,7 @@ fn imports_persistence_merged_on_incremental() {
     std::fs::write(src.join("utils.js"), "export const x = 1;\n").unwrap();
     std::fs::write(src.join("app.js"), "import { x } from './utils';\n").unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1582,7 +1582,7 @@ fn laravel_blade_imports_in_index() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1644,7 +1644,7 @@ class OrderService
     )
     .unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1701,7 +1701,7 @@ class Post extends Model {}
     )
     .unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1757,7 +1757,7 @@ class UserController extends Controller
     )
     .unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();
@@ -1807,7 +1807,7 @@ import UserTable from './components/UserTable.vue'
     )
     .unwrap();
 
-    let svc = codesight_mcp::service::CodeService::new(codesight_mcp::config::AppConfig::new(
+    let svc = codesight_engine::service::CodeService::new(codesight_engine::config::AppConfig::new(
         ws.path().join("idx"),
     ))
     .unwrap();

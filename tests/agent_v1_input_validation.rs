@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 input validation.
 
-use codesight_mcp::config::AppConfig;
-use codesight_mcp::service::CodeService;
+use codesight_engine::config::AppConfig;
+use codesight_engine::service::CodeService;
 use serde_json::json;
 use std::fs;
 use tempfile::tempdir;
