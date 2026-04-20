@@ -221,13 +221,16 @@ fn run() {
         assert!(
             symbols
                 .iter()
-                .any(|s| s.name == "run" && s.language == "rust"),
+                .any(|s| s.name == "run" && s.language == codesight_core::RUST),
             "missing host rust symbol for run: {symbols:?}"
         );
 
         // Injected SQL symbol for the `users` table must show up, remapped into host
         // coordinates (its start_byte must fall inside the Rust source).
-        let sql_syms: Vec<_> = symbols.iter().filter(|s| s.language == "sql").collect();
+        let sql_syms: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.language == codesight_core::SQL)
+            .collect();
         assert!(
             !sql_syms.is_empty(),
             "no injected sql symbols produced from sqlx::query!: {symbols:?}"
@@ -258,7 +261,10 @@ function build() {
         let symbols = extractor
             .extract("src/app.js", source)
             .expect("extract javascript");
-        let sql_syms: Vec<_> = symbols.iter().filter(|s| s.language == "sql").collect();
+        let sql_syms: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.language == codesight_core::SQL)
+            .collect();
         // The template_string node includes backticks; the SQL grammar may tolerate
         // them. Either way, at least the injection path must run without errors and
         // host symbols must still be present.

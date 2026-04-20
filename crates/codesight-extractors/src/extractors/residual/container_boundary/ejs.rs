@@ -53,7 +53,7 @@ impl crate::extractors::LanguageExtractor for EjsExtractor {
         // Delegated JS symbols must surface as language "ejs" so downstream outline
         // and graph queries see a consistent host language for the template file.
         for symbol in &mut symbols {
-            symbol.language = "ejs".to_string();
+            symbol.language = codesight_core::EJS;
         }
 
         // 2. Synthetic template symbol — host semantics, not a grammar construct.
@@ -150,7 +150,7 @@ fn make_symbol(
     StoredSymbol {
         id: format!("{file_path}::{name}#{}", kind.as_str()),
         extraction_tier: ExtractionTier::CuratedQueryPack,
-        language: "ejs".to_string(),
+        language: codesight_core::EJS,
         file_path: file_path.to_string(),
         qualified_name: name.to_string(),
         name: name.to_string(),
@@ -218,7 +218,7 @@ mod tests {
         assert_eq!(formatted.kind, SymbolKind::Function);
         // Grammar-backed injections must emit the symbol under the EJS host language,
         // and its byte span must fall inside the original .ejs source.
-        assert_eq!(formatted.language, "ejs");
+        assert_eq!(formatted.language, codesight_core::EJS);
         assert!(formatted.end_byte <= TEMPLATE.len());
         assert!(
             TEMPLATE[formatted.start_byte..formatted.end_byte].contains("formatDate"),

@@ -9,7 +9,6 @@ use tree_sitter::Node;
 
 use crate::core::symbols::{ExtractionTier, SymbolKind};
 
-use crate::extractors::classifier::path_suggests_ansible_layout;
 use crate::extractors::common::{node_text, parse_tree, push_symbol};
 use crate::extractors::engine::catalogs::QueryPackCatalog;
 use crate::extractors::engine::scm::ScmExtractor;
@@ -34,11 +33,20 @@ impl crate::extractors::LanguageExtractor for YamlExtractor {
         file_path: &str,
         source: &str,
     ) -> anyhow::Result<Vec<crate::core::pipeline::StoredSymbol>> {
-        if !path_suggests_ansible_layout(Path::new(file_path)) {
+        let resolved = codesight_language_support::builtin_registry()
+            .classify_path(Path::new(file_path));
+        let is_ansible = resolved
+            .profile
+            .is_some_and(|p| p.as_str() == "ansible");
+        if !is_ansible {
             return yaml_pack()?.extract(file_path, source);
         }
 
-        let tree = parse_tree(tree_sitter_yaml::LANGUAGE, source)?;
+        let tree = parse_tree(
+            codesight_language_support::builtin_grammar("yaml")
+                .expect("yaml grammar registered with language-support"),
+            source,
+        )?;
         let mut symbols = Vec::new();
         visit_ansible_nodes(tree.root_node(), file_path, source, &mut symbols)?;
         if symbols.is_empty() {

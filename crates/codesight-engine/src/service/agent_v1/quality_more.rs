@@ -52,10 +52,12 @@ impl CodeService {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         let min_complexity = args.min_complexity.unwrap_or(0);
         let top_n = args.top_n.unwrap_or(50);
+        let include_conventional = args.include_conventional.unwrap_or(false);
 
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
-        let data = quality::hotspots_payload(&store, min_complexity, top_n)?;
+        let data =
+            quality::hotspots_payload(&store, min_complexity, top_n, include_conventional)?;
 
         // `methodology` + `confidence_level` are fixed per-tool constants —
         // belong in the tool docs, not repeated in every response envelope
@@ -72,6 +74,12 @@ impl CodeService {
         let min_complexity = args.min_complexity.unwrap_or(0);
         let min_callers = args.min_callers.unwrap_or(0);
         let top_n = args.top_n.unwrap_or(50);
+        let include_conventional = args.include_conventional.unwrap_or(false);
+        // FEEDBACK.md §4b: cap caller_files per candidate. Max 50.
+        let top_caller_files = args
+            .top_caller_files
+            .unwrap_or(10)
+            .clamp(1, 50);
 
         let raw_bytes = store.repo_total_bytes()?;
         let timer = MetaBuilder::new(raw_bytes);
@@ -112,7 +120,12 @@ impl CodeService {
                 .as_ref()
                 .map(|root| codesight_analysis::agent_readiness::compute_file_churn(root))
                 .unwrap_or_default();
-            quality::top_hotspot_files_from_cached(&all_symbols, &file_churn, top_files)
+            quality::top_hotspot_files_from_cached(
+                &all_symbols,
+                &file_churn,
+                top_files,
+                include_conventional,
+            )
         };
 
         let scope_tag = if args.file_path.is_some() {
@@ -132,6 +145,11 @@ impl CodeService {
         let mut cands: Vec<Cand<'_>> = Vec::new();
         for sym in &*all_symbols {
             if !file_set.contains(sym.file_path.as_str()) {
+                continue;
+            }
+            if !include_conventional
+                && codesight_language_support::is_conventional_path(&sym.file_path)
+            {
                 continue;
             }
             let kind_lower = sym.kind.to_ascii_lowercase();
@@ -195,9 +213,25 @@ impl CodeService {
             if (caller_count as u64) < min_callers {
                 continue;
             }
-            let caller_files: Vec<&&str> = files[ci].iter().collect();
+            // FEEDBACK.md §4b: deterministic truncation — shortest path depth
+            // first, then alphabetical. This keeps the N "easiest to skim"
+            // caller files visible and gives the agent a stable signal
+            // across runs.
+            let caller_files_total = files[ci].len();
+            let mut sorted_callers: Vec<&str> =
+                files[ci].iter().copied().collect();
+            sorted_callers.sort_by(|a, b| {
+                let depth_a = a.matches('/').count();
+                let depth_b = b.matches('/').count();
+                depth_a.cmp(&depth_b).then_with(|| a.cmp(b))
+            });
+            let truncated = sorted_callers.len() > top_caller_files;
+            if truncated {
+                sorted_callers.truncate(top_caller_files);
+            }
+
             let score = cand.cyclomatic as f64 * (1.0 + caller_count as f64);
-            candidates.push(json!({
+            let mut entry = json!({
                 "id": cand.sym.id,
                 "name": cand.sym.name,
                 "kind": cand.sym.kind,
@@ -205,9 +239,18 @@ impl CodeService {
                 "line": cand.sym.start_line,
                 "cyclomatic": cand.cyclomatic,
                 "caller_count": caller_count,
-                "caller_files": caller_files,
+                "caller_files": sorted_callers,
                 "score": score,
-            }));
+            });
+            if truncated
+                && let Value::Object(map) = &mut entry
+            {
+                map.insert(
+                    "caller_files_total".to_string(),
+                    json!(caller_files_total),
+                );
+            }
+            candidates.push(entry);
         }
 
         candidates.sort_by(|a, b| {

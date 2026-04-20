@@ -1,11 +1,11 @@
 //! Integration tests: swift parser.
 
 use codesight_extractors::extractors::LanguageExtractor;
-use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
 use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
-    let source = QUERY_FILES
+    let source = query_files_slice()
         .iter()
         .find(|(k, _)| *k == lang_key)
         .unwrap_or_else(|| panic!("no query for {lang_key}"))

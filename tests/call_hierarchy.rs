@@ -57,7 +57,7 @@ fn build_call_repo() -> (tempfile::TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = index_code(&svc, &src);
     (ws, svc, sid)
 }

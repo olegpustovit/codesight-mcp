@@ -788,7 +788,7 @@ class SessionManager:
         let index_root = workspace.path().join("index");
         let service = CodeService::with_backends(
             AppConfig::new(index_root),
-            codesight_backend_treesitter::default_router(),
+            codesight_backend::default_router(),
         )
         .expect("service");
 
@@ -876,7 +876,7 @@ class SessionManager:
 
         let service = CodeService::with_backends(
             AppConfig::new(workspace.path().join("index")),
-            codesight_backend_treesitter::default_router(),
+            codesight_backend::default_router(),
         )
         .expect("service");
 

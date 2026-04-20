@@ -7,7 +7,6 @@ use crate::core::pipeline::StoredSymbol;
 use crate::core::symbols::ExtractionTier;
 
 use super::LanguageExtractor;
-use super::classifier::{SpecialExtractor, classify_special_path};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedProfile {
@@ -29,23 +28,25 @@ impl ResolvedProfile {
 pub(crate) struct LanguageProfileRegistry;
 
 impl LanguageProfileRegistry {
+    /// Resolve the host-profile attached to `path` via the language registry
+    /// (LANGUAGES.md §3.3 step 6). Replaces the old `classify_special_path`
+    /// duplicate with a route-through into
+    /// `codesight-language-support::LanguageRegistry::classify_path`, which is
+    /// the single source of truth for host/profile attachment.
     pub(crate) fn resolve_for_path(&self, path: &Path) -> Option<ResolvedProfile> {
-        match classify_special_path(path)? {
-            SpecialExtractor::Ansible => Some(ResolvedProfile {
-                language_name: "ansible",
-                base_language: "yaml",
-            }),
-            SpecialExtractor::OpenApi => {
-                let base_language = match path.extension().and_then(|ext| ext.to_str()) {
-                    Some(ext) if ext.eq_ignore_ascii_case("json") => "json",
-                    _ => "yaml",
-                };
-                Some(ResolvedProfile {
-                    language_name: "openapi",
-                    base_language,
-                })
-            }
-        }
+        let registry = codesight_language_support::builtin_registry();
+        let resolved = registry.classify_path(path);
+        let profile = resolved.profile?;
+        let host_name = registry.get(resolved.host)?.id().as_str();
+        let (language_name, base_language) = match profile.as_str() {
+            "openapi" => ("openapi", if host_name == "json" { "json" } else { "yaml" }),
+            "ansible" => ("ansible", "yaml"),
+            _ => return None,
+        };
+        Some(ResolvedProfile {
+            language_name,
+            base_language,
+        })
     }
 }
 
@@ -91,7 +92,7 @@ impl LanguageExtractor for ProfiledExtractor {
         let mut symbols = self.delegate.extract(file_path, source)?;
         for symbol in &mut symbols {
             symbol.extraction_tier = ExtractionTier::Profiled;
-            symbol.language = self.language_name.to_string();
+            symbol.language = codesight_core::LanguageId::intern(self.language_name);
         }
         Ok(symbols)
     }

@@ -7,7 +7,8 @@ use codesight_extractors::extractors::engine::catalogs::QueryPackCatalog;
 use codesight_extractors::extractors::engine::scm::ScmExtractor;
 
 fn query_dirs_on_disk() -> BTreeSet<String> {
-    let queries_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/queries");
+    let queries_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/codesight-language-support/runtime/queries");
     fs::read_dir(queries_root)
         .unwrap()
         .filter_map(|entry| {
@@ -77,7 +78,8 @@ fn override_backed_query_packs_still_compile_for_wrapper_delegation() {
 
 #[test]
 fn builtin_query_packs_use_canonical_tags_layout() {
-    let queries_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/queries");
+    let queries_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/codesight-language-support/runtime/queries");
     let legacy_paths: Vec<String> = fs::read_dir(queries_root)
         .unwrap()
         .filter_map(|entry| {

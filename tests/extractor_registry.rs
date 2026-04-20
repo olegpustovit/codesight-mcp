@@ -37,10 +37,11 @@ fn built_in_grammars_have_structural_language_lookup() {
     let curated: HashSet<&str> = registry.curated_languages().into_iter().collect();
 
     for grammar in GrammarCatalog::builtin().iter() {
+        let name = grammar.language_name();
         let extractor = registry
-            .extractor_for_language(grammar.language_name)
-            .unwrap_or_else(|| panic!("missing language lookup for {}", grammar.language_name));
-        let expected = if curated.contains(grammar.language_name) {
+            .extractor_for_language(name)
+            .unwrap_or_else(|| panic!("missing language lookup for {name}"));
+        let expected = if curated.contains(name) {
             ExtractionTier::CuratedQueryPack
         } else {
             ExtractionTier::GenericAstFallback
@@ -48,8 +49,7 @@ fn built_in_grammars_have_structural_language_lookup() {
         assert_eq!(
             extractor.extraction_tier(),
             expected,
-            "language lookup for {} picked wrong tier",
-            grammar.language_name
+            "language lookup for {name} picked wrong tier",
         );
     }
 }
@@ -113,7 +113,7 @@ fn profile_paths_resolve_to_profiled_extractors_and_rewrite_symbols() {
         "expected profiled openapi extraction to return symbols"
     );
     assert!(openapi_symbols.iter().all(|symbol| {
-        symbol.language == "openapi" && symbol.extraction_tier == ExtractionTier::Profiled
+        symbol.language.as_str() == "openapi" && symbol.extraction_tier == ExtractionTier::Profiled
     }));
 
     let ansible = registry

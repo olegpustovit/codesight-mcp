@@ -51,7 +51,7 @@ fn test_finds_import_reference() {
     fs::write(src.join("utils.js"), "export function helper() {}\n").unwrap();
     fs::write(src.join("app.js"), "import { helper } from './utils';\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
 
     let r = svc
@@ -97,7 +97,7 @@ fn test_finds_content_reference() {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
 
     let r = svc
@@ -130,7 +130,7 @@ fn test_no_references() {
     fs::write(src.join("utils.py"), "def helper(): pass\n").unwrap();
     fs::write(src.join("app.py"), "print('hello')\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
 
     let r = svc
@@ -166,7 +166,7 @@ fn test_search_content_false() {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
 
     let r = svc
@@ -207,7 +207,7 @@ fn test_batch_identifiers() {
     .unwrap();
     fs::write(src.join("app.js"), "import { helper } from './utils';\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
 
     let r = svc
@@ -247,7 +247,7 @@ fn test_batch_identifiers() {
 
 fn test_not_indexed() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "check_references",
@@ -273,7 +273,7 @@ fn test_no_import_data_searches_content() {
     fs::write(src.join("utils.py"), "def helper(): pass\n").unwrap();
     fs::write(src.join("app.py"), "result = helper()\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
 
     let r = svc
@@ -322,7 +322,7 @@ fn test_neither_param_raises() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("utils.py"), "def helper(): pass\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
 
     let r = svc
@@ -347,7 +347,7 @@ fn test_both_params_raises() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("utils.py"), "def helper(): pass\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
 
     let r = svc

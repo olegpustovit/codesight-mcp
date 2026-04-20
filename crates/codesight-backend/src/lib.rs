@@ -1,6 +1,7 @@
-//! Code-intelligence backend trait. The engine calls into this crate only;
-//! concrete backends (tree-sitter, LSP, hybrid) live in sibling crates and
-//! are wired by the host binary.
+//! Code-intelligence backend trait (`CodeBackend`) plus optional concrete
+//! implementations behind Cargo features (`treesitter`, `lsp`). The engine
+//! depends on this crate with `default-features = false` so it only sees
+//! the trait; the host binary enables `treesitter` (and optionally `lsp`).
 //!
 //! Design principles (MEGAPLAN §2.1):
 //! 1. Language-scoped — each backend declares which languages it handles.
@@ -305,3 +306,12 @@ impl BackendRouter {
         self.pick(|c| c.has_index)
     }
 }
+
+#[cfg(feature = "treesitter")]
+pub mod treesitter;
+
+#[cfg(feature = "treesitter")]
+pub use treesitter::{default_router, TreeSitterBackend};
+
+#[cfg(feature = "lsp")]
+pub mod lsp;

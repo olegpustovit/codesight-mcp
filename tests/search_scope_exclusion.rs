@@ -36,7 +36,7 @@ fn exclude_drops_symbol_hits() {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let result = svc
@@ -80,7 +80,7 @@ fn exclude_drops_file_hits() {
     fs::write(ws.path().join("src/keep/a.py"), "# TODO keep\n").unwrap();
     fs::write(ws.path().join("src/skip/b.py"), "# TODO skip\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let result = svc

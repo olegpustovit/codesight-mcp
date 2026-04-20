@@ -14,10 +14,10 @@ use std::path::PathBuf;
 
 use rusqlite::OptionalExtension;
 
-use crate::core::symbols::{ExtractionTier, SymbolKind};
 use crate::storage::SymbolRecord;
 
 use super::IndexStore;
+use super::row_utils::symbol_record_from_row;
 
 /// Minimal enriched view of a symbol — the union of
 /// `symbol_names_by_id` + `symbol_signature_by_id` + file language,
@@ -217,40 +217,7 @@ impl IndexStore {
             );
             let mut stmt = conn.prepare_cached(&sql)?;
             let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
-                let kind_str: String = row.get(1)?;
-                let kind = SymbolKind::from_db(&kind_str).ok_or_else(|| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        1,
-                        rusqlite::types::Type::Text,
-                        Box::new(std::io::Error::other(format!(
-                            "unknown symbol kind {kind_str}"
-                        ))),
-                    )
-                })?;
-                let tier_str: String = row.get(2)?;
-                let extraction_tier = ExtractionTier::from_db(&tier_str).ok_or_else(|| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        2,
-                        rusqlite::types::Type::Text,
-                        Box::new(std::io::Error::other(format!(
-                            "unknown extraction tier {tier_str}"
-                        ))),
-                    )
-                })?;
-                Ok(SymbolRecord {
-                    id: row.get(0)?,
-                    kind,
-                    extraction_tier,
-                    file_path: row.get(3)?,
-                    start_line: row.get::<_, u32>(4)?,
-                    end_line: row.get::<_, u32>(5)?,
-                    start_byte: row.get::<_, i64>(6)? as usize,
-                    end_byte: row.get::<_, i64>(7)? as usize,
-                    source_hash: row.get(8)?,
-                    stored_source: row.get(9)?,
-                    file_size_bytes: row.get::<_, i64>(10)? as u64,
-                    root_path: root_path.clone(),
-                })
+                symbol_record_from_row(row, &root_path)
             })?;
             for row in rows {
                 let rec = row?;

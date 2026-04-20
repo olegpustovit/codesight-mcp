@@ -14,7 +14,7 @@ fn ingest_rust_repo(files: &[(&str, &str)]) -> (CodeService, tempfile::TempDir, 
         }
         fs::write(path, content).unwrap();
     }
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

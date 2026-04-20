@@ -86,7 +86,7 @@ fn build_small_index() -> (tempfile::TempDir, CodeService, String) {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     (ws, svc, sid)
 }
@@ -95,7 +95,7 @@ fn build_medium_index() -> (tempfile::TempDir, CodeService, String) {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_medium_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     (ws, svc, sid)
 }
@@ -325,7 +325,7 @@ fn test_change_velocity_meta_methodology_present_no_git() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let r = svc
         .dispatch(
@@ -346,7 +346,7 @@ fn test_change_velocity_methodology_field_name() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let r = svc
         .dispatch(
@@ -370,7 +370,7 @@ fn test_change_velocity_confidence_field_name() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let r = svc
         .dispatch(
@@ -404,7 +404,7 @@ fn test_repo_health_meta_methodology_present() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let r = svc
         .dispatch(
@@ -424,7 +424,7 @@ fn test_repo_health_meta_confidence_level_present() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let r = svc
         .dispatch(
@@ -447,7 +447,7 @@ fn test_repo_health_meta_confidence_level_is_medium() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let r = svc
         .dispatch(

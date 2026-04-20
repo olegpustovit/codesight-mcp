@@ -12,10 +12,10 @@ blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 codesight-analysis = { path = "../codesight-analysis" }
-codesight-backend = { path = "../codesight-backend" }
+codesight-backend = { path = "../codesight-backend", default-features = false }
 codesight-core = { path = "../codesight-core" }
-codesight-framework = { path = "../codesight-framework" }
 codesight-imports = { path = "../codesight-imports" }
+codesight-language-support = { path = "../codesight-language-support" }
 codesight-retrieval = { path = "../codesight-retrieval" }
 codesight-storage = { path = "../codesight-storage" }
 mcp-rpc = { path = "../mcp-rpc" }
@@ -40,6 +40,6 @@ uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
 
 [dev-dependencies]
-codesight-backend-treesitter = { path = "../codesight-backend-treesitter" }
+codesight-backend = { path = "../codesight-backend", default-features = false, features = ["treesitter"] }
 tempfile = "3"
 tokio = { version = "1", features = ["test-util"] }

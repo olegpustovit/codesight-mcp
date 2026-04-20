@@ -11,6 +11,7 @@ mod resolve;
 mod tree_sitter;
 
 pub use bundle::context_bundle_import_lines;
+pub use codesight_language_support::ImportExtractionMode;
 pub use cross_repo::{
     PackageMatchKind, PackageReferenceEvidence, PackageReferenceMatcher, package_reference_evidence,
 };
@@ -24,72 +25,6 @@ use serde::{Deserialize, Serialize};
 
 use codesight_core::symbols::FactQuality;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportExtractionMode {
-    TreeSitterFirst,
-    FallbackOnly,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ImportExtractionCapability {
-    pub canonical_language: &'static str,
-    pub aliases: &'static [&'static str],
-    pub mode: ImportExtractionMode,
-}
-
-const IMPORT_EXTRACTION_CAPABILITIES: &[ImportExtractionCapability] = &[
-    ImportExtractionCapability {
-        canonical_language: "python",
-        aliases: &["py"],
-        mode: ImportExtractionMode::TreeSitterFirst,
-    },
-    ImportExtractionCapability {
-        canonical_language: "javascript",
-        aliases: &["js"],
-        mode: ImportExtractionMode::TreeSitterFirst,
-    },
-    ImportExtractionCapability {
-        canonical_language: "typescript",
-        aliases: &["ts"],
-        mode: ImportExtractionMode::TreeSitterFirst,
-    },
-    ImportExtractionCapability {
-        canonical_language: "tsx",
-        aliases: &[],
-        mode: ImportExtractionMode::TreeSitterFirst,
-    },
-    ImportExtractionCapability {
-        canonical_language: "jsx",
-        aliases: &[],
-        mode: ImportExtractionMode::TreeSitterFirst,
-    },
-    ImportExtractionCapability {
-        canonical_language: "vue",
-        aliases: &[],
-        mode: ImportExtractionMode::FallbackOnly,
-    },
-    ImportExtractionCapability {
-        canonical_language: "sql",
-        aliases: &[],
-        mode: ImportExtractionMode::FallbackOnly,
-    },
-    ImportExtractionCapability {
-        canonical_language: "dart",
-        aliases: &[],
-        mode: ImportExtractionMode::FallbackOnly,
-    },
-    ImportExtractionCapability {
-        canonical_language: "go",
-        aliases: &["golang"],
-        mode: ImportExtractionMode::TreeSitterFirst,
-    },
-    ImportExtractionCapability {
-        canonical_language: "rust",
-        aliases: &["rs"],
-        mode: ImportExtractionMode::TreeSitterFirst,
-    },
-];
-
 /// A structured import edge extracted from source code.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImportEdge {
@@ -97,33 +32,18 @@ pub struct ImportEdge {
     pub names: Vec<String>,
 }
 
-pub fn import_extraction_capabilities() -> &'static [ImportExtractionCapability] {
-    IMPORT_EXTRACTION_CAPABILITIES
-}
-
-pub fn import_capability_for_language(
-    language: &str,
-) -> Option<&'static ImportExtractionCapability> {
-    let language = language.to_ascii_lowercase();
-    import_extraction_capabilities().iter().find(|capability| {
-        capability
-            .canonical_language
-            .eq_ignore_ascii_case(&language)
-            || capability
-                .aliases
-                .iter()
-                .any(|alias| alias.eq_ignore_ascii_case(&language))
-    })
+pub fn import_extraction_mode(language: &str) -> Option<ImportExtractionMode> {
+    codesight_language_support::import_extraction_mode_for_language(language)
 }
 
 pub fn supports_import_extraction(language: &str) -> bool {
-    import_capability_for_language(language).is_some()
+    codesight_language_support::supports_import_extraction(language)
 }
 
 #[must_use]
 fn import_fact_quality_for(language: &str, tree_sitter_used: bool) -> FactQuality {
-    match import_capability_for_language(language) {
-        Some(cap) if cap.mode == ImportExtractionMode::FallbackOnly => FactQuality::Heuristic,
+    match import_extraction_mode(language) {
+        Some(ImportExtractionMode::FallbackOnly) => FactQuality::Heuristic,
         Some(_) if tree_sitter_used => FactQuality::BaselineStructural,
         Some(_) => FactQuality::Heuristic,
         None => FactQuality::Heuristic,
@@ -178,28 +98,13 @@ pub fn extract_imports_with_quality(
     (edges, quality)
 }
 
-/// Detect language from file path extension.
+/// Detect language from file path extension. Thin adapter over
+/// [`codesight_language_support::LanguageRegistry`] — the registry owns
+/// the full identity table (LANGUAGES.md §5 `language_for_path` migration).
 pub fn language_for_path(file_path: &str) -> &'static str {
-    let ext = file_path.rsplit('.').next().unwrap_or("");
-    match ext {
-        "py" | "pyi" => "python",
-        "js" | "mjs" | "cjs" => "javascript",
-        "ts" | "mts" | "cts" => "typescript",
-        "tsx" => "tsx",
-        "jsx" => "jsx",
-        "vue" => "vue",
-        "sql" => "sql",
-        "dart" => "dart",
-        "go" => "go",
-        "rs" => "rust",
-        "rb" => "ruby",
-        "php" => "php",
-        "scm" => "tree-sitter-query",
-        "toml" => "toml",
-        "md" | "markdown" => "markdown",
-        "yaml" | "yml" => "yaml",
-        _ => "unknown",
-    }
+    codesight_language_support::builtin_registry()
+        .identify_path(std::path::Path::new(file_path))
+        .as_str()
 }
 
 /// Extract structured import edges from source content for any supported language.
@@ -265,11 +170,17 @@ mod tests {
 
     #[test]
     fn import_capabilities_cover_dart_and_go() {
-        let dart = import_capability_for_language("dart").expect("dart capability");
-        assert_eq!(dart.mode, ImportExtractionMode::FallbackOnly);
-
-        let go = import_capability_for_language("golang").expect("go capability alias");
-        assert_eq!(go.canonical_language, "go");
-        assert_eq!(go.mode, ImportExtractionMode::TreeSitterFirst);
+        assert_eq!(
+            import_extraction_mode("dart"),
+            Some(ImportExtractionMode::FallbackOnly)
+        );
+        assert_eq!(
+            import_extraction_mode("golang"),
+            Some(ImportExtractionMode::TreeSitterFirst)
+        );
+        assert_eq!(
+            import_extraction_mode("go"),
+            Some(ImportExtractionMode::TreeSitterFirst)
+        );
     }
 }

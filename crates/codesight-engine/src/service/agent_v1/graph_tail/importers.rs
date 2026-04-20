@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
+use crate::service::agent_v1::util::path_matches_filter;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
@@ -30,7 +31,18 @@ impl CodeService {
         let adj = store.dependency_graph()?;
         let imports: Vec<&String> = adj
             .get(file_path)
-            .map(|deps| deps.iter().collect())
+            .map(|deps| {
+                deps.iter()
+                    .filter(|target| {
+                        path_matches_filter(
+                            target,
+                            args.scope.as_deref(),
+                            args.exclude.as_deref(),
+                            args.file_pattern.as_deref(),
+                        )
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
         let data = json!({
             "graph": "imports",
@@ -60,6 +72,14 @@ impl CodeService {
             .iter()
             .filter(|(_, deps)| deps.iter().any(|d| d == file_path))
             .map(|(src, _)| src)
+            .filter(|src| {
+                path_matches_filter(
+                    src,
+                    args.scope.as_deref(),
+                    args.exclude.as_deref(),
+                    args.file_pattern.as_deref(),
+                )
+            })
             .collect();
         let mut data = json!({
             "graph": "importers",

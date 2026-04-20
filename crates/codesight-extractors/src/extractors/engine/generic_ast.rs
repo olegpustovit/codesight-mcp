@@ -15,10 +15,10 @@ pub struct GenericAstExtractor {
 }
 
 impl GenericAstExtractor {
-    pub fn from_grammar(definition: &'static GrammarDefinition) -> Self {
+    pub fn from_grammar(definition: GrammarDefinition) -> Self {
         Self {
-            language_name: definition.language_name,
-            extensions: definition.extensions,
+            language_name: definition.language_name(),
+            extensions: definition.extensions(),
             grammar: definition.language(),
         }
     }

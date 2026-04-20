@@ -45,7 +45,7 @@ fn build_git_repo() -> Option<(tempfile::TempDir, CodeService, String)> {
     run(&["add", "."])?;
     run(&["commit", "-m", "init"])?;
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
     Some((ws, svc, sid))
 }
@@ -56,7 +56,7 @@ fn build_non_git_repo() -> (tempfile::TempDir, CodeService, String) {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("utils.py"), "def helper():\n    return 1\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
     (ws, svc, sid)
 }
@@ -102,7 +102,7 @@ fn find_symbol_id(svc: &CodeService, sid: &str, name: &str) -> String {
 #[test]
 fn churn_errors_missing_repo_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "evaluate_impact",

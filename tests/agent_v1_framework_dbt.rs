@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use codesight_framework::FrameworkProvider;
-use codesight_framework::dbt::*;
+use codesight_language_support::frameworks::FrameworkProvider;
+use codesight_language_support::languages::sql::dbt::*;
 
 // ── _detect_dbt_project ─────────────────────────────────────────────────────
 #[test]

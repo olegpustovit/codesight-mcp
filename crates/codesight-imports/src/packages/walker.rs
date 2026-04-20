@@ -92,21 +92,16 @@ pub fn discover_package_names(root: &Path) -> Vec<String> {
         .into_iter()
         .filter_entry(|entry| !is_pruned(entry));
 
+    let registry = codesight_language_support::builtin_registry();
     for entry in walker.flatten() {
         if !entry.file_type().is_dir() {
             continue;
         }
         let dir = entry.path();
-        let names = [
-            super::python::read_package_names(dir),
-            super::javascript::read_package_names(dir),
-            super::go::read_package_names(dir),
-            super::rust::read_package_names(dir),
-            super::dotnet::read_package_names(dir),
-        ]
-        .concat();
-        for name in names {
-            if seen.insert(name.clone()) {
+        for lang in registry.all() {
+            if let Some(name) = lang.packages().package_name_for_dir(dir)
+                && seen.insert(name.clone())
+            {
                 ordered.push(name);
             }
         }

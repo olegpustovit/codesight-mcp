@@ -156,7 +156,7 @@ fn make_symbol(
     StoredSymbol {
         id: format!("{file_path}::{name}#{}", kind.as_str()),
         extraction_tier: ExtractionTier::ManualOverride,
-        language: "blade".to_string(),
+        language: codesight_core::BLADE,
         file_path: file_path.to_string(),
         qualified_name: name.to_string(),
         name: name.to_string(),

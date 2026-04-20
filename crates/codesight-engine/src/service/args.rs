@@ -31,7 +31,11 @@ pub struct GetSectionArgs {
 }
 
 pub(crate) fn default_max_results() -> usize {
-    10
+    // Raised 10 → 25 (FEEDBACK.md Phase 5a): the blocked-then-retry loop was
+    // the #1 UX papercut on `search_catalog`. Still bounded by the upstream
+    // server-side byte cap, so raising the default adds zero risk of
+    // runaway responses.
+    25
 }
 
 pub struct IndexResult {

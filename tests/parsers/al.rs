@@ -797,9 +797,11 @@ fn test_al_language_field() {
     let syms = extract_symbols();
     for s in &syms {
         assert_eq!(
-            s.language, "al",
+            s.language.as_str(),
+            "al",
             "symbol {} has language {}",
-            s.name, s.language
+            s.name,
+            s.language
         );
     }
 }

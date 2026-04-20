@@ -13,7 +13,7 @@ fn build_service_with_code() -> (CodeService, tempfile::TempDir, String) {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("main.py"), "def hello():\n    return 1\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

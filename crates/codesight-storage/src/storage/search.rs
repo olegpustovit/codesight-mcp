@@ -4,11 +4,13 @@ use std::collections::HashSet;
 
 use rusqlite::{named_params, types::Value as SqlValue};
 
-use crate::core::symbols::SymbolKind;
 use crate::db;
 use crate::storage::SearchSymbol;
 
 use super::IndexStore;
+use super::row_utils::{
+    normalize_scope, push_exclude_clause, push_scope_clause, search_symbol_from_row,
+};
 use super::types::SearchCandidate;
 
 impl IndexStore {
@@ -62,30 +64,8 @@ impl IndexStore {
         let mut stmt = conn.prepare_cached(&sql)?;
 
         let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
-            let kind_str: String = row.get(1)?;
-            let kind = SymbolKind::from_db(&kind_str).ok_or_else(|| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    1,
-                    rusqlite::types::Type::Text,
-                    Box::new(std::io::Error::other(format!(
-                        "unknown symbol kind {kind_str}"
-                    ))),
-                )
-            })?;
             Ok(SearchCandidate {
-                result: SearchSymbol {
-                    id: row.get(0)?,
-                    kind,
-                    name: row.get(2)?,
-                    file: row.get(3)?,
-                    line: row.get::<_, u32>(4)?,
-                    signature: row.get(5)?,
-                    summary: row.get(6)?,
-                    score: 0.0,
-                    match_type: None,
-                    fuzzy_similarity: None,
-                    edit_distance: None,
-                },
+                result: search_symbol_from_row(row, 0.0)?,
                 qualified_name: row.get(7)?,
                 raw_rank: row.get::<_, f64>(8)?,
             })
@@ -190,73 +170,7 @@ impl IndexStore {
         if trimmed.is_empty() {
             return Ok(Vec::new());
         }
-        let scope_value = scope.map(normalize_scope);
-        let scope_prefix = scope_value.as_ref().map(|value| format!("{value}%"));
-        let scope_contains = scope_value.as_ref().map(|value| format!("%{value}%"));
-        let lim = max_results.clamp(1, 100) as i64;
-
-        let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare_cached(
-            r#"
-            SELECT
-                s.id,
-                s.kind,
-                s.name,
-                s.file_path,
-                s.start_line,
-                s.signature,
-                s.summary
-            FROM symbols s
-            WHERE instr(lower(s.name), lower(:needle)) > 0
-              AND (:kind IS NULL OR s.kind = :kind)
-              AND (
-                    :scope_exact IS NULL
-                 OR s.file_path = :scope_exact
-                 OR s.file_path LIKE :scope_prefix
-                 OR s.file_path LIKE :scope_contains
-              )
-            ORDER BY s.file_path, s.start_line, s.id
-            LIMIT :lim
-        "#,
-        )?;
-
-        let rows = stmt.query_map(
-            named_params! {
-                ":needle": trimmed,
-                ":kind": &kind,
-                ":scope_exact": &scope_value.as_deref(),
-                ":scope_prefix": &scope_prefix.as_deref(),
-                ":scope_contains": &scope_contains.as_deref(),
-                ":lim": &lim,
-            },
-            |row| {
-                let kind_str: String = row.get(1)?;
-                let kind = SymbolKind::from_db(&kind_str).ok_or_else(|| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        1,
-                        rusqlite::types::Type::Text,
-                        Box::new(std::io::Error::other(format!(
-                            "unknown symbol kind {kind_str}"
-                        ))),
-                    )
-                })?;
-                Ok(SearchSymbol {
-                    id: row.get(0)?,
-                    kind,
-                    name: row.get(2)?,
-                    file: row.get(3)?,
-                    line: row.get::<_, u32>(4)?,
-                    signature: row.get(5)?,
-                    summary: row.get(6)?,
-                    score: 0.42,
-                    match_type: None,
-                    fuzzy_similarity: None,
-                    edit_distance: None,
-                })
-            },
-        )?;
-
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        self.scan_symbols_by_scope(Some(trimmed), kind, scope, max_results.clamp(1, 100), 0.42)
     }
 
     /// Materialize search-shaped symbol rows for a specific id set.
@@ -275,29 +189,7 @@ impl IndexStore {
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |row| {
-            let kind_str: String = row.get(1)?;
-            let kind = SymbolKind::from_db(&kind_str).ok_or_else(|| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    1,
-                    rusqlite::types::Type::Text,
-                    Box::new(std::io::Error::other(format!(
-                        "unknown symbol kind {kind_str}"
-                    ))),
-                )
-            })?;
-            Ok(SearchSymbol {
-                id: row.get(0)?,
-                kind,
-                name: row.get(2)?,
-                file: row.get(3)?,
-                line: row.get::<_, u32>(4)?,
-                signature: row.get(5)?,
-                summary: row.get(6)?,
-                score: 0.0,
-                match_type: None,
-                fuzzy_similarity: None,
-                edit_distance: None,
-            })
+            search_symbol_from_row(row, 0.0)
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -309,10 +201,24 @@ impl IndexStore {
         scope: Option<&str>,
         max_rows: usize,
     ) -> anyhow::Result<Vec<SearchSymbol>> {
-        let lim = max_rows.clamp(1, 20_000) as i64;
+        self.scan_symbols_by_scope(None, kind, scope, max_rows.clamp(1, 20_000), 0.0)
+    }
+
+    /// Shared body for `search_symbols_name_contains` and `symbols_light_scan`.
+    /// `needle = Some(s)` filters by case-insensitive name substring; `None`
+    /// scans every row in the scope.
+    fn scan_symbols_by_scope(
+        &self,
+        needle: Option<&str>,
+        kind: Option<&str>,
+        scope: Option<&str>,
+        limit: usize,
+        score: f64,
+    ) -> anyhow::Result<Vec<SearchSymbol>> {
         let scope_value = scope.map(normalize_scope);
         let scope_prefix = scope_value.as_ref().map(|value| format!("{value}%"));
         let scope_contains = scope_value.as_ref().map(|value| format!("%{value}%"));
+        let lim = limit as i64;
 
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare_cached(
@@ -326,7 +232,8 @@ impl IndexStore {
                 s.signature,
                 s.summary
             FROM symbols s
-            WHERE (:kind IS NULL OR s.kind = :kind)
+            WHERE (:needle IS NULL OR instr(lower(s.name), lower(:needle)) > 0)
+              AND (:kind IS NULL OR s.kind = :kind)
               AND (
                     :scope_exact IS NULL
                  OR s.file_path = :scope_exact
@@ -340,81 +247,17 @@ impl IndexStore {
 
         let rows = stmt.query_map(
             named_params! {
+                ":needle": &needle,
                 ":kind": &kind,
                 ":scope_exact": &scope_value.as_deref(),
                 ":scope_prefix": &scope_prefix.as_deref(),
                 ":scope_contains": &scope_contains.as_deref(),
                 ":lim": &lim,
             },
-            |row| {
-                let kind_str: String = row.get(1)?;
-                let kind = SymbolKind::from_db(&kind_str).ok_or_else(|| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        1,
-                        rusqlite::types::Type::Text,
-                        Box::new(std::io::Error::other(format!(
-                            "unknown symbol kind {kind_str}"
-                        ))),
-                    )
-                })?;
-                Ok(SearchSymbol {
-                    id: row.get(0)?,
-                    kind,
-                    name: row.get(2)?,
-                    file: row.get(3)?,
-                    line: row.get::<_, u32>(4)?,
-                    signature: row.get(5)?,
-                    summary: row.get(6)?,
-                    score: 0.0,
-                    match_type: None,
-                    fuzzy_similarity: None,
-                    edit_distance: None,
-                })
-            },
+            |row| search_symbol_from_row(row, score),
         )?;
+
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-}
-
-fn normalize_scope(scope: &str) -> String {
-    scope
-        .replace('\\', "/")
-        .trim_matches('*')
-        .trim()
-        .to_string()
-}
-
-fn push_scope_clause(
-    sql: &mut String,
-    params: &mut Vec<SqlValue>,
-    column: &str,
-    scope: Option<&str>,
-) {
-    let Some(scope) = scope else {
-        return;
-    };
-    let scope = normalize_scope(scope);
-    sql.push_str(&format!(
-        " AND ({column} = ? OR {column} LIKE ? OR {column} LIKE ?)"
-    ));
-    params.push(SqlValue::from(scope.clone()));
-    params.push(SqlValue::from(format!("{scope}%")));
-    params.push(SqlValue::from(format!("%{scope}%")));
-}
-
-fn push_exclude_clause(
-    sql: &mut String,
-    params: &mut Vec<SqlValue>,
-    column: &str,
-    exclude: &[String],
-) {
-    for pattern in exclude {
-        let pattern = normalize_scope(pattern);
-        sql.push_str(&format!(
-            " AND ({column} NOT LIKE ? AND {column} NOT LIKE ?)"
-        ));
-        params.push(SqlValue::from(format!("{pattern}%")));
-        params.push(SqlValue::from(format!("%{pattern}%")));
     }
 }
 
@@ -472,3 +315,4 @@ fn overlap(query_tokens: &[String], candidate_tokens: &[String]) -> f64 {
         .count();
     matched as f64 / query_tokens.len() as f64
 }
+

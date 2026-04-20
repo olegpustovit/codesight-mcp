@@ -1,10 +1,11 @@
+use super::language_id::LanguageId;
 use super::symbols::{ExtractionTier, FactQuality, SymbolKind};
 
 #[derive(Debug, Clone)]
 pub struct StoredSymbol {
     pub id: String,
     pub extraction_tier: ExtractionTier,
-    pub language: String,
+    pub language: LanguageId,
     pub file_path: String,
     pub qualified_name: String,
     pub name: String,
@@ -30,7 +31,7 @@ impl StoredSymbol {
 #[derive(Debug, Clone)]
 pub struct FileFingerprint {
     pub file_path: String,
-    pub language: String,
+    pub language: LanguageId,
     pub size_bytes: u64,
     pub modified_ns: u64,
     pub content_hash: String,
@@ -39,7 +40,7 @@ pub struct FileFingerprint {
 #[derive(Debug, Clone)]
 pub struct IndexedFileUpdate {
     pub file_path: String,
-    pub language: String,
+    pub language: LanguageId,
     pub size_bytes: u64,
     pub modified_ns: u64,
     pub content_hash: String,

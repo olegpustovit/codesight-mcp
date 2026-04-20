@@ -130,7 +130,7 @@ mod tests {
     fn fingerprint(path: &str, size: u64, mtime: u64) -> FileFingerprint {
         FileFingerprint {
             file_path: path.to_string(),
-            language: "rust".to_string(),
+            language: codesight_core::RUST,
             size_bytes: size,
             modified_ns: mtime,
             content_hash: "deadbeef".to_string(),
@@ -144,7 +144,7 @@ mod tests {
         let ff = fingerprint("a.rs", 10, 1);
         let update = IndexedFileUpdate {
             file_path: "a.rs".to_string(),
-            language: "rust".to_string(),
+            language: codesight_core::RUST,
             size_bytes: 10,
             modified_ns: 1,
             content_hash: "deadbeef".to_string(),
@@ -152,7 +152,7 @@ mod tests {
                 id: "a.rs::a#function".to_string(),
                 extraction_tier:
                     codesight_storage::core::symbols::ExtractionTier::CuratedQueryPack,
-                language: "rust".to_string(),
+                language: codesight_core::RUST,
                 file_path: "a.rs".to_string(),
                 qualified_name: "a".to_string(),
                 name: "a".to_string(),

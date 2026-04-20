@@ -168,7 +168,7 @@ where
             if existing_file.content_hash == content_hash {
                 touched_files.push(FileFingerprint {
                     file_path: relative_path,
-                    language: language.clone(),
+                    language: codesight_core::LanguageId::intern(&language),
                     size_bytes,
                     modified_ns,
                     content_hash,
@@ -196,7 +196,7 @@ where
 
         updated_files.push(IndexedFileUpdate {
             file_path: relative_path,
-            language,
+            language: codesight_core::LanguageId::intern(&language),
             size_bytes,
             modified_ns,
             content_hash,
@@ -229,7 +229,13 @@ where
 
     let alias_map = codesight_imports::imports::load_tsconfig_aliases(&root.to_string_lossy());
     let alias_ref = (!alias_map.is_empty()).then_some(&alias_map);
-    let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(&graph_sources, alias_ref);
+    let workspace_crates = codesight_imports::packages::workspace_crates_from_root(root);
+    let workspace_ref = (!workspace_crates.is_empty()).then_some(&workspace_crates);
+    let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(
+        &graph_sources,
+        alias_ref,
+        workspace_ref,
+    );
 
     let indexed_at = chrono::Utc::now().to_rfc3339();
     let symbol_vectors = build_symbol_vectors(&repo, &updated_files)?;
@@ -359,7 +365,7 @@ pub fn reindex_files(
         symbols_extracted += indexed.symbols.len();
         updated_files.push(IndexedFileUpdate {
             file_path: relative_path,
-            language,
+            language: codesight_core::LanguageId::intern(&language),
             size_bytes,
             modified_ns: mod_ns,
             content_hash,
@@ -369,7 +375,13 @@ pub fn reindex_files(
 
     let alias_map = codesight_imports::imports::load_tsconfig_aliases(&root.to_string_lossy());
     let alias_ref = (!alias_map.is_empty()).then_some(&alias_map);
-    let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(&graph_sources, alias_ref);
+    let workspace_crates = codesight_imports::packages::workspace_crates_from_root(root);
+    let workspace_ref = (!workspace_crates.is_empty()).then_some(&workspace_crates);
+    let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(
+        &graph_sources,
+        alias_ref,
+        workspace_ref,
+    );
 
     let indexed_at = chrono::Utc::now().to_rfc3339();
     store.apply_index_with_deps(

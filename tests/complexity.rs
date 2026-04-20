@@ -68,7 +68,7 @@ fn run_simple_function_low_complexity() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("simple.py"), "def foo():\n    return 42\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let sym = find_symbol_id(&svc, &sid, "foo");
 
@@ -101,7 +101,7 @@ fn run_if_increases_branch_hints() {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let sym = find_symbol_id(&svc, &sid, "branchy");
 
@@ -142,7 +142,7 @@ fn run_multiple_branches_higher_hints() {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let sym = find_symbol_id(&svc, &sid, "multi");
 
@@ -179,7 +179,7 @@ fn run_for_loop_increases_hints() {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let sym = find_symbol_id(&svc, &sid, "loopy");
 
@@ -211,7 +211,7 @@ fn run_while_loop_increases_hints() {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let sym = find_symbol_id(&svc, &sid, "whiler");
 
@@ -235,7 +235,7 @@ fn run_while_loop_increases_hints() {
 /// Missing source_id produces error.
 fn run_missing_source_error() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
 
     let r = svc
         .dispatch(
@@ -258,7 +258,7 @@ fn run_unknown_symbol_error() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("a.py"), "def real():\n    pass\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
 
     let r = svc
@@ -281,7 +281,7 @@ fn run_meta_has_timing() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("t.py"), "def t():\n    return 1\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let sym = find_symbol_id(&svc, &sid, "t");
 
@@ -308,7 +308,7 @@ fn run_findings_structure() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("s.py"), "def s():\n    return 1\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let sym = find_symbol_id(&svc, &sid, "s");
 

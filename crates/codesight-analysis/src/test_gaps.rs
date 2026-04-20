@@ -5,9 +5,9 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 
-use crate::agent_readiness::{
-    compute_fan_in, compute_file_churn, is_fn_method, is_test_file, tested_file_set,
-};
+use codesight_language_support::is_test_file;
+
+use crate::agent_readiness::{compute_fan_in, compute_file_churn, is_fn_method, tested_file_set};
 use crate::complexity::cyclomatic_complexity;
 use codesight_storage::storage::{AnalysisSymbol, IndexStore};
 

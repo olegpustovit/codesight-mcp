@@ -11,50 +11,11 @@ use serde_json::Value;
 use crate::config::BYTES_PER_TOKEN;
 use crate::core::pipeline::FileFingerprint;
 use crate::db;
+use crate::storage::row_utils::{
+    push_exclude_clause as push_doc_exclude_clause, push_scope_clause as push_doc_scope_clause,
+};
 
 use super::{DocStore, SearchSection, SectionRecord};
-
-fn normalize_doc_scope(scope: &str) -> String {
-    scope
-        .replace('\\', "/")
-        .trim_matches('*')
-        .trim()
-        .to_string()
-}
-
-fn push_doc_scope_clause(
-    sql: &mut String,
-    params: &mut Vec<rusqlite::types::Value>,
-    column: &str,
-    scope: Option<&str>,
-) {
-    let Some(scope) = scope else {
-        return;
-    };
-    let scope = normalize_doc_scope(scope);
-    sql.push_str(&format!(
-        " AND ({column} = ? OR {column} LIKE ? OR {column} LIKE ?)"
-    ));
-    params.push(rusqlite::types::Value::from(scope.clone()));
-    params.push(rusqlite::types::Value::from(format!("{scope}%")));
-    params.push(rusqlite::types::Value::from(format!("%{scope}%")));
-}
-
-fn push_doc_exclude_clause(
-    sql: &mut String,
-    params: &mut Vec<rusqlite::types::Value>,
-    column: &str,
-    exclude: &[String],
-) {
-    for pattern in exclude {
-        let pattern = normalize_doc_scope(pattern);
-        sql.push_str(&format!(
-            " AND ({column} NOT LIKE ? AND {column} NOT LIKE ?)"
-        ));
-        params.push(rusqlite::types::Value::from(format!("{pattern}%")));
-        params.push(rusqlite::types::Value::from(format!("%{pattern}%")));
-    }
-}
 
 impl DocStore {
     pub fn file_fingerprints(&self) -> anyhow::Result<HashMap<String, FileFingerprint>> {
@@ -65,7 +26,7 @@ impl DocStore {
         let rows = stmt.query_map([], |row| {
             Ok(FileFingerprint {
                 file_path: row.get(0)?,
-                language: row.get(1)?,
+                language: codesight_core::LanguageId::intern(&row.get::<_, String>(1)?),
                 size_bytes: row.get::<_, i64>(2)? as u64,
                 modified_ns: row.get::<_, i64>(3)? as u64,
                 content_hash: row.get(4)?,

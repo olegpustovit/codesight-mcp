@@ -92,7 +92,7 @@ impl IndexStore {
         let rows = stmt.query_map([], |row| {
             Ok(FileFingerprint {
                 file_path: row.get(0)?,
-                language: row.get(1)?,
+                language: codesight_core::LanguageId::intern(&row.get::<_, String>(1)?),
                 size_bytes: row.get::<_, i64>(2)? as u64,
                 modified_ns: row.get::<_, i64>(3)? as u64,
                 content_hash: row.get(4)?,
@@ -349,7 +349,7 @@ impl IndexStore {
         )?;
         for file in touched_files {
             stmt.execute(params![
-                file.language,
+                file.language.as_str(),
                 to_i64_u64(file.size_bytes)?,
                 to_i64_u64(file.modified_ns)?,
                 file.content_hash,
@@ -373,7 +373,7 @@ impl IndexStore {
         )?
         .execute(params![
             file.file_path,
-            file.language,
+            file.language.as_str(),
             to_i64_u64(file.size_bytes)?,
             to_i64_u64(file.modified_ns)?,
             file.content_hash
@@ -411,7 +411,7 @@ impl IndexStore {
         .execute(params![
             symbol.id,
             symbol.file_path,
-            symbol.language,
+            symbol.language.as_str(),
             symbol.extraction_tier.as_str(),
             symbol.kind.as_str(),
             symbol.qualified_name,

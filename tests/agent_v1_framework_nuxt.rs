@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 framework nuxt.
 
-use codesight_framework::FrameworkProvider;
-use codesight_framework::nuxt::*;
+use codesight_language_support::frameworks::FrameworkProvider;
+use codesight_language_support::languages::vue::nuxt::*;
 
 // ── _nuxt_route_from_path ───────────────────────────────────────────────────
 #[test]

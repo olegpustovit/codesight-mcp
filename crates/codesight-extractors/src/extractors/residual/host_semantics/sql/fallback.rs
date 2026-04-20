@@ -40,7 +40,7 @@ pub(super) fn extract_ctes(
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{name}#function"),
             extraction_tier: ExtractionTier::ManualOverride,
-            language: "sql".to_string(),
+            language: codesight_core::SQL,
             file_path: file_path.to_string(),
             qualified_name: name.to_string(),
             name: name.to_string(),
@@ -132,7 +132,7 @@ fn collect_dbt_blocks(
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{name}#{}", spec.id_tag),
             extraction_tier: ExtractionTier::ManualOverride,
-            language: "sql".to_string(),
+            language: codesight_core::SQL,
             file_path: file_path.to_string(),
             qualified_name: name.to_string(),
             name: name.to_string(),

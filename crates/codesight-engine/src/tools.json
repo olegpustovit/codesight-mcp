@@ -61,7 +61,7 @@
           "items": { "type": "string" },
           "description": "Repo-relative prefixes or substrings to skip. Complements `scope` (inclusion)."
         },
-        "limit": { "type": "integer", "default": 10 },
+        "limit": { "type": "integer", "default": 25 },
         "offset": {
           "type": "integer",
           "default": 0,
@@ -147,6 +147,17 @@
         },
         "verify": { "type": "boolean", "default": false },
         "context_lines": { "type": "integer", "default": 0 },
+        "max_tokens": {
+          "type": "integer",
+          "description": "Soft token budget for the combined item payload (~4 bytes/token). Once exceeded, later refs are stubbed with {truncated: true, reason: 'token_budget_exceeded', suggestion: ...} instead of returning a JSON-escaped preview. Alias: token_budget."
+        },
+        "token_budget": { "type": "integer", "description": "Alias for max_tokens." },
+        "wait_for_fresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "If a reindex is mid-flight for this source_id, block until it completes or max_wait_ms elapses (FEEDBACK.md §5b)."
+        },
+        "max_wait_ms": { "type": "integer", "default": 2000, "maximum": 30000 },
         "repo_path": { "type": "string" }
       }
     }
@@ -273,6 +284,19 @@
         },
         "token_budget": { "type": "integer", "description": "Alias of max_tokens." },
         "limit": { "type": "integer", "default": 20 },
+        "scope": {
+          "type": "string",
+          "description": "Path-prefix / substring inclusion filter — applies to imports, importers, find_references, references, related, calls."
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Path prefixes / substrings to skip (complements `scope`)."
+        },
+        "file_pattern": {
+          "type": "string",
+          "description": "Glob pattern (e.g. `crates/foo/**/*.rs`) filtering edge endpoints by file path."
+        },
         "repo_path": { "type": "string" }
       }
     }
@@ -396,6 +420,16 @@
           "type": "integer",
           "description": "refactor_targets (repo mode, when file_path is omitted): number of hottest files to scan (default 10)."
         },
+        "top_caller_files": {
+          "type": "integer",
+          "default": 10,
+          "description": "refactor_targets: max caller_files entries per candidate (clamped 1..=50). When truncated, `caller_files_total` on the same entry carries the full count."
+        },
+        "include_conventional": {
+          "type": "boolean",
+          "default": false,
+          "description": "hotspots / refactor_targets: include scripts/, tests/, examples/, benches/, build.rs, fixtures/, testdata/, stress/ in the scan. Off by default — codegen helpers and fixtures otherwise dominate the ranking."
+        },
         "file_path": {
           "type": "string",
           "description": "refactor_targets: file to scope the scan to. Omit for repo-wide mode over the hottest `top_files`."
@@ -480,12 +514,12 @@
   },
   {
     "name": "manage_indexes",
-    "description": "Invalidate, delete, rebuild, status, snapshot_quality, session_stats, or session_end. Most actions target a single source and require `source_id`; `session_stats` is global and does not. `session_end` captures the end-of-session quality snapshot, closes the active session ledger, and returns the same rollup as `session_stats` plus `quality_delta` warnings when quality regressed. `rebuild` additionally requires `root_hint`.",
+    "description": "Invalidate, delete, rebuild, status, snapshot_quality, session_stats, session_end, or analysis_health. Most actions target a single source and require `source_id`; `session_stats` is global and does not. `session_end` captures the end-of-session quality snapshot, closes the active session ledger, and returns the same rollup as `session_stats` plus `quality_delta` warnings when quality regressed. `rebuild` additionally requires `root_hint`. `analysis_health` surfaces graph/reachability/staleness counters (FEEDBACK.md §7) — `unresolved_use_statements > 0` and zero `workspace_crate_edges` in a multi-crate repo are red flags.",
     "inputSchema": {
       "type": "object",
       "required": ["action"],
       "properties": {
-        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status", "snapshot_quality", "session_stats", "session_end"] },
+        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status", "snapshot_quality", "session_stats", "session_end", "analysis_health"] },
         "source_id": { "type": "string", "description": "Required for invalidate/delete/rebuild/status/snapshot_quality; ignored for session_stats/session_end unless needed for snapshot capture." },
         "root_hint": { "type": "string", "description": "Filesystem path; required for `rebuild`." },
         "domains": { "type": "string" },

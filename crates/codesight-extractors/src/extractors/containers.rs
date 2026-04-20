@@ -149,7 +149,7 @@ pub(crate) fn remap_symbols(
                 };
             }
             if let Some(language) = options.language_override {
-                symbol.language = language.to_string();
+                symbol.language = codesight_core::LanguageId::intern(language);
             }
 
             symbol.file_path = file_path.to_string();

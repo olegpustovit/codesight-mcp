@@ -43,7 +43,7 @@ impl CodeService {
             (dead_count as f64 / meta.file_count as f64) * 100.0
         };
 
-        let hotspots_data = quality::hotspots_payload(&store, 1, 5)?;
+        let hotspots_data = quality::hotspots_payload(&store, 1, 5, false)?;
         let top_hotspots = hotspots_data
             .get("hotspots")
             .cloned()

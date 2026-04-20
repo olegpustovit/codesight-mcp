@@ -69,7 +69,7 @@ fn hierarchy_json(svc: &CodeService, source_id: &str, class_name: &str) -> serde
 
 fn case_errors_and_integration() {
     let workspace = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let res = hierarchy_json(&svc, "no_such_repo__", "Foo");
     assert!(!res["ok"].as_bool().unwrap());
 
@@ -162,7 +162,7 @@ fn case_external_base() {
         "class MyWidget(ExternalBase):\n    pass\n",
     )
     .unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
     let res = hierarchy_json(&svc, &sid, "MyWidget");
     assert!(res["ok"].as_bool().unwrap());

@@ -29,7 +29,7 @@ fn shared_small_repo() -> (&'static CodeService, &'static str) {
         let src = root.join("src");
         test_support::write_small_repo(&src).unwrap();
         fs::write(src.join("imports_demo.py"), IMPORTS_DEMO_PY).unwrap();
-        let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+        let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
         let sid = ingest(&svc, &root);
         (workspace, svc, sid)
     });

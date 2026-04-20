@@ -14,17 +14,22 @@ use codesight_imports::imports::{
 pub fn build_dependency_graph(
     files: &[(String, String)], // (relative_path, source_content)
 ) -> HashMap<String, Vec<String>> {
-    build_dependency_graph_with_aliases(files, None)
+    build_dependency_graph_with_aliases(files, None, None)
 }
 
 /// Build a file-level dependency adjacency list from source files,
-/// with optional tsconfig/jsconfig path alias support.
+/// with optional tsconfig/jsconfig path alias support and workspace-crate
+/// (Rust) cross-crate `use` resolution.
 pub fn build_dependency_graph_with_aliases(
     files: &[(String, String)], // (relative_path, source_content)
     alias_map: Option<&HashMap<String, Vec<String>>>,
+    workspace_crates: Option<&HashMap<String, String>>,
 ) -> HashMap<String, Vec<String>> {
-    let mut adj =
-        fold_adjacency_from_edges(build_dependency_graph_edges_with_aliases(files, alias_map));
+    let mut adj = fold_adjacency_from_edges(build_dependency_graph_edges_with_aliases(
+        files,
+        alias_map,
+        workspace_crates,
+    ));
     for (path, _) in files {
         adj.entry(path.clone()).or_default();
     }
@@ -35,6 +40,7 @@ pub fn build_dependency_graph_with_aliases(
 pub fn build_dependency_graph_edges_with_aliases(
     files: &[(String, String)],
     alias_map: Option<&HashMap<String, Vec<String>>>,
+    workspace_crates: Option<&HashMap<String, String>>,
 ) -> Vec<(String, String, FactQuality)> {
     let known_files: HashSet<String> = files.iter().map(|(p, _)| p.clone()).collect();
     let known_files_vec: Vec<String> = known_files.iter().cloned().collect();
@@ -51,6 +57,7 @@ pub fn build_dependency_graph_edges_with_aliases(
                 &known_files,
                 &known_files_vec,
                 alias_map,
+                workspace_crates,
             ) && resolved != *path
             {
                 out.push((path.clone(), resolved, quality));
@@ -109,7 +116,7 @@ mod tests {
             ("a.py".to_string(), "import b\n".to_string()),
             ("b.py".to_string(), String::new()),
         ];
-        let edges = build_dependency_graph_edges_with_aliases(&files, None);
+        let edges = build_dependency_graph_edges_with_aliases(&files, None, None);
         let e = edges
             .iter()
             .find(|(s, t, _)| s == "a.py" && t == "b.py")

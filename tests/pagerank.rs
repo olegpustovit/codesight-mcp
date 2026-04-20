@@ -49,7 +49,7 @@ fn build_centrality_repo() -> (tempfile::TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = index_code(&svc, &src);
     (ws, svc, sid)
 }
@@ -293,7 +293,7 @@ fn importance_top_n_respected() {
 #[test]
 fn importance_missing_repo() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "inspect_graph",
@@ -337,7 +337,7 @@ fn build_sort_by_repo() -> (tempfile::TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = index_code(&svc, &src);
     (ws, svc, sid)
 }

@@ -1,7 +1,9 @@
 //! SCM query-based extractor engine.
 //!
-//! Built-in packs live under `runtime/queries/<pack_id>/tags.scm`, with optional
-//! `injections.scm` and `pack.toml`. The pack catalog is generated at build time by `build.rs`;
+//! Built-in packs live under
+//! `codesight-language-support/runtime/queries/<pack_id>/tags.scm`, with optional
+//! `injections.scm` and `pack.toml`. The pack catalog is generated at build time by
+//! `codesight-language-support/build.rs`;
 //! [`super::catalogs::QueryPackCatalog`] loads those sources and hands them to
 //! [`ScmExtractor`]. Submodules hold header parsing, pattern metadata, capture types, doc
 //! cleanup, and the extract phases; [`ScmExtractor`] is the public façade over tree-sitter
@@ -22,7 +24,7 @@ mod scope;
 #[cfg(test)]
 mod tests;
 
-pub use super::catalogs::{QUERY_FILES, ScmMetadata, parse_scm_header};
+pub use super::catalogs::{ScmMetadata, parse_scm_header, query_files_slice};
 
 use std::sync::OnceLock;
 

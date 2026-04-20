@@ -65,7 +65,7 @@ fn resolve_with_aliases(
     alias_map: &HashMap<String, Vec<String>>,
 ) -> Option<String> {
     let mut aliases: Vec<(&String, &Vec<String>)> = alias_map.iter().collect();
-    aliases.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    aliases.sort_by_key(|a| std::cmp::Reverse(a.0.len()));
 
     for (pattern, replacements) in aliases {
         let prefix = pattern.trim_end_matches('*');
@@ -288,6 +288,12 @@ fn file_stem(path: &str) -> Option<String> {
 }
 
 /// Resolve a single [`ImportEdge`] to a project file, including Python dotted-module fallback.
+///
+/// `workspace_crates` — map of `<underscored-crate-name>` → `<lib.rs path
+/// relative to the repo>` for every workspace-member crate. Used to resolve
+/// cross-crate Rust imports (`use mcp_rpc::foo` from a binary crate lands on
+/// `crates/mcp-rpc/src/lib.rs`). When `None` or empty, such imports stay
+/// unresolved and are treated as external.
 pub fn resolve_import_edge_for_graph(
     edge: &ImportEdge,
     from_file: &str,
@@ -295,16 +301,32 @@ pub fn resolve_import_edge_for_graph(
     source_files: &HashSet<String>,
     known_files_vec: &[String],
     alias_map: Option<&HashMap<String, Vec<String>>>,
+    workspace_crates: Option<&HashMap<String, String>>,
 ) -> Option<String> {
     // Rust has `::`-path imports that overlap with external crate names.
     // Route every Rust edge through the Rust-aware resolver, which only
     // accepts local candidates when the specifier starts with
-    // `crate`/`self`/`super`. Bare names like `regex` / `serde` / `tokio`
-    // are correctly treated as external (return None) rather than falling
-    // through to the generic stem-match fallback — which would false-match
-    // any local file sharing the name.
+    // `crate`/`self`/`super` OR a workspace-member crate name.
     if lang.eq_ignore_ascii_case("rust") || lang.eq_ignore_ascii_case("rs") {
-        return resolve_rust_specifier(&edge.specifier, from_file, known_files_vec);
+        // Rust edges carry `(specifier, names)` where names are the leaf
+        // identifiers brought into scope. For resolution we want the full
+        // module path that the `use` statement walks — that's
+        // `specifier::<first_name>` when a name is present. Example:
+        // `use crate::deep;` emits `{specifier: "crate", names: ["deep"]}`
+        // and we need to resolve the path `crate::deep`, not just `crate`.
+        // Wildcards / extern crate emit empty `names`; fall back to
+        // specifier as-is so `use rayon::prelude::*;` keeps resolving to
+        // `rayon::prelude`.
+        let full_path = if let Some(first) = edge.names.first() {
+            if edge.specifier.is_empty() {
+                first.clone()
+            } else {
+                format!("{}::{}", edge.specifier, first)
+            }
+        } else {
+            edge.specifier.clone()
+        };
+        return resolve_rust_specifier(&full_path, from_file, known_files_vec, workspace_crates);
     }
     if let Some(p) = resolve_specifier(&edge.specifier, from_file, source_files, alias_map) {
         return Some(p);
@@ -327,15 +349,30 @@ pub fn resolve_import_edge_for_graph(
 /// Map a Rust `::`-path specifier to a local file, stripping `crate::`,
 /// `self::`, `super::` prefixes and attempting both `stem.rs` and
 /// `stem/mod.rs` candidates against the known-files list.
+///
+/// `workspace_crates` routes a bare first segment that matches a
+/// workspace-member crate name (underscore form) to that crate's `lib.rs`
+/// entry — without this step, cross-crate `use mcp_rpc::run_stdio` gets
+/// treated as external even though it resolves locally.
 fn resolve_rust_specifier(
     specifier: &str,
     from_file: &str,
     known_files: &[String],
+    workspace_crates: Option<&HashMap<String, String>>,
 ) -> Option<String> {
     let mut segments: Vec<&str> = specifier.split("::").filter(|s| !s.is_empty()).collect();
     let first = segments.first().copied()?;
     let is_anchored = matches!(first, "crate" | "self" | "super");
     if !is_anchored {
+        // Workspace-crate route: `use mcp_rpc::foo` from anywhere in the
+        // workspace lands on `crates/mcp-rpc/src/lib.rs`. The re-export
+        // walk then follows ordinary import edges from lib.rs.
+        if let Some(map) = workspace_crates
+            && let Some(lib_rs) = map.get(first)
+            && lib_rs.as_str() != from_file
+        {
+            return Some(lib_rs.clone());
+        }
         // Bare identifier — could be an external crate OR a submodule that
         // the current file declared via `mod <name>;`. We can't inspect the
         // from-file's AST here, so use a safe file-system heuristic: only
@@ -521,53 +558,61 @@ mod rust_resolve_tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
+    fn resolve(specifier: &str, from_file: &str, known: &[String]) -> Option<String> {
+        resolve_rust_specifier(specifier, from_file, known, None)
+    }
+
     #[test]
     fn crate_prefix_resolves_under_src_root() {
         let known = files(&["src/lib.rs", "src/models.rs"]);
-        let got = resolve_rust_specifier("crate::models", "src/lib.rs", &known);
-        assert_eq!(got.as_deref(), Some("src/models.rs"));
+        assert_eq!(
+            resolve("crate::models", "src/lib.rs", &known).as_deref(),
+            Some("src/models.rs"),
+        );
     }
 
     #[test]
     fn nested_crate_path_prefers_longest_match() {
         let known = files(&["src/lib.rs", "src/a/b.rs"]);
-        let got = resolve_rust_specifier("crate::a::b", "src/lib.rs", &known);
-        assert_eq!(got.as_deref(), Some("src/a/b.rs"));
+        assert_eq!(
+            resolve("crate::a::b", "src/lib.rs", &known).as_deref(),
+            Some("src/a/b.rs"),
+        );
     }
 
     #[test]
     fn crate_mod_rs_candidate_matches() {
         let known = files(&["src/lib.rs", "src/a/mod.rs"]);
-        let got = resolve_rust_specifier("crate::a", "src/lib.rs", &known);
-        assert_eq!(got.as_deref(), Some("src/a/mod.rs"));
+        assert_eq!(
+            resolve("crate::a", "src/lib.rs", &known).as_deref(),
+            Some("src/a/mod.rs"),
+        );
     }
 
     #[test]
     fn external_crate_returns_none() {
         let known = files(&["src/lib.rs", "src/models.rs"]);
-        assert!(resolve_rust_specifier("serde", "src/lib.rs", &known).is_none());
-        assert!(resolve_rust_specifier("std::collections", "src/lib.rs", &known).is_none());
+        assert!(resolve("serde", "src/lib.rs", &known).is_none());
+        assert!(resolve("std::collections", "src/lib.rs", &known).is_none());
     }
 
     #[test]
     fn bare_crate_name_does_not_false_match_local_file() {
         let known = files(&["src/framework/laravel/regex.rs", "src/lib.rs"]);
-        assert!(resolve_rust_specifier("regex", "src/lib.rs", &known).is_none());
+        assert!(resolve("regex", "src/lib.rs", &known).is_none());
     }
 
     #[test]
     fn super_resolves_to_sibling_in_same_dir() {
-        // Regression: `super::render` from `laravel/provider.rs` must NOT
-        // match `nuxt/render.rs` — it must anchor at the current file's
-        // module dir (`laravel/`).
         let known = files(&[
             "src/framework/laravel/provider.rs",
             "src/framework/laravel/render.rs",
             "src/framework/nuxt/render.rs",
         ]);
-        let got =
-            resolve_rust_specifier("super::render", "src/framework/laravel/provider.rs", &known);
-        assert_eq!(got.as_deref(), Some("src/framework/laravel/render.rs"));
+        assert_eq!(
+            resolve("super::render", "src/framework/laravel/provider.rs", &known).as_deref(),
+            Some("src/framework/laravel/render.rs"),
+        );
     }
 
     #[test]
@@ -576,92 +621,145 @@ mod rust_resolve_tests {
             "src/framework/laravel/provider.rs",
             "src/framework/shared.rs",
         ]);
-        let got = resolve_rust_specifier(
-            "super::super::shared",
-            "src/framework/laravel/provider.rs",
-            &known,
+        assert_eq!(
+            resolve(
+                "super::super::shared",
+                "src/framework/laravel/provider.rs",
+                &known,
+            )
+            .as_deref(),
+            Some("src/framework/shared.rs"),
         );
-        assert_eq!(got.as_deref(), Some("src/framework/shared.rs"));
     }
 
     #[test]
     fn super_from_mod_rs_steps_out_of_module() {
-        // `super::sibling` from `foo/mod.rs` should resolve in `foo/`'s
-        // parent directory (one level above `foo/`).
         let known = files(&["src/framework/laravel/mod.rs", "src/framework/nuxt.rs"]);
-        let got = resolve_rust_specifier("super::nuxt", "src/framework/laravel/mod.rs", &known);
-        assert_eq!(got.as_deref(), Some("src/framework/nuxt.rs"));
+        assert_eq!(
+            resolve("super::nuxt", "src/framework/laravel/mod.rs", &known).as_deref(),
+            Some("src/framework/nuxt.rs"),
+        );
     }
 
     #[test]
     fn self_from_mod_rs_stays_in_module() {
         let known = files(&["src/a/mod.rs", "src/a/inner.rs"]);
-        let got = resolve_rust_specifier("self::inner", "src/a/mod.rs", &known);
-        assert_eq!(got.as_deref(), Some("src/a/inner.rs"));
+        assert_eq!(
+            resolve("self::inner", "src/a/mod.rs", &known).as_deref(),
+            Some("src/a/inner.rs"),
+        );
     }
 
     #[test]
     fn self_from_lib_rs_resolves_to_crate_root_sibling() {
-        // `mod service;` in `src/lib.rs` must map to `src/service.rs`
-        // (or `src/service/mod.rs`), NOT to `src/lib/service.rs`.
-        // Regression for the 94%-dead-code bug where crate roots were
-        // treated like ordinary 2018-style module files.
         let known = files(&["src/lib.rs", "src/service.rs", "src/models/mod.rs"]);
-        let got = resolve_rust_specifier("self::service", "src/lib.rs", &known);
-        assert_eq!(got.as_deref(), Some("src/service.rs"));
-        let got2 = resolve_rust_specifier("self::models", "src/lib.rs", &known);
-        assert_eq!(got2.as_deref(), Some("src/models/mod.rs"));
+        assert_eq!(
+            resolve("self::service", "src/lib.rs", &known).as_deref(),
+            Some("src/service.rs"),
+        );
+        assert_eq!(
+            resolve("self::models", "src/lib.rs", &known).as_deref(),
+            Some("src/models/mod.rs"),
+        );
     }
 
     #[test]
     fn self_from_main_rs_resolves_to_crate_root_sibling() {
         let known = files(&["src/main.rs", "src/cli.rs"]);
-        let got = resolve_rust_specifier("self::cli", "src/main.rs", &known);
-        assert_eq!(got.as_deref(), Some("src/cli.rs"));
+        assert_eq!(
+            resolve("self::cli", "src/main.rs", &known).as_deref(),
+            Some("src/cli.rs"),
+        );
     }
 
     #[test]
     fn bare_sibling_submodule_resolves_locally() {
-        // `use resolve::X` from `indexing/imports/mod.rs` where `resolve.rs`
-        // is declared `mod resolve;` in that same file. The sibling file
-        // exists in the from-file's own directory, so the edge resolves.
         let known = files(&[
             "src/indexing/imports/mod.rs",
             "src/indexing/imports/resolve.rs",
-            "src/framework/laravel/resolve.rs", // decoy — should NOT be picked
+            "src/framework/laravel/resolve.rs",
         ]);
-        let got = resolve_rust_specifier(
-            "resolve::resolve_specifier",
-            "src/indexing/imports/mod.rs",
-            &known,
+        assert_eq!(
+            resolve(
+                "resolve::resolve_specifier",
+                "src/indexing/imports/mod.rs",
+                &known,
+            )
+            .as_deref(),
+            Some("src/indexing/imports/resolve.rs"),
         );
-        assert_eq!(got.as_deref(), Some("src/indexing/imports/resolve.rs"));
     }
 
     #[test]
     fn bare_non_sibling_still_rejected() {
-        // `use regex::Regex` from `nextjs/middleware.rs`: there's no
-        // `nextjs/regex.rs`, so even though `laravel/regex.rs` exists
-        // elsewhere, the specifier stays external.
         let known = files(&[
             "src/framework/nextjs/middleware.rs",
             "src/framework/laravel/regex.rs",
         ]);
-        assert!(
-            resolve_rust_specifier("regex", "src/framework/nextjs/middleware.rs", &known).is_none()
-        );
+        assert!(resolve("regex", "src/framework/nextjs/middleware.rs", &known).is_none());
     }
 
     #[test]
     fn crate_root_from_workspace_crate_uses_its_own_src() {
-        // A workspace-member file's `crate::` prefix must resolve inside
-        // that member's `src/`, not the outer repo's `src/`.
         let known = files(&[
             "src/main.rs",
             "crates/cs-storage/src/lib.rs",
             "crates/cs-storage/src/db.rs",
         ]);
-        let got = resolve_rust_specifier("crate::db", "crates/cs-storage/src/lib.rs", &known);
-        assert_eq!(got.as_deref(), Some("crates/cs-storage/src/db.rs"));
+        assert_eq!(
+            resolve("crate::db", "crates/cs-storage/src/lib.rs", &known).as_deref(),
+            Some("crates/cs-storage/src/db.rs"),
+        );
+    }
+
+    #[test]
+    fn workspace_crate_bare_use_resolves_to_lib_rs() {
+        // `use mcp_rpc::run_stdio` from `src/main.rs` — the Phase-1
+        // regression from FEEDBACK.md. Without the workspace map the
+        // resolver falls through to the bare-sibling check and returns
+        // None, orphaning `crates/mcp-rpc/src/server.rs` in dead_code.
+        let known = files(&[
+            "src/main.rs",
+            "crates/mcp-rpc/src/lib.rs",
+            "crates/mcp-rpc/src/server.rs",
+        ]);
+        let mut ws = HashMap::new();
+        ws.insert(
+            "mcp_rpc".to_string(),
+            "crates/mcp-rpc/src/lib.rs".to_string(),
+        );
+        let got = resolve_rust_specifier("mcp_rpc::run_stdio", "src/main.rs", &known, Some(&ws));
+        assert_eq!(got.as_deref(), Some("crates/mcp-rpc/src/lib.rs"));
+    }
+
+    #[test]
+    fn workspace_crate_wins_over_bare_sibling_even_when_sibling_exists() {
+        // If a workspace crate is named `utils` AND there's a local
+        // `utils.rs` sibling, the workspace-crate mapping wins — the
+        // `use utils::foo` in a workspace file almost always means the
+        // member crate, not a sibling module (which is `self::utils::foo`).
+        let known = files(&[
+            "src/main.rs",
+            "src/utils.rs",
+            "crates/utils/src/lib.rs",
+        ]);
+        let mut ws = HashMap::new();
+        ws.insert("utils".to_string(), "crates/utils/src/lib.rs".to_string());
+        let got = resolve_rust_specifier("utils::helper", "src/main.rs", &known, Some(&ws));
+        assert_eq!(got.as_deref(), Some("crates/utils/src/lib.rs"));
+    }
+
+    #[test]
+    fn workspace_crate_does_not_apply_to_anchored_paths() {
+        // `self::foo` and `super::foo` still resolve to sibling files.
+        let known = files(&[
+            "src/main.rs",
+            "src/utils.rs",
+            "crates/utils/src/lib.rs",
+        ]);
+        let mut ws = HashMap::new();
+        ws.insert("utils".to_string(), "crates/utils/src/lib.rs".to_string());
+        let got = resolve_rust_specifier("self::utils", "src/main.rs", &known, Some(&ws));
+        assert_eq!(got.as_deref(), Some("src/utils.rs"));
     }
 }

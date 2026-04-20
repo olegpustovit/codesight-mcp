@@ -60,7 +60,7 @@ fn ingest(svc: &CodeService, root: &std::path::Path) -> String {
 fn run_returns_required_fields() {
     let workspace = tempdir().unwrap();
     let root = build_demo_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
     let r = svc
         .dispatch(
@@ -92,7 +92,7 @@ fn run_returns_required_fields() {
 fn run_summary_non_empty_string() {
     let workspace = tempdir().unwrap();
     let root = build_demo_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
     let r = svc
         .dispatch(
@@ -110,7 +110,7 @@ fn run_summary_non_empty_string() {
 fn run_counts_non_negative() {
     let workspace = tempdir().unwrap();
     let root = build_demo_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
     let r = svc
         .dispatch(
@@ -131,7 +131,7 @@ fn run_counts_non_negative() {
 fn run_dead_code_pct_range() {
     let workspace = tempdir().unwrap();
     let root = build_demo_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
     let r = svc
         .dispatch(
@@ -149,7 +149,7 @@ fn run_dead_code_pct_range() {
 fn run_top_hotspots_is_short_list() {
     let workspace = tempdir().unwrap();
     let root = build_demo_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
     let r = svc
         .dispatch(
@@ -167,7 +167,7 @@ fn run_top_hotspots_is_short_list() {
 fn run_cycles_sample_is_list() {
     let workspace = tempdir().unwrap();
     let root = build_demo_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
     let r = svc
         .dispatch(
@@ -183,7 +183,7 @@ fn run_cycles_sample_is_list() {
 
 fn run_timing_in_meta() {
     let workspace = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",
@@ -198,7 +198,7 @@ fn run_timing_in_meta() {
 
 fn run_missing_repo_error() {
     let workspace = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",
@@ -215,7 +215,7 @@ fn run_missing_repo_error() {
 fn run_repo_field_present() {
     let workspace = tempdir().unwrap();
     let root = build_demo_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
     let r = svc
         .dispatch(
@@ -236,7 +236,7 @@ fn run_repo_field_present() {
 fn run_fn_method_count_present() {
     let workspace = tempdir().unwrap();
     let root = build_demo_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
     let r = svc
         .dispatch(

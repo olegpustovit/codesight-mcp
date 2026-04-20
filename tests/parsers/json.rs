@@ -3,12 +3,12 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
 use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
 use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
-    let source = QUERY_FILES
+    let source = query_files_slice()
         .iter()
         .find(|(k, _)| *k == lang_key)
         .unwrap_or_else(|| panic!("no query for {lang_key}"))
@@ -111,9 +111,11 @@ fn test_json_symbol_kind() {
             s.kind
         );
         assert_eq!(
-            s.language, "json",
+            s.language.as_str(),
+            "json",
             "symbol '{}' language should be 'json', got '{}'",
-            s.name, s.language
+            s.name,
+            s.language
         );
     }
 }

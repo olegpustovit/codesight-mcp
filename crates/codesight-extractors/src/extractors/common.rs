@@ -82,7 +82,7 @@ pub fn push_symbol_prequalified(
     symbols.push(StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
         extraction_tier: ExtractionTier::ManualOverride,
-        language: language.to_string(),
+        language: codesight_core::LanguageId::intern(language),
         file_path: file_path.to_string(),
         qualified_name,
         name: name.to_string(),
@@ -124,7 +124,7 @@ pub fn push_symbol_ex(
     symbols.push(StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
         extraction_tier: ExtractionTier::ManualOverride,
-        language: language.to_string(),
+        language: codesight_core::LanguageId::intern(language),
         file_path: file_path.to_string(),
         qualified_name,
         name: name.to_string(),

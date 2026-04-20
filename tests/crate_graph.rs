@@ -18,13 +18,11 @@ fn workspace_crate_dependency_invariants_hold() {
         "codesight-mcp",
         "codesight-analysis",
         "codesight-backend",
-        "codesight-backend-lsp",
-        "codesight-backend-treesitter",
         "codesight-core",
         "codesight-engine",
         "codesight-extractors",
-        "codesight-framework",
         "codesight-imports",
+        "codesight-language-support",
         "codesight-retrieval",
         "codesight-storage",
         "mcp-rpc",
@@ -62,8 +60,8 @@ fn workspace_crate_dependency_invariants_hold() {
     );
     assert_eq!(
         ws_deps("codesight-extractors"),
-        vec!["codesight-core"],
-        "extractors may only depend on core"
+        vec!["codesight-core", "codesight-language-support"],
+        "extractors may only depend on core + language-support (Phase C)"
     );
     assert_eq!(
         ws_deps("codesight-storage"),
@@ -72,51 +70,67 @@ fn workspace_crate_dependency_invariants_hold() {
     );
     assert_eq!(
         ws_deps("codesight-analysis"),
-        vec!["codesight-core", "codesight-storage"],
-        "analysis depends on core + storage only"
+        vec![
+            "codesight-core",
+            "codesight-language-support",
+            "codesight-storage",
+        ],
+        "analysis depends on core + language-support + storage (Phase D)"
     );
     assert_eq!(
         ws_deps("codesight-imports"),
-        vec!["codesight-core", "codesight-extractors"],
-        "imports depends on core + extractors only"
+        vec![
+            "codesight-core",
+            "codesight-extractors",
+            "codesight-language-support",
+        ],
+        "imports depends on core + extractors + language-support only"
     );
     assert_eq!(
         ws_deps("codesight-retrieval"),
         vec!["codesight-core", "codesight-storage"],
         "retrieval depends on core + storage only"
     );
-    assert!(
-        ws_deps("codesight-framework").contains(&"codesight-extractors".to_string()),
-        "framework needs extractors for parse_tree"
-    );
-    assert!(
-        !ws_deps("codesight-framework").contains(&"codesight-storage".to_string()),
-        "framework must not depend on storage"
-    );
+    // ── L0.75: language support (LANGUAGES.md §2.3) ─────────────────────
+    //
+    // Owns every per-language behavior. May only depend on L0 primitives
+    // (codesight-core). Must never reach upward into a concrete backend,
+    // the engine, analysis, imports, extractors, framework, retrieval, or
+    // storage — otherwise the "one crate owns language behavior" contract
+    // collapses into the same scattered tables the refactor is removing.
+    let lang_deps = ws_deps("codesight-language-support");
+    for banned in [
+        "codesight-analysis",
+        "codesight-backend",
+        "codesight-engine",
+        "codesight-extractors",
+        "codesight-imports",
+        "codesight-retrieval",
+        "codesight-storage",
+        "mcp-rpc",
+    ] {
+        assert!(
+            !lang_deps.contains(&banned.to_string()),
+            "codesight-language-support must not depend on {banned}: {lang_deps:?}"
+        );
+    }
 
-    // ── L0.5: backend trait + tree-sitter impl ──────────────────────────
-    assert_eq!(
-        ws_deps("codesight-backend"),
-        vec!["codesight-core"],
-        "backend trait depends only on core"
-    );
-    let ts_deps = ws_deps("codesight-backend-treesitter");
+    // ── L0.5: backend trait + optional impls (Cargo features) ──────────
+    let backend_deps = ws_deps("codesight-backend");
     assert!(
-        ts_deps.contains(&"codesight-backend".to_string()),
-        "backend-treesitter must depend on the trait: {ts_deps:?}"
+        backend_deps.contains(&"codesight-core".to_string()),
+        "codesight-backend must depend on core: {backend_deps:?}"
     );
     assert!(
-        ts_deps.contains(&"codesight-extractors".to_string()),
-        "backend-treesitter wraps extractors: {ts_deps:?}"
+        backend_deps.contains(&"codesight-extractors".to_string()),
+        "codesight-backend lists extractors for the tree-sitter feature: {backend_deps:?}"
     );
-    assert!(
-        !ts_deps.contains(&"codesight-engine".to_string()),
-        "backend impls must not depend on the engine: {ts_deps:?}"
-    );
-    assert!(
-        !ts_deps.contains(&"codesight-storage".to_string()),
-        "backend-treesitter must not reach into storage directly: {ts_deps:?}"
-    );
+    for banned in ["codesight-engine", "codesight-storage"] {
+        assert!(
+            !backend_deps.contains(&banned.to_string()),
+            "codesight-backend must not depend on {banned}: {backend_deps:?}"
+        );
+    }
 
     // ── L2: protocol ────────────────────────────────────────────────────
     let rpc_deps = ws_deps("mcp-rpc");
@@ -134,7 +148,7 @@ fn workspace_crate_dependency_invariants_hold() {
         "codesight-storage",
         "codesight-analysis",
         "codesight-retrieval",
-        "codesight-framework",
+        "codesight-language-support",
         "mcp-rpc",
     ] {
         assert!(
@@ -144,20 +158,12 @@ fn workspace_crate_dependency_invariants_hold() {
     }
     // Phase C gate (MEGAPLAN §7): engine must not reach for tree-sitter
     // directly. Routing happens through the backend trait.
-    for banned in ["codesight-backend-treesitter", "codesight-backend-lsp", "codesight-extractors"] {
+    for banned in ["codesight-extractors"] {
         assert!(
             !engine_deps.contains(&banned.to_string()),
-            "engine must not depend on a concrete backend impl ({banned}): {engine_deps:?}"
+            "engine must not depend on extractors directly ({banned}): {engine_deps:?}"
         );
     }
-
-    // ── L0.5: LSP backend ───────────────────────────────────────────────
-    let lsp_deps = ws_deps("codesight-backend-lsp");
-    assert_eq!(
-        lsp_deps,
-        vec!["codesight-backend"],
-        "LSP backend depends only on the trait crate"
-    );
 
     // No workspace crate may depend on the product binary crate.
     for pkg_name in &names {
@@ -170,11 +176,11 @@ fn workspace_crate_dependency_invariants_hold() {
         );
     }
 
-    // Root binary depends on engine + backend-treesitter + mcp-rpc.
+    // Root binary depends on engine + backend (tree-sitter feature) + mcp-rpc.
     let root_deps = ws_deps("codesight-mcp");
     for required in [
         "codesight-engine",
-        "codesight-backend-treesitter",
+        "codesight-backend",
         "mcp-rpc",
     ] {
         assert!(

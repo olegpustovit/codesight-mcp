@@ -175,9 +175,11 @@ fn test_blade_language_field() {
     let syms = extract_symbols();
     for s in &syms {
         assert_eq!(
-            s.language, "blade",
+            s.language.as_str(),
+            "blade",
             "symbol {} has language {}",
-            s.name, s.language
+            s.name,
+            s.language
         );
     }
 }

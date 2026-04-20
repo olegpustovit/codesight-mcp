@@ -3,7 +3,7 @@ use super::*;
 use crate::core::symbols::SymbolKind;
 
 fn make_extractor(key: &str) -> ScmExtractor {
-    let source = QUERY_FILES
+    let source = query_files_slice()
         .iter()
         .find(|(candidate, _)| *candidate == key)
         .unwrap_or_else(|| panic!("no query file for {key}"))
@@ -921,7 +921,7 @@ fn scm_fortran_full_coverage() {
         "doc: {}",
         add.summary
     );
-    assert_eq!(add.language, "fortran");
+    assert_eq!(add.language, codesight_core::FORTRAN);
 
     assert!(
         names.contains(&("greet", "function")),

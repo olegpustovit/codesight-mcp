@@ -2,7 +2,6 @@
 
 use codesight_analysis::impact::rename_safety_payload;
 use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
 use codesight_storage::storage::IndexStore;
 use codesight_mcp::test_support::{
     find_symbol_id, index_code_fixture, open_code_store, write_files,
@@ -78,7 +77,7 @@ fn test_missing_symbol_returns_none_from_domain() {
 #[test]
 fn test_missing_repo_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "evaluate_impact",
@@ -120,7 +119,7 @@ fn test_timing_present() {
         ],
     )
     .unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let indexed = svc
         .dispatch(
             "ingest_sources",

@@ -167,10 +167,37 @@ pub fn check_staleness_detail(
         return Ok(Vec::new());
     }
 
+    let (mut stale, indexed) = scan_indexed_vs_disk(conn, root_path, file_table, limit)?;
+    if stale.len() < limit {
+        scan_new_files(root_path, &indexed, is_relevant, &mut stale, limit);
+    }
+    Ok(stale)
+}
+
+fn mtime_ns(meta: &fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
+fn path_in_skipped_dir(rel: &str) -> bool {
+    rel.split('/')
+        .next()
+        .is_some_and(|seg| SKIP_DIRS.contains(&seg))
+}
+
+/// Phase 1: walk indexed rows, flag any whose on-disk size/mtime drifted.
+/// Returns the stale list so far and the set of indexed paths for phase 2.
+fn scan_indexed_vs_disk(
+    conn: &Connection,
+    root_path: &Path,
+    file_table: &str,
+    limit: usize,
+) -> StorageResult<(Vec<String>, HashSet<String>)> {
     let select_sql = format!("SELECT file_path, size_bytes, modified_ns FROM {file_table}");
     let mut stmt = conn.prepare_cached(&select_sql)?;
-    let mut indexed_paths = HashSet::new();
-    let mut stale_paths = Vec::new();
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -179,13 +206,8 @@ pub fn check_staleness_detail(
         ))
     })?;
 
-    let skip_set: HashSet<&str> = SKIP_DIRS.iter().copied().collect();
-    let path_in_skipped_dir = |rel: &str| -> bool {
-        rel.split('/')
-            .next()
-            .is_some_and(|seg| skip_set.contains(seg))
-    };
-
+    let mut indexed = HashSet::new();
+    let mut stale = Vec::new();
     for row in rows {
         let (file_path, db_size, db_mtime) = row?;
         // Skip stale entries from older ingests that ran before a dir was
@@ -195,37 +217,31 @@ pub fn check_staleness_detail(
         if path_in_skipped_dir(&file_path) {
             continue;
         }
-        indexed_paths.insert(file_path.clone());
-        let full = root_path.join(&file_path);
-        match fs::metadata(&full) {
-            Ok(meta) => {
-                let disk_size = meta.len();
-                let disk_mtime = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_nanos() as u64)
-                    .unwrap_or(0);
-                if disk_size != db_size || disk_mtime != db_mtime {
-                    stale_paths.push(file_path);
-                    if stale_paths.len() >= limit {
-                        return Ok(stale_paths);
-                    }
-                }
-            }
-            Err(_) => {
-                stale_paths.push(file_path);
-                if stale_paths.len() >= limit {
-                    return Ok(stale_paths);
-                }
+        indexed.insert(file_path.clone());
+        let changed = match fs::metadata(root_path.join(&file_path)) {
+            Ok(meta) => meta.len() != db_size || mtime_ns(&meta) != db_mtime,
+            Err(_) => true,
+        };
+        if changed {
+            stale.push(file_path);
+            if stale.len() >= limit {
+                break;
             }
         }
     }
+    Ok((stale, indexed))
+}
 
-    // Check for new files not in the index. Mirror the ingest walker
-    // (`ignore::WalkBuilder` with git-ignore support + SKIP_DIRS) so the
-    // staleness check never flags files the ingester would skip — otherwise
-    // gitignored source files permanently mark the index stale.
+/// Phase 2: walk the filesystem for files the ingester would index but aren't
+/// in the db yet. Mirrors the ingest walker (git-ignore + SKIP_DIRS) so
+/// ignored files don't permanently mark the index stale.
+fn scan_new_files(
+    root_path: &Path,
+    indexed: &HashSet<String>,
+    is_relevant: impl Fn(&str) -> bool,
+    stale: &mut Vec<String>,
+    limit: usize,
+) {
     let walker = ignore::WalkBuilder::new(root_path)
         .hidden(false)
         .git_ignore(true)
@@ -248,13 +264,11 @@ pub fn check_staleness_detail(
             .strip_prefix(root_path)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
-        if is_relevant(&rel) && !indexed_paths.contains(&rel) {
-            stale_paths.push(rel);
-            if stale_paths.len() >= limit {
-                return Ok(stale_paths);
+        if is_relevant(&rel) && !indexed.contains(&rel) {
+            stale.push(rel);
+            if stale.len() >= limit {
+                return;
             }
         }
     }
-
-    Ok(stale_paths)
 }

@@ -5,6 +5,86 @@ use serde_json::{Value, json};
 use crate::config::BYTES_PER_TOKEN;
 use codesight_storage::storage::{SearchSymbol, doc_index::SearchSection};
 
+/// Test whether a repo-relative file path passes the combined
+/// scope / exclude / file_pattern filter used by `inspect_graph` and
+/// `find_references` (FEEDBACK.md §6b).
+///
+/// - `scope`: substring inclusion (path must contain it).
+/// - `exclude`: substrings to skip (any match rejects).
+/// - `file_pattern`: `*` / `**` / `?` glob — matches the full path.
+///
+/// All `None` means unfiltered (accept).
+pub(in crate::service) fn path_matches_filter(
+    path: &str,
+    scope: Option<&str>,
+    exclude: Option<&[String]>,
+    file_pattern: Option<&str>,
+) -> bool {
+    if let Some(scope) = scope
+        && !scope.is_empty()
+        && !path.contains(scope)
+    {
+        return false;
+    }
+    if let Some(excludes) = exclude {
+        for ex in excludes {
+            if !ex.is_empty() && path.contains(ex) {
+                return false;
+            }
+        }
+    }
+    if let Some(pat) = file_pattern
+        && !pat.is_empty()
+        && !glob_match_path(pat, path)
+    {
+        return false;
+    }
+    true
+}
+
+/// Minimal glob matcher: `**` matches any sequence (including `/`), `*`
+/// matches any non-`/` sequence, `?` matches a single char. Good enough for
+/// "match these repo-relative paths" without pulling in a full globset.
+fn glob_match_path(pattern: &str, path: &str) -> bool {
+    // Convert to a regex: `**` → `.*`, `*` → `[^/]*`, `?` → `.`, escape
+    // other special chars. Anchored at both ends.
+    let mut regex = String::with_capacity(pattern.len() + 4);
+    regex.push('^');
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'*' => {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    regex.push_str(".*");
+                    i += 2;
+                } else {
+                    regex.push_str("[^/]*");
+                    i += 1;
+                }
+            }
+            b'?' => {
+                regex.push('.');
+                i += 1;
+            }
+            b'.' | b'+' | b'(' | b')' | b'|' | b'^' | b'$' | b'{' | b'}' | b'[' | b']'
+            | b'\\' => {
+                regex.push('\\');
+                regex.push(bytes[i] as char);
+                i += 1;
+            }
+            other => {
+                regex.push(other as char);
+                i += 1;
+            }
+        }
+    }
+    regex.push('$');
+    regex::Regex::new(&regex)
+        .map(|re| re.is_match(path))
+        .unwrap_or(false)
+}
+
 /// Round a ranker score to 3 decimal places for JSON serialization so f64
 /// round-trip artifacts (e.g. `0.5299999999999999`) don't leak into the
 /// response envelope. Internal comparisons stay exact — truncation happens

@@ -14,7 +14,7 @@ use codesight_storage::storage::IndexStore;
 use codesight_storage::storage::doc_index::{DocIndexSummary, DocStore};
 
 fn backend() -> std::sync::Arc<dyn codesight_backend::CodeBackend> {
-    std::sync::Arc::new(codesight_backend_treesitter::TreeSitterBackend::new())
+    std::sync::Arc::new(codesight_backend::TreeSitterBackend::new())
 }
 
 /// Write a set of repo-relative files under `root`.
@@ -58,9 +58,16 @@ pub fn copy_fixture_tree(src: &Path, dst: &Path) -> Result<()> {
 /// Create a fresh service rooted at `index_root`. Wires the tree-sitter
 /// backend so ingest paths work in tests.
 pub fn make_service(index_root: &Path) -> Result<CodeService> {
+    make_service_from_config(AppConfig::new(index_root.to_path_buf()))
+}
+
+/// Wrap an existing [`AppConfig`] with a tree-sitter backend router. Drop-in
+/// replacement for `CodeService::new(config)` in integration tests — the
+/// bare constructor leaves the backend router empty and SIGABRTs on ingest.
+pub fn make_service_from_config(config: AppConfig) -> Result<CodeService> {
     let mut router = codesight_backend::BackendRouter::new();
     router.register(backend());
-    CodeService::with_backends(AppConfig::new(index_root.to_path_buf()), router)
+    CodeService::with_backends(config, router)
 }
 
 /// Index a source repo directly through the domain orchestrator and return its source id.

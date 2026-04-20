@@ -818,7 +818,8 @@ impl CodeService {
                 Ok(bytes) => bytes,
                 Err(e) => return self.error_response(&MetaBuilder::new(1), e),
             };
-        let timer = MetaBuilder::new(raw_bytes.max(1));
+        let timer = MetaBuilder::new(raw_bytes.max(1))
+            .with_class(crate::service::savings::RetrievalClass::Search);
         let extra = build_meta_extras(&plan, stats.fuzzy_applied, semantic_requested);
 
         let fmt_ctx = FormatCtx {

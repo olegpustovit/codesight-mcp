@@ -81,6 +81,9 @@ fn read_args_for_ref(
         verify: false,
         context_lines: 0,
         repo_path: repo_path.map(|s| s.to_string()),
+        max_tokens: None,
+        wait_for_fresh: None,
+        max_wait_ms: None,
     }
 }
 

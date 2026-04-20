@@ -39,7 +39,7 @@ fn build_fixture() -> (TempDir, IndexStore) {
         let file_path = format!("src/module_{f}/mod.rs");
         files.push(FileFingerprint {
             file_path: file_path.clone(),
-            language: "rust".to_string(),
+            language: codesight_core::RUST,
             size_bytes: 4096,
             modified_ns: 0,
             content_hash: format!("hash-{f}"),
@@ -51,7 +51,7 @@ fn build_fixture() -> (TempDir, IndexStore) {
             symbols.push(StoredSymbol {
                 id: format!("{file_path}:{name}"),
                 extraction_tier: ExtractionTier::CuratedQueryPack,
-                language: "rust".to_string(),
+                language: codesight_core::RUST,
                 file_path: file_path.clone(),
                 qualified_name: format!("module_{f}::{name}"),
                 name,
@@ -70,7 +70,7 @@ fn build_fixture() -> (TempDir, IndexStore) {
 
         updates.push(IndexedFileUpdate {
             file_path,
-            language: "rust".to_string(),
+            language: codesight_core::RUST,
             size_bytes: 4096,
             modified_ns: 0,
             content_hash: format!("hash-{f}"),

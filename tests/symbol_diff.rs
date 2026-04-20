@@ -116,7 +116,7 @@ fn build_repo_fixture(files: &[(&str, &str)]) -> RepoFixture {
     for (path, content) in files {
         fs::write(src.join(path), content).unwrap();
     }
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let source_id = ingest(&svc, workspace.path());
     RepoFixture {
         _workspace: workspace,
@@ -216,7 +216,7 @@ fn run_diff_requires_symbol_kind(fixture: &RepoFixture) {
 /// Missing source_id produces error.
 fn run_diff_missing_source_error() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
 
     let r = svc
         .dispatch(
@@ -418,7 +418,7 @@ fn case_response_has_source_identifiers() {
         "def foo(x):\n    return x * 2\n\ndef bar(y):\n    return y + 1\n",
     )
     .unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path());
     let foo_id = find_symbol_id(&svc, &sid, "foo");
     let bar_id = find_symbol_id(&svc, &sid, "bar");

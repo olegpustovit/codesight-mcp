@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use codesight_framework::profiles::{detect_framework, profile_to_meta};
-use codesight_framework::{
+use codesight_language_support::frameworks::profiles::{detect_framework, profile_to_meta};
+use codesight_language_support::frameworks::{
     EnrichableSymbol, ExtraImport, FileContext, FrameworkProvider, FrameworkRegistry,
     collect_extra_imports, collect_metadata, enrich_symbol,
 };

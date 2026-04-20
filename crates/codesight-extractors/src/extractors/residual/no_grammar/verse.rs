@@ -266,7 +266,7 @@ fn make_symbol(
     StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
         extraction_tier: ExtractionTier::ManualOverride,
-        language: "verse".to_string(),
+        language: codesight_core::VERSE,
         file_path: file_path.to_string(),
         qualified_name,
         name: name.to_string(),

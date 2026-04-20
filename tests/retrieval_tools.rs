@@ -57,7 +57,7 @@ fn case_structure_and_catalog() {
     let workspace = tempdir().unwrap();
     let root = setup_demo_repo(workspace.path());
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let sid = ingest_code(&svc, &root);
 
     // file_outline: language tag present, no symbols for .h
@@ -109,7 +109,7 @@ fn case_search_variants() {
     let workspace = tempdir().unwrap();
     let root = setup_demo_repo(workspace.path());
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let sid = ingest_code(&svc, &root);
 
     // context + ordering: both TODO hits with before/after lines
@@ -229,7 +229,7 @@ fn case_catalog_staleness_after_backdate() {
     let workspace = tempdir().unwrap();
     let root = setup_demo_repo(workspace.path());
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg.clone()).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg.clone()).unwrap();
     let sid = ingest_code(&svc, &root);
     backdate_index(&cfg, &sid, 8);
 
@@ -254,7 +254,7 @@ fn case_search_skips_unreadable_file() {
     let workspace = tempdir().unwrap();
     let root = setup_demo_repo(workspace.path());
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let sid = ingest_code(&svc, &root);
     fs::remove_file(root.join("include/no_symbols.h")).unwrap();
 
@@ -286,7 +286,7 @@ fn case_read_file_slices_and_missing() {
     fs::write(root.join("demo.txt"), "first\r\nsecond\r\n").unwrap();
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let sid = ingest_code(&svc, &root);
 
     let read = |refs| {
@@ -358,7 +358,7 @@ fn case_file_outline_batch_empty_and_conflict() {
     fs::write(mini.join("src/a.py"), "def foo(): pass\n").unwrap();
     fs::write(mini.join("src/b.py"), "def bar(): pass\n").unwrap();
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let sid = ingest_code(&svc, &mini);
 
     let batch = svc
@@ -420,7 +420,7 @@ fn case_sha_staleness_in_meta() {
     std::fs::write(root.join("app.py"), "def main():\n    pass\n").unwrap();
 
     let cfg = codesight_engine::config::AppConfig::new(workspace.path().join("idx"));
-    let svc = codesight_engine::service::CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",
@@ -463,7 +463,7 @@ fn search_catalog_total_matches_is_pre_cap() {
     fs::write(root.join("mod.py"), body).unwrap();
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let sid = ingest_code(&svc, &root);
 
     let r = svc

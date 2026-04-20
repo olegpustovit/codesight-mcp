@@ -18,7 +18,7 @@ fn setup() -> (tempfile::TempDir, tempfile::TempDir, CodeService, String) {
         "def hinted():\n    return 'hi'\n",
     )
     .unwrap();
-    let svc = CodeService::new(AppConfig::new(idx.path().to_path_buf())).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(idx.path().to_path_buf())).unwrap();
     let ing = svc
         .dispatch(
             "ingest_sources",

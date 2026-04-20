@@ -7,6 +7,26 @@ use crate::config::{
     BUILD_SHA, BUILD_TIME, BUILD_VERSION, BYTES_PER_TOKEN, RETRIEVAL_ENGINE, RETRIEVAL_VERSION,
 };
 
+/// Retrieval baseline class for `tokens_saved` — FEEDBACK.md §3b. A zero
+/// `tokens_saved` on `whole_file_read` is expected (the caller asked for the
+/// full file); a zero `tokens_saved` on `search` is a red flag indicating
+/// the query wasn't narrow enough. Marking the class lets agents branch on
+/// intent instead of treating every 0 as a misuse signal.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrievalClass {
+    /// Outlines, trees, class hierarchies — no source text returned.
+    Structural,
+    /// Specific symbol/section, or bounded `start_line..=end_line` slice.
+    TargetedRange,
+    /// Whole-file read via `read_content kind=file` with no line bounds.
+    WholeFileRead,
+    /// Pure metadata (`catalog_sources`, `manage_indexes`, …).
+    MetadataOnly,
+    /// BM25 / regex / fuzzy / dense search over an index.
+    Search,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Meta {
     /// Omitted when the tool has no file-read baseline to compare against
@@ -14,6 +34,10 @@ pub struct Meta {
     /// treat absence as "savings undefined", not "zero savings".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens_saved: Option<u64>,
+    /// FEEDBACK.md §3b: the baseline behind `tokens_saved`. Omitted when the
+    /// caller didn't tag its `MetaBuilder`. See [`RetrievalClass`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrieval_class: Option<RetrievalClass>,
     pub total_tokens_saved: u64,
     pub response_tokens: u64,
     pub naive_tokens: u64,
@@ -430,6 +454,7 @@ fn round_cost_map(mut values: HashMap<String, f64>) -> HashMap<String, f64> {
 pub struct MetaBuilder {
     raw_bytes: u64,
     started_at: Instant,
+    retrieval_class: Option<RetrievalClass>,
 }
 
 impl MetaBuilder {
@@ -437,7 +462,15 @@ impl MetaBuilder {
         Self {
             raw_bytes,
             started_at: Instant::now(),
+            retrieval_class: None,
         }
+    }
+
+    /// Tag this response with its retrieval class (FEEDBACK.md §3b).
+    #[must_use]
+    pub fn with_class(mut self, class: RetrievalClass) -> Self {
+        self.retrieval_class = Some(class);
+        self
     }
 
     pub fn success<T: serde::Serialize>(
@@ -498,6 +531,7 @@ impl MetaBuilder {
         let tokens_saved_per_ms = (tokens_saved_per_ms_raw * 100.0).round() / 100.0;
         Meta {
             tokens_saved,
+            retrieval_class: self.retrieval_class,
             total_tokens_saved,
             response_tokens,
             naive_tokens,
@@ -557,6 +591,51 @@ mod tests {
                 (scaled - scaled.round()).abs() < 1e-9,
                 "cost should be rounded to 4 decimals: {value}"
             );
+        }
+    }
+
+    use super::{MetaBuilder, RetrievalClass};
+
+    #[test]
+    fn meta_builder_without_class_omits_retrieval_class() {
+        let dir = tempdir().unwrap();
+        let ledger = SavingsLedger::new(dir.path().join("_savings.json"));
+        let body = serde_json::json!({"hello": "world"});
+        let meta = MetaBuilder::new(1024).success(&body, &ledger).unwrap();
+        assert!(meta.retrieval_class.is_none());
+        // Round-trips via JSON without serializing the missing field.
+        let encoded = serde_json::to_string(&meta).unwrap();
+        assert!(
+            !encoded.contains("retrieval_class"),
+            "retrieval_class must be omitted: {encoded}",
+        );
+    }
+
+    #[test]
+    fn meta_builder_with_class_surfaces_it_in_serialized_output() {
+        let dir = tempdir().unwrap();
+        let ledger = SavingsLedger::new(dir.path().join("_savings.json"));
+        let body = serde_json::json!({"hello": "world"});
+        let meta = MetaBuilder::new(1024)
+            .with_class(RetrievalClass::WholeFileRead)
+            .success(&body, &ledger)
+            .unwrap();
+        assert_eq!(meta.retrieval_class, Some(RetrievalClass::WholeFileRead));
+        let encoded = serde_json::to_value(&meta).unwrap();
+        assert_eq!(encoded["retrieval_class"], serde_json::json!("whole_file_read"));
+    }
+
+    #[test]
+    fn retrieval_class_snake_cases_all_variants() {
+        for (variant, expected) in [
+            (RetrievalClass::Structural, "structural"),
+            (RetrievalClass::TargetedRange, "targeted_range"),
+            (RetrievalClass::WholeFileRead, "whole_file_read"),
+            (RetrievalClass::MetadataOnly, "metadata_only"),
+            (RetrievalClass::Search, "search"),
+        ] {
+            let encoded = serde_json::to_value(variant).unwrap();
+            assert_eq!(encoded, serde_json::json!(expected));
         }
     }
 }

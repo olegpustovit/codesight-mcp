@@ -5,17 +5,22 @@ use std::path::{Path, PathBuf};
 
 use codesight_engine::config::{AppConfig, TrustCheckResult, check_trust, is_broad_path};
 use codesight_engine::service::CodeService;
+use codesight_mcp::test_support::make_service as make_service_indexed;
 use serde_json::json;
 use tempfile::tempdir;
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
 fn make_service(ws: &Path) -> CodeService {
-    CodeService::new(AppConfig::new(ws.join("idx"))).unwrap()
+    make_service_indexed(&ws.join("idx")).unwrap()
 }
 
 fn make_service_with_config(config: AppConfig) -> CodeService {
-    CodeService::new(config).unwrap()
+    let mut router = codesight_backend::BackendRouter::new();
+    router.register(std::sync::Arc::new(
+        codesight_backend::TreeSitterBackend::new(),
+    ));
+    CodeService::with_backends(config, router).unwrap()
 }
 
 fn ingest(svc: &CodeService, root: &Path) -> serde_json::Value {

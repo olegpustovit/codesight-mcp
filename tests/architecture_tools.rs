@@ -28,7 +28,7 @@ fn build_linear_repo() -> (tempfile::TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = index_code(&svc, &src);
     (ws, svc, sid)
 }
@@ -51,7 +51,7 @@ fn build_cyclic_repo() -> (tempfile::TempDir, CodeService, String) {
     .unwrap();
     fs::write(src.join("z.py"), "def standalone():\n    pass\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = index_code(&svc, &src);
     (ws, svc, sid)
 }
@@ -77,7 +77,7 @@ fn build_layered_repo() -> (tempfile::TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = index_code(&svc, &src);
     (ws, svc, sid)
 }
@@ -239,7 +239,7 @@ fn arch_cycles_result_shape() {
 #[test]
 fn arch_unknown_repo_cycles_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "inspect_graph",
@@ -364,7 +364,7 @@ fn arch_coupling_unknown_file_returns_error() {
 #[test]
 fn arch_coupling_unknown_repo_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "inspect_graph",
@@ -474,7 +474,7 @@ fn arch_layer_count_matches_rules() {
 #[test]
 fn arch_unknown_repo_layer_violations_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "inspect_graph",

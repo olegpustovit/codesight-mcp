@@ -8,7 +8,7 @@ use crate::service::agent_v1::args::{ContentRef, ReadContentArgs};
 use crate::service::agent_v1::util::{err_item, resolve_symbol_id};
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::args::{FileContentArgs, GetSectionArgs};
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{MetaBuilder, RetrievalClass};
 
 /// Strip unwanted fields and inject `ref` block into an item.
 fn strip_and_tag(
@@ -185,6 +185,14 @@ impl CodeService {
             Ok(a) => a.into_inner(),
             Err(err) => return self.error_response(&MetaBuilder::new(0), err),
         };
+        // FEEDBACK.md §5b: caller opted in to wait-until-fresh semantics.
+        // Bounded so a stuck reindex can't hang the client forever.
+        if args.wait_for_fresh.unwrap_or(false) {
+            let timeout_ms = args.max_wait_ms.unwrap_or(2000).min(30_000);
+            let _ = self
+                .reindex_states()
+                .wait_for_fresh_result(&args.source_id, Some(timeout_ms));
+        }
         let context_lines = (args.context_lines.max(0) as usize).min(50);
         let include = args.include.unwrap_or_else(|| vec!["body".to_string()]);
         let want_body = include.iter().any(|x| x == "body");
@@ -192,14 +200,28 @@ impl CodeService {
         let repo_path = args.repo_path.as_deref();
         let default_repo_store = self.ensure_repo_store(&args.source_id, repo_path).ok();
 
+        // FEEDBACK.md §3a: soft byte budget. When exceeded, later refs stub
+        // out with a structured suggestion instead of returning a JSON-escaped
+        // unreadable preview at the client. Uses BYTES_PER_TOKEN to keep the
+        // conversion consistent with the rest of the engine.
+        let bytes_budget: Option<u64> = args.max_tokens.map(|max_tokens| {
+            (max_tokens as u64).saturating_mul(codesight_storage::config::BYTES_PER_TOKEN)
+        });
+
         let mut items = Vec::new();
         let mut raw_bytes_total = 0u64;
         let mut warnings = Vec::new();
         let mut scopes = ReadScopeCounters::default();
         let mut returned_bytes = 0u64;
         let mut warned_full_file_reads = 0u64;
+        let mut budget_exhausted = false;
 
         for pref in &args.refs {
+            if budget_exhausted {
+                items.push(oversized_ref_stub(pref));
+                warnings.push(token_budget_warning(pref));
+                continue;
+            }
             let sid = pref.source_id.as_deref().unwrap_or(&args.source_id);
             let repo_store_for_ref = if sid == args.source_id {
                 default_repo_store.clone()
@@ -233,17 +255,31 @@ impl CodeService {
                         warned_full_file_reads += 1;
                     }
                     items.push(item);
+                    if let Some(budget) = bytes_budget
+                        && returned_bytes > budget
+                    {
+                        budget_exhausted = true;
+                    }
                 }
             }
         }
 
-        let timer = MetaBuilder::new(raw_bytes_total.max(1));
+        // FEEDBACK.md §3b: classify the retrieval so `tokens_saved: 0` on a
+        // whole-file read doesn't read as misuse. Pick the dominant scope —
+        // any non-file-full ref makes the overall class targeted.
+        let class = if scopes.symbol > 0 || scopes.section > 0 || scopes.file_range > 0 {
+            RetrievalClass::TargetedRange
+        } else {
+            RetrievalClass::WholeFileRead
+        };
+        let timer = MetaBuilder::new(raw_bytes_total.max(1)).with_class(class);
         let extra = build_read_meta_extras(
             &scopes,
             returned_bytes,
             warned_full_file_reads,
             args.verify,
             want_hash,
+            budget_exhausted,
         );
         self.success_response_with_meta_extra(&timer, json!({ "items": items }), warnings, extra)
     }
@@ -339,6 +375,56 @@ fn extract_item_bytes(item: &Value) -> u64 {
         .unwrap_or(0)
 }
 
+/// Stub emitted in place of an unread ref when the running byte budget has
+/// already been exhausted. Carries a concrete alternative tool + args so the
+/// agent can retry without guessing what a "token_budget_exceeded" means.
+fn oversized_ref_stub(pref: &ContentRef) -> Value {
+    let path = pref
+        .path
+        .as_deref()
+        .or(pref.stable_id.as_deref())
+        .or(pref.id.as_deref())
+        .unwrap_or("unknown");
+    json!({
+        "ref": {
+            "kind": pref.kind,
+            "path": path,
+            "source_id": pref.source_id,
+        },
+        "truncated": true,
+        "reason": "token_budget_exceeded",
+        "suggestion": {
+            "tool": "inspect_structure",
+            "args": {"view": "file_outline", "file_path": path},
+        },
+    })
+}
+
+/// Per-trimmed-ref warning (FEEDBACK.md §3a). One per stubbed ref so the
+/// agent can see exactly which inputs it paid for and which it needs to
+/// re-fetch via a narrower call.
+fn token_budget_warning(pref: &ContentRef) -> Value {
+    let path = pref
+        .path
+        .as_deref()
+        .or(pref.stable_id.as_deref())
+        .or(pref.id.as_deref())
+        .unwrap_or("unknown");
+    json!({
+        "code": "TOKEN_HEAVY_READ",
+        "message": format!(
+            "Ref '{}' was stubbed because the running byte budget was exhausted. Retry \
+             with inspect_structure view=file_outline, or read_content with \
+             start_line/end_line.",
+            path,
+        ),
+        "detail": {
+            "reason": "token_budget_exceeded",
+            "path": path,
+        },
+    })
+}
+
 fn token_heavy_read_warning(pref: &ContentRef, item_bytes: u64) -> Value {
     let path_str = pref
         .path
@@ -369,6 +455,7 @@ fn build_read_meta_extras(
     warned_full_file_reads: u64,
     verify: bool,
     want_hash: bool,
+    budget_exhausted: bool,
 ) -> Vec<(String, Value)> {
     let mut extra: Vec<(String, Value)> = vec![
         (
@@ -386,6 +473,14 @@ fn build_read_meta_extras(
             json!(warned_full_file_reads),
         ),
     ];
+
+    // FEEDBACK.md §3a: strip `next_step_hint` once the response is already
+    // over budget — it's duplicative and costs tokens we don't have.
+    if budget_exhausted {
+        extra.push(("truncated".to_string(), json!(true)));
+        extra.push(("truncated_by".to_string(), json!(["token_budget"])));
+        return extra;
+    }
 
     if verify || want_hash {
         extra.push((

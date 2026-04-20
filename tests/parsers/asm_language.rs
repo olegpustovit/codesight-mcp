@@ -376,7 +376,7 @@ fn test_parse_wla_dx_language_field() {
     let symbols = extract_wla_dx();
     assert!(!symbols.is_empty(), "should extract at least one symbol");
     for s in &symbols {
-        assert_eq!(s.language, "asm", "symbol {} has wrong language", s.name);
+        assert_eq!(s.language.as_str(), "asm", "symbol {} has wrong language", s.name);
     }
 }
 

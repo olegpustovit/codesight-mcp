@@ -28,10 +28,17 @@ pub(crate) fn build_registry(project_root: Option<&Path>) -> ExtractorRegistry {
     match project_root {
         None => CACHED_BASE.clone(),
         Some(root) => {
-            let overlay_roots = crate::adaptive_languages::project_query_pack_roots(root);
-            let has_overlay = overlay_roots.iter().any(|p| p.is_dir());
-            let extras = crate::adaptive_languages::project_extra_extensions(root);
-            if !has_overlay && extras.is_empty() {
+            let config = crate::adaptive_languages::read_project_config(root);
+            let has_overlay = config
+                .as_ref()
+                .and_then(|cfg| cfg.query_pack_roots.as_ref())
+                .is_some_and(|roots| !roots.is_empty())
+                || root.join(".codesight/queries").is_dir();
+            let extras_empty = config
+                .as_ref()
+                .and_then(|cfg| cfg.extra_extensions.as_ref())
+                .is_none_or(|m| m.is_empty());
+            if !has_overlay && extras_empty {
                 return CACHED_BASE.clone();
             }
             build_registry_uncached(project_root)
@@ -85,7 +92,7 @@ fn build_registry_uncached(project_root: Option<&Path>) -> ExtractorRegistry {
     extractors.push(Arc::new(VerseExtractor));
 
     for grammar in engine::catalogs::GrammarCatalog::builtin().iter() {
-        if curated_languages.contains(grammar.language_name) {
+        if curated_languages.contains(grammar.language_name()) {
             continue;
         }
         extractors.push(Arc::new(

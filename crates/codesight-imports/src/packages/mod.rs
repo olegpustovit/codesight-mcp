@@ -7,14 +7,12 @@
 
 use std::path::Path;
 
-pub mod dotnet;
-pub mod go;
-pub mod javascript;
-pub mod python;
 pub mod registry;
-pub mod rust;
 pub mod walker;
 
+pub use codesight_language_support::languages::rust::{
+    workspace_bin_targets_from_root, workspace_crates_from_root,
+};
 pub use registry::{
     CrossRepoEdge, PackageRegistry, RepoEntry, build_cross_repo_edges, build_package_registry,
     find_repos_for_package,
@@ -34,18 +32,12 @@ pub fn extract_package_names(dir: &str) -> Vec<String> {
 
 /// Extract the root package name from an import specifier for a given language.
 ///
-/// Returns empty string for relative imports. Languages not explicitly
-/// supported fall through to returning the specifier unchanged.
+/// Routes through `codesight_language_support::root_package_from_specifier`
+/// — the per-language `PackageManifest` trait now owns the logic
+/// (LANGUAGES.md Phase D.5). Languages without a registered package model
+/// return the specifier unchanged.
 pub fn extract_root_package_from_specifier(specifier: &str, language: &str) -> String {
-    match language.to_ascii_lowercase().as_str() {
-        "python" => python::root_package_from_specifier(specifier),
-        "javascript" | "typescript" | "tsx" | "jsx" => {
-            javascript::root_package_from_specifier(specifier)
-        }
-        "go" => go::root_package_from_specifier(specifier),
-        "rust" => rust::root_package_from_specifier(specifier),
-        _ => specifier.to_string(),
-    }
+    codesight_language_support::root_package_from_specifier(language, specifier)
 }
 
 #[cfg(test)]

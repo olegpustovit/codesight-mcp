@@ -141,9 +141,7 @@ roll back the same session.
 | [`src/cli/`](src/cli/) | Operator subcommands (`check`, `init`, hooks). |
 | [`crates/codesight-engine/`](crates/codesight-engine) | **L1 engine.** MCP tool dispatch, indexing orchestration, `AppConfig`, security, server support, `tools.json` contract. Backend-agnostic. |
 | [`crates/codesight-engine/src/tools.json`](crates/codesight-engine/src/tools.json) | **Frozen MCP contract.** Schema + handler ship together. |
-| [`crates/codesight-backend/`](crates/codesight-backend) | **L0.5 trait.** `CodeBackend` + `BackendRouter`. One trait; tree-sitter / LSP / hybrid impls plug in. |
-| [`crates/codesight-backend-treesitter/`](crates/codesight-backend-treesitter) | Tree-sitter `CodeBackend`. Wraps `codesight-extractors`. |
-| [`crates/codesight-backend-lsp/`](crates/codesight-backend-lsp) | Config-driven LSP `CodeBackend`. Per-language subprocess spawn + health gate. |
+| [`crates/codesight-backend/`](crates/codesight-backend) | **L0.5.** `CodeBackend` + `BackendRouter`; tree-sitter + LSP impls are Cargo features (`treesitter`, `lsp`) in the same crate. Engine uses `default-features = false`. |
 | [`crates/codesight-core/`](crates/codesight-core) | L0 primitives: `Symbol`, `FactQuality`, pipeline types. |
 | [`crates/codesight-analysis/`](crates/codesight-analysis) | Quality, impact, graph analysis. |
 | [`crates/codesight-extractors/`](crates/codesight-extractors) | Tree-sitter SCM engine + query packs. Implementation detail of the tree-sitter backend. |
@@ -160,8 +158,8 @@ Layer invariants (enforced by `tests/crate_graph.rs`):
 
 - **L0** (primitives): `codesight-core` ← `-analysis` / `-extractors` /
   `-retrieval` / `-storage` / `-imports` / `-framework`. No upward deps.
-- **L0.5** (backend trait): `codesight-backend` ← `-backend-treesitter` /
-  `-backend-lsp`. Concrete backends never depend on the engine.
+- **L0.5** (backend): `codesight-backend` holds the trait and optional impls.
+  Concrete backend code never depends on the engine.
 - **L1** (engine): `codesight-engine` depends on the trait + L0. **Does not
   depend on any concrete backend** (Phase C gate — `cargo check -p
   codesight-engine` pulls no tree-sitter / LSP types through its lib).

@@ -157,7 +157,7 @@ fn remap_does_not_match_across_directory_boundary() {
 #[test]
 fn list_repos_source_root_remapped() {
     use codesight_engine::config::AppConfig;
-    use codesight_engine::service::CodeService;
+    
     use serde_json::json;
 
     let workspace = tempfile::tempdir().expect("tempdir");
@@ -173,7 +173,7 @@ fn list_repos_source_root_remapped() {
     let index_root = workspace_canon.join(".index");
     let mut config = AppConfig::new(index_root.clone());
     // No path_map during indexing.
-    let service = CodeService::new(config.clone()).expect("service");
+    let service = codesight_mcp::test_support::make_service_from_config(config.clone()).expect("service");
 
     let indexed = service
         .dispatch(
@@ -194,7 +194,7 @@ fn list_repos_source_root_remapped() {
     // Use the canonicalized workspace path as the original prefix.
     let orig_prefix = workspace_canon.to_string_lossy().to_string();
     config.path_map = vec![(orig_prefix.clone(), "/remapped/prefix".to_owned())];
-    let service2 = CodeService::new(config).expect("service2");
+    let service2 = codesight_mcp::test_support::make_service_from_config(config).expect("service2");
 
     let catalog = service2
         .dispatch("catalog_sources", json!({}))

@@ -3,8 +3,8 @@
 
 use std::fs;
 
-use codesight_engine::config::AppConfig;
 use codesight_engine::service::CodeService;
+use codesight_mcp::test_support::make_service;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -59,7 +59,7 @@ def complex_func(a, b):
     fs::create_dir_all(&orphan).unwrap();
     fs::write(orphan.join("unused.py"), "def unused_thing():\n    pass\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = make_service(&ws.path().join("idx")).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

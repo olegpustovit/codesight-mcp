@@ -6,7 +6,8 @@ use codesight_storage::storage::AnalysisSymbol;
 use crate::evidence::EvidenceNote;
 
 use super::entrypoints::{
-    detect_cargo_target_files, detect_main_guard_files, entrypoint_root_notes, is_test_file,
+    detect_cargo_target_files, detect_foreign_trait_impl_files, detect_main_guard_files,
+    entrypoint_root_notes, is_test_file,
 };
 
 pub(crate) struct RepoReachability {
@@ -27,6 +28,11 @@ pub(crate) fn build_repo_reachability(
 ) -> RepoReachability {
     let main_guard_files = detect_main_guard_files(root_path, all_files, all_symbols);
     let cargo_target_files = detect_cargo_target_files(root_path, all_files);
+    // FEEDBACK.md §2: structs that only exist to satisfy a foreign trait
+    // (Drop, Dispatcher, serde::Deserialize, …) are reached at runtime via
+    // vtable; no symbol-reference edge points at them. Treat their
+    // enclosing file as a live root.
+    let foreign_trait_impl_files = detect_foreign_trait_impl_files(root_path, all_files);
     let mut live_roots = HashSet::new();
     let mut explicit_live_roots = HashSet::new();
     let mut evidence_notes = Vec::new();
@@ -61,6 +67,17 @@ pub(crate) fn build_repo_reachability(
             evidence_notes.push(EvidenceNote::structural(
                 "cargo_target",
                 format!("file '{file}' is a Cargo [[test]]/[[example]]/[[bench]]/[[bin]] target"),
+            ));
+        }
+
+        if foreign_trait_impl_files.contains(file) {
+            live_roots.insert(file.clone());
+            explicit_live_roots.insert(file.clone());
+            evidence_notes.push(EvidenceNote::heuristic(
+                "foreign_trait_impl",
+                format!(
+                    "file '{file}' contains `impl <ForeignTrait> for X` — reached at runtime via vtable"
+                ),
             ));
         }
     }

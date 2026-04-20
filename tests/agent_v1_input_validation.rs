@@ -10,7 +10,7 @@ use tempfile::tempdir;
 
 fn make_svc() -> (tempfile::TempDir, CodeService) {
     let dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(dir.path().to_path_buf())).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().to_path_buf())).unwrap();
     (dir, svc)
 }
 
@@ -28,7 +28,7 @@ fn resolve_source_owner_slash_name() {
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("main.py"), "x = 1\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",
@@ -64,7 +64,7 @@ fn resolve_source_name_only_lookup() {
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("main.py"), "x = 1\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",
@@ -99,7 +99,7 @@ fn resolve_source_display_name_lookup() {
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("main.py"), "x = 1\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",
@@ -162,7 +162,7 @@ fn resolve_source_ambiguous_display_name_raises() {
     fs::write(root1.join("main.py"), "x = 1\n").unwrap();
     fs::write(root2.join("main.py"), "y = 2\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let r1 = svc
         .dispatch(
             "ingest_sources",
@@ -369,7 +369,7 @@ fn ingest_fixture_repo(svc: &CodeService, dir: &tempfile::TempDir) -> String {
 #[test]
 fn search_catalog_output_mode_count() {
     let dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let sid = ingest_fixture_repo(&svc, &dir);
     let r = svc
         .dispatch(
@@ -397,7 +397,7 @@ fn search_catalog_output_mode_count() {
 #[test]
 fn search_catalog_output_mode_files_with_matches() {
     let dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let sid = ingest_fixture_repo(&svc, &dir);
     let r = svc
         .dispatch(
@@ -446,7 +446,7 @@ fn search_catalog_output_mode_invalid() {
 #[test]
 fn search_catalog_pattern_alias_works() {
     let dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let sid = ingest_fixture_repo(&svc, &dir);
     let r = svc
         .dispatch(
@@ -465,7 +465,7 @@ fn search_catalog_pattern_alias_works() {
 #[test]
 fn search_catalog_pattern_and_query_conflict() {
     let dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let sid = ingest_fixture_repo(&svc, &dir);
     let r = svc
         .dispatch(
@@ -484,7 +484,7 @@ fn search_catalog_pattern_and_query_conflict() {
 #[test]
 fn search_catalog_regex_compile_error_message() {
     let dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let sid = ingest_fixture_repo(&svc, &dir);
     let r = svc
         .dispatch(
@@ -515,7 +515,7 @@ fn search_catalog_regex_compile_error_message() {
 #[test]
 fn inspect_graph_imports_returns_outgoing_deps() {
     let dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let sid = ingest_fixture_repo(&svc, &dir);
     let r = svc
         .dispatch(
@@ -542,7 +542,7 @@ fn inspect_graph_imports_returns_outgoing_deps() {
 #[test]
 fn inspect_graph_imports_requires_file_path() {
     let dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let sid = ingest_fixture_repo(&svc, &dir);
     let r = svc
         .dispatch(
@@ -561,7 +561,7 @@ fn inspect_graph_imports_requires_file_path() {
 #[test]
 fn read_content_plain_read_omits_next_step_hint() {
     let dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(dir.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx"))).unwrap();
     let sid = ingest_fixture_repo(&svc, &dir);
     let r = svc
         .dispatch(

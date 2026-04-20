@@ -377,6 +377,7 @@ mod tests {
             scope: None,
             exclude: None,
             include_non_code: None,
+            file_pattern: None,
         };
         let f = RefFilter::from_args(&args);
         assert!(!f.admits("fixture.json"));
@@ -408,6 +409,7 @@ mod tests {
             scope: Some("src/service/".into()),
             exclude: Some(vec!["tests/".into()]),
             include_non_code: None,
+            file_pattern: None,
         };
         let f = RefFilter::from_args(&args);
         assert!(f.admits("src/service/foo.rs"));
@@ -440,6 +442,7 @@ mod tests {
             scope: None,
             exclude: None,
             include_non_code: Some(true),
+            file_pattern: None,
         };
         let f = RefFilter::from_args(&args);
         assert!(f.admits("scripts/stress/x.json"));

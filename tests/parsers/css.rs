@@ -3,14 +3,14 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
 use codesight_extractors::extractors::{
     ExtractorRegistry, LanguageExtractor, LessExtractor, SassExtractor, StylExtractor,
 };
 use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
-    let source = QUERY_FILES
+    let source = query_files_slice()
         .iter()
         .find(|(k, _)| *k == lang_key)
         .unwrap_or_else(|| panic!("no query for {lang_key}"))
@@ -182,7 +182,7 @@ fn test_css_class_selector() {
         .find(|s| s.name == ".container")
         .expect(".container symbol missing");
     assert_eq!(s.kind, SymbolKind::Class);
-    assert_eq!(s.language, "css");
+    assert_eq!(s.language.as_str(), "css");
     assert!(s.start_line > 0);
 }
 
@@ -440,7 +440,7 @@ fn test_scss_variable_kind() {
         .find(|s| s.name == "$primary-color")
         .expect("$primary-color symbol missing");
     assert_eq!(s.kind, SymbolKind::Constant);
-    assert_eq!(s.language, "scss");
+    assert_eq!(s.language.as_str(), "scss");
     assert!(
         s.signature.contains("$primary-color"),
         "signature should contain $primary-color, got: {}",
@@ -514,7 +514,7 @@ fn test_scss_rule_set_kind() {
         .find(|s| s.name == ".container")
         .expect(".container symbol missing");
     assert_eq!(s.kind, SymbolKind::Class);
-    assert_eq!(s.language, "scss");
+    assert_eq!(s.language.as_str(), "scss");
 }
 
 /// Ref: test_scss_placeholder_extracted

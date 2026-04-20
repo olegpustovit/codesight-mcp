@@ -4,7 +4,6 @@ use std::process::Command;
 
 use codesight_analysis::quality::hotspots_payload;
 use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
 use codesight_storage::storage::IndexStore;
 use codesight_mcp::test_support::{index_code_fixture, open_code_store, write_files};
 use serde_json::{Value, json};
@@ -76,7 +75,7 @@ fn build_git_repo() -> Option<(tempfile::TempDir, AppConfig, String, IndexStore)
 }
 
 fn get_hotspots(store: &IndexStore, min_complexity: u64, top_n: usize) -> Value {
-    hotspots_payload(store, min_complexity, top_n).unwrap()
+    hotspots_payload(store, min_complexity, top_n, false).unwrap()
 }
 
 #[test]
@@ -140,7 +139,7 @@ fn hotspots_min_complexity_filter() {
 #[test]
 fn hotspots_missing_repo_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",
@@ -158,7 +157,7 @@ fn hotspots_timing_present() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     write_files(&src, &[("a.py", "def sample():\n    return 1\n")]).unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let indexed = svc
         .dispatch(
             "ingest_sources",

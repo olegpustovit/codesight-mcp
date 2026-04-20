@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
 use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
 use codesight_core::SymbolKind;
 
@@ -41,7 +41,7 @@ end
 ";
 
 fn luau_extractor() -> ScmExtractor {
-    let source = QUERY_FILES
+    let source = query_files_slice()
         .iter()
         .find(|(key, _)| *key == "luau")
         .unwrap_or_else(|| panic!("no query pack for luau"))
@@ -235,9 +235,11 @@ fn test_luau_language_field() {
     assert!(!symbols.is_empty(), "should have at least one symbol");
     for sym in &symbols {
         assert_eq!(
-            sym.language, "luau",
+            sym.language.as_str(),
+            "luau",
             "symbol {:?} has language {:?}, expected 'luau'",
-            sym.name, sym.language
+            sym.name,
+            sym.language
         );
     }
 }

@@ -1,59 +1,25 @@
-use std::{collections::HashSet, fs, path::Path};
+//! Dead-code entrypoint detection — thin wrapper over the per-language
+//! liveness axis in `codesight-language-support`.
+//!
+//! LANGUAGES.md §4.4: entrypoint basenames, test-file detection, fixture
+//! detection, Rust `FOREIGN_TRAIT_BASES`, Python `__main__` guards, and
+//! Cargo target discovery all live in per-language folders now. This module
+//! keeps the public shape (`entrypoint_root_notes`,
+//! `detect_main_guard_files`, `detect_cargo_target_files`,
+//! `detect_foreign_trait_impl_files`, `is_test_file`, `is_test_fixture`)
+//! so callers don't change in the same patch.
 
+use std::collections::HashSet;
+use std::path::Path;
+
+use codesight_language_support::builtin_registry;
+use codesight_language_support::manifest::{PYTHON, RUST};
 use codesight_storage::storage::AnalysisSymbol;
 
 use crate::evidence::EvidenceNote;
 
-pub(crate) const ENTRYPOINT_BASENAMES: &[&str] = &[
-    "main.py",
-    "__main__.py",
-    "__init__.py",
-    "app.py",
-    "application.py",
-    "wsgi.py",
-    "asgi.py",
-    "manage.py",
-    "setup.py",
-    "conftest.py",
-    "main.js",
-    "index.js",
-    "app.js",
-    "server.js",
-    "main.ts",
-    "index.ts",
-    "app.ts",
-    "server.ts",
-    "main.go",
-    "main.rs",
-    // Rust crate roots (not just binaries)
-    "lib.rs",
-    // Cargo build scripts — always live via cargo, never reachable via
-    // normal import graphs.
-    "build.rs",
-    "main.c",
-    "main.cpp",
-];
-
-pub(crate) fn is_test_file(file_path: &str) -> bool {
-    let basename = Path::new(file_path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
-    basename.starts_with("test_")
-        || basename.starts_with("tests")
-        || file_path.contains("/tests/")
-        || file_path.contains("/test/")
-}
-
-/// Test/bench fixture files are parser inputs held as source of truth for
-/// tree-sitter snapshots. They are never executed and have no import edges,
-/// so reachability-based dead-code detection flags every one of them with
-/// confidence 1.0. Skip them unconditionally.
-pub(crate) fn is_test_fixture(file_path: &str) -> bool {
-    file_path.contains("/fixtures/")
-        || file_path.starts_with("fixtures/")
-        || file_path.contains("/lang_samples/")
-}
+pub(crate) use codesight_language_support::is_test_file;
+pub(crate) use codesight_language_support::is_test_fixture;
 
 pub(crate) fn entrypoint_root_notes(
     file_path: &str,
@@ -65,7 +31,8 @@ pub(crate) fn entrypoint_root_notes(
         .unwrap_or("");
     let mut notes = Vec::new();
 
-    if ENTRYPOINT_BASENAMES.contains(&basename) || basename.starts_with("main.") {
+    if codesight_language_support::is_entrypoint_basename(basename) || basename.starts_with("main.")
+    {
         notes.push(EvidenceNote::heuristic(
             "entrypoint_basename",
             format!("basename '{basename}' is treated as an entry root"),
@@ -89,19 +56,15 @@ pub(crate) fn detect_main_guard_files(
     all_files: &[String],
     all_symbols: &[AnalysisSymbol],
 ) -> HashSet<String> {
-    let mut files = HashSet::new();
-
-    if let Some(root_path) = root_path {
-        for file in all_files {
-            let absolute_path = root_path.join(file);
-            if let Ok(content) = fs::read_to_string(&absolute_path)
-                && content.contains("__name__")
-                && content.contains("__main__")
-            {
-                files.insert(file.clone());
-            }
-        }
-    }
+    let python = builtin_registry().get(PYTHON).map(|lang| lang.liveness());
+    let mut files: HashSet<String> = python
+        .map(|policy| {
+            policy
+                .additional_live_root_files(root_path, all_files)
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default();
 
     for symbol in all_symbols {
         if symbol.source_text.contains("__name__") && symbol.source_text.contains("__main__") {
@@ -112,105 +75,67 @@ pub(crate) fn detect_main_guard_files(
     files
 }
 
+pub(crate) fn detect_cargo_target_files(
+    root_path: Option<&Path>,
+    all_files: &[String],
+) -> HashSet<String> {
+    rust_live_roots(root_path, all_files, Filter::Cargo)
+}
+
+pub(crate) fn detect_foreign_trait_impl_files(
+    root_path: Option<&Path>,
+    all_files: &[String],
+) -> HashSet<String> {
+    rust_live_roots(root_path, all_files, Filter::ForeignTraitImpl)
+}
+
+enum Filter {
+    Cargo,
+    ForeignTraitImpl,
+}
+
+fn rust_live_roots(
+    root_path: Option<&Path>,
+    all_files: &[String],
+    which: Filter,
+) -> HashSet<String> {
+    // Rust's `additional_live_root_files` returns the union of foreign-trait
+    // impl files and Cargo targets. We re-filter here so callers can still
+    // ask for each subset independently (the evidence-note text differs).
+    let Some(rust) = builtin_registry().get(RUST) else {
+        return HashSet::new();
+    };
+    let all = rust.liveness().additional_live_root_files(root_path, all_files);
+    match which {
+        Filter::Cargo => all
+            .into_iter()
+            .filter(|f| is_cargo_target_path(f))
+            .collect(),
+        Filter::ForeignTraitImpl => all
+            .into_iter()
+            .filter(|f| !is_cargo_target_path(f))
+            .collect(),
+    }
+}
+
+fn is_cargo_target_path(path: &str) -> bool {
+    // Cargo targets sit under tests/, examples/, benches/, or src/bin/. A
+    // foreign-trait impl file lives elsewhere.
+    path.starts_with("tests/")
+        || path.contains("/tests/")
+        || path.starts_with("examples/")
+        || path.contains("/examples/")
+        || path.starts_with("benches/")
+        || path.contains("/benches/")
+        || path.starts_with("src/bin/")
+        || path.contains("/src/bin/")
+}
+
 fn glob_match(pattern: &str, path: &str) -> bool {
     let re_str = pattern.replace('.', r"\.").replace('*', "[^/]*");
     regex::Regex::new(&format!("(?:^|/){re_str}$"))
         .map(|re| re.is_match(path))
         .unwrap_or(false)
-}
-
-/// Collect Cargo target files that are always live roots in practice:
-///
-/// - Auto-discovered targets: any `.rs` file under `tests/`, `examples/`, or
-///   `benches/` next to a `Cargo.toml`.
-/// - Explicit `[[test]]` / `[[example]]` / `[[bench]]` entries with a `path`
-///   field.
-///
-/// Paths are returned relative to `root_path` (the indexed repo root), matching
-/// the shape of `all_files`. When `root_path` is `None` this is a no-op — we
-/// can't read `Cargo.toml` contents without a disk anchor.
-///
-/// `Cargo.toml` is discovered by walking the filesystem from `root_path`
-/// rather than scanning `all_files`, because the symbol indexer does not
-/// track `.toml` manifests — the list would otherwise come back empty and
-/// the detector would become a no-op.
-pub(crate) fn detect_cargo_target_files(
-    root_path: Option<&Path>,
-    all_files: &[String],
-) -> HashSet<String> {
-    let mut targets = HashSet::new();
-    let Some(root) = root_path else {
-        return targets;
-    };
-
-    let file_set: HashSet<&str> = all_files.iter().map(String::as_str).collect();
-    let cargo_dirs: Vec<String> = ignore::WalkBuilder::new(root)
-        .git_ignore(true)
-        .hidden(false)
-        .build()
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.file_type().is_some_and(|ft| ft.is_file()) && entry.file_name() == "Cargo.toml"
-        })
-        .filter_map(|entry| {
-            entry
-                .path()
-                .parent()
-                .and_then(|p| p.strip_prefix(root).ok())
-                .and_then(|p| p.to_str())
-                .map(|s| s.replace('\\', "/"))
-        })
-        .collect();
-
-    let join_rel = |dir: &str, sub: &str| -> String {
-        if dir.is_empty() {
-            sub.to_string()
-        } else {
-            format!("{dir}/{sub}")
-        }
-    };
-
-    for cargo_dir in &cargo_dirs {
-        for subdir in ["tests", "examples", "benches"] {
-            let prefix = join_rel(cargo_dir, subdir);
-            for file in all_files {
-                if !file.ends_with(".rs") {
-                    continue;
-                }
-                let matches_subdir = file == &prefix
-                    || file.starts_with(&format!("{prefix}/"))
-                    || file.starts_with(&format!("{prefix}\\"));
-                if matches_subdir {
-                    targets.insert(file.clone());
-                }
-            }
-        }
-
-        let cargo_toml_rel = join_rel(cargo_dir, "Cargo.toml");
-        let cargo_toml_abs = root.join(&cargo_toml_rel);
-        let Ok(contents) = fs::read_to_string(&cargo_toml_abs) else {
-            continue;
-        };
-        let Ok(parsed) = contents.parse::<toml::Value>() else {
-            continue;
-        };
-        for key in ["test", "example", "bench", "bin"] {
-            let Some(entries) = parsed.get(key).and_then(|v| v.as_array()) else {
-                continue;
-            };
-            for entry in entries {
-                let Some(path) = entry.get("path").and_then(|p| p.as_str()) else {
-                    continue;
-                };
-                let rel = join_rel(cargo_dir, path);
-                if file_set.contains(rel.as_str()) {
-                    targets.insert(rel);
-                }
-            }
-        }
-    }
-
-    targets
 }
 
 #[cfg(test)]

@@ -34,7 +34,7 @@ fn setup_broken_links_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Cod
         }
         fs::write(&path, content).unwrap();
     }
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest_docs(&svc, &doc_root);
     (ws, svc, sid)
 }
@@ -60,7 +60,7 @@ fn get_broken_links(svc: &CodeService, sid: &str) -> Value {
 #[test]
 fn doc_broken_links_not_indexed() {
     let ws = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",

@@ -134,6 +134,19 @@ pub struct ReadContentArgs {
     pub context_lines: i64,
     #[serde(default)]
     pub repo_path: Option<String>,
+    /// Soft token budget for the combined item payload. Once exceeded, later
+    /// refs are stubbed with a structured `truncated: true` marker instead of
+    /// returning unreadable JSON-escaped previews (FEEDBACK.md §3a). Alias:
+    /// `token_budget`.
+    #[serde(default, alias = "token_budget")]
+    pub max_tokens: Option<u32>,
+    /// If a reindex is mid-flight for this source_id, block until it
+    /// completes or `max_wait_ms` elapses (FEEDBACK.md §5b). Default: false
+    /// — the handler annotates STALE_DATA_WARNING and returns immediately.
+    #[serde(default)]
+    pub wait_for_fresh: Option<bool>,
+    #[serde(default)]
+    pub max_wait_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,12 +224,20 @@ pub struct InspectGraphArgs {
     /// `dependencies` (≈4 bytes/token). Alias `token_budget`.
     #[serde(default, alias = "token_budget")]
     pub max_tokens: Option<u32>,
-    /// `find_references`: path-prefix / substring inclusion filter.
+    /// Path-prefix / substring inclusion filter. Applies to
+    /// `find_references`, `imports`, `importers`, `references`, `related`,
+    /// and `calls` (FEEDBACK.md §6b).
     #[serde(default)]
     pub scope: Option<String>,
-    /// `find_references`: path prefixes / substrings to skip.
+    /// Path prefixes / substrings to skip (complements `scope`). Applies to
+    /// the same graph modes as `scope`.
     #[serde(default)]
     pub exclude: Option<Vec<String>>,
+    /// Glob-ish pattern to filter edge endpoints by file path. Supports
+    /// `*` / `**` / `?` like a conservative gitignore. Applies to the same
+    /// graph modes as `scope` (FEEDBACK.md §6b).
+    #[serde(default)]
+    pub file_pattern: Option<String>,
     /// `find_references`: when true, include hits in data-format files
     /// (`json`, `yaml`, `toml`, `xml`, `md`). Default false — those files
     /// are almost never the right answer for "who references fn X".
@@ -301,6 +322,17 @@ pub struct EvaluateQualityArgs {
     /// `token_budget`.
     #[serde(default, alias = "token_budget")]
     pub max_tokens: Option<u32>,
+    /// Max `caller_files` entries per `refactor_targets` candidate
+    /// (FEEDBACK.md Phase 4b). When truncated, `caller_files_total` carries
+    /// the untruncated count. Defaults to 10.
+    #[serde(default)]
+    pub top_caller_files: Option<usize>,
+    /// If true, `hotspots` / `refactor_targets` scan conventional dirs
+    /// (scripts/, tests/, examples/, benches/, build.rs, fixtures/, …).
+    /// Defaults to false so codegen helpers and fixture noise stop
+    /// dominating the top of the ranking (FEEDBACK.md Phase 4a).
+    #[serde(default)]
+    pub include_conventional: Option<bool>,
     // regression_check fields
     #[serde(default)]
     pub snapshot_name: Option<String>,

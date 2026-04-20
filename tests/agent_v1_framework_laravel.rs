@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 framework laravel.
 
-use codesight_framework::FrameworkProvider;
-use codesight_framework::laravel::*;
+use codesight_language_support::frameworks::FrameworkProvider;
+use codesight_language_support::languages::php::laravel::*;
 
 // ── _guess_table ────────────────────────────────────────────────────────────
 #[test]

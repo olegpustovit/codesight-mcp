@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 codesight-core = { path = "../codesight-core" }
+codesight-language-support = { path = "../codesight-language-support" }
 codesight-storage = { path = "../codesight-storage" }
 ignore = "0.4"
 regex = "1"

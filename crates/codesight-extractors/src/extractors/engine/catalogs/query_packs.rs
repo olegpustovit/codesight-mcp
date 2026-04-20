@@ -3,40 +3,37 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use codesight_language_support::{
+    builtin_extractor_version_stamp as ls_builtin_extractor_version_stamp, builtin_query_packs,
+};
 use serde::Deserialize;
 
 use crate::adaptive_languages::project_query_pack_roots;
 
 use super::metadata::{ScmMetadata, parse_scm_header};
 
-include!(concat!(env!("OUT_DIR"), "/builtin_query_packs.rs"));
-
 /// Content-addressed stamp over the built-in query pack payload plus the
-/// crate version. Used by the indexer to detect that extractor behavior has
-/// changed even when no source file on disk has — tags.scm edits, grammar
-/// bumps, and new built-in packs all change the stamp, forcing a rehash of
-/// previously-cached files on next incremental ingest.
+/// crate version. Phase C delegates to `codesight-language-support`; the
+/// computation and payload are identical.
 pub fn builtin_extractor_version_stamp() -> &'static str {
+    ls_builtin_extractor_version_stamp()
+}
+
+/// Lazy `(pack_id, tags.scm)` slice over the language-support pack table.
+/// Used by `tests/parsers/*.rs` helpers that previously reached into the
+/// generated `QUERY_FILES` constant. Phase D task: migrate those helpers to
+/// `QueryPackCatalog::builtin().find_by_pack_id(..)` and delete this.
+pub fn query_files_slice() -> &'static [(&'static str, &'static str)] {
     use std::sync::OnceLock;
-    static STAMP: OnceLock<String> = OnceLock::new();
-    STAMP
+    static SLICE: OnceLock<Vec<(&'static str, &'static str)>> = OnceLock::new();
+    SLICE
         .get_or_init(|| {
-            let mut hasher = blake3::Hasher::new();
-            hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
-            hasher.update(b"\0");
-            for (pack_id, query, injections, metadata) in BUILTIN_QUERY_PACKS {
-                hasher.update(pack_id.as_bytes());
-                hasher.update(b"\0");
-                hasher.update(query.as_bytes());
-                hasher.update(b"\0");
-                hasher.update(injections.unwrap_or("").as_bytes());
-                hasher.update(b"\0");
-                hasher.update(metadata.unwrap_or("").as_bytes());
-                hasher.update(b"\0");
-            }
-            hasher.finalize().to_hex().to_string()
+            builtin_query_packs()
+                .iter()
+                .map(|(pack_id, tags, _, _)| (*pack_id, *tags))
+                .collect()
         })
-        .as_str()
+        .as_slice()
 }
 
 #[derive(Clone)]
@@ -79,7 +76,7 @@ impl QueryPackMetadataFile {
 
 impl QueryPackCatalog {
     pub fn builtin() -> Self {
-        let packs = BUILTIN_QUERY_PACKS
+        let packs = builtin_query_packs()
             .iter()
             .map(
                 |(pack_id, query_source, injections_source, metadata_source)| {

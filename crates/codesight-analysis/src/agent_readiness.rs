@@ -1,12 +1,22 @@
 //! Agent-readiness scoring based on navigability, comprehensibility,
 //! verifiability, and change safety.
+//!
+//! Per-language heuristics (visibility, type-density, family, nesting
+//! mode, entry-points) live in `codesight-language-support`. This module
+//! is pure scoring math on top of the façade.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use codesight_language_support::{
+    fallback_type_baseline_for_path, has_restricted_visibility, is_test_file,
+    language_family_for_path, max_nesting_depth_for_path, measured_type_density_for_path,
+};
+use codesight_language_support::traits::complexity::LanguageFamily;
+use codesight_storage::storage::AnalysisSymbol;
+
 use crate::complexity::cyclomatic_complexity;
 use crate::thresholds::current_thresholds;
-use codesight_storage::storage::AnalysisSymbol;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AgentReadinessDimensions {
@@ -56,21 +66,6 @@ pub struct ScopedAgentReadiness {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LanguageFamily {
-    BracedStatic,
-    ScriptedDynamic,
-    FunctionalExpression,
-    DeclarativeMarkup,
-    Unknown,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum NestingMode {
-    Brace,
-    Indent,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TypeAnnotationMethod {
     Measured,
     BaselineFallback,
@@ -86,67 +81,9 @@ impl TypeAnnotationMethod {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct LanguageProfile {
-    language: &'static str,
-    family: LanguageFamily,
-    nesting_mode: NestingMode,
-}
-
-impl LanguageProfile {
-    fn function_length_warn(self) -> Option<u32> {
-        match self.family {
-            LanguageFamily::BracedStatic => Some(75),
-            LanguageFamily::ScriptedDynamic => Some(40),
-            LanguageFamily::FunctionalExpression => Some(30),
-            LanguageFamily::DeclarativeMarkup | LanguageFamily::Unknown => None,
-        }
-    }
-
-    fn fallback_type_baseline(self) -> Option<f64> {
-        match self.language {
-            "python" => Some(0.4),
-            "typescript" | "tsx" => Some(0.7),
-            "javascript" | "jsx" | "ruby" | "perl" | "lua" => Some(0.1),
-            "php" => Some(0.3),
-            "haskell" => Some(0.9),
-            "scala" => Some(0.7),
-            "elixir" | "erlang" => Some(0.3),
-            "clojure" => Some(0.1),
-            _ => match self.family {
-                LanguageFamily::BracedStatic => Some(1.0),
-                LanguageFamily::ScriptedDynamic => Some(0.3),
-                LanguageFamily::FunctionalExpression => Some(0.5),
-                LanguageFamily::DeclarativeMarkup | LanguageFamily::Unknown => None,
-            },
-        }
-    }
-
-    fn supports_measured_types(self) -> bool {
-        matches!(
-            self.language,
-            "python"
-                | "typescript"
-                | "tsx"
-                | "javascript"
-                | "jsx"
-                | "php"
-                | "rust"
-                | "go"
-                | "java"
-                | "csharp"
-                | "cpp"
-                | "kotlin"
-                | "swift"
-                | "dart"
-                | "scala"
-        )
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
 struct FunctionFacts<'a> {
     sym: &'a AnalysisSymbol,
-    profile: LanguageProfile,
+    family: LanguageFamily,
     importance: f64,
     file_fan_in: usize,
     cyclomatic: usize,
@@ -160,29 +97,6 @@ struct FunctionFacts<'a> {
 
 pub fn is_fn_method(kind: &str) -> bool {
     kind.eq_ignore_ascii_case("function") || kind.eq_ignore_ascii_case("method")
-}
-
-pub fn is_test_file(path: &str) -> bool {
-    const DIR_MARKERS: &[&str] = &["/tests/", "/__tests__/", "/spec/", "/test/"];
-    const SUFFIXES: &[&str] = &[
-        "_test.rs",
-        "_test.py",
-        "_test.go",
-        "_test.ts",
-        "_test.js",
-        ".test.ts",
-        ".test.js",
-        ".test.tsx",
-        ".test.jsx",
-        "_spec.rb",
-        "_spec.ts",
-        "_spec.js",
-    ];
-    let lower = path.to_ascii_lowercase();
-    DIR_MARKERS.iter().any(|m| lower.contains(m))
-        || SUFFIXES.iter().any(|s| lower.ends_with(s))
-        || lower.starts_with("tests/")
-        || lower.starts_with("test/")
 }
 
 pub fn tested_file_set(
@@ -393,8 +307,7 @@ fn agent_signal_from_inputs(
         structural_localization: compute_structural_localization(facts),
         nesting_depth_health: weighted_health(facts, |fact| fact.nesting_depth <= 4),
         function_length_health: weighted_health(facts, |fact| {
-            fact.profile
-                .function_length_warn()
+            codesight_language_support::function_length_warn_for_path(&fact.sym.file_path)
                 .is_some_and(|limit| fact.line_span <= limit)
         }),
         type_annotation_density: weighted_type_density(facts),
@@ -450,7 +363,7 @@ fn agent_signal_from_inputs(
     let graph_coverage_ratio = graph_backed_function_files as f64 / total_function_files as f64;
     let family_known_ratio = facts
         .iter()
-        .filter(|fact| fact.profile.family != LanguageFamily::Unknown)
+        .filter(|fact| fact.family != LanguageFamily::Unknown)
         .count() as f64
         / facts.len() as f64;
     let measured_type_ratio = measured_type_count as f64 / facts.len() as f64;
@@ -513,9 +426,9 @@ fn build_function_facts<'a>(
         .iter()
         .filter(|sym| is_fn_method(&sym.kind))
         .filter_map(|sym| {
-            let profile = language_profile(&sym.file_path);
+            let family = language_family_for_path(&sym.file_path);
             if matches!(
-                profile.family,
+                family,
                 LanguageFamily::DeclarativeMarkup | LanguageFamily::Unknown
             ) {
                 return None;
@@ -524,14 +437,14 @@ fn build_function_facts<'a>(
             let file_churn = *churn.get(&sym.file_path).unwrap_or(&0);
             let importance = importance_weight(file_fan_in, file_churn);
             let cyclomatic = cyclomatic_complexity(&sym.source_text);
-            let nesting_depth = max_nesting_depth(&sym.source_text, profile);
+            let nesting_depth = max_nesting_depth_for_path(&sym.source_text, &sym.file_path);
             let line_span = sym.end_line.saturating_sub(sym.start_line) + 1;
             let (type_annotation_score, type_annotation_method) =
-                measure_type_annotation_density(sym, profile);
+                measure_type_annotation(sym);
 
             Some(FunctionFacts {
                 sym,
-                profile,
+                family,
                 importance,
                 file_fan_in,
                 cyclomatic,
@@ -767,8 +680,7 @@ fn compute_interface_encapsulation(all_symbols: &[AnalysisSymbol]) -> f64 {
             continue;
         }
         total += 1;
-        let profile = language_profile(&sym.file_path);
-        if has_restricted_visibility(sym, profile.language) {
+        if has_restricted_visibility(&sym.file_path, &sym.source_text, &sym.name) {
             restricted += 1;
         }
     }
@@ -824,703 +736,20 @@ fn is_test_symbol(sym: &AnalysisSymbol) -> bool {
     is_test_file(&sym.file_path) || sym.id.contains("::tests.")
 }
 
-fn language_profile(file_path: &str) -> LanguageProfile {
-    let lower = file_path.to_ascii_lowercase();
-    let language = if lower.ends_with(".blade.php") {
-        "blade"
-    } else if lower.ends_with(".cshtml") || lower.ends_with(".razor") {
-        "razor"
-    } else if lower.ends_with("makefile") || lower.ends_with("/makefile") {
-        "makefile"
-    } else {
-        match lower.rsplit('.').next().unwrap_or("") {
-            "rs" => "rust",
-            "go" => "go",
-            "java" => "java",
-            "cs" => "csharp",
-            "cc" | "cp" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => "cpp",
-            "swift" => "swift",
-            "kt" | "kts" => "kotlin",
-            "dart" => "dart",
-            "py" | "pyi" => "python",
-            "rb" => "ruby",
-            "js" | "mjs" | "cjs" => "javascript",
-            "ts" | "mts" | "cts" => "typescript",
-            "tsx" => "tsx",
-            "jsx" => "jsx",
-            "php" => "php",
-            "pl" | "pm" => "perl",
-            "lua" => "lua",
-            "ex" | "exs" => "elixir",
-            "erl" | "hrl" => "erlang",
-            "hs" => "haskell",
-            "ml" | "mli" => "ocaml",
-            "fs" | "fsi" | "fsx" => "fsharp",
-            "scala" | "sc" => "scala",
-            "clj" | "cljs" | "cljc" => "clojure",
-            "json" => "json",
-            "xml" => "xml",
-            "html" | "htm" => "html",
-            "css" | "scss" | "less" => "css",
-            "yaml" | "yml" => "yaml",
-            "toml" => "toml",
-            "sql" => "sql",
-            _ => "unknown",
-        }
-    };
-
-    match language {
-        "rust" | "go" | "java" | "csharp" | "cpp" | "swift" | "kotlin" | "dart" => {
-            LanguageProfile {
-                language,
-                family: LanguageFamily::BracedStatic,
-                nesting_mode: NestingMode::Brace,
-            }
-        }
-        "python" | "ruby" | "perl" | "lua" => LanguageProfile {
-            language,
-            family: LanguageFamily::ScriptedDynamic,
-            nesting_mode: NestingMode::Indent,
-        },
-        "javascript" | "typescript" | "tsx" | "jsx" | "php" => LanguageProfile {
-            language,
-            family: LanguageFamily::ScriptedDynamic,
-            nesting_mode: NestingMode::Brace,
-        },
-        "scala" => LanguageProfile {
-            language,
-            family: LanguageFamily::FunctionalExpression,
-            nesting_mode: NestingMode::Brace,
-        },
-        "elixir" | "erlang" | "haskell" | "ocaml" | "fsharp" | "clojure" => LanguageProfile {
-            language,
-            family: LanguageFamily::FunctionalExpression,
-            nesting_mode: NestingMode::Indent,
-        },
-        "json" | "xml" | "html" | "css" | "yaml" | "toml" | "sql" | "makefile" | "blade"
-        | "razor" => LanguageProfile {
-            language,
-            family: LanguageFamily::DeclarativeMarkup,
-            nesting_mode: NestingMode::Indent,
-        },
-        _ => LanguageProfile {
-            language,
-            family: LanguageFamily::Unknown,
-            nesting_mode: NestingMode::Indent,
-        },
-    }
-}
-
-/// Compute nesting depth for a source body given its file path.
-/// Exported for use in the per-symbol complexity payload.
+/// Compute nesting depth for `source` given the file path. Exposed for the
+/// per-symbol complexity payload in `quality.rs`.
 pub fn max_nesting_depth_for_file(source: &str, file_path: &str) -> usize {
-    max_nesting_depth(source, language_profile(file_path))
+    max_nesting_depth_for_path(source, file_path)
 }
 
-fn max_nesting_depth(source: &str, profile: LanguageProfile) -> usize {
-    match profile.nesting_mode {
-        NestingMode::Brace => brace_nesting_depth(source),
-        NestingMode::Indent => indent_nesting_depth(source),
-    }
-}
-
-fn brace_nesting_depth(source: &str) -> usize {
-    let mut depth = 0usize;
-    let mut max_depth = 0usize;
-    let mut chars = source.chars().peekable();
-    let mut in_string = None;
-    let mut escape = false;
-    let mut in_block_comment = false;
-    let mut in_line_comment = false;
-
-    while let Some(ch) = chars.next() {
-        if in_line_comment {
-            if ch == '\n' {
-                in_line_comment = false;
-            }
-            continue;
-        }
-        if in_block_comment {
-            if ch == '*' && chars.peek() == Some(&'/') {
-                chars.next();
-                in_block_comment = false;
-            }
-            continue;
-        }
-        if let Some(quote) = in_string {
-            if escape {
-                escape = false;
-                continue;
-            }
-            if ch == '\\' {
-                escape = true;
-                continue;
-            }
-            if ch == quote {
-                in_string = None;
-            }
-            continue;
-        }
-
-        if ch == '"' || ch == '`' {
-            in_string = Some(ch);
-            continue;
-        }
-        if ch == '/' && chars.peek() == Some(&'/') {
-            chars.next();
-            in_line_comment = true;
-            continue;
-        }
-        if ch == '/' && chars.peek() == Some(&'*') {
-            chars.next();
-            in_block_comment = true;
-            continue;
-        }
-        if ch == '{' {
-            depth += 1;
-            max_depth = max_depth.max(depth);
-        } else if ch == '}' {
-            depth = depth.saturating_sub(1);
-        }
-    }
-
-    max_depth
-}
-
-fn indent_nesting_depth(source: &str) -> usize {
-    let mut stack = vec![0usize];
-    let mut max_depth = 0usize;
-
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with("//")
-            || trimmed.starts_with('#')
-            || trimmed.starts_with("/*")
-            || trimmed.starts_with('*')
-        {
-            continue;
-        }
-
-        let indent = line
-            .chars()
-            .take_while(|ch| *ch == ' ' || *ch == '\t')
-            .fold(0usize, |acc, ch| acc + if ch == '\t' { 4 } else { 1 });
-
-        while stack.last().copied().unwrap_or(0) > indent {
-            stack.pop();
-        }
-        if indent > stack.last().copied().unwrap_or(0) {
-            stack.push(indent);
-        }
-        max_depth = max_depth.max(stack.len().saturating_sub(1));
-    }
-
-    max_depth
-}
-
-fn measure_type_annotation_density(
-    sym: &AnalysisSymbol,
-    profile: LanguageProfile,
-) -> (f64, TypeAnnotationMethod) {
-    if profile.supports_measured_types()
-        && let Some(score) = measured_type_density(&sym.source_text, profile.language)
-    {
+fn measure_type_annotation(sym: &AnalysisSymbol) -> (f64, TypeAnnotationMethod) {
+    if let Some(score) = measured_type_density_for_path(&sym.file_path, &sym.source_text) {
         return (score, TypeAnnotationMethod::Measured);
     }
-
     (
-        profile.fallback_type_baseline().unwrap_or(0.0),
+        fallback_type_baseline_for_path(&sym.file_path).unwrap_or(0.0),
         TypeAnnotationMethod::BaselineFallback,
     )
-}
-
-fn measured_type_density(source: &str, language: &str) -> Option<f64> {
-    match language {
-        "rust" => measure_colon_after_name(source, language, true, is_rust_receiver),
-        "python" => measure_colon_after_name(source, language, false, is_python_receiver),
-        "typescript" | "tsx" | "kotlin" | "swift" | "scala" => {
-            measure_colon_after_name(source, language, false, |_| false)
-        }
-        "javascript" | "jsx" => measure_colon_after_name(source, language, false, |_| false),
-        "php" => measure_php_signature(source),
-        "go" => measure_go_signature(source),
-        "java" | "csharp" | "cpp" | "dart" => measure_type_before_name(source, language),
-        _ => None,
-    }
-}
-
-fn measure_colon_after_name<F>(
-    source: &str,
-    language: &str,
-    implicit_unit_return: bool,
-    is_receiver: F,
-) -> Option<f64>
-where
-    F: Fn(&str) -> bool,
-{
-    let open = source.find('(')?;
-    let close = find_matching_delimiter(source, open, '(', ')')?;
-    let params = &source[open + 1..close];
-    let suffix = &source[close + 1..];
-
-    let mut total_slots = 0usize;
-    let mut score_sum = 0.0;
-    for raw_param in split_top_level(params, ',') {
-        let param = raw_param.trim();
-        if param.is_empty() || param == "/" || param == "*" || is_receiver(param) {
-            continue;
-        }
-        total_slots += 1;
-        if let Some(ty) = extract_colon_param_type(param) {
-            score_sum += type_token_score(ty, language);
-        }
-    }
-
-    total_slots += 1;
-    if let Some(return_ty) = extract_return_type_after_params(suffix, language) {
-        score_sum += type_token_score(return_ty, language);
-    } else if implicit_unit_return {
-        score_sum += 1.0;
-    }
-
-    Some(score_sum / total_slots as f64)
-}
-
-fn measure_php_signature(source: &str) -> Option<f64> {
-    let open = source.find('(')?;
-    let close = find_matching_delimiter(source, open, '(', ')')?;
-    let params = &source[open + 1..close];
-    let suffix = &source[close + 1..];
-
-    let mut total_slots = 0usize;
-    let mut score_sum = 0.0;
-    for raw_param in split_top_level(params, ',') {
-        let param = raw_param.trim();
-        if param.is_empty() {
-            continue;
-        }
-        total_slots += 1;
-        let tokens: Vec<&str> = param.split_whitespace().collect();
-        if let Some(var_pos) = tokens.iter().position(|token| token.starts_with('$'))
-            && var_pos > 0
-        {
-            score_sum += type_token_score(&tokens[..var_pos].join(" "), "php");
-        }
-    }
-
-    total_slots += 1;
-    if let Some(return_ty) = extract_return_type_after_params(suffix, "php") {
-        score_sum += type_token_score(return_ty, "php");
-    }
-
-    Some(score_sum / total_slots as f64)
-}
-
-fn measure_type_before_name(source: &str, language: &str) -> Option<f64> {
-    let open = source.find('(')?;
-    let close = find_matching_delimiter(source, open, '(', ')')?;
-    let before_open = source[..open].trim();
-    let params = &source[open + 1..close];
-
-    let return_type = infer_prefixed_return_type(before_open)?;
-    let mut total_slots = 1usize;
-    let mut score_sum = type_token_score(&return_type, language);
-
-    for raw_param in split_top_level(params, ',') {
-        let param = raw_param.trim();
-        if param.is_empty() {
-            continue;
-        }
-        total_slots += 1;
-        if let Some(ty) = extract_prefixed_param_type(param) {
-            score_sum += type_token_score(&ty, language);
-        }
-    }
-
-    Some(score_sum / total_slots as f64)
-}
-
-fn measure_go_signature(source: &str) -> Option<f64> {
-    let func_idx = source.find("func")?;
-    let mut scan = source[func_idx + 4..].trim_start();
-    if scan.starts_with('(') {
-        let open = source.len() - scan.len();
-        let close = find_matching_delimiter(source, open, '(', ')')?;
-        scan = source[close + 1..].trim_start();
-    }
-
-    let name_paren_offset = scan.find('(')?;
-    let params_open = source.len() - scan.len() + name_paren_offset;
-    let params_close = find_matching_delimiter(source, params_open, '(', ')')?;
-    let params = &source[params_open + 1..params_close];
-    let suffix = source[params_close + 1..].trim_start();
-
-    let mut total_slots = 0usize;
-    let mut score_sum = 0.0;
-    let mut pending_names = 0usize;
-
-    for raw_part in split_top_level(params, ',') {
-        let part = raw_part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        if !part.contains(' ') && !part.starts_with("...") {
-            pending_names += 1;
-            continue;
-        }
-
-        let Some(last_space) = part.rfind(' ') else {
-            total_slots += 1 + pending_names;
-            pending_names = 0;
-            continue;
-        };
-        let names = part[..last_space]
-            .split(',')
-            .map(str::trim)
-            .filter(|segment| !segment.is_empty())
-            .count()
-            + pending_names;
-        let ty = part[last_space + 1..].trim();
-        total_slots += names.max(1);
-        score_sum += type_token_score(ty, "go") * names.max(1) as f64;
-        pending_names = 0;
-    }
-    if pending_names > 0 {
-        total_slots += pending_names;
-    }
-
-    total_slots += 1;
-    if suffix.starts_with('{') {
-        score_sum += 1.0;
-    } else {
-        let return_ty = take_until_top_level_char(suffix, &['{']).trim();
-        if return_ty.is_empty() {
-            score_sum += 1.0;
-        } else {
-            score_sum += type_token_score(return_ty, "go");
-        }
-    }
-
-    Some(score_sum / total_slots as f64)
-}
-
-fn extract_colon_param_type(param: &str) -> Option<&str> {
-    let colon = find_top_level_colon(param)?;
-    let annotation = param[colon + 1..].trim();
-    let annotation = take_until_top_level_char(annotation, &['=']).trim();
-    (!annotation.is_empty()).then_some(annotation)
-}
-
-fn extract_return_type_after_params<'a>(suffix: &'a str, language: &str) -> Option<&'a str> {
-    let trimmed = suffix.trim_start();
-    if matches!(language, "typescript" | "tsx" | "kotlin" | "scala" | "php")
-        && trimmed.starts_with(':')
-    {
-        let ty = take_until_top_level_char(trimmed[1..].trim_start(), &['{', '=', ';'])
-            .trim_end_matches(':')
-            .trim();
-        return (!ty.is_empty()).then_some(ty);
-    }
-    if let Some(idx) = find_top_level_arrow(trimmed) {
-        let ty =
-            take_until_top_level_char(trimmed[idx + 2..].trim_start(), &['{', ':', '=']).trim();
-        return (!ty.is_empty()).then_some(ty);
-    }
-    None
-}
-
-fn infer_prefixed_return_type(before_open: &str) -> Option<String> {
-    let trimmed = before_open.trim();
-    let mut tokens: Vec<&str> = trimmed.split_whitespace().collect();
-    if tokens.len() < 2 {
-        return None;
-    }
-    tokens.pop()?;
-    while matches!(
-        tokens.first().copied(),
-        Some(
-            "pub"
-                | "public"
-                | "private"
-                | "protected"
-                | "internal"
-                | "static"
-                | "abstract"
-                | "async"
-                | "virtual"
-                | "override"
-                | "sealed"
-                | "open"
-                | "final"
-                | "synchronized"
-                | "inline"
-                | "constexpr"
-                | "extern"
-                | "unsafe"
-        )
-    ) {
-        tokens.remove(0);
-    }
-    (!tokens.is_empty()).then(|| tokens.join(" "))
-}
-
-fn extract_prefixed_param_type(param: &str) -> Option<String> {
-    let trimmed = param.trim();
-    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
-    if tokens.is_empty() {
-        return None;
-    }
-    if tokens.len() == 1 {
-        return None;
-    }
-    let mut start = 0usize;
-    while matches!(
-        tokens.get(start).copied(),
-        Some("final" | "readonly" | "ref" | "out" | "in" | "params" | "this")
-    ) {
-        start += 1;
-    }
-    if tokens.len() <= start + 1 {
-        return None;
-    }
-    let joined = tokens[start..tokens.len() - 1].join(" ");
-    (!joined.is_empty()).then_some(joined)
-}
-
-fn type_token_score(token: &str, language: &str) -> f64 {
-    let normalized = normalize_type_token(token);
-    if normalized.is_empty() {
-        return 0.0;
-    }
-    if normalized == "unknown" && matches!(language, "typescript" | "tsx") {
-        return 0.3;
-    }
-    if normalized == "any"
-        || normalized == "typing.any"
-        || normalized == "object"
-        || normalized == "dynamic"
-        || normalized == "mixed"
-        || normalized == "interface{}"
-        || normalized == "void*"
-        || normalized == "auto"
-        || normalized == "t.untyped"
-        || normalized == "term()"
-        || normalized == "anyref"
-        || normalized == "anyobject"
-        || normalized == "dynany"
-        || normalized == "box<dynany>"
-        || normalized == "{*}"
-        || normalized.contains("<any>")
-        || normalized.contains("typing.any")
-        || normalized.contains("dynany")
-    {
-        return 0.0;
-    }
-    1.0
-}
-
-fn normalize_type_token(token: &str) -> String {
-    token
-        .chars()
-        .filter(|ch| !ch.is_whitespace() && *ch != '\'')
-        .flat_map(|ch| ch.to_lowercase())
-        .collect()
-}
-
-fn has_restricted_visibility(sym: &AnalysisSymbol, language: &str) -> bool {
-    let trimmed = sym.source_text.trim_start();
-    match language {
-        "rust" => {
-            if trimmed.starts_with("pub(crate)")
-                || trimmed.starts_with("pub(super)")
-                || trimmed.starts_with("pub(self)")
-                || trimmed.starts_with("pub(in ")
-            {
-                true
-            } else {
-                !trimmed.starts_with("pub ")
-            }
-        }
-        "go" => sym
-            .name
-            .chars()
-            .next()
-            .map(|ch| !ch.is_uppercase())
-            .unwrap_or(true),
-        "python" | "ruby" | "perl" | "lua" => sym.name.starts_with('_'),
-        "elixir" | "erlang" => trimmed.starts_with("defp ") || trimmed.starts_with("defmacrop "),
-        "javascript" | "typescript" | "tsx" | "jsx" => {
-            if trimmed.starts_with("private ") || trimmed.starts_with("protected ") {
-                true
-            } else {
-                !trimmed.starts_with("export ")
-            }
-        }
-        "java" | "csharp" | "cpp" | "php" | "kotlin" | "swift" | "dart" | "scala" => {
-            if trimmed.starts_with("private ")
-                || trimmed.starts_with("protected ")
-                || trimmed.starts_with("internal ")
-            {
-                true
-            } else {
-                !trimmed.starts_with("public ")
-            }
-        }
-        _ => sym.name.starts_with('_'),
-    }
-}
-
-/// Iterator that yields `(byte_offset, char)` pairs while tracking
-/// string literals and `()[]{}<>` nesting depth.  The `at_top_level()`
-/// predicate is `true` when all four bracket counters are zero and we
-/// are not inside a string — callers use it to decide which characters
-/// are structurally significant.
-struct TopLevelScanner<'a> {
-    inner: std::str::CharIndices<'a>,
-    paren: usize,
-    bracket: usize,
-    brace: usize,
-    angle: usize,
-    in_string: Option<char>,
-    escape: bool,
-}
-
-impl<'a> TopLevelScanner<'a> {
-    fn new(text: &'a str) -> Self {
-        Self {
-            inner: text.char_indices(),
-            paren: 0,
-            bracket: 0,
-            brace: 0,
-            angle: 0,
-            in_string: None,
-            escape: false,
-        }
-    }
-
-    fn at_top_level(&self) -> bool {
-        self.in_string.is_none()
-            && self.paren == 0
-            && self.bracket == 0
-            && self.brace == 0
-            && self.angle == 0
-    }
-}
-
-impl Iterator for TopLevelScanner<'_> {
-    type Item = (usize, char);
-
-    fn next(&mut self) -> Option<(usize, char)> {
-        let (idx, ch) = self.inner.next()?;
-
-        if let Some(quote) = self.in_string {
-            if self.escape {
-                self.escape = false;
-            } else if ch == '\\' {
-                self.escape = true;
-            } else if ch == quote {
-                self.in_string = None;
-            }
-            return Some((idx, ch));
-        }
-
-        match ch {
-            '"' | '`' => self.in_string = Some(ch),
-            '(' => self.paren += 1,
-            ')' => self.paren = self.paren.saturating_sub(1),
-            '[' => self.bracket += 1,
-            ']' => self.bracket = self.bracket.saturating_sub(1),
-            '{' => self.brace += 1,
-            '}' => self.brace = self.brace.saturating_sub(1),
-            '<' => self.angle += 1,
-            '>' => self.angle = self.angle.saturating_sub(1),
-            _ => {}
-        }
-        Some((idx, ch))
-    }
-}
-
-fn find_matching_delimiter(
-    text: &str,
-    open_index: usize,
-    open: char,
-    close: char,
-) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut scanner = TopLevelScanner::new(&text[open_index..]);
-    while let Some((idx, ch)) = scanner.next() {
-        if scanner.in_string.is_some() {
-            continue;
-        }
-        if ch == open {
-            depth += 1;
-        } else if ch == close {
-            depth = depth.saturating_sub(1);
-            if depth == 0 {
-                return Some(open_index + idx);
-            }
-        }
-    }
-    None
-}
-
-fn split_top_level(text: &str, delimiter: char) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut start = 0usize;
-    let mut scanner = TopLevelScanner::new(text);
-    while let Some((idx, ch)) = scanner.next() {
-        if ch == delimiter && scanner.at_top_level() {
-            parts.push(&text[start..idx]);
-            start = idx + ch.len_utf8();
-        }
-    }
-    parts.push(&text[start..]);
-    parts
-}
-
-fn take_until_top_level_char<'a>(text: &'a str, stop_chars: &[char]) -> &'a str {
-    let mut scanner = TopLevelScanner::new(text);
-    while let Some((idx, ch)) = scanner.next() {
-        if scanner.at_top_level() && stop_chars.contains(&ch) {
-            return &text[..idx];
-        }
-    }
-    text
-}
-
-fn find_top_level_colon(text: &str) -> Option<usize> {
-    let mut scanner = TopLevelScanner::new(text);
-    while let Some((idx, ch)) = scanner.next() {
-        if ch == ':' && scanner.at_top_level() {
-            return Some(idx);
-        }
-    }
-    None
-}
-
-fn find_top_level_arrow(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let mut scanner = TopLevelScanner::new(text);
-    while let Some((idx, ch)) = scanner.next() {
-        if ch == '-' && idx + 1 < bytes.len() && bytes[idx + 1] == b'>' && scanner.at_top_level() {
-            return Some(idx);
-        }
-    }
-    None
-}
-
-fn is_python_receiver(param: &str) -> bool {
-    let name = param.split(':').next().unwrap_or(param).trim();
-    matches!(name, "self" | "cls" | "*self" | "*cls")
-}
-
-fn is_rust_receiver(param: &str) -> bool {
-    let normalized = param.replace(' ', "");
-    matches!(
-        normalized.as_str(),
-        "self" | "&self" | "&mutself" | "mutself" | "self:Self" | "self:Box<Self>"
-    ) || normalized.starts_with("self:")
 }
 
 #[cfg(test)]
@@ -1542,21 +771,21 @@ mod tests {
     #[test]
     fn rust_unit_return_counts_as_typed() {
         let source = "fn run(&self, value: i32) {\n    if value > 1 {\n        println!(\"{value}\");\n    }\n}";
-        let score = measured_type_density(source, "rust").unwrap();
+        let score = measured_type_density_for_path("lib.rs", source).unwrap();
         assert!((score - 1.0).abs() < 0.001, "unexpected score {score}");
     }
 
     #[test]
     fn rust_dyn_any_is_penalized() {
         let source = "fn erase(value: Box<dyn Any>) -> Box<dyn Any> { value }";
-        let score = measured_type_density(source, "rust").unwrap();
+        let score = measured_type_density_for_path("lib.rs", source).unwrap();
         assert!(score < 0.1, "dyn Any should score near zero, got {score}");
     }
 
     #[test]
     fn python_any_and_missing_annotations_are_penalized() {
         let source = "def foo(x: Any, y) -> None:\n    return None\n";
-        let score = measured_type_density(source, "python").unwrap();
+        let score = measured_type_density_for_path("lib.py", source).unwrap();
         assert!(
             (score - (1.0 / 3.0)).abs() < 0.05,
             "unexpected score {score}"
@@ -1566,27 +795,15 @@ mod tests {
     #[test]
     fn go_grouped_parameters_and_void_return_are_typed() {
         let source = "func foo(x, y int) {\n    fmt.Println(x + y)\n}";
-        let score = measured_type_density(source, "go").unwrap();
+        let score = measured_type_density_for_path("main.go", source).unwrap();
         assert!((score - 1.0).abs() < 0.001, "unexpected score {score}");
     }
 
     #[test]
     fn javascript_without_jsdoc_scores_zero() {
         let source = "function foo(x, y) {\n  return x + y;\n}";
-        let score = measured_type_density(source, "javascript").unwrap();
+        let score = measured_type_density_for_path("app.js", source).unwrap();
         assert!(score < 0.01, "unexpected score {score}");
-    }
-
-    #[test]
-    fn brace_nesting_stays_flat_for_match_style_blocks() {
-        let source = "fn foo(x: i32) {\n    match x {\n        1 => println!(\"one\"),\n        _ => println!(\"other\"),\n    }\n}";
-        assert_eq!(brace_nesting_depth(source), 2);
-    }
-
-    #[test]
-    fn indent_nesting_tracks_python_blocks() {
-        let source = "def foo(x):\n    if x:\n        for item in x:\n            if item:\n                return item\n    return None\n";
-        assert_eq!(indent_nesting_depth(source), 4);
     }
 
     #[test]
@@ -1627,26 +844,18 @@ mod tests {
 
     #[test]
     fn verifiability_substitute_model() {
-        // Types are primary; tests fill the gap where types are missing.
-        // verifiability = type + (1 - type) × oracle
-
-        // Fully typed, no tests → types cover it
         let typed_no_tests = make_verifiability(1.0, 0.0);
         assert!((typed_no_tests - 1.0).abs() < 0.001, "got {typed_no_tests}");
 
-        // No types, good tests → tests are the only signal
         let untyped_good_tests = make_verifiability(0.0, 0.8);
         assert!(
             (untyped_good_tests - 0.8).abs() < 0.001,
             "got {untyped_good_tests}"
         );
 
-        // Partial types, partial tests → types dominate
         let partial = make_verifiability(0.7, 0.5);
-        // 0.7 + 0.3 × 0.5 = 0.85
         assert!((partial - 0.85).abs() < 0.001, "got {partial}");
 
-        // No types, no tests → correctly terrible
         let nothing = make_verifiability(0.0, 0.0);
         assert!(nothing < 0.001, "got {nothing}");
     }

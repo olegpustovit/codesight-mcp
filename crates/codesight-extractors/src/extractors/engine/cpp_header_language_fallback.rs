@@ -24,7 +24,7 @@ pub(crate) fn adjust_language_for_cpp_header_if_plain_c(
         return;
     }
     for sym in symbols.iter_mut() {
-        sym.language = "c".to_string();
+        sym.language = codesight_core::C;
     }
 }
 
@@ -80,7 +80,7 @@ mod tests {
         let mut syms = vec![StoredSymbol {
             id: "t::x#function".into(),
             extraction_tier: ExtractionTier::CuratedQueryPack,
-            language: "cpp".into(),
+            language: codesight_core::CPP,
             file_path: "hdr.h".into(),
             qualified_name: "x".into(),
             name: "x".into(),
@@ -96,7 +96,7 @@ mod tests {
             file_size_bytes: 10,
         }];
         adjust_language_for_cpp_header_if_plain_c(&mut syms, "cpp", "hdr.h", "void x();");
-        assert_eq!(syms[0].language, "c");
+        assert_eq!(syms[0].language, codesight_core::C);
     }
 
     #[test]
@@ -104,7 +104,7 @@ mod tests {
         let mut syms = vec![StoredSymbol {
             id: "t::x#function".into(),
             extraction_tier: ExtractionTier::CuratedQueryPack,
-            language: "cpp".into(),
+            language: codesight_core::CPP,
             file_path: "hdr.h".into(),
             qualified_name: "x".into(),
             name: "x".into(),
@@ -125,6 +125,6 @@ mod tests {
             "hdr.h",
             "namespace n { void x(); }",
         );
-        assert_eq!(syms[0].language, "cpp");
+        assert_eq!(syms[0].language, codesight_core::CPP);
     }
 }

@@ -45,7 +45,7 @@ fn ingest(svc: &CodeService, root: &std::path::Path, incremental: bool) -> Value
 /// pollute the crawled file set.
 fn make_svc() -> (tempfile::TempDir, CodeService) {
     let idx_dir = tempdir().unwrap();
-    let svc = CodeService::new(AppConfig::new(idx_dir.path().to_path_buf())).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(idx_dir.path().to_path_buf())).unwrap();
     (idx_dir, svc)
 }
 
@@ -319,7 +319,7 @@ fn case_same_basename_folders_distinct_source_ids() {
     .unwrap();
 
     let idx_path = ws.path().join("idx");
-    let svc = CodeService::new(AppConfig::new(idx_path)).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(idx_path)).unwrap();
 
     let r_left = svc
         .dispatch(

@@ -130,7 +130,7 @@ pub fn fqn_to_symbol(
     // Find matching PSR-4 namespace prefix
     // Sort by longest prefix first for specificity
     let mut prefixes: Vec<(&String, &String)> = psr4_map.iter().collect();
-    prefixes.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    prefixes.sort_by_key(|entry| std::cmp::Reverse(entry.0.len()));
 
     for (namespace, dir) in prefixes {
         if fqn.starts_with(namespace.as_str()) {

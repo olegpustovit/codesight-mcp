@@ -9,6 +9,7 @@ mod graph_reads;
 mod index_store;
 pub mod migrations;
 mod repo_summary;
+mod row_utils;
 mod schema;
 mod search;
 mod snapshot_store;

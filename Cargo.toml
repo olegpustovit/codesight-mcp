@@ -3,13 +3,11 @@ members = [
     ".",
     "crates/codesight-analysis",
     "crates/codesight-backend",
-    "crates/codesight-backend-lsp",
-    "crates/codesight-backend-treesitter",
     "crates/codesight-core",
     "crates/codesight-engine",
     "crates/codesight-extractors",
-    "crates/codesight-framework",
     "crates/codesight-imports",
+    "crates/codesight-language-support",
     "crates/codesight-retrieval",
     "crates/codesight-storage",
     "crates/mcp-rpc",
@@ -28,12 +26,11 @@ anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 codesight-analysis = { path = "crates/codesight-analysis" }
 codesight-backend = { path = "crates/codesight-backend" }
-codesight-backend-treesitter = { path = "crates/codesight-backend-treesitter" }
 codesight-core = { path = "crates/codesight-core" }
 codesight-engine = { path = "crates/codesight-engine" }
 codesight-extractors = { path = "crates/codesight-extractors" }
-codesight-framework = { path = "crates/codesight-framework" }
 codesight-imports = { path = "crates/codesight-imports" }
+codesight-language-support = { path = "crates/codesight-language-support" }
 codesight-retrieval = { path = "crates/codesight-retrieval" }
 codesight-storage = { path = "crates/codesight-storage" }
 mcp-rpc = { path = "crates/mcp-rpc" }
@@ -49,7 +46,6 @@ walkdir = "2"
 
 [dev-dependencies]
 cargo_metadata = "0.19"
-codesight-framework = { path = "crates/codesight-framework" }
 tempfile = "3"
 # `test-util` enables `#[tokio::test(start_paused = true)]` so timeout /
 # drain tests can use virtual time instead of real sleeps (saves ~2 s off

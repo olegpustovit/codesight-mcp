@@ -39,7 +39,7 @@ pub(super) fn make_symbol(
     StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
         extraction_tier: ExtractionTier::ManualOverride,
-        language: "al".to_string(),
+        language: codesight_core::AL,
         file_path: file_path.to_string(),
         qualified_name,
         name: name.to_string(),
@@ -83,7 +83,7 @@ pub(super) fn make_symbol_with_sig(
     StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
         extraction_tier: ExtractionTier::ManualOverride,
-        language: "al".to_string(),
+        language: codesight_core::AL,
         file_path: file_path.to_string(),
         qualified_name,
         name: name.to_string(),

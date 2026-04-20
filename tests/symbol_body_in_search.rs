@@ -30,7 +30,7 @@ fn symbol_body_included_with_context() {
         "# pre\ndef target():\n    return 'v'\n# post\n",
     )
     .unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path(), "code");
 
     let legacy = svc
@@ -77,7 +77,7 @@ fn section_body_included_with_context() {
         "intro\n# Example\nbody line\ntrailer\n",
     )
     .unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, ws.path(), "docs");
 
     let enriched = svc

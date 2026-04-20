@@ -358,7 +358,7 @@ fn case_package_names_saved_and_loaded() {
     _write(&src, "pyproject.toml", "[project]\nname = \"mylib\"\n");
     _write(&src, "mylib.py", "def hello(): pass\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let _sid = ingest(&svc, &src);
 
     // Re-open the store and check package_names
@@ -388,7 +388,7 @@ fn case_old_index_without_package_names_loads_cleanly() {
     fs::create_dir_all(&src).unwrap();
     _write(&src, "app.py", "def main(): pass\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let _sid = ingest(&svc, &src);
 
     // Find the store and delete package_names from meta
@@ -504,7 +504,7 @@ fn case_find_importers_cross_repo_false_finds_local_importers() {
         "from utils import helper\nresult = helper()\n",
     );
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
 
     // Use inspect_graph importers mode to find importers of utils.py
@@ -540,7 +540,7 @@ fn case_find_importers_cross_repo_false_no_cross_repo_key() {
         "from utils import helper\nresult = helper()\n",
     );
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
 
     let r = svc
@@ -578,7 +578,7 @@ fn case_find_importers_cross_repo_true_finds_cross_repo_importers() {
     _write(&provider, "api.py", "def do_thing(): pass\n");
     _write(&consumer, "app.py", "import mylib\nmylib.do_thing()\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let provider_id = ingest(&svc, &provider);
     let _consumer_id = ingest(&svc, &consumer);
 
@@ -618,7 +618,7 @@ fn case_find_importers_cross_repo_results_have_correct_fields() {
     _write(&provider, "api.py", "def do_thing(): pass\n");
     _write(&consumer, "app.py", "import mylib\nmylib.do_thing()\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let provider_id = ingest(&svc, &provider);
     let _consumer_id = ingest(&svc, &consumer);
 
@@ -661,7 +661,7 @@ fn case_blast_radius_cross_repo_false_no_cross_repo_key() {
         "from utils import helper\nresult = helper()\n",
     );
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
 
     let r = svc
@@ -694,7 +694,7 @@ fn case_blast_radius_cross_repo_true_adds_cross_repo_field() {
         "from utils import helper\nresult = helper()\n",
     );
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
 
     let r = svc
@@ -733,7 +733,7 @@ fn case_dependency_graph_cross_repo_false_no_cross_repo_edges() {
     _write(&src, "utils.py", "def helper(): return 42\n");
     _write(&src, "main.py", "from utils import helper\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
 
     let r = svc
@@ -765,7 +765,7 @@ fn case_dependency_graph_cross_repo_true_returns_dict() {
     _write(&provider, "api.py", "def do_thing(): pass\n");
     _write(&consumer, "app.py", "import mylib\nmylib.do_thing()\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let _provider_id = ingest(&svc, &provider);
     let consumer_id = ingest(&svc, &consumer);
 
@@ -817,7 +817,7 @@ fn case_get_cross_repo_map_avoids_unrelated_substring_matches() {
     _write(&provider, "__init__.py", "");
     _write(&consumer, "app.py", "import my_library\nmy_library.run()\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let _provider_id = ingest(&svc, &provider);
     let _consumer_id = ingest(&svc, &consumer);
 
@@ -846,7 +846,7 @@ fn case_get_cross_repo_map_no_filter_returns_all() {
     _write(&provider, "api.py", "def do(): pass\n");
     _write(&consumer, "app.py", "import mylib\nmylib.do()\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let provider_id = ingest(&svc, &provider);
     let consumer_id = ingest(&svc, &consumer);
 
@@ -883,7 +883,7 @@ fn case_get_cross_repo_map_with_filter() {
     _write(&provider, "api.py", "def do_thing(): pass\n");
     _write(&consumer, "app.py", "import mylib\nmylib.do_thing()\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let _provider_id = ingest(&svc, &provider);
     let consumer_id = ingest(&svc, &consumer);
 
@@ -904,7 +904,7 @@ fn case_get_cross_repo_map_unknown_repo_returns_error() {
     fs::create_dir_all(&src).unwrap();
     _write(&src, "app.py", "print('hello')\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let _sid = ingest(&svc, &src);
 
     let r = svc
@@ -928,7 +928,7 @@ fn case_get_cross_repo_map_cross_repo_edges_structure() {
     _write(&provider, "api.py", "def do_thing(): pass\n");
     _write(&consumer, "app.py", "import mylib\nmylib.do_thing()\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let _provider_id = ingest(&svc, &provider);
     let _consumer_id = ingest(&svc, &consumer);
 
@@ -960,7 +960,7 @@ fn case_no_cross_repo_match_returns_empty() {
     _write(&src, "utils.py", "def foo(): pass\n");
     _write(&src, "main.py", "from utils import foo\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let _sid = ingest(&svc, &src);
 
     let r = svc.dispatch("get_cross_repo_map", json!({})).unwrap();
@@ -987,7 +987,7 @@ fn case_circular_cross_repo_dependency_no_infinite_loop() {
     _write(&src_b, "pyproject.toml", "[project]\nname = \"pkg-b\"\n");
     _write(&src_b, "__init__.py", "import pkg_a\n");
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let _repo_a = ingest(&svc, &src_a);
     let _repo_b = ingest(&svc, &src_b);
 

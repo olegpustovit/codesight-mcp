@@ -1,6 +1,7 @@
 //! Quality snapshot persistence: save/load named quality baselines.
 
 use anyhow::Context;
+use rusqlite::{OptionalExtension, Row};
 
 use super::IndexStore;
 
@@ -31,18 +32,56 @@ pub struct QualitySnapshot {
     pub avg_complexity: f64,
 }
 
+const SNAPSHOT_COLUMNS: &str = "source_id, name, score, structural_score, agent_readiness_score, \
+     modularity, acyclicity, depth, equality, redundancy, \
+     navigability, comprehensibility, verifiability, change_safety, \
+     cycle_count, dead_count, dup_count, file_count, symbol_count, \
+     confidence, avg_complexity";
+
+const SNAPSHOT_SELECT: &str =
+    "source_id, name, created_at, score, structural_score, agent_readiness_score, \
+     modularity, acyclicity, depth, equality, redundancy, \
+     navigability, comprehensibility, verifiability, change_safety, \
+     cycle_count, dead_count, dup_count, file_count, symbol_count, \
+     confidence, avg_complexity";
+
+fn row_to_snapshot(row: &Row<'_>) -> rusqlite::Result<QualitySnapshot> {
+    Ok(QualitySnapshot {
+        source_id: row.get(0)?,
+        name: row.get(1)?,
+        created_at: row.get(2)?,
+        score: row.get(3)?,
+        structural_score: row.get(4)?,
+        agent_readiness_score: row.get(5)?,
+        modularity: row.get(6)?,
+        acyclicity: row.get(7)?,
+        depth: row.get(8)?,
+        equality: row.get(9)?,
+        redundancy: row.get(10)?,
+        navigability: row.get(11)?,
+        comprehensibility: row.get(12)?,
+        verifiability: row.get(13)?,
+        change_safety: row.get(14)?,
+        cycle_count: row.get(15)?,
+        dead_count: row.get(16)?,
+        dup_count: row.get(17)?,
+        file_count: row.get(18)?,
+        symbol_count: row.get(19)?,
+        confidence: row.get(20)?,
+        avg_complexity: row.get(21)?,
+    })
+}
+
 impl IndexStore {
     /// Save (or overwrite) a named quality snapshot.
     pub fn save_snapshot(&self, snap: &QualitySnapshot) -> anyhow::Result<()> {
         let conn = self.open_connection()?;
+        let sql = format!(
+            "INSERT OR REPLACE INTO quality_snapshots ({SNAPSHOT_COLUMNS}) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)"
+        );
         conn.execute(
-            "INSERT OR REPLACE INTO quality_snapshots (
-                source_id, name, score, structural_score, agent_readiness_score,
-                modularity, acyclicity, depth, equality, redundancy,
-                navigability, comprehensibility, verifiability, change_safety,
-                cycle_count, dead_count, dup_count, file_count, symbol_count,
-                confidence, avg_complexity
-            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+            &sql,
             rusqlite::params![
                 snap.source_id,
                 snap.name,
@@ -78,45 +117,13 @@ impl IndexStore {
         name: &str,
     ) -> anyhow::Result<Option<QualitySnapshot>> {
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare(
-            "SELECT source_id, name, created_at, score, structural_score,
-                    agent_readiness_score, modularity, acyclicity, depth,
-                    equality, redundancy, navigability, comprehensibility,
-                    verifiability, change_safety, cycle_count, dead_count,
-                    dup_count, file_count, symbol_count, confidence, avg_complexity
-             FROM quality_snapshots
-             WHERE source_id = ?1 AND name = ?2",
-        )?;
-        let result = stmt.query_row(rusqlite::params![source_id, name], |row| {
-            Ok(QualitySnapshot {
-                source_id: row.get(0)?,
-                name: row.get(1)?,
-                created_at: row.get(2)?,
-                score: row.get(3)?,
-                structural_score: row.get(4)?,
-                agent_readiness_score: row.get(5)?,
-                modularity: row.get(6)?,
-                acyclicity: row.get(7)?,
-                depth: row.get(8)?,
-                equality: row.get(9)?,
-                redundancy: row.get(10)?,
-                navigability: row.get(11)?,
-                comprehensibility: row.get(12)?,
-                verifiability: row.get(13)?,
-                change_safety: row.get(14)?,
-                cycle_count: row.get(15)?,
-                dead_count: row.get(16)?,
-                dup_count: row.get(17)?,
-                file_count: row.get(18)?,
-                symbol_count: row.get(19)?,
-                confidence: row.get(20)?,
-                avg_complexity: row.get(21)?,
-            })
-        });
-        match result {
-            Ok(snap) => Ok(Some(snap)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        let sql = format!(
+            "SELECT {SNAPSHOT_SELECT} FROM quality_snapshots \
+             WHERE source_id = ?1 AND name = ?2"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        stmt.query_row(rusqlite::params![source_id, name], row_to_snapshot)
+            .optional()
+            .map_err(Into::into)
     }
 }

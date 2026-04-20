@@ -311,7 +311,7 @@ fn extract_csharp_block_via_regex(
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{view_name}.{name}#method"),
             extraction_tier: ExtractionTier::ManualOverride,
-            language: "csharp".to_string(),
+            language: codesight_core::CSHARP,
             file_path: file_path.to_string(),
             qualified_name: format!("{view_name}.{name}"),
             name,
@@ -350,7 +350,7 @@ fn extract_csharp_block_via_regex(
         symbols.push(StoredSymbol {
             id: format!("{file_path}::{view_name}.{name}#constant"),
             extraction_tier: ExtractionTier::ManualOverride,
-            language: "csharp".to_string(),
+            language: codesight_core::CSHARP,
             file_path: file_path.to_string(),
             qualified_name: format!("{view_name}.{name}"),
             name,
@@ -403,7 +403,7 @@ fn extract_inline_js(
                 symbols.push(StoredSymbol {
                     id: format!("{file_path}::{view_name}.{name}#function"),
                     extraction_tier: ExtractionTier::ManualOverride,
-                    language: "javascript".to_string(),
+                    language: codesight_core::JAVASCRIPT,
                     file_path: file_path.to_string(),
                     qualified_name: format!("{view_name}.{name}"),
                     name,
@@ -514,7 +514,7 @@ fn make_sym(
     StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
         extraction_tier: ExtractionTier::ManualOverride,
-        language: language.to_string(),
+        language: codesight_core::LanguageId::intern(language),
         file_path: file_path.to_string(),
         qualified_name,
         name: name.to_string(),

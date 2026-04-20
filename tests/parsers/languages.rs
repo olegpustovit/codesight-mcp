@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{QUERY_FILES, ScmExtractor, parse_scm_header};
+use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
 use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
 use codesight_core::SymbolKind;
 
@@ -15,7 +15,7 @@ fn registry_extract(filename: &str, src: &str) -> Vec<codesight_core::StoredSymb
 }
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
-    let source = QUERY_FILES
+    let source = query_files_slice()
         .iter()
         .find(|(k, _)| *k == lang_key)
         .unwrap_or_else(|| panic!("no query for {lang_key}"))
@@ -530,7 +530,7 @@ fn test_parse_cpp_header_stays_cpp() {
     assert!(!symbols.is_empty(), "should produce symbols");
     // All symbols should have language == "cpp"
     for s in &symbols {
-        assert_eq!(s.language, "cpp", "symbol {} should be cpp", s.name);
+        assert_eq!(s.language.as_str(), "cpp", "symbol {} should be cpp", s.name);
     }
     // Widget class
     assert!(
@@ -554,9 +554,9 @@ fn test_parse_cpp_header_falls_back_to_c() {
         .expect("c-only header extraction");
     assert!(!symbols.is_empty());
     assert!(
-        symbols.iter().all(|s| s.language == "c"),
+        symbols.iter().all(|s| s.language.as_str() == "c"),
         "all symbols should be c: {:?}",
-        symbols.iter().map(|s| &s.language).collect::<Vec<_>>()
+        symbols.iter().map(|s| s.language.as_str()).collect::<Vec<_>>()
     );
     let only_c = symbols.iter().find(|s| s.name == "only_c");
     assert!(only_c.is_some(), "missing only_c function");
@@ -685,8 +685,8 @@ fn test_parse_cpp_mixed_header_deterministic_selection() {
     assert!(!run1.is_empty());
     assert!(!run2.is_empty());
 
-    let langs1: std::collections::HashSet<_> = run1.iter().map(|s| &s.language).collect();
-    let langs2: std::collections::HashSet<_> = run2.iter().map(|s| &s.language).collect();
+    let langs1: std::collections::HashSet<_> = run1.iter().map(|s| s.language).collect();
+    let langs2: std::collections::HashSet<_> = run2.iter().map(|s| s.language).collect();
     assert_eq!(langs1, langs2);
     assert_eq!(langs1.len(), 1, "should have exactly one language");
 }
@@ -698,7 +698,7 @@ fn test_parse_cpp_header_with_cpp_keywords_stays_cpp() {
         .expect("cpp keywords header extraction");
     assert!(!symbols.is_empty(), "should produce symbols");
     assert!(
-        symbols.iter().all(|s| s.language == "cpp"),
+        symbols.iter().all(|s| s.language.as_str() == "cpp"),
         "all symbols should be cpp"
     );
     let names: Vec<_> = symbols
@@ -796,7 +796,7 @@ class Repository {
 
     // Check language name
     assert!(
-        syms.iter().all(|s| s.language == "dart"),
+        syms.iter().all(|s| s.language.as_str() == "dart"),
         "all symbols should have language dart"
     );
 }
@@ -992,7 +992,7 @@ end
     );
 
     assert!(
-        syms.iter().all(|s| s.language == "elixir"),
+        syms.iter().all(|s| s.language.as_str() == "elixir"),
         "all symbols should have language elixir"
     );
 }
@@ -1050,7 +1050,7 @@ sub describe {
     );
 
     assert!(
-        syms.iter().all(|s| s.language == "perl"),
+        syms.iter().all(|s| s.language.as_str() == "perl"),
         "all symbols should have language perl"
     );
 }
@@ -1109,7 +1109,7 @@ fn helper() -> Nil {
     );
 
     assert!(
-        syms.iter().all(|s| s.language == "gleam"),
+        syms.iter().all(|s| s.language.as_str() == "gleam"),
         "all symbols should have language gleam"
     );
 }
@@ -1149,7 +1149,7 @@ fn test_parse_nix() {
     );
 
     assert!(
-        syms.iter().all(|s| s.language == "nix"),
+        syms.iter().all(|s| s.language.as_str() == "nix"),
         "all symbols should have language nix"
     );
 }
@@ -1168,7 +1168,7 @@ fn test_parse_vue_js() {
             .any(|s| s.name == "greet" && s.kind.as_str() == "function")
     );
     for s in &syms {
-        assert_eq!(s.language, "vue");
+        assert_eq!(s.language.as_str(), "vue");
     }
 }
 
@@ -1179,7 +1179,7 @@ fn test_parse_vue_ts() {
     assert!(syms.iter().any(|s| s.name == "User"));
     assert!(syms.iter().any(|s| s.name == "getName"));
     for s in &syms {
-        assert_eq!(s.language, "vue");
+        assert_eq!(s.language.as_str(), "vue");
     }
 }
 
@@ -1339,7 +1339,7 @@ fn test_vue_extension_mapping() {
     let src = "<script>\nfunction hello() {}\n</script>\n";
     let syms = registry_extract("Test.vue", src);
     for s in &syms {
-        assert_eq!(s.language, "vue");
+        assert_eq!(s.language.as_str(), "vue");
     }
 }
 
@@ -1376,7 +1376,7 @@ fn test_parse_ejs() {
             .collect::<Vec<_>>()
     );
     assert_eq!(tmpl.unwrap().name, "index");
-    assert_eq!(tmpl.unwrap().language, "ejs");
+    assert_eq!(tmpl.unwrap().language.as_str(), "ejs");
 
     // JS function inside scriptlet
     let func = syms.iter().find(|s| s.name == "formatDate");
@@ -1466,7 +1466,7 @@ UI<public> := module:
         "sig: {}",
         ui.unwrap().signature
     );
-    assert_eq!(ui.unwrap().language, "verse");
+    assert_eq!(ui.unwrap().language.as_str(), "verse");
 
     // Nested class
     let widget = syms.iter().find(|s| s.name == "widget");
@@ -1590,7 +1590,7 @@ fn test_parse_xml() {
 
     assert!(names.contains(&"config"), "missing config: {names:?}");
     assert!(
-        syms.iter().all(|s| s.language == "xml"),
+        syms.iter().all(|s| s.language.as_str() == "xml"),
         "all symbols should have language xml"
     );
 }
@@ -1613,7 +1613,7 @@ fn test_parse_xul() {
 
     assert!(names.contains(&"window"), "missing window: {names:?}");
     assert!(
-        syms.iter().all(|s| s.language == "xml"),
+        syms.iter().all(|s| s.language.as_str() == "xml"),
         "all symbols should have language xml"
     );
 }
@@ -1643,7 +1643,7 @@ fn test_parse_erlang_functions() {
     let syms = ext.extract("mymod.erl", src).unwrap();
     let add = syms.iter().find(|s| s.name == "add").expect("missing add");
     assert_eq!(add.kind, SymbolKind::Function, "add should be function");
-    assert_eq!(add.language, "erlang");
+    assert_eq!(add.language.as_str(), "erlang");
 }
 
 #[test]
@@ -1782,7 +1782,7 @@ fn test_parse_fortran_function() {
         "docstring should contain 'Computes the sum', got: {:?}",
         add.summary
     );
-    assert_eq!(add.language, "fortran");
+    assert_eq!(add.language.as_str(), "fortran");
 }
 
 #[test]

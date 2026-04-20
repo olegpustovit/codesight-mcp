@@ -94,7 +94,7 @@ fn symbol_names_from_search(data: &serde_json::Value) -> Vec<String> {
 fn case_fuzzy_integration_cases() {
     let workspace = tempdir().unwrap();
     let root = setup_fuzzy_demo_repo(workspace.path());
-    let svc = CodeService::new(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &root);
 
     let res = svc

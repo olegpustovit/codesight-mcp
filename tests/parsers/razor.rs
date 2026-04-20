@@ -73,45 +73,45 @@ fn test_parse_razor_mixed_symbols() {
         .iter()
         .find(|s| s.name == "Index" && s.kind == SymbolKind::Class);
     assert!(view.is_some(), "Index class should exist");
-    assert_eq!(view.unwrap().language, "razor");
+    assert_eq!(view.unwrap().language.as_str(), "razor");
 
     // FullName method (C#)
     let fullname = syms.iter().find(|s| s.name == "FullName");
     assert!(fullname.is_some(), "FullName should exist");
     assert_eq!(fullname.unwrap().kind, SymbolKind::Method);
-    assert_eq!(fullname.unwrap().language, "csharp");
+    assert_eq!(fullname.unwrap().language.as_str(), "csharp");
     assert_eq!(fullname.unwrap().qualified_name, "Index.FullName");
 
     // Count constant (C#)
     let count = syms.iter().find(|s| s.name == "Count");
     assert!(count.is_some(), "Count should exist");
     assert_eq!(count.unwrap().kind, SymbolKind::Constant);
-    assert_eq!(count.unwrap().language, "csharp");
+    assert_eq!(count.unwrap().language.as_str(), "csharp");
 
     // profile-card HTML id
     let profile_card = syms.iter().find(|s| s.name == "profile-card");
     assert!(profile_card.is_some(), "profile-card should exist");
     assert_eq!(profile_card.unwrap().kind, SymbolKind::Constant);
-    assert_eq!(profile_card.unwrap().language, "razor");
+    assert_eq!(profile_card.unwrap().language.as_str(), "razor");
 
     // profile.js external script
     let profile_js = syms.iter().find(|s| s.name == "profile.js");
     assert!(profile_js.is_some(), "profile.js should exist");
     assert_eq!(profile_js.unwrap().kind, SymbolKind::Function);
-    assert_eq!(profile_js.unwrap().language, "razor");
+    assert_eq!(profile_js.unwrap().language.as_str(), "razor");
 
     // toggleCard inline JS function
     let toggle = syms.iter().find(|s| s.name == "toggleCard");
     assert!(toggle.is_some(), "toggleCard should exist");
     assert_eq!(toggle.unwrap().kind, SymbolKind::Function);
-    assert_eq!(toggle.unwrap().language, "javascript");
+    assert_eq!(toggle.unwrap().language.as_str(), "javascript");
     assert_eq!(toggle.unwrap().qualified_name, "Index.toggleCard");
 
     // style_1 (style block)
     let style = syms.iter().find(|s| s.name == "style_1");
     assert!(style.is_some(), "style_1 should exist");
     assert_eq!(style.unwrap().kind, SymbolKind::Constant);
-    assert_eq!(style.unwrap().language, "razor");
+    assert_eq!(style.unwrap().language.as_str(), "razor");
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn test_parse_razor_code_block_handles_nested_braces_and_strings() {
     let render = symbols.iter().find(|s| s.name == "Render");
     assert!(render.is_some(), "Render method should exist");
     assert_eq!(render.unwrap().kind, SymbolKind::Method);
-    assert_eq!(render.unwrap().language, "csharp");
+    assert_eq!(render.unwrap().language.as_str(), "csharp");
     assert!(
         render.unwrap().start_line >= 2,
         "Render should be on line >= 2"
@@ -179,7 +179,7 @@ fn test_parse_public_razor_layout_fixture() {
         .iter()
         .find(|s| s.name == "_Layout" && s.kind == SymbolKind::Class);
     assert!(view.is_some(), "_Layout class should exist");
-    assert_eq!(view.unwrap().language, "razor");
+    assert_eq!(view.unwrap().language.as_str(), "razor");
 
     let scripts: std::collections::HashMap<_, _> = syms
         .iter()
@@ -224,7 +224,7 @@ fn test_blazor_component_symbol() {
         .iter()
         .find(|s| s.name == "Counter" && s.kind == SymbolKind::Class);
     assert!(component.is_some(), "Counter class should exist");
-    assert_eq!(component.unwrap().language, "razor");
+    assert_eq!(component.unwrap().language.as_str(), "razor");
     assert_eq!(component.unwrap().start_line, 1);
 }
 
@@ -242,7 +242,7 @@ fn test_blazor_page_routes() {
         "missing parameterized route"
     );
     assert_eq!(routes["/counter"].kind, SymbolKind::Constant);
-    assert_eq!(routes["/counter"].language, "razor");
+    assert_eq!(routes["/counter"].language.as_str(), "razor");
 }
 
 #[test]
@@ -275,11 +275,11 @@ fn test_blazor_code_block_csharp_members() {
 
     let on_init = syms.iter().find(|s| s.name == "OnInitialized");
     assert!(on_init.is_some(), "OnInitialized should exist");
-    assert_eq!(on_init.unwrap().language, "csharp");
+    assert_eq!(on_init.unwrap().language.as_str(), "csharp");
 
     let increment = syms.iter().find(|s| s.name == "IncrementCount");
     assert!(increment.is_some(), "IncrementCount should exist");
-    assert_eq!(increment.unwrap().language, "csharp");
+    assert_eq!(increment.unwrap().language.as_str(), "csharp");
 }
 
 /// Nested generics break the legacy regex return-type arm (`Task<…>` uses `[^>]+`).
@@ -298,12 +298,12 @@ fn test_razor_code_block_nested_generic_method_via_tree_sitter() {
         .expect("extract");
     let m = syms
         .iter()
-        .find(|s| s.name == "FetchAllAsync" && s.language == "csharp");
+        .find(|s| s.name == "FetchAllAsync" && s.language.as_str() == "csharp");
     assert!(
         m.is_some(),
         "expected csharp.FetchAllAsync from tree-sitter, got csharp names: {:?}",
         syms.iter()
-            .filter(|s| s.language == "csharp")
+            .filter(|s| s.language.as_str() == "csharp")
             .map(|s| s.name.as_str())
             .collect::<Vec<_>>()
     );
@@ -316,7 +316,7 @@ fn test_blazor_html_ids() {
         .iter()
         .filter(|s| {
             s.kind == SymbolKind::Constant
-                && s.language == "razor"
+                && s.language.as_str() == "razor"
                 && !s.signature.starts_with("@page")
                 && !s.signature.starts_with("@inject")
         })
@@ -333,7 +333,7 @@ fn test_blazor_style_block() {
     let style = syms.iter().find(|s| s.name == "style_1");
     assert!(style.is_some(), "style_1 should exist");
     assert_eq!(style.unwrap().kind, SymbolKind::Constant);
-    assert_eq!(style.unwrap().language, "razor");
+    assert_eq!(style.unwrap().language.as_str(), "razor");
 }
 
 #[test]

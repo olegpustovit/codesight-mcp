@@ -29,9 +29,11 @@ impl crate::extractors::LanguageExtractor for VueExtractor {
         };
 
         let grammar: tree_sitter::Language = if block.is_typescript {
-            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
+            codesight_language_support::builtin_grammar("typescript")
+                .expect("typescript grammar registered with language-support")
         } else {
-            tree_sitter_javascript::LANGUAGE.into()
+            codesight_language_support::builtin_grammar("javascript")
+                .expect("javascript grammar registered with language-support")
         };
 
         // Derive component name from filename (e.g. "Counter.vue" -> "Counter")
@@ -45,7 +47,7 @@ impl crate::extractors::LanguageExtractor for VueExtractor {
             symbols.push(StoredSymbol {
                 id: format!("{file_path}::{comp_name}#class"),
                 extraction_tier: ExtractionTier::ManualOverride,
-                language: "vue".to_string(),
+                language: codesight_core::VUE,
                 file_path: file_path.to_string(),
                 qualified_name: comp_name.clone(),
                 name: comp_name.clone(),
@@ -368,7 +370,7 @@ fn push_vue_symbol(
     symbols.push(StoredSymbol {
         id: format!("{file_path}::{qualified_name}#{}", kind.as_str()),
         extraction_tier: ExtractionTier::ManualOverride,
-        language: "vue".to_string(),
+        language: codesight_core::VUE,
         file_path: file_path.to_string(),
         qualified_name,
         name: name.to_string(),
@@ -475,7 +477,7 @@ export default {
             .find(|s| s.name == "greet")
             .expect("missing greet");
         assert_eq!(greet.kind, SymbolKind::Function);
-        assert_eq!(greet.language, "vue");
+        assert_eq!(greet.language, codesight_core::VUE);
         assert!(
             greet.summary.contains("Greet a user"),
             "summary: {}",
@@ -501,7 +503,7 @@ export default {
             .iter()
             .find(|s| s.name == "User" && s.kind == SymbolKind::Type)
             .expect("missing User interface");
-        assert_eq!(iface.language, "vue");
+        assert_eq!(iface.language, codesight_core::VUE);
 
         let func = symbols
             .iter()

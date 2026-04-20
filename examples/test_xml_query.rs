@@ -1,6 +1,8 @@
 fn main() {
     let lang: tree_sitter::Language = tree_sitter_xml::LANGUAGE_XML.into();
-    let query_src = include_str!("../runtime/queries/xml/tags.scm");
+    let query_src = include_str!(
+        "../crates/codesight-language-support/runtime/queries/xml/tags.scm"
+    );
     match tree_sitter::Query::new(&lang, query_src) {
         Ok(q) => println!(
             "XML query OK: {} patterns, {} captures",

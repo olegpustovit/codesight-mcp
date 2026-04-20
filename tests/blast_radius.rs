@@ -43,7 +43,7 @@ fn build_chain_repo() -> (tempfile::TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
     (ws, svc, sid)
 }
@@ -120,7 +120,7 @@ fn bfs_no_importers_returns_empty() {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("lonely.py"), "def lonely():\n    pass\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
     let r = blast_radius(&svc, &sid, "lonely", 3);
     assert!(r["ok"].as_bool().unwrap_or(false), "{r:?}");
@@ -143,7 +143,7 @@ fn bfs_no_cycles_on_circular_graph() {
         "from a import foo\n\ndef bar():\n    return foo()\n",
     )
     .unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
     let r = blast_radius(&svc, &sid, "foo", 5);
     assert!(r["ok"].as_bool().unwrap_or(false), "{r:?}");
@@ -243,7 +243,7 @@ fn risk_zero_importers_gives_risk_score_zero() {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("lone.py"), "def lone():\n    pass\n").unwrap();
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest(&svc, &src);
     let r = blast_radius_with_depth_scores(&svc, &sid, "lone", 1);
     assert!(r["ok"].as_bool().unwrap_or(false), "{r:?}");

@@ -30,7 +30,7 @@ fn search_catalog_savings_use_candidate_files_not_repo_bytes() {
     fs::write(src.join("main.py"), matching).unwrap();
     fs::write(src.join("huge_blob.py"), "x".repeat(400_000)).unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let response = svc
@@ -66,7 +66,7 @@ fn search_catalog_count_mode_uses_the_same_candidate_file_baseline() {
     fs::write(src.join("main.py"), matching).unwrap();
     fs::write(src.join("huge_blob.py"), "y".repeat(400_000)).unwrap();
 
-    let svc = CodeService::new(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let response = svc

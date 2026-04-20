@@ -23,7 +23,11 @@ impl crate::extractors::LanguageExtractor for LuauExtractor {
         file_path: &str,
         source: &str,
     ) -> anyhow::Result<Vec<crate::core::pipeline::StoredSymbol>> {
-        let tree = parse_tree(tree_sitter_luau::LANGUAGE, source)?;
+        let tree = parse_tree(
+            codesight_language_support::builtin_grammar("luau")
+                .expect("luau grammar registered with language-support"),
+            source,
+        )?;
         let mut symbols = Vec::new();
         visit(
             tree.root_node(),

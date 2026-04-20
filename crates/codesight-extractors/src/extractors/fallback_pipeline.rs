@@ -39,7 +39,7 @@ mod tests {
         StoredSymbol {
             id: format!("f::{name}"),
             extraction_tier: ExtractionTier::ManualOverride,
-            language: "x".into(),
+            language: codesight_core::UNKNOWN_LANGUAGE,
             file_path: "f".into(),
             qualified_name: name.into(),
             name: name.into(),

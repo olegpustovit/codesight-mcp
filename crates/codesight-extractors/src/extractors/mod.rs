@@ -1,7 +1,6 @@
 mod al;
 mod asm;
 mod blade;
-pub(crate) mod classifier;
 pub mod common;
 pub(crate) mod containers;
 mod ejs;

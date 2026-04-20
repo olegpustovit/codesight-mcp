@@ -16,7 +16,7 @@ fn setup_with_metadata(metadata: serde_json::Value) -> (CodeService, String) {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("model.py"), "x = 1\n").unwrap();
 
-    let svc = CodeService::new(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

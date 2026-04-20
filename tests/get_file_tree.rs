@@ -104,7 +104,7 @@ fn setup_header_fixture() -> TreeFixture {
     .unwrap();
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let source_id = ingest_code(&svc, &root);
     TreeFixture {
         _workspace: workspace,
@@ -126,7 +126,7 @@ fn setup_small_tree_fixture() -> TreeFixture {
     }
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let source_id = ingest_code(&svc, &root);
     TreeFixture {
         _workspace: workspace,
@@ -156,7 +156,7 @@ fn setup_large_tree_fixture() -> TreeFixture {
     }
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let source_id = ingest_code(&svc, &root);
     TreeFixture {
         _workspace: workspace,
@@ -178,7 +178,7 @@ fn setup_custom_cap_fixture() -> TreeFixture {
     }
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let source_id = ingest_code(&svc, &root);
     TreeFixture {
         _workspace: workspace,
@@ -279,7 +279,7 @@ fn case_prefers_symbol_language_over_extension() {
     fs::write(root.join("src/orphan.cpp"), "// no symbols here\n").unwrap();
 
     let cfg = AppConfig::new(workspace.path().join("idx"));
-    let svc = CodeService::new(cfg).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(cfg).unwrap();
     let sid = ingest_code(&svc, &root);
 
     let r = inspect_file_tree(&svc, &sid, json!({}));

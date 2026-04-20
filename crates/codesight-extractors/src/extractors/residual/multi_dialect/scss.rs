@@ -23,7 +23,11 @@ impl crate::extractors::LanguageExtractor for ScssExtractor {
         file_path: &str,
         source: &str,
     ) -> anyhow::Result<Vec<crate::core::pipeline::StoredSymbol>> {
-        let tree = parse_tree(tree_sitter_scss::language(), source)?;
+        let tree = parse_tree(
+            codesight_language_support::builtin_grammar("scss")
+                .expect("scss grammar registered with language-support"),
+            source,
+        )?;
         let mut symbols = Vec::new();
         visit(tree.root_node(), file_path, source, &mut symbols)?;
         symbols.sort_by_key(|s| (s.start_byte, s.end_byte));
