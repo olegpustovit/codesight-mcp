@@ -11,16 +11,17 @@ use std::{
 use ignore::WalkBuilder;
 use tracing::instrument;
 
-use codesight_backend::{CodeBackend, IndexFileRequest};
 use codesight_storage::storage::vector_index::OwnedVectorRow;
 
 use codesight_storage::storage::IndexStore;
 
 use codesight_core::pipeline::{FileFingerprint, IndexedFileUpdate};
 
+use codesight_language_support::dep_graph;
+
 use crate::{
     config::{AppConfig, GITIGNORE_WARNING_FILE_THRESHOLD},
-    indexing::dep_graph,
+    indexing::Indexer,
     repo_id::normalize_repo_id,
 };
 
@@ -56,21 +57,21 @@ pub struct CodeIndexOutcome {
 #[instrument(
     level = "info",
     name = "ingest",
-    skip(config, backend),
+    skip(config, indexer),
     fields(root = %root.display())
 )]
 pub fn index_workspace(
     config: &AppConfig,
     root: &Path,
-    backend: &Arc<dyn CodeBackend>,
+    indexer: &Arc<Indexer>,
 ) -> anyhow::Result<CodeIndexOutcome> {
-    index_workspace_with_symbol_vectors(config, root, backend, |_, _| Ok(Vec::new()))
+    index_workspace_with_symbol_vectors(config, root, indexer, |_, _| Ok(Vec::new()))
 }
 
 pub fn index_workspace_with_symbol_vectors<F>(
     config: &AppConfig,
     root: &Path,
-    backend: &Arc<dyn CodeBackend>,
+    indexer: &Arc<Indexer>,
     build_symbol_vectors: F,
 ) -> anyhow::Result<CodeIndexOutcome>
 where
@@ -79,7 +80,7 @@ where
     let repo = normalize_repo_id(root);
     let store = IndexStore::open(config.repo_db_path(&repo))?;
     let index_version = store.current_index_version()?.saturating_add(1);
-    let extractor_version = backend.version_stamp();
+    let extractor_version = indexer.version_stamp();
     // If the backend's version stamp changed since the last ingest, drop
     // cached file fingerprints so every matching file gets re-extracted
     // even when its content hash hasn't changed. Without this, edits to
@@ -127,7 +128,7 @@ where
         }
 
         let path = entry.path();
-        let Some(language) = backend.detect_language(root, path) else {
+        let Some(language) = indexer.detect_language(root, path) else {
             continue;
         };
 
@@ -177,22 +178,7 @@ where
             }
         }
 
-        let indexed = match backend.index_file(IndexFileRequest {
-            project_root: root.to_path_buf(),
-            file: path.to_path_buf(),
-            source: source.clone(),
-        }) {
-            Ok(indexed) => indexed,
-            Err(err) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = format!("{err}"),
-                    backend = backend.name(),
-                    "backend extraction failed"
-                );
-                continue;
-            }
-        };
+        let symbols = indexer.extract_symbols(root, path, &source);
 
         updated_files.push(IndexedFileUpdate {
             file_path: relative_path,
@@ -200,7 +186,7 @@ where
             size_bytes,
             modified_ns,
             content_hash,
-            symbols: indexed.symbols,
+            symbols,
         });
     }
 
@@ -227,9 +213,12 @@ where
         .cloned()
         .collect::<Vec<_>>();
 
-    let alias_map = codesight_imports::imports::load_tsconfig_aliases(&root.to_string_lossy());
+    let alias_map = codesight_language_support::builtin_registry()
+        .get(codesight_language_support::TYPESCRIPT)
+        .map(|l| l.path_aliases(root))
+        .unwrap_or_default();
     let alias_ref = (!alias_map.is_empty()).then_some(&alias_map);
-    let workspace_crates = codesight_imports::packages::workspace_crates_from_root(root);
+    let workspace_crates = codesight_language_support::packages::workspace_crates_from_root(root);
     let workspace_ref = (!workspace_crates.is_empty()).then_some(&workspace_crates);
     let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(
         &graph_sources,
@@ -252,7 +241,8 @@ where
         &extractor_version,
     )?;
 
-    let package_names = codesight_imports::packages::extract_package_names(&root.to_string_lossy());
+    let package_names =
+        codesight_language_support::packages::extract_package_names(&root.to_string_lossy());
     if !package_names.is_empty() {
         let _ = store.set_package_names(&package_names);
     }
@@ -260,7 +250,9 @@ where
     let metadata = store.repo_metadata()?;
     let languages_without_import_extractor: Vec<String> = indexed_languages
         .into_iter()
-        .filter(|language| !codesight_imports::imports::supports_import_extraction(language))
+        .filter(|language| {
+            !codesight_language_support::imports_orchestration::supports_import_extraction(language)
+        })
         .collect();
 
     let files_reindexed = updated_files.len();
@@ -305,11 +297,11 @@ pub fn reindex_files(
     root: &Path,
     repo: &str,
     store: &IndexStore,
-    backend: &Arc<dyn CodeBackend>,
+    indexer: &Arc<Indexer>,
     changed_paths: &[std::path::PathBuf],
 ) -> anyhow::Result<DeltaReindexStats> {
     let index_version = store.current_index_version()?.saturating_add(1);
-    let extractor_version = backend.version_stamp();
+    let extractor_version = indexer.version_stamp();
 
     let mut updated_files = Vec::new();
     let mut removed_files = Vec::new();
@@ -332,7 +324,7 @@ pub fn reindex_files(
             _ => continue,
         };
 
-        let Some(language) = backend.detect_language(root, abs_path) else {
+        let Some(language) = indexer.detect_language(root, abs_path) else {
             continue;
         };
 
@@ -350,32 +342,24 @@ pub fn reindex_files(
         let source = String::from_utf8_lossy(&bytes).into_owned();
         graph_sources.push((relative_path.clone(), source.clone()));
 
-        let indexed = match backend.index_file(IndexFileRequest {
-            project_root: root.to_path_buf(),
-            file: abs_path.clone(),
-            source: source.clone(),
-        }) {
-            Ok(indexed) => indexed,
-            Err(err) => {
-                tracing::warn!(path = %abs_path.display(), error = format!("{err}"), backend = backend.name(), "extraction failed");
-                continue;
-            }
-        };
-
-        symbols_extracted += indexed.symbols.len();
+        let symbols = indexer.extract_symbols(root, abs_path, &source);
+        symbols_extracted += symbols.len();
         updated_files.push(IndexedFileUpdate {
             file_path: relative_path,
             language: codesight_core::LanguageId::intern(&language),
             size_bytes,
             modified_ns: mod_ns,
             content_hash,
-            symbols: indexed.symbols,
+            symbols,
         });
     }
 
-    let alias_map = codesight_imports::imports::load_tsconfig_aliases(&root.to_string_lossy());
+    let alias_map = codesight_language_support::builtin_registry()
+        .get(codesight_language_support::TYPESCRIPT)
+        .map(|l| l.path_aliases(root))
+        .unwrap_or_default();
     let alias_ref = (!alias_map.is_empty()).then_some(&alias_map);
-    let workspace_crates = codesight_imports::packages::workspace_crates_from_root(root);
+    let workspace_crates = codesight_language_support::packages::workspace_crates_from_root(root);
     let workspace_ref = (!workspace_crates.is_empty()).then_some(&workspace_crates);
     let dep_edges = dep_graph::build_dependency_graph_edges_with_aliases(
         &graph_sources,

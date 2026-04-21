@@ -53,27 +53,20 @@ pub(in crate::service) fn git_show_file(
 }
 
 /// Extract symbol names and their source text from raw content using the
-/// backend indexer. Used by git-diff-driven analyses that feed in content
+/// tree-sitter indexer. Used by git-diff-driven analyses that feed in content
 /// from `git show`, so we can't rely on on-disk reads.
 pub(in crate::service) fn extract_symbol_names_from_content(
     content: &str,
     file_path: &str,
     project_root: &std::path::Path,
-    backend: &std::sync::Arc<dyn codesight_backend::CodeBackend>,
+    indexer: &std::sync::Arc<crate::indexing::Indexer>,
 ) -> Vec<(String, String)> {
     let abs = project_root.join(file_path);
-    match backend.index_file(codesight_backend::IndexFileRequest {
-        project_root: project_root.to_path_buf(),
-        file: abs,
-        source: content.to_string(),
-    }) {
-        Ok(indexed) => indexed
-            .symbols
-            .into_iter()
-            .map(|s| (s.name, s.source_text))
-            .collect(),
-        Err(_) => Vec::new(),
-    }
+    indexer
+        .extract_symbols(project_root, &abs, content)
+        .into_iter()
+        .map(|s| (s.name, s.source_text))
+        .collect()
 }
 
 /// BFS once from `target_id` across reverse call edges, returning a

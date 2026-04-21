@@ -9,8 +9,7 @@ use std::time::Duration;
 use notify_debouncer_full::{DebounceEventResult, new_debouncer, notify::RecursiveMode};
 
 use crate::config::AppConfig;
-use crate::indexing::code_index;
-use codesight_backend::CodeBackend;
+use crate::indexing::{Indexer, code_index};
 use codesight_storage::storage::IndexStore;
 
 struct WatchHandle {
@@ -39,7 +38,7 @@ impl WatcherManager {
         repo_id: &str,
         root: PathBuf,
         config: AppConfig,
-        backend: Arc<dyn CodeBackend>,
+        indexer: Arc<Indexer>,
     ) {
         if !self.enabled.load(Ordering::Relaxed) {
             return;
@@ -55,7 +54,7 @@ impl WatcherManager {
         let handle = std::thread::Builder::new()
             .name(format!("watch-{repo_id}"))
             .spawn(move || {
-                if let Err(e) = run_watcher(&repo_id_owned, &root, &config, &backend) {
+                if let Err(e) = run_watcher(&repo_id_owned, &root, &config, &indexer) {
                     tracing::warn!(repo = %repo_id_owned, error = %e, "file watcher exited");
                 }
             })
@@ -70,7 +69,7 @@ fn run_watcher(
     repo_id: &str,
     root: &Path,
     config: &AppConfig,
-    backend: &Arc<dyn CodeBackend>,
+    indexer: &Arc<Indexer>,
 ) -> anyhow::Result<()> {
     let store = IndexStore::open(config.repo_db_path(repo_id))?;
     let storage_dir = config.index_root();
@@ -91,7 +90,7 @@ fn run_watcher(
             continue;
         }
         let start = std::time::Instant::now();
-        match code_index::reindex_files(config, root, repo_id, &store, backend, &changed) {
+        match code_index::reindex_files(config, root, repo_id, &store, indexer, &changed) {
             Ok(stats) => {
                 tracing::debug!(
                     repo = %repo_id,

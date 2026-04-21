@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
-use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
+use codesight_language_support::LanguageRegistry;
 use codesight_core::SymbolKind;
 
 const LUAU_SERVICE: &str = "\
@@ -264,7 +264,7 @@ fn test_luau_no_return_type_without_annotation() {
 /// Reference asserts: LANGUAGE_EXTENSIONS[".luau"] == "luau"
 #[test]
 fn test_luau_extension_registered() {
-    let registry = ExtractorRegistry::default();
+    let registry = LanguageRegistry::default();
     let ext = registry.extractor_for_path(Path::new("module.luau"));
     assert!(ext.is_some(), ".luau extension should be registered");
     assert_eq!(
@@ -274,10 +274,10 @@ fn test_luau_extension_registered() {
     );
 }
 /// Reference asserts: "luau" in LANGUAGE_REGISTRY
-/// Rust equivalent: ExtractorRegistry default includes a luau extractor.
+/// Rust equivalent: LanguageRegistry default includes a luau extractor.
 #[test]
 fn test_luau_language_in_registry() {
-    let registry = ExtractorRegistry::default();
+    let registry = LanguageRegistry::default();
     // Verify that any .luau file resolves, confirming luau is in the registry.
     let ext = registry.extractor_for_path(Path::new("test.luau"));
     assert!(ext.is_some(), "luau should be in the extractor registry");

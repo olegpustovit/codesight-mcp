@@ -1,11 +1,11 @@
-//! Ranking, semantic retrieval, fuzzy matching, summarization, and doc section parsing.
+//! Ranking, semantic retrieval, fuzzy matching, and doc section parsing.
 //!
-//! This domain sits between persistence (`storage`) and the MCP/service boundary.
+//! This domain sits between persistence (`storage`) and the MCP/service
+//! boundary. Semantic retrieval runs on a bundled on-device embedder
+//! (`embedder`) — there is no external LLM summarizer.
 
 pub mod bm25_reference;
-pub mod doc_summarizer;
 pub mod embedder;
 pub mod fusion;
 pub mod fuzzy;
 pub mod sections;
-pub mod summarizer;

@@ -14,9 +14,10 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use serde_json::{Map, Value, json};
 use tracing::instrument;
 
-use codesight_analysis::complexity::cyclomatic_complexity;
-use codesight_backend::CodeBackend;
+use codesight_analysis::complexity::cyclomatic_complexity_for_path;
 use codesight_storage::storage::{QualitySnapshot, vector_index::OwnedVectorRow};
+
+use crate::indexing::Indexer;
 
 use crate::{
     config::{
@@ -179,28 +180,21 @@ pub struct CodeService {
     /// calls back into the service. Uninstalled in unit tests that drive
     /// `CodeService` directly by value — those take the synchronous fallback.
     self_weak: OnceLock<Weak<CodeService>>,
-    /// Pluggable code-intelligence router. Backends (tree-sitter today, LSP
-    /// next) are registered by the host binary at startup. Empty during unit
-    /// tests that don't need backend-routed facts.
-    backends: codesight_backend::BackendRouter,
+    /// Tree-sitter-backed indexer. Wraps a `LanguageRegistry` and provides
+    /// language detection + symbol extraction. Always present — handlers
+    /// never conditionally probe for a backend.
+    indexer: Arc<Indexer>,
 }
 
 impl CodeService {
     pub fn new(config: AppConfig) -> anyhow::Result<Self> {
-        Self::with_backends(config, codesight_backend::BackendRouter::new())
-    }
-
-    pub fn with_backends(
-        config: AppConfig,
-        backends: codesight_backend::BackendRouter,
-    ) -> anyhow::Result<Self> {
         config.ensure_layout()?;
         agent_v1::validate::init_schemas()
             .map_err(|e| anyhow::anyhow!("tools.json schema init failed: {e}"))?;
         let ledger = SavingsLedger::new(config.savings_file());
         let reindex_states = Arc::new(ReindexStateManager::new());
         Ok(Self {
-            backends,
+            indexer: Arc::new(Indexer::new()),
             config,
             ledger,
             ledger_guard: Mutex::new(()),
@@ -212,12 +206,6 @@ impl CodeService {
             ),
             self_weak: OnceLock::new(),
         })
-    }
-
-    /// Backend router. Handlers route per `(Language, Capability)` through
-    /// this when they need typed facts; unrouted handlers can ignore it.
-    pub fn backends(&self) -> &codesight_backend::BackendRouter {
-        &self.backends
     }
 
     /// Process-wide per-source snapshot cache. Accessible so handler modules
@@ -373,7 +361,8 @@ impl CodeService {
             if kind != "function" && kind != "method" {
                 continue;
             }
-            let cyclomatic = cyclomatic_complexity(&symbol.source_text) as u64;
+            let cyclomatic =
+                cyclomatic_complexity_for_path(&symbol.source_text, &symbol.file_path) as u64;
             total_complexity = total_complexity.saturating_add(cyclomatic);
             function_count = function_count.saturating_add(1);
             let entry = file_hotspots.entry(symbol.file_path).or_default();
@@ -670,19 +659,9 @@ impl CodeService {
         }
     }
 
-    /// Backend indexer for the current router. Returns `None` when no
-    /// backend has been registered (e.g. some unit tests that don't touch
-    /// the indexing path). Handlers that require a backend should use
-    /// [`Self::require_indexer`].
-    pub(crate) fn indexer(&self) -> Option<&Arc<dyn CodeBackend>> {
-        self.backends.indexer()
-    }
-
-    /// Strict version of [`Self::indexer`] that surfaces a diagnostic rather
-    /// than silently skipping work.
-    pub(crate) fn require_indexer(&self) -> anyhow::Result<&Arc<dyn CodeBackend>> {
-        self.indexer()
-            .ok_or_else(|| anyhow::anyhow!("no code-intelligence backend registered"))
+    /// Tree-sitter-backed indexer. Always available.
+    pub(crate) fn indexer(&self) -> &Arc<Indexer> {
+        &self.indexer
     }
 
     pub(super) fn success_response(
@@ -786,11 +765,7 @@ class SessionManager:
         .unwrap();
 
         let index_root = workspace.path().join("index");
-        let service = CodeService::with_backends(
-            AppConfig::new(index_root),
-            codesight_backend::default_router(),
-        )
-        .expect("service");
+        let service = CodeService::new(AppConfig::new(index_root)).expect("service");
 
         let indexed = service
             .dispatch(
@@ -874,11 +849,8 @@ class SessionManager:
         fs::create_dir_all(&repo_root).unwrap();
         fs::write(repo_root.join("lib.py"), "x = 1\n").unwrap();
 
-        let service = CodeService::with_backends(
-            AppConfig::new(workspace.path().join("index")),
-            codesight_backend::default_router(),
-        )
-        .expect("service");
+        let service =
+            CodeService::new(AppConfig::new(workspace.path().join("index"))).expect("service");
 
         let repo_id = crate::repo_id::normalize_repo_id(&repo_root.canonicalize().unwrap());
         service

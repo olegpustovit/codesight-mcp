@@ -59,6 +59,6 @@ impl Language for Jsx {
         true
     }
     fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_colon_after_name(source, "jsx", false, |_| false)
+        measure_colon_after_name(source, self, false, |_| false)
     }
 }

@@ -46,6 +46,7 @@ impl LanguageRegistry {
     /// and `.codesight.toml` `extra_extensions`.
     pub fn for_workspace_root(root: &Path) -> anyhow::Result<Self> {
         let mut reg = Self::builtin();
+        reg.register_workspace_query_packs(root)?;
         let extras = crate::workspace::project_extra_extensions(root);
         let typed: HashMap<String, LanguageId> = extras
             .iter()
@@ -67,8 +68,25 @@ impl LanguageRegistry {
                 (ext.clone(), id)
             })
             .collect();
-        reg.apply_extra_extensions(&typed);
+        reg.apply_extra_extension_ids(&typed);
         Ok(reg)
+    }
+
+    fn register_workspace_query_packs(&mut self, root: &Path) -> anyhow::Result<()> {
+        let overlay_roots = crate::workspace::project_query_pack_roots(root);
+        let overlay = crate::query_pack_catalog::QueryPackCatalog::from_roots(&overlay_roots)?;
+        for pack in overlay.iter() {
+            let id = LanguageId::intern(&pack.metadata.name);
+            if self.by_id.contains_key(&id) {
+                continue;
+            }
+            let Some(spec) = crate::grammars::builtin_grammar_spec(&pack.metadata.grammar) else {
+                continue;
+            };
+            let lang = crate::workspace_pack::WorkspacePackLanguage::new(id, pack, spec);
+            self.register(Arc::new(lang));
+        }
+        Ok(())
     }
 
     pub fn get(&self, id: LanguageId) -> Option<&dyn Language> {
@@ -76,7 +94,61 @@ impl LanguageRegistry {
     }
 
     pub fn for_path(&self, path: &Path) -> Option<&dyn Language> {
-        self.resolve_get(self.identify_path(path))
+        let host = self.identify_path(path);
+        if let Some(profile_lang) = self
+            .best_profile_for(path, host)
+            .and_then(|pid| self.for_language_name(pid.as_str()))
+        {
+            return Some(profile_lang);
+        }
+        self.resolve_get(host)
+    }
+
+    /// Legacy alias for [`Self::for_path`].
+    pub fn extractor_for_path(&self, path: &Path) -> Option<&dyn Language> {
+        self.for_path(path)
+    }
+
+    /// Legacy alias for [`Self::for_language_name`].
+    pub fn extractor_for_language(&self, name: &str) -> Option<&dyn Language> {
+        self.for_language_name(name)
+    }
+
+    /// Legacy helper: every supported language as a sorted list of names.
+    pub fn supported_languages(&self) -> Vec<&str> {
+        let mut langs: Vec<&str> = self.all().map(|lang| lang.id().as_str()).collect();
+        langs.sort();
+        langs.dedup();
+        langs
+    }
+
+    /// Legacy alias for [`Self::supported_languages`].
+    pub fn known_languages(&self) -> Vec<&str> {
+        self.supported_languages()
+    }
+
+    /// Curated-language names as a sorted list (string form).
+    pub fn curated_language_names(&self) -> Vec<&'static str> {
+        let mut names: Vec<&'static str> =
+            self.curated_languages().map(|id| id.as_str()).collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// Resolve a language name passed by the caller (e.g. `"rust"`,
+    /// `"golang"`, `"tsx"`). Looks up by canonical id OR by manifest alias.
+    pub fn for_language_name(&self, name: &str) -> Option<&dyn Language> {
+        let lower = name.to_ascii_lowercase();
+        self.all().find(|lang| {
+            if lang.id().as_str().eq_ignore_ascii_case(&lower) {
+                return true;
+            }
+            lang.manifest()
+                .aliases
+                .iter()
+                .any(|alias| alias.eq_ignore_ascii_case(&lower))
+        })
     }
 
     pub fn for_file(&self, path: &Path, source: Option<&str>) -> Option<&dyn Language> {
@@ -164,7 +236,10 @@ impl LanguageRegistry {
         self.by_id.insert(id, language);
     }
 
-    pub fn apply_extra_extensions(
+    /// Id-keyed register: accepts pre-resolved `(extension, LanguageId)`
+    /// pairs. Used by internal call-sites that already have a typed id.
+    /// External callers / `.codesight.toml` use [`Self::apply_extra_extensions`].
+    pub fn apply_extra_extension_ids(
         &mut self,
         mappings: &HashMap<String, LanguageId>,
     ) -> Vec<String> {
@@ -178,6 +253,41 @@ impl LanguageRegistry {
             self.extra_ext.insert(trimmed, *id);
         }
         rejected
+    }
+
+    /// Register extra `(extension, language_name)` mappings. Returns a list
+    /// of human-readable warnings for entries the registry could not accept
+    /// (empty extension, unknown language, etc.).
+    pub fn apply_extra_extensions(
+        &mut self,
+        mappings: &HashMap<String, String>,
+    ) -> Vec<String> {
+        let mut warnings = Vec::new();
+        for (ext_raw, lang_raw) in mappings {
+            let ext = ext_raw.trim().to_string();
+            let lang = lang_raw.trim().to_string();
+            if ext.is_empty() || ext == "." {
+                warnings.push(format!(
+                    "extra_extensions: skipping empty extension for language '{lang_raw}'"
+                ));
+                continue;
+            }
+            if lang.is_empty() {
+                warnings.push(format!(
+                    "extra_extensions: skipping extension '{ext}' with empty language"
+                ));
+                continue;
+            }
+            let ext_norm = ext.strip_prefix('.').unwrap_or(&ext).to_ascii_lowercase();
+            let Some(lang_ref) = self.for_language_name(&lang) else {
+                warnings.push(format!(
+                    "extra_extensions: unknown language '{lang}' for extension '.{ext_norm}', skipping"
+                ));
+                continue;
+            };
+            self.extra_ext.insert(ext_norm, lang_ref.id());
+        }
+        warnings
     }
 
     fn identify_path_no_probe(&self, path: &Path) -> LanguageId {
@@ -328,7 +438,7 @@ mod tests {
         let mut r = LanguageRegistry::empty();
         let mut mappings = HashMap::new();
         mappings.insert(".foo".to_string(), RUST);
-        let rejected = r.apply_extra_extensions(&mappings);
+        let rejected = r.apply_extra_extension_ids(&mappings);
         assert_eq!(rejected, vec![".foo".to_string()]);
     }
 
@@ -337,7 +447,7 @@ mod tests {
         let mut r = LanguageRegistry::builtin();
         let mut mappings = HashMap::new();
         mappings.insert(".rsx".to_string(), RUST);
-        assert!(r.apply_extra_extensions(&mappings).is_empty());
+        assert!(r.apply_extra_extension_ids(&mappings).is_empty());
         assert_eq!(r.identify_path(Path::new("foo.rsx")), RUST);
     }
 
@@ -448,7 +558,7 @@ mod tests {
         mappings.insert(String::new(), RUST);
         mappings.insert(".".to_string(), RUST);
         mappings.insert(".xx".to_string(), LanguageId::new("nosuchlanguage"));
-        let rejected = r.apply_extra_extensions(&mappings);
+        let rejected = r.apply_extra_extension_ids(&mappings);
         assert_eq!(rejected.len(), 3);
         assert_eq!(r.identify_path(Path::new("foo.xx")), UNKNOWN_LANGUAGE);
     }

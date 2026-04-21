@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::ExtractorRegistry;
+use codesight_language_support::LanguageRegistry;
 use codesight_core::StoredSymbol;
 use codesight_mcp::test_support::code_reference_fixtures_dir;
 
@@ -12,7 +12,7 @@ fn fixture_source() -> String {
 }
 
 fn extract_symbols() -> Vec<StoredSymbol> {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new("resources/views/profile.blade.php"))
         .expect("blade extractor");
@@ -26,7 +26,7 @@ fn extract_symbols() -> Vec<StoredSymbol> {
 
 #[test]
 fn test_blade_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("resources/views/home.blade.php"));
     assert!(ext.is_some(), ".blade.php should be detected");
     assert_eq!(ext.unwrap().language_name(), "blade");
@@ -34,7 +34,7 @@ fn test_blade_extension_detected() {
 
 #[test]
 fn test_blade_not_confused_with_php() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("app/Http/Controllers/HomeController.php"));
     assert!(ext.is_some(), ".php should be detected");
     assert_eq!(ext.unwrap().language_name(), "php");
@@ -42,7 +42,7 @@ fn test_blade_not_confused_with_php() {
 
 #[test]
 fn test_blade_extension_in_registry() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("test.blade.php"));
     assert!(ext.is_some(), ".blade.php must be registered");
     assert_eq!(ext.unwrap().language_name(), "blade");

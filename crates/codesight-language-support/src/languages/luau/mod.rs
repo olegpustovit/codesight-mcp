@@ -1,5 +1,9 @@
 //! Luau language.
 
+pub mod extractor;
+
+use anyhow::Result;
+use codesight_core::StoredSymbol;
 use tree_sitter::Language as TsLanguage;
 
 use crate::languages::builtins::LUAU_MANIFEST;
@@ -28,5 +32,8 @@ impl Language for LuauSupport {
     }
     fn grammar_spec(&self) -> Option<&'static GrammarSpec> {
         Some(&GRAMMAR)
+    }
+    fn extract_symbols(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
+        extractor::LuauExtractor.extract(file_path, source)
     }
 }

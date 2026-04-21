@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
-use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
+use codesight_language_support::LanguageRegistry;
 use codesight_core::SymbolKind;
 
 fn registry_extract(filename: &str, src: &str) -> Vec<codesight_core::StoredSymbol> {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new(filename))
         .unwrap_or_else(|| panic!("no extractor for {filename}"));
@@ -877,7 +877,7 @@ data class Point(val x: Int, val y: Int)
     assert_eq!(add.qualified_name, "Calculator.add");
 
     // Check .kts extension mapping
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let kts = reg.extractor_for_path(Path::new("build.gradle.kts"));
     assert!(kts.is_some(), ".kts must map to kotlin");
     assert_eq!(kts.unwrap().language_name(), "kotlin");
@@ -1398,7 +1398,7 @@ fn test_parse_ejs() {
     assert_eq!(footer.unwrap().kind, SymbolKind::Import);
 
     // Extension mapping
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("views/index.ejs"));
     assert!(ext.is_some(), ".ejs must map to ejs");
     assert_eq!(ext.unwrap().language_name(), "ejs");
@@ -1538,7 +1538,7 @@ UI<public> := module:
     );
 
     // Extension mapping
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("Fortnite.digest.verse"));
     assert!(ext.is_some(), ".verse must map to verse");
     assert_eq!(ext.unwrap().language_name(), "verse");
@@ -1620,7 +1620,7 @@ fn test_parse_xul() {
 
 #[test]
 fn test_xml_extension_mapping() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let xml = reg.extractor_for_path(Path::new("config.xml"));
     assert!(xml.is_some(), ".xml must map to xml");
     assert_eq!(xml.unwrap().language_name(), "xml");
@@ -1717,7 +1717,7 @@ fn test_parse_erlang_byte_offsets() {
 
 #[test]
 fn test_erlang_extension_mapping() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let erl = reg.extractor_for_path(Path::new("mymod.erl"));
     assert!(erl.is_some(), ".erl must map to erlang");
     assert_eq!(erl.unwrap().language_name(), "erlang");
@@ -1921,7 +1921,7 @@ fn test_parse_fortran_byte_offsets() {
 #[test]
 fn test_fortran_extension_mapping() {
     // Expects: .f90, .f95, .f03, .f08, .f, .for, .fpp map to fortran
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     for ext_str in &[
         "main.f90", "main.f95", "main.f03", "main.f08", "main.f", "main.for", "main.fpp",
     ] {

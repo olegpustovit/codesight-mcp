@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use crate::agent_readiness::{AgentReadinessSignal, compute_agent_readiness, is_fn_method};
-use crate::complexity::cyclomatic_complexity;
+use crate::complexity::cyclomatic_complexity_for_path;
 use crate::dead_code;
 use crate::graph::find_cycles;
 use codesight_storage::storage::{AnalysisSymbol, IndexStore};
@@ -94,7 +94,7 @@ pub fn compute_quality_signal_precomputed(
     let complexities: Vec<f64> = all_symbols
         .iter()
         .filter(|s| is_fn_method(&s.kind))
-        .map(|s| cyclomatic_complexity(&s.source_text) as f64)
+        .map(|s| cyclomatic_complexity_for_path(&s.source_text, &s.file_path) as f64)
         .collect();
     let equality = if complexities.is_empty() {
         0.5 // no functions → neutral

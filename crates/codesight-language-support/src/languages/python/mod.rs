@@ -1,14 +1,16 @@
 //! Python language implementation.
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
 use tree_sitter::Language as TsLanguage;
 
 use crate::family::{LanguageFamily, NestingMode};
+use crate::imports_types::ImportEdge;
 use crate::languages::builtins::PYTHON_MANIFEST;
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, PYTHON};
-use crate::signature_density::measure_colon_after_name;
+use crate::signature_density::{measure_colon_after_name, normalize_type_token};
 use crate::traits::{ImportExtractionMode, Language};
 
 /// Python receiver detector — filters `self` / `cls` from parameter lists.
@@ -59,6 +61,57 @@ impl Language for Python {
 
     fn imports_query(&self) -> Option<&'static str> {
         Some(include_str!("queries/imports.scm"))
+    }
+
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        &["if", "elif", "for", "while", "except", "and", "or"]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["#"]
+    }
+    fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
+        // Pytest + unittest convention: `test_foo` functions, `TestFoo`
+        // classes.
+        let name = id.leaf_name();
+        name.starts_with("test_") || name.starts_with("Test")
+    }
+
+    fn resolve_import_edge(
+        &self,
+        edge: &ImportEdge,
+        from_file: &str,
+        source_files: &HashSet<String>,
+        known_files_vec: &[String],
+        alias_map: Option<&HashMap<String, Vec<String>>>,
+        _workspace_crates: Option<&HashMap<String, String>>,
+    ) -> Option<String> {
+        if let Some(p) = crate::imports_orchestration::resolve_specifier(
+            &edge.specifier,
+            from_file,
+            source_files,
+            alias_map,
+        ) {
+            return Some(p);
+        }
+        if !edge.specifier.starts_with("./")
+            && !edge.specifier.starts_with("../")
+            && edge.specifier.contains('.')
+        {
+            let top = edge.specifier.split('.').next()?.to_string();
+            if top.is_empty() {
+                return None;
+            }
+            let resolved = crate::imports_orchestration::resolve_imports_to_files(
+                &[top],
+                known_files_vec,
+                from_file,
+            );
+            return resolved.into_iter().next();
+        }
+        None
     }
 
     fn top_level_import_stems(&self, source: &str, _path: &str) -> Vec<String> {
@@ -137,15 +190,16 @@ impl Language for Python {
         path.rsplit('/').next().unwrap_or(path) == "conftest.py"
     }
 
-    fn additional_live_root_files(
+    fn additional_live_roots(
         &self,
         root: Option<&Path>,
         all_files: &[String],
-    ) -> Vec<String> {
+    ) -> Vec<crate::traits::LiveRoot> {
+        use crate::traits::{LiveRoot, LiveRootConfidence};
         let Some(root) = root else {
             return Vec::new();
         };
-        let mut files = Vec::new();
+        let mut roots = Vec::new();
         for file in all_files {
             if !file.ends_with(".py") {
                 continue;
@@ -155,10 +209,18 @@ impl Language for Python {
                 && content.contains("__name__")
                 && content.contains("__main__")
             {
-                files.push(file.clone());
+                roots.push(LiveRoot {
+                    path: file.clone(),
+                    reason: "main_guard",
+                    message: format!(
+                        "file '{file}' contains a __name__ == '__main__' style guard"
+                    ),
+                    confidence: LiveRootConfidence::Heuristic,
+                    explicit: true,
+                });
             }
         }
-        files
+        roots
     }
 
     fn is_restricted(&self, _source_text: &str, name: &str) -> bool {
@@ -178,7 +240,20 @@ impl Language for Python {
         true
     }
     fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_colon_after_name(source, "python", false, is_python_receiver)
+        measure_colon_after_name(source, self, false, is_python_receiver)
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        let normalized = normalize_type_token(token);
+        if normalized.is_empty() {
+            return 0.0;
+        }
+        if matches!(normalized.as_str(), "any" | "typing.any" | "object") {
+            return 0.0;
+        }
+        if normalized.contains("<any>") || normalized.contains("typing.any") {
+            return 0.0;
+        }
+        1.0
     }
 }
 

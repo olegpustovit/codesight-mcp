@@ -10,8 +10,9 @@ pub enum ToolErrorCategory {
     InvalidArgument,
     NotFound,
     /// Retryable I/O, timeouts, rate limits. Surfaced on `_meta.error_category`
-    /// when a handler exceeds the `HANDLER_TIMEOUT_MS` budget or otherwise
-    /// fails in a retryable way.
+    /// when a handler exceeds its per-tool timeout (see
+    /// `service::agent_v1::registry::TimeoutClass`) or otherwise fails in a
+    /// retryable way.
     Transient,
     Internal,
 }

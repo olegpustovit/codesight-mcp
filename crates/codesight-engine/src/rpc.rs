@@ -10,8 +10,9 @@ use serde_json::{Value, json};
 use tokio::task;
 use tokio::time::timeout;
 
-use crate::config::{BUILD_VERSION, timeout_for_tool};
+use crate::config::BUILD_VERSION;
 use crate::service::CodeService;
+use crate::service::agent_v1::registry;
 use crate::service::agent_v1::validate::tool_definitions;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 
@@ -36,7 +37,7 @@ impl mcp_rpc::Dispatcher for CodeService {
         _id: Option<Value>,
     ) -> anyhow::Result<Value> {
         let tool = name.clone();
-        let budget_ms = timeout_for_tool(&tool);
+        let budget_ms = registry::timeout_ms(&tool);
         let svc = self.clone();
         let work = task::spawn_blocking(move || svc.dispatch(&name, arguments));
         let joined = if budget_ms == 0 {

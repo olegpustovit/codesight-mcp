@@ -11,10 +11,10 @@ use crate::manifest::{LanguageId, LanguageManifest};
 use crate::registry::LanguageRegistry;
 
 use super::{
-    al, asm, bash, blade, c, cpp, csharp, css, dart, ejs, elixir, erlang, fortran, gleam, go,
-    java, javascript, json, jsx, kotlin, less, lua, luau, markdown, nix, perl, php, python, razor,
-    ruby, rust, sass, scss, sql, styl, swift, toml, tree_sitter_query, tsx, typescript, verse,
-    vue, xml, yaml,
+    al, ansible, asm, bash, blade, c, cpp, csharp, css, dart, ejs, elixir, erlang, fortran, gleam,
+    go, java, javascript, json, jsx, kotlin, less, lua, luau, markdown, nix, openapi, perl, php,
+    python, razor, ruby, rust, sass, scss, sql, styl, swift, toml, tree_sitter_query, tsx,
+    typescript, verse, vue, xml, yaml,
 };
 use crate::manifest::{
     BASH, CPP, CSHARP, CSS, DART, ELIXIR, GO, JAVA, JAVASCRIPT, JSON, KOTLIN, LUA, LUAU, PERL,
@@ -123,7 +123,7 @@ manifest!(CPP_MANIFEST,
 manifest!(C_MANIFEST,
     display = "C", aliases = &[], ext = &["c"],
     filenames = &[], compound = &[],
-    grammar = None,
+    grammar = Some(&cpp::GRAMMAR),
     profiles = &[], probe = None);
 
 manifest!(SWIFT_MANIFEST,
@@ -273,7 +273,7 @@ manifest!(ERLANG_MANIFEST,
 
 manifest!(FORTRAN_MANIFEST,
     display = "Fortran", aliases = &[],
-    ext = &["f", "f90", "f95", "f03", "f08"],
+    ext = &["f", "f90", "f95", "f03", "f08", "for", "fpp"],
     filenames = &[], compound = &[],
     grammar = Some(&fortran::GRAMMAR),
     profiles = &[], probe = None);
@@ -314,9 +314,34 @@ manifest!(TREE_SITTER_QUERY_MANIFEST,
     grammar = None,
     profiles = &[], probe = None);
 
+// Host-profile languages. Routing is handled by the registry's profile
+// dispatch — these manifests intentionally register no extensions; the
+// host languages (YAML, JSON) still claim them.
+manifest!(OPENAPI_MANIFEST,
+    display = "OpenAPI", aliases = &["swagger"], ext = &[],
+    filenames = &[], compound = &[],
+    grammar = Some(&yaml::GRAMMAR),
+    profiles = &[], probe = None);
+
+manifest!(ANSIBLE_MANIFEST,
+    display = "Ansible", aliases = &[], ext = &[],
+    filenames = &[], compound = &[],
+    grammar = Some(&yaml::GRAMMAR),
+    profiles = &[], probe = None);
+
 const CURATED: &[LanguageId] = &[
     RUST, TYPESCRIPT, TSX, JAVASCRIPT, PYTHON, GO, JAVA, RUBY, PHP, CSHARP, CPP, SWIFT, KOTLIN,
     DART, BASH, SQL, YAML, JSON, XML, CSS, SCSS, LUA, LUAU, PERL, ELIXIR,
+    // Every other grammar-backed language inherits the default SCM pipeline
+    // via `Language::extract_symbols`, which qualifies as a curated-query-pack
+    // tier.
+    crate::manifest::C,
+    crate::manifest::JSX,
+    crate::manifest::NIX,
+    crate::manifest::ERLANG,
+    crate::manifest::FORTRAN,
+    crate::manifest::GLEAM,
+    crate::manifest::VUE,
 ];
 
 /// Register every builtin language in `registry`.
@@ -365,6 +390,8 @@ pub fn register_builtins(registry: &mut LanguageRegistry) {
     registry.register(Arc::new(markdown::MarkdownSupport));
     registry.register(Arc::new(toml::TomlSupport));
     registry.register(Arc::new(tree_sitter_query::TreeSitterQuerySupport));
+    registry.register(Arc::new(openapi::Openapi));
+    registry.register(Arc::new(ansible::Ansible));
     for id in CURATED {
         registry.mark_curated(*id);
     }

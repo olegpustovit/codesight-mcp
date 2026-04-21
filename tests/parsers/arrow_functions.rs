@@ -1,7 +1,6 @@
 //! Integration tests: arrow functions.
 
-use codesight_extractors::extractors::LanguageExtractor;
-use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
 use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {

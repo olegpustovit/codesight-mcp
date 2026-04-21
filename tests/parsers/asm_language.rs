@@ -1,6 +1,7 @@
 //! Integration tests: asm language.
 
-use codesight_extractors::extractors::{AsmExtractor, ExtractorRegistry, LanguageExtractor};
+use codesight_language_support::LanguageRegistry;
+use codesight_language_support::languages::asm::extractor::AsmExtractor;
 use codesight_core::{StoredSymbol, SymbolKind};
 use std::path::Path;
 
@@ -560,7 +561,7 @@ fn test_parse_comments_only() {
 /// Assembly file extensions are properly mapped to the asm extractor.
 #[test]
 fn test_extension_mapping() {
-    let registry = ExtractorRegistry::default();
+    let registry = LanguageRegistry::default();
 
     for ext in &["asm", "s", "65816", "inc", "z80", "spc"] {
         let path_str = format!("test.{ext}");
@@ -577,15 +578,15 @@ fn test_extension_mapping() {
         );
     }
 }
-/// asm is registered in ExtractorRegistry and discoverable.
+/// asm is registered in LanguageRegistry and discoverable.
 #[test]
 fn test_language_in_registry() {
-    let registry = ExtractorRegistry::default();
+    let registry = LanguageRegistry::default();
     // Verify asm is reachable by looking up a canonical asm extension.
     let extractor = registry.extractor_for_path(Path::new("test.asm"));
     assert!(
         extractor.is_some(),
-        "asm should be registered in ExtractorRegistry"
+        "asm should be registered in LanguageRegistry"
     );
     assert_eq!(extractor.unwrap().language_name(), "asm");
 }

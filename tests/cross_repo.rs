@@ -3,7 +3,7 @@
 use std::fs;
 use tempfile::tempdir;
 
-use codesight_imports::packages::{
+use codesight_language_support::packages::{
     RepoEntry, build_package_registry, extract_package_names, extract_root_package_from_specifier,
     find_repos_for_package,
 };

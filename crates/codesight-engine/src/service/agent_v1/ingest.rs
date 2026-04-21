@@ -97,15 +97,15 @@ impl CodeService {
         };
 
         // ── Trust checking ──
-        match crate::config::check_trust(&self.config, &path_for_index) {
-            crate::config::TrustCheckResult::Trusted => {}
-            crate::config::TrustCheckResult::TrustedBroadRoot { warning } => {
+        match crate::security::check_trust(&self.config, &path_for_index) {
+            crate::security::TrustCheckResult::Trusted => {}
+            crate::security::TrustCheckResult::TrustedBroadRoot { warning } => {
                 warnings.push(json!({
                     "code": "BROAD_PATH_TRUSTED",
                     "message": warning,
                 }));
             }
-            crate::config::TrustCheckResult::Untrusted { error } => {
+            crate::security::TrustCheckResult::Untrusted { error } => {
                 return self.error_response(
                     &timer,
                     ToolError {
@@ -240,14 +240,12 @@ impl CodeService {
         // SELECT on the next hit.
         self.source_registry().invalidate(&source_id);
 
-        if let Some(backend) = self.indexer() {
-            self.watchers.ensure_watching(
-                &source_id,
-                path_for_index,
-                self.config.clone(),
-                backend.clone(),
-            );
-        }
+        self.watchers.ensure_watching(
+            &source_id,
+            path_for_index,
+            self.config.clone(),
+            self.indexer().clone(),
+        );
 
         self.success_response_with_warnings(&timer, data, warnings)
     }

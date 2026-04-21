@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use codesight_language_support::is_test_file;
 
 use crate::agent_readiness::{compute_fan_in, compute_file_churn, is_fn_method, tested_file_set};
-use crate::complexity::cyclomatic_complexity;
+use crate::complexity::cyclomatic_complexity_for_path;
 use codesight_storage::storage::{AnalysisSymbol, IndexStore};
 
 pub struct TestGap {
@@ -96,7 +96,7 @@ fn compute_gaps(
             continue;
         }
 
-        let cc = cyclomatic_complexity(&sym.source_text);
+        let cc = cyclomatic_complexity_for_path(&sym.source_text, &sym.file_path);
         if (cc as u64) < min_complexity {
             continue;
         }

@@ -2,14 +2,14 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use codesight_extractors::extractors::ExtractorRegistry;
-use codesight_extractors::extractors::engine::catalogs::QueryPackCatalog;
-use codesight_extractors::extractors::engine::scm::ScmExtractor;
+use codesight_language_support::LanguageRegistry;
+use codesight_language_support::query_pack_catalog::QueryPackCatalog;
+use codesight_language_support::scm_engine::ScmExtractor;
 
 fn query_dirs_on_disk() -> BTreeSet<String> {
-    let queries_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/codesight-language-support/runtime/queries");
-    fs::read_dir(queries_root)
+    let languages_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/codesight-language-support/src/languages");
+    fs::read_dir(languages_root)
         .unwrap()
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -17,7 +17,7 @@ fn query_dirs_on_disk() -> BTreeSet<String> {
                 return None;
             }
             let dir = entry.path();
-            if dir.join("tags.scm").is_file() {
+            if dir.join("queries/tags.scm").is_file() {
                 Some(entry.file_name().to_string_lossy().into_owned())
             } else {
                 None
@@ -78,13 +78,13 @@ fn override_backed_query_packs_still_compile_for_wrapper_delegation() {
 
 #[test]
 fn builtin_query_packs_use_canonical_tags_layout() {
-    let queries_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/codesight-language-support/runtime/queries");
-    let legacy_paths: Vec<String> = fs::read_dir(queries_root)
+    let languages_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/codesight-language-support/src/languages");
+    let legacy_paths: Vec<String> = fs::read_dir(languages_root)
         .unwrap()
         .filter_map(|entry| {
             let entry = entry.ok()?;
-            let path = entry.path().join("symbols.scm");
+            let path = entry.path().join("queries/symbols.scm");
             path.is_file().then(|| path.display().to_string())
         })
         .collect();
@@ -115,7 +115,7 @@ fn codesight_queries_convention_loads_packs_without_toml_config() {
     let pack = catalog.find_by_pack_id("toyjson").expect("toyjson pack");
     assert_eq!(pack.metadata.name, "toyjson");
 
-    let registry = ExtractorRegistry::for_workspace_root(workspace.path());
+    let registry = LanguageRegistry::for_workspace_root(workspace.path()).unwrap();
     let extractor = registry
         .extractor_for_path(Path::new("example.toyjson"))
         .expect("workspace extractor");
@@ -150,7 +150,7 @@ fn workspace_query_pack_root_supports_pack_toml_metadata() {
     assert_eq!(pack.metadata.extensions, vec!["toyjson"]);
     assert_eq!(pack.metadata.grammar, "json");
 
-    let registry = ExtractorRegistry::for_workspace_root(workspace.path());
+    let registry = LanguageRegistry::for_workspace_root(workspace.path()).unwrap();
     let extractor = registry
         .extractor_for_path(Path::new("example.toyjson"))
         .expect("workspace extractor");

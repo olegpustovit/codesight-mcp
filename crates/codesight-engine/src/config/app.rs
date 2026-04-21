@@ -65,7 +65,7 @@ impl AppConfig {
     }
 
     pub fn repo_dir(&self, repo: &str) -> PathBuf {
-        super::paths::slug_dir(self.repos_dir(), repo)
+        slug_dir(self.repos_dir(), repo)
     }
 
     pub fn repo_db_path(&self, repo: &str) -> PathBuf {
@@ -77,7 +77,7 @@ impl AppConfig {
     }
 
     pub fn doc_dir(&self, repo: &str) -> PathBuf {
-        super::paths::slug_dir(self.docs_dir(), repo)
+        slug_dir(self.docs_dir(), repo)
     }
 
     pub fn doc_db_path(&self, repo: &str) -> PathBuf {
@@ -115,4 +115,20 @@ impl AppConfig {
             }
         }
     }
+}
+
+/// Repo→disk directory slug: sanitize non-alnum chars to `-`, append a
+/// blake3(repo) hex prefix so different repos never collide on disk.
+fn slug_dir(base: PathBuf, repo: &str) -> PathBuf {
+    let sanitized = repo
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => ch,
+            _ => '-',
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_owned();
+    let digest = blake3::hash(repo.as_bytes()).to_hex().to_string();
+    base.join(format!("{sanitized}-{}", &digest[..12]))
 }

@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
-use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
+use codesight_language_support::LanguageRegistry;
 use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
@@ -51,7 +51,7 @@ fn syms() -> Vec<codesight_core::StoredSymbol> {
 /// `get_language_for_path("package.json") == "json"`
 #[test]
 fn test_json_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("package.json"));
     assert!(ext.is_some(), "registry should find an extractor for .json");
     assert_eq!(ext.unwrap().language_name(), "json");
@@ -59,7 +59,7 @@ fn test_json_extension_detected() {
 /// `".json" in LANGUAGE_EXTENSIONS` and maps to `"json"`.
 #[test]
 fn test_json_extension_in_registry() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("anything.json"));
     assert!(ext.is_some(), ".json must be registered");
     assert_eq!(ext.unwrap().language_name(), "json");
@@ -69,7 +69,7 @@ fn test_json_extension_in_registry() {
 /// or an openapi extractor.
 #[test]
 fn test_openapi_json_not_overridden() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
 
     let openapi = reg.extractor_for_path(Path::new("api.openapi.json"));
     assert!(openapi.is_some());
@@ -183,7 +183,7 @@ fn test_json_symbol_has_byte_info() {
 /// key symbols.
 #[test]
 fn test_json_via_parse_file() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new("package.json"))
         .expect("registry should resolve package.json");

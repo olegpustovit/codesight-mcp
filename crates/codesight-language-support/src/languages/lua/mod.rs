@@ -42,4 +42,13 @@ impl Language for Lua {
     fn fallback_type_baseline(&self) -> Option<f64> {
         Some(0.1)
     }
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        &["if", "elseif", "for", "while", "repeat", "and", "or"]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["--"]
+    }
 }

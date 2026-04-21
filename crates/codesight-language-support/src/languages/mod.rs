@@ -5,6 +5,7 @@
 //! framework subpackages.
 
 pub mod al;
+pub mod ansible;
 pub mod asm;
 pub mod bash;
 pub mod blade;
@@ -30,6 +31,7 @@ pub mod lua;
 pub mod luau;
 pub mod markdown;
 pub mod nix;
+pub mod openapi;
 pub mod perl;
 pub mod php;
 pub mod python;

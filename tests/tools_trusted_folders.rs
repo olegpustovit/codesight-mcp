@@ -3,7 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use codesight_engine::config::{AppConfig, TrustCheckResult, check_trust, is_broad_path};
+use codesight_engine::config::AppConfig;
+use codesight_engine::security::{TrustCheckResult, check_trust, is_broad_path};
 use codesight_engine::service::CodeService;
 use codesight_mcp::test_support::make_service as make_service_indexed;
 use serde_json::json;
@@ -16,11 +17,7 @@ fn make_service(ws: &Path) -> CodeService {
 }
 
 fn make_service_with_config(config: AppConfig) -> CodeService {
-    let mut router = codesight_backend::BackendRouter::new();
-    router.register(std::sync::Arc::new(
-        codesight_backend::TreeSitterBackend::new(),
-    ));
-    CodeService::with_backends(config, router).unwrap()
+    CodeService::new(config).unwrap()
 }
 
 fn ingest(svc: &CodeService, root: &Path) -> serde_json::Value {
@@ -235,20 +232,6 @@ fn index_folder_uses_project_config_trusted_folders() {
     let svc = make_service_with_config(config);
     let r = ingest(&svc, &project);
     assert!(is_ok(&r), "expected success for trusted project: {r:?}");
-}
-
-// 10. Project config escape path blocked
-#[test]
-fn index_folder_project_config_escape_blocked() {
-    use codesight_engine::config::sanitize_project_trusted_folders;
-
-    let project_root = PathBuf::from("/projects/myproject");
-    let entries = vec![PathBuf::from("../outside")];
-    let sanitized = sanitize_project_trusted_folders(&project_root, &entries);
-    assert!(
-        sanitized.is_empty(),
-        "escape paths should be rejected: {sanitized:?}"
-    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

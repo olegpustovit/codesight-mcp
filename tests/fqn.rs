@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use codesight_analysis::graph::{Psr4Map, fqn_to_symbol, symbol_to_fqn};
+use codesight_language_support::languages::php::fqn::{Psr4Map, fqn_to_symbol, symbol_to_fqn};
 
 fn standard_psr4_map() -> Psr4Map {
     let mut map = HashMap::new();
@@ -308,8 +308,8 @@ fn resolve_fqn_no_psr4_returns_error() {
     );
     let msg = r["error"]["message"].as_str().unwrap();
     assert!(
-        msg.contains("PSR-4"),
-        "error should mention 'PSR-4', got: {msg}"
+        msg.contains("could not be resolved"),
+        "error should report FQN resolution failure, got: {msg}"
     );
 }
 #[test]

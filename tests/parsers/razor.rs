@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor, RazorExtractor};
+use codesight_language_support::LanguageRegistry;
+use codesight_language_support::languages::razor::extractor::RazorExtractor;
 use codesight_core::{StoredSymbol, SymbolKind};
 use codesight_mcp::test_support::code_reference_fixtures_dir;
 
@@ -12,7 +13,7 @@ fn fixture_source(name: &str) -> String {
 }
 
 fn extract_cshtml_symbols() -> Vec<StoredSymbol> {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new("Views/Profile/Index.cshtml"))
         .expect("razor extractor");
@@ -24,7 +25,7 @@ fn extract_cshtml_symbols() -> Vec<StoredSymbol> {
 }
 
 fn extract_blazor_symbols() -> Vec<StoredSymbol> {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new("Pages/Counter.razor"))
         .expect("razor extractor");
@@ -33,7 +34,7 @@ fn extract_blazor_symbols() -> Vec<StoredSymbol> {
 }
 
 fn extract_layout_symbols() -> Vec<StoredSymbol> {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new("Views/Shared/_Layout.cshtml"))
         .expect("razor extractor");
@@ -50,7 +51,7 @@ fn extract_layout_symbols() -> Vec<StoredSymbol> {
 
 #[test]
 fn test_cshtml_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("Views/Profile/Index.cshtml"));
     assert!(ext.is_some(), ".cshtml should be detected");
     assert_eq!(ext.unwrap().language_name(), "razor");
@@ -58,7 +59,7 @@ fn test_cshtml_extension_detected() {
 
 #[test]
 fn test_cshtml_extension_in_registry() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("test.cshtml"));
     assert!(ext.is_some(), ".cshtml must be registered");
     assert_eq!(ext.unwrap().language_name(), "razor");
@@ -128,7 +129,7 @@ fn test_parse_razor_code_block_handles_nested_braces_and_strings() {
     }
 }
 "#;
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new("Views/Shared/Editor.cshtml"))
         .expect("razor extractor");
@@ -155,8 +156,8 @@ fn test_parse_razor_code_block_handles_nested_braces_and_strings() {
 
 #[test]
 fn test_discover_local_files_includes_cshtml() {
-    // This tests that the ExtractorRegistry recognizes .cshtml files
-    let reg = ExtractorRegistry::default();
+    // This tests that the LanguageRegistry recognizes .cshtml files
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("Views/Home/Index.cshtml"));
     assert!(ext.is_some(), ".cshtml should be recognized");
 }
@@ -203,7 +204,7 @@ fn test_parse_public_razor_layout_fixture() {
 
 #[test]
 fn test_razor_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("Pages/Counter.razor"));
     assert!(ext.is_some(), ".razor should be detected");
     assert_eq!(ext.unwrap().language_name(), "razor");
@@ -211,7 +212,7 @@ fn test_razor_extension_detected() {
 
 #[test]
 fn test_razor_extension_in_registry() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("test.razor"));
     assert!(ext.is_some(), ".razor must be registered");
     assert_eq!(ext.unwrap().language_name(), "razor");
@@ -338,7 +339,7 @@ fn test_blazor_style_block() {
 
 #[test]
 fn test_discover_local_files_includes_razor() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("Pages/Counter.razor"));
     assert!(ext.is_some(), ".razor should be recognized");
 }

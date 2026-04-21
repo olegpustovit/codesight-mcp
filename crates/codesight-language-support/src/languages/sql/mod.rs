@@ -1,8 +1,11 @@
 //! SQL language + dbt framework providers.
 
 pub mod dbt;
+pub mod extractor;
 pub mod imports;
 
+use anyhow::Result;
+use codesight_core::StoredSymbol;
 use tree_sitter::Language as TsLanguage;
 
 use crate::family::{LanguageFamily, NestingMode};
@@ -48,5 +51,24 @@ impl Language for SqlSupport {
     }
     fn extract_imports(&self, source: &str) -> Vec<ImportEdge> {
         imports::extract(source)
+    }
+    fn extract_symbols(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
+        extractor::SqlExtractor.extract(file_path, source)
+    }
+
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["--"]
+    }
+    fn cyclomatic_complexity(&self, source: &str) -> usize {
+        // SQL is tagged `DeclarativeMarkup` (family), but it has real
+        // branching: `CASE WHEN`, `IF`, `IIF`, `ELSEIF`. Override the
+        // family short-circuit with a case-insensitive scan.
+        let lower = source.to_ascii_lowercase();
+        crate::complexity::count_cyclomatic(
+            &lower,
+            &["if", "when", "elseif", "iif"],
+            &[],
+            &["--"],
+        )
     }
 }

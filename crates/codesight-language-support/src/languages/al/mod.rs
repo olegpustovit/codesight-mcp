@@ -1,5 +1,10 @@
 //! AL language (regex-only, no grammar).
 
+pub mod extractor;
+
+use anyhow::Result;
+use codesight_core::StoredSymbol;
+
 use crate::languages::builtins::AL_MANIFEST;
 use crate::manifest::{AL, LanguageId, LanguageManifest};
 use crate::traits::Language;
@@ -12,5 +17,8 @@ impl Language for AlSupport {
     }
     fn manifest(&self) -> &'static LanguageManifest {
         &AL_MANIFEST
+    }
+    fn extract_symbols(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
+        extractor::AlExtractor.extract(file_path, source)
     }
 }

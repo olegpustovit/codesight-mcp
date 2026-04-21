@@ -8,7 +8,7 @@ use tree_sitter::Language as TsLanguage;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::CPP_MANIFEST;
 use crate::manifest::{C, CPP, GrammarSpec, LanguageId, LanguageManifest};
-use crate::signature_density::measure_type_before_name;
+use crate::signature_density::{measure_type_before_name, normalize_type_token};
 use crate::traits::Language;
 
 pub struct Cpp;
@@ -61,7 +61,50 @@ impl Language for Cpp {
         true
     }
     fn measured_type_density(&self, src: &str) -> Option<f64> {
-        measure_type_before_name(src, "cpp")
+        measure_type_before_name(src, self)
+    }
+    fn postprocess_symbols(
+        &self,
+        symbols: &mut [codesight_core::StoredSymbol],
+        file_path: &str,
+        source: &str,
+    ) {
+        downgrade_plain_c_header_symbols(symbols, file_path, source);
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        let normalized = normalize_type_token(token);
+        if normalized.is_empty() {
+            return 0.0;
+        }
+        if matches!(normalized.as_str(), "void*" | "auto") {
+            return 0.0;
+        }
+        1.0
+    }
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        &["if", "else if", "for", "while", "do", "switch", "case", "catch"]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &["&&", "||"]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["//"]
+    }
+}
+
+/// Rewrite emitted symbols' language from C++ to C when the file is a `.h`
+/// header whose content has no C++-only constructs. Called from the `Cpp`
+/// impl of `Language::postprocess_symbols` — generic code never branches
+/// on "cpp" to reach this.
+fn downgrade_plain_c_header_symbols(
+    symbols: &mut [codesight_core::StoredSymbol],
+    file_path: &str,
+    source: &str,
+) {
+    if cpp_header_content_probe(Path::new(file_path), source).is_some() {
+        for symbol in symbols.iter_mut() {
+            symbol.language = C;
+        }
     }
 }
 

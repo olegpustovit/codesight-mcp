@@ -6,8 +6,10 @@
 //!   * `measure_type_before_name` — generic parser for `RetType name(ParamType n, …)`
 //!     shapes (C, C++, Java, C#, Dart).
 //!   * A reusable `TopLevelScanner` and helpers (delimiter matching, top-level
-//!     splits, type-token weak-typing detection) that each language's own
-//!     signature parser can compose with.
+//!     splits) that each language's own signature parser can compose with.
+//!
+//! Per-language type-token weights are consulted via `Language::type_token_score`;
+//! this module never branches on a language id.
 //!
 //! Language-specific signature parsers (Go's `func (recv) name(params) ret`,
 //! PHP's `Type $name`, receiver detectors) live in each language's
@@ -15,47 +17,12 @@
 
 use std::str::CharIndices;
 
-/// Exact-match tokens that collapse to "any"-typed under any language.
-const WEAK_TYPE_EXACT: &[&str] = &[
-    "any",
-    "typing.any",
-    "object",
-    "dynamic",
-    "mixed",
-    "interface{}",
-    "void*",
-    "auto",
-    "t.untyped",
-    "term()",
-    "anyref",
-    "anyobject",
-    "dynany",
-    "box<dynany>",
-    "{*}",
-];
+use crate::traits::Language;
 
-/// Substrings that force a zero score regardless of language.
-const WEAK_TYPE_CONTAINS: &[&str] = &["<any>", "typing.any", "dynany"];
-
-/// Score a type token: 1.0 for real types, 0.0 for weak/any variants,
-/// 0.3 for TypeScript/TSX `unknown`.
-pub fn type_token_score(token: &str, language: &str) -> f64 {
-    let normalized = normalize_type_token(token);
-    if normalized.is_empty() {
-        return 0.0;
-    }
-    if normalized == "unknown" && matches!(language, "typescript" | "tsx") {
-        return 0.3;
-    }
-    if WEAK_TYPE_EXACT.contains(&normalized.as_str())
-        || WEAK_TYPE_CONTAINS.iter().any(|s| normalized.contains(s))
-    {
-        return 0.0;
-    }
-    1.0
-}
-
-fn normalize_type_token(token: &str) -> String {
+/// Normalize a raw type token to its comparison form: lowercase, strip
+/// whitespace and apostrophes. Exposed so `Language::type_token_score`
+/// overrides match against the same canonical form used by extraction.
+pub fn normalize_type_token(token: &str) -> String {
     token
         .chars()
         .filter(|ch| !ch.is_whitespace() && *ch != '\'')
@@ -68,7 +35,7 @@ fn normalize_type_token(token: &str) -> String {
 /// filters `self` / `cls`.
 pub fn measure_colon_after_name<F>(
     source: &str,
-    language: &str,
+    lang: &dyn Language,
     implicit_unit_return: bool,
     is_receiver: F,
 ) -> Option<f64>
@@ -89,13 +56,13 @@ where
         }
         total_slots += 1;
         if let Some(ty) = extract_colon_param_type(param) {
-            score_sum += type_token_score(ty, language);
+            score_sum += lang.type_token_score(ty);
         }
     }
 
     total_slots += 1;
-    if let Some(return_ty) = extract_return_type_after_params(suffix, language) {
-        score_sum += type_token_score(return_ty, language);
+    if let Some(return_ty) = extract_return_type_after_params(suffix, lang) {
+        score_sum += lang.type_token_score(return_ty);
     } else if implicit_unit_return {
         score_sum += 1.0;
     }
@@ -104,7 +71,7 @@ where
 }
 
 /// C/C++/Java/C#/Dart family: `RetType name(ParamType name, ...)`.
-pub fn measure_type_before_name(source: &str, language: &str) -> Option<f64> {
+pub fn measure_type_before_name(source: &str, lang: &dyn Language) -> Option<f64> {
     let open = source.find('(')?;
     let close = find_matching_delimiter(source, open, '(', ')')?;
     let before_open = source[..open].trim();
@@ -112,7 +79,7 @@ pub fn measure_type_before_name(source: &str, language: &str) -> Option<f64> {
 
     let return_type = infer_prefixed_return_type(before_open)?;
     let mut total_slots = 1usize;
-    let mut score_sum = type_token_score(&return_type, language);
+    let mut score_sum = lang.type_token_score(&return_type);
 
     for raw_param in split_top_level(params, ',') {
         let param = raw_param.trim();
@@ -121,7 +88,7 @@ pub fn measure_type_before_name(source: &str, language: &str) -> Option<f64> {
         }
         total_slots += 1;
         if let Some(ty) = extract_prefixed_param_type(param) {
-            score_sum += type_token_score(&ty, language);
+            score_sum += lang.type_token_score(&ty);
         }
     }
 
@@ -136,12 +103,14 @@ fn extract_colon_param_type(param: &str) -> Option<&str> {
 }
 
 /// Return-type extractor: `: Type` (TS, Kotlin, Scala, PHP) or `-> Type`
-/// (Rust, Python, Go). Exposed for per-language callers that need it.
-pub fn extract_return_type_after_params<'a>(suffix: &'a str, language: &str) -> Option<&'a str> {
+/// (Rust, Python, Go). The colon-suffix form is only accepted when the
+/// language's family uses it — detected via the `TypeReturnStyle` hook.
+pub fn extract_return_type_after_params<'a>(
+    suffix: &'a str,
+    lang: &dyn Language,
+) -> Option<&'a str> {
     let trimmed = suffix.trim_start();
-    if matches!(language, "typescript" | "tsx" | "kotlin" | "scala" | "php")
-        && trimmed.starts_with(':')
-    {
+    if lang.uses_colon_return_suffix() && trimmed.starts_with(':') {
         let ty = take_until_top_level_char(trimmed[1..].trim_start(), &['{', '=', ';'])
             .trim_end_matches(':')
             .trim();

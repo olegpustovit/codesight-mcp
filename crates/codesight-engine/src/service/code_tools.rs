@@ -8,7 +8,7 @@ use tracing::info;
 use super::args::*;
 use super::helpers::{slice_file_lines, *};
 use super::{CodeService, MAX_QUERY_LEN};
-use codesight_imports::imports::language_for_path;
+use codesight_language_support::imports_orchestration::language_for_path;
 
 use codesight_storage::storage::{self, IndexStore, RetrievedSymbol, SearchSymbol, doc_index::DocStore};
 
@@ -36,12 +36,12 @@ impl CodeService {
         &self,
         root: &std::path::Path,
     ) -> anyhow::Result<(IndexResult, Vec<Value>)> {
-        let backend = self.require_indexer()?.clone();
+        let indexer = self.indexer().clone();
         let mut embed_warning = None;
         let outcome = code_index::index_workspace_with_symbol_vectors(
             &self.config,
             root,
-            &backend,
+            &indexer,
             |_source_id, updated_files| match self.symbol_vectors_for_updates(updated_files) {
                 Ok(rows) => Ok(rows),
                 Err(message) => {
@@ -399,9 +399,9 @@ impl CodeService {
             Ok(store) => {
                 if let Ok(root) = store.root_path()
                     && root.is_dir()
-                    && let Some(backend) = self.indexer()
                 {
-                    let known = |p: &std::path::Path| backend.detect_language(&root, p).is_some();
+                    let indexer = self.indexer();
+                    let known = |p: &std::path::Path| indexer.detect_language(&root, p).is_some();
                     if store.is_stale(&root, known).unwrap_or(false) {
                         let repo_id = crate::repo_id::normalize_repo_id(&root);
                         let files_in_flight =

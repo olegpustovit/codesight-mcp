@@ -10,6 +10,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use codesight_core::StoredSymbol;
+use codesight_core::symbols::ExtractionTier;
+
 use crate::family::{LanguageFamily, NestingMode};
 use crate::fallback;
 use crate::frameworks::FrameworkProvider;
@@ -29,6 +32,39 @@ use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest};
 pub enum ImportExtractionMode {
     TreeSitterFirst,
     FallbackOnly,
+}
+
+/// Confidence tier for a language-declared live root. Mirrors the
+/// `EvidenceNote` structural/heuristic split without pulling analysis into
+/// this crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveRootConfidence {
+    /// Fact: a build manifest or parser confirms this file is a runtime
+    /// entry (Cargo `[[bin]]`, Python `__main__.py` entrypoint, etc.).
+    Structural,
+    /// Heuristic: pattern match — e.g. `if __name__ == '__main__'` guard,
+    /// foreign-trait impl detection.
+    Heuristic,
+}
+
+/// A file-level live root surfaced by a language. Analysis unions these
+/// across every registered language; it never branches on the language id.
+#[derive(Debug, Clone)]
+pub struct LiveRoot {
+    /// Repo-relative path of the live root.
+    pub path: String,
+    /// Stable reason key (`"main_guard"`, `"cargo_target"`,
+    /// `"foreign_trait_impl"`, `"nextjs_page"`, …). Surfaces in the
+    /// evidence note's `code` field.
+    pub reason: &'static str,
+    /// Human-readable message describing why the file is live.
+    pub message: String,
+    pub confidence: LiveRootConfidence,
+    /// When true, the presence of this root counts as an explicit
+    /// entry for the "no-entry-points" detector — analysis will not
+    /// emit a framework-warning when at least one explicit root is
+    /// found.
+    pub explicit: bool,
 }
 
 /// Everything a language owns. New-language onboarding is a single `impl
@@ -62,11 +98,70 @@ pub trait Language: Send + Sync {
         self.grammar_spec().and_then(|spec| spec.injections_scm)
     }
 
-    // ── Symbol extraction (placeholder — generic SCM pipeline is the fallback) ──
+    // ── Symbol extraction ───────────────────────────────────────────────
     /// Whether this language produces extracted symbols. Languages without a
     /// grammar or a manual extractor return `false`.
     fn supports_extraction(&self) -> bool {
         false
+    }
+
+    /// Extraction tier this language emits.
+    fn extraction_tier(&self) -> ExtractionTier {
+        if self.grammar_spec().is_some() {
+            ExtractionTier::CuratedQueryPack
+        } else {
+            ExtractionTier::ManualOverride
+        }
+    }
+
+    /// Primary extraction entry point. Default runs the curated SCM pipeline
+    /// when `grammar_spec()` is available. Languages with bespoke extraction
+    /// (AL, Blade, Vue, Razor, EJS, YAML/Ansible, SQL/dbt, ASM dialects,
+    /// SCSS dialects, Luau dialects, Verse) override.
+    fn extract_symbols(
+        &self,
+        file_path: &str,
+        source: &str,
+    ) -> anyhow::Result<Vec<StoredSymbol>> {
+        let Some(spec) = self.grammar_spec() else {
+            return Ok(Vec::new());
+        };
+        if spec.tags_scm.is_empty() {
+            return Ok(Vec::new());
+        }
+        crate::scm_engine::extract_with_spec(self.id().as_str(), spec, file_path, source)
+    }
+
+    /// Legacy alias for `self.id().as_str()`.
+    fn language_name(&self) -> &'static str {
+        self.id().as_str()
+    }
+
+    /// Legacy alias for `self.manifest().extensions`.
+    fn supported_extensions(&self) -> &'static [&'static str] {
+        self.manifest().extensions
+    }
+
+    /// Legacy alias for `self.extract_symbols(...)`.
+    fn extract(
+        &self,
+        file_path: &str,
+        source: &str,
+    ) -> anyhow::Result<Vec<StoredSymbol>> {
+        self.extract_symbols(file_path, source)
+    }
+
+    /// Post-extraction symbol fixup — runs after `extract_symbols` / the SCM
+    /// engine produces the raw symbol list. C++ uses it to downgrade plain-C
+    /// `.h` headers to `C`; other languages can hook content-aware rewrites
+    /// (TSX/JSX dual-identity, Razor host language, …) here without adding
+    /// C++-specific branches to generic code. Default: no-op.
+    fn postprocess_symbols(
+        &self,
+        _symbols: &mut [StoredSymbol],
+        _file_path: &str,
+        _source: &str,
+    ) {
     }
 
     // ── Imports ──────────────────────────────────────────────────────────
@@ -132,9 +227,34 @@ pub trait Language: Send + Sync {
     }
 
     /// Path aliases for this language discovered in `root` (e.g. tsconfig
-    /// `paths`, pyproject `[tool.…]`). Default empty.
-    fn path_aliases(&self, _root: &Path) -> HashMap<String, String> {
+    /// `paths`, pyproject `[tool.…]`). Each alias maps to an ordered list of
+    /// replacement prefixes (tsconfig's `paths` allows multiple fallbacks).
+    /// Default empty.
+    fn path_aliases(&self, _root: &Path) -> HashMap<String, Vec<String>> {
         HashMap::new()
+    }
+
+    /// Resolve an import edge to a project-relative file path. Default
+    /// dispatches to the generic relative / alias / basename resolver in
+    /// [`crate::imports_orchestration::resolve_specifier`]. Rust overrides
+    /// with its anchor-aware `crate::` / `self::` / `super::` walker;
+    /// Python overrides to add a dotted-module stem fallback.
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_import_edge(
+        &self,
+        edge: &ImportEdge,
+        from_file: &str,
+        source_files: &std::collections::HashSet<String>,
+        _known_files_vec: &[String],
+        alias_map: Option<&HashMap<String, Vec<String>>>,
+        _workspace_crates: Option<&HashMap<String, String>>,
+    ) -> Option<String> {
+        crate::imports_orchestration::resolve_specifier(
+            &edge.specifier,
+            from_file,
+            source_files,
+            alias_map,
+        )
     }
 
     // ── Packages / workspaces ────────────────────────────────────────────
@@ -144,6 +264,23 @@ pub trait Language: Send + Sync {
 
     fn workspace_members(&self, _root: &Path) -> Vec<String> {
         Vec::new()
+    }
+
+    /// Namespace-to-directory autoload map (PHP PSR-4, etc.). Default empty.
+    fn namespace_map(&self, _root: &Path) -> HashMap<String, String> {
+        HashMap::new()
+    }
+
+    /// Resolve a language-native fully-qualified name to a `symbol_id`
+    /// (e.g. `"App\\Models\\User"` → `"app/Models/User.php::User#class"`).
+    /// Default `None`; languages with a namespace convention override.
+    fn resolve_fqn(
+        &self,
+        _fqn: &str,
+        _root: &Path,
+        _source_files: &std::collections::HashSet<String>,
+    ) -> Option<String> {
+        None
     }
 
     // ── Liveness / entrypoints / tests ───────────────────────────────────
@@ -174,11 +311,17 @@ pub trait Language: Send + Sync {
     /// Hook for Rust's foreign-trait impl sweep, Python's
     /// `if __name__ == '__main__':` probe, Cargo targets, and other
     /// language-specific live-root discoveries that require file I/O.
-    fn additional_live_root_files(
+    ///
+    /// Each returned [`LiveRoot`] carries a stable `reason` key, a
+    /// human-readable message, a confidence level, and whether the root
+    /// should count as an **explicit** entry (suppresses the
+    /// "no-entry-points" warning in analysis). Analysis consumers never
+    /// need to know which language emitted each root.
+    fn additional_live_roots(
         &self,
         _root: Option<&Path>,
         _all_files: &[String],
-    ) -> Vec<String> {
+    ) -> Vec<LiveRoot> {
         Vec::new()
     }
 
@@ -213,6 +356,84 @@ pub trait Language: Send + Sync {
 
     fn measured_type_density(&self, _source: &str) -> Option<f64> {
         None
+    }
+
+    /// Score one type token from a signature: 1.0 when the annotation is
+    /// informative, 0.0 when it collapses to the language's "any" shape
+    /// (Python's `Any`, TypeScript's `any`, Go's `interface{}`, …), and
+    /// intermediate values for languages that recognize soft gradations
+    /// (TypeScript's `unknown` → 0.3). Default: any non-empty normalized
+    /// token scores 1.0 — languages with weak-type vocabulary override.
+    fn type_token_score(&self, token: &str) -> f64 {
+        let normalized = crate::signature_density::normalize_type_token(token);
+        if normalized.is_empty() {
+            0.0
+        } else {
+            1.0
+        }
+    }
+
+    /// True when this language writes a return-type after the parameter
+    /// list as `: Type` (TypeScript, Kotlin, Scala, PHP, Swift). Languages
+    /// that only use the arrow form (`-> Type`) or a prefix return type
+    /// (Java/C++) leave this `false`. Used by the generic signature-density
+    /// parser to decide whether a `:` following the params is a return type
+    /// or a block opener.
+    fn uses_colon_return_suffix(&self) -> bool {
+        false
+    }
+
+    /// Branch keywords that contribute one decision point to cyclomatic
+    /// complexity (split on non-identifier boundaries). Default covers the
+    /// C-family + scripted union; languages override for their specific
+    /// vocabulary (Rust's `match`, SQL's `CASE WHEN`, Ruby's `unless`, …).
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        &[
+            "if", "elif", "else if", "for", "while", "except", "catch", "case", "and", "or",
+        ]
+    }
+
+    /// Inline branch-operator strings that contribute one decision point
+    /// (e.g. `&&`, `||`). Default covers C-family operators + Python
+    /// ternary; languages without short-circuit operators override empty.
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &["&&", "||"]
+    }
+
+    /// Line-comment prefixes to skip while scanning for branch tokens.
+    /// Default covers the C-family (`//`), shell / Python / Perl (`#`),
+    /// and SQL / Lua (`--`).
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["//", "#", "--"]
+    }
+
+    /// Per-language cyclomatic-complexity heuristic. Default runs the
+    /// generic branch counter over `branch_keywords()`, `branch_operators()`,
+    /// and `line_comment_prefixes()` — plus a `?` ternary scan that avoids
+    /// `?.` / `??`. Declarative markup families (YAML, JSON, TOML, XML,
+    /// Markdown) short-circuit to the base complexity of `1` because they
+    /// have no control flow.
+    fn cyclomatic_complexity(&self, source: &str) -> usize {
+        if matches!(self.family(), crate::family::LanguageFamily::DeclarativeMarkup) {
+            return 1;
+        }
+        crate::complexity::count_cyclomatic(
+            source,
+            self.branch_keywords(),
+            self.branch_operators(),
+            self.line_comment_prefixes(),
+        )
+    }
+
+    /// Returns true when a symbol-id names a test symbol under this
+    /// language's conventions (Rust's `tests.` parent scope, Python's
+    /// `test_` prefix, Go's `TestXxx` etc.). Default false.
+    ///
+    /// Use the `SymbolIdRef` accessors (`leaf_name`, `has_scope`, `kind`)
+    /// instead of reparsing the raw string — callers never have to know
+    /// the serialized shape.
+    fn is_test_symbol_id(&self, _id: codesight_core::SymbolIdRef<'_>) -> bool {
+        false
     }
 
     // ── Frameworks (per-project providers this language contributes) ─────

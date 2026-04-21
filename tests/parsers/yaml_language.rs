@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor, YamlExtractor};
+use codesight_language_support::LanguageRegistry;
+use codesight_language_support::languages::yaml::extractor::YamlExtractor;
 use codesight_core::SymbolKind;
 
 // ---------------------------------------------------------------------------
@@ -89,11 +90,11 @@ fn by_qualified(
 // 1. test_yaml_extension_mapping
 // ---------------------------------------------------------------------------
 ///
-/// We verify via `ExtractorRegistry` that both extensions resolve to the yaml
+/// We verify via `LanguageRegistry` that both extensions resolve to the yaml
 /// extractor whose `language_name()` is `"yaml"`.
 #[test]
 fn test_yaml_extension_mapping() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
 
     let yaml_ext = reg.extractor_for_path(Path::new("settings.yaml"));
     assert!(yaml_ext.is_some(), ".yaml should be recognized");
@@ -111,7 +112,7 @@ fn test_yaml_extension_mapping() {
 /// `extractors::classifier` path layout + `.yml`/`.yaml`.
 #[test]
 fn test_ansible_path_heuristics_override_yaml() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
 
     for path in &[
         "playbooks/site.yml",
@@ -137,7 +138,7 @@ fn test_ansible_path_heuristics_override_yaml() {
 /// Basename rules live in `extractors::classifier` (OpenAPI stems + extensions).
 #[test]
 fn test_openapi_basename_still_wins_over_yaml() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
 
     let openapi = reg.extractor_for_path(Path::new("openapi.yaml"));
     assert!(openapi.is_some(), "openapi.yaml should be recognized");

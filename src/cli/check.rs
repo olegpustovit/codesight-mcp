@@ -153,11 +153,11 @@ fn check_schema_version(config: &AppConfig) -> CheckOutcome {
 fn check_query_packs(workspace: Option<&Path>) -> CheckOutcome {
     let result = match workspace {
         Some(ws) => {
-            codesight_extractors::extractors::engine::catalogs::QueryPackCatalog::for_workspace_root(
+            codesight_language_support::query_pack_catalog::QueryPackCatalog::for_workspace_root(
                 ws,
             )
         }
-        None => Ok(codesight_extractors::extractors::engine::catalogs::QueryPackCatalog::builtin()),
+        None => Ok(codesight_language_support::query_pack_catalog::QueryPackCatalog::builtin()),
     };
     match result {
         Ok(catalog) => {

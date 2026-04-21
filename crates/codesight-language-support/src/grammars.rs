@@ -44,11 +44,16 @@ pub fn builtin_query_packs() -> &'static [BuiltinQueryPackRow] {
 
 /// Resolve a compiled tree-sitter `Language` by grammar name.
 pub fn builtin_grammar(name: &str) -> Option<Language> {
+    builtin_grammar_spec(name).map(|spec| (spec.loader)())
+}
+
+/// Resolve the static `GrammarSpec` for a builtin grammar name. Used when
+/// workspace-level query packs need to reuse a builtin loader.
+pub fn builtin_grammar_spec(name: &str) -> Option<&'static GrammarSpec> {
     builtin_registry()
         .all()
         .filter_map(|lang| lang.grammar_spec())
         .find(|spec| spec.grammar_name == name)
-        .map(|spec| (spec.loader)())
 }
 
 /// Iterate every registered builtin `GrammarSpec`.

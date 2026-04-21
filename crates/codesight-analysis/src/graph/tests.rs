@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use super::coupling::CouplingAssessment;
 use super::{LayerDef, compute_coupling, file_to_layer, find_cycles};
 
 // ── find_cycles tests (port of TestFindCycles) ─────────────────────
@@ -172,7 +173,7 @@ fn coupling_leaf_stable() {
     assert_eq!(m.ce, 0);
     assert!(m.ca >= 1);
     assert_eq!(m.instability, Some(0.0));
-    assert_eq!(m.assessment, "stable");
+    assert_eq!(m.assessment, CouplingAssessment::Stable);
 }
 
 #[test]

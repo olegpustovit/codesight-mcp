@@ -5,7 +5,7 @@ use tree_sitter::Language as TsLanguage;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::KOTLIN_MANIFEST;
 use crate::manifest::{GrammarSpec, KOTLIN, LanguageId, LanguageManifest};
-use crate::signature_density::measure_colon_after_name;
+use crate::signature_density::{measure_colon_after_name, normalize_type_token};
 use crate::traits::Language;
 
 pub struct Kotlin;
@@ -55,6 +55,31 @@ impl Language for Kotlin {
         true
     }
     fn measured_type_density(&self, src: &str) -> Option<f64> {
-        measure_colon_after_name(src, "kotlin", false, |_| false)
+        measure_colon_after_name(src, self, false, |_| false)
+    }
+    fn uses_colon_return_suffix(&self) -> bool {
+        true
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        let normalized = normalize_type_token(token);
+        if normalized.is_empty() {
+            return 0.0;
+        }
+        if normalized == "any" {
+            return 0.0;
+        }
+        1.0
+    }
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        &["if", "else if", "for", "while", "do", "when", "catch"]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &["&&", "||"]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["//"]
+    }
+    fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
+        id.leaf_name().starts_with("test")
     }
 }

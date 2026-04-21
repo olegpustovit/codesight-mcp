@@ -385,17 +385,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codesight-backend"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "codesight-core",
- "codesight-extractors",
- "serde",
- "thiserror",
-]
-
-[[package]]
 name = "codesight-core"
 version = "0.1.0"
 dependencies = [
@@ -412,13 +401,12 @@ dependencies = [
  "blake3",
  "chrono",
  "codesight-analysis",
- "codesight-backend",
  "codesight-core",
- "codesight-imports",
  "codesight-language-support",
  "codesight-retrieval",
  "codesight-storage",
  "dirs",
+ "globset",
  "ignore",
  "jsonschema",
  "mcp-rpc",
@@ -428,56 +416,12 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "serde_yaml",
- "sqlite-vec",
- "streaming-iterator",
  "strum",
  "tempfile",
  "thiserror",
  "tokio",
- "toml",
  "tracing",
  "uuid",
- "walkdir",
-]
-
-[[package]]
-name = "codesight-extractors"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "blake3",
- "codesight-core",
- "codesight-language-support",
- "criterion",
- "regex",
- "serde",
- "serde_json",
- "streaming-iterator",
- "thiserror",
- "toml",
- "tracing",
- "tree-sitter",
-]
-
-[[package]]
-name = "codesight-imports"
-version = "0.1.0"
-dependencies = [
- "codesight-core",
- "codesight-extractors",
- "codesight-language-support",
- "ignore",
- "serde",
- "serde_json",
- "tempfile",
- "toml",
- "tree-sitter",
- "tree-sitter-go",
- "tree-sitter-javascript",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
  "walkdir",
 ]
 
@@ -495,7 +439,9 @@ dependencies = [
  "serde_yaml",
  "streaming-iterator",
  "tempfile",
+ "thiserror",
  "toml",
+ "tracing",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-c-sharp",
@@ -538,11 +484,8 @@ dependencies = [
  "chrono",
  "clap",
  "codesight-analysis",
- "codesight-backend",
  "codesight-core",
  "codesight-engine",
- "codesight-extractors",
- "codesight-imports",
  "codesight-language-support",
  "codesight-retrieval",
  "codesight-storage",

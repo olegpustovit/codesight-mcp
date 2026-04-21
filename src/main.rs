@@ -180,7 +180,7 @@ fn run() -> anyhow::Result<()> {
         "codesight-mcp starting"
     );
     let config = AppConfig::load();
-    let service = CodeService::with_backends(config, codesight_backend::default_router())?;
+    let service = CodeService::new(config)?;
     service.enable_background_watch();
     let service = Arc::new(service);
     service.install_arc_handle();
@@ -196,7 +196,7 @@ fn dispatch_config() -> DispatchConfig {
 }
 
 fn build_service() -> anyhow::Result<CodeService> {
-    CodeService::with_backends(AppConfig::load(), codesight_backend::default_router())
+    CodeService::new(AppConfig::load())
 }
 
 fn print_envelope(value: &serde_json::Value) -> anyhow::Result<()> {

@@ -118,6 +118,8 @@ fn canonical_lookup(s: &str) -> Option<&'static str> {
         "markdown" => MARKDOWN.0,
         "toml" => TOML.0,
         "tree-sitter-query" => TREE_SITTER_QUERY.0,
+        "openapi" => OPENAPI.0,
+        "ansible" => ANSIBLE.0,
         _ => return None,
     })
 }
@@ -186,6 +188,8 @@ pub const GLEAM: LanguageId = LanguageId::new("gleam");
 pub const MARKDOWN: LanguageId = LanguageId::new("markdown");
 pub const TOML: LanguageId = LanguageId::new("toml");
 pub const TREE_SITTER_QUERY: LanguageId = LanguageId::new("tree-sitter-query");
+pub const OPENAPI: LanguageId = LanguageId::new("openapi");
+pub const ANSIBLE: LanguageId = LanguageId::new("ansible");
 
 #[cfg(test)]
 mod tests {

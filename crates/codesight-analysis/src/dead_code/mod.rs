@@ -55,7 +55,6 @@ pub fn dead_code_payload(
     let reachability = build_repo_reachability(
         &all_files,
         &dep_graph,
-        &all_symbols,
         root_path.as_deref(),
         include_tests,
         entry_patterns,
@@ -163,7 +162,6 @@ pub fn dead_code_v2_payload(store: &IndexStore, min_confidence: f64) -> anyhow::
     let reachability = build_repo_reachability(
         &all_files,
         &dep_graph,
-        &all_symbols,
         root_path.as_deref(),
         false,
         &[],

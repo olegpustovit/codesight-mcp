@@ -28,19 +28,6 @@ use codesight_engine::service::savings::SavingsLedger;
 
 // ── Constants ────────────────────────────────────────────────────────────
 
-/// Known code file extensions — same ~50 language set codesight indexes.
-const CODE_EXTENSIONS: &[&str] = &[
-    "py", "ts", "tsx", "js", "jsx", "rs", "go", "java", "rb", "php", "cs", "cpp", "cc", "cxx", "c",
-    "h", "hpp", "hxx", "swift", "kt", "kts", "scala", "dart", "lua", "hs", "sql", "nix", "tf",
-    "proto", "graphql", "jl", "r", "groovy", "pl", "pm", "bash", "sh", "zsh", "fish", "vue",
-    "svelte", "astro", "elm", "ex", "exs", "erl", "hrl", "clj", "cljs", "ml", "mli", "fs", "fsi",
-    "v", "sv", "vhd", "zig", "nim", "cr", "purs", "dhall", "toml", "yaml", "yml", "json", "xml",
-    "al",
-];
-
-/// Doc file extensions — indexed as sections via the retrieval crate.
-const DOC_EXTENSIONS: &[&str] = &["md", "mdx", "rst", "adoc", "asciidoc", "txt", "org", "tex"];
-
 /// Commands that are always safe (build tools, VCS, runtimes).
 const SAFE_BASH_PREFIXES: &[&str] = &[
     "git", "cargo", "npm", "yarn", "docker", "kubectl", "pip", "brew", "make", "cmake", "python",
@@ -305,9 +292,8 @@ fn is_code_file(path: &str) -> bool {
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    CODE_EXTENSIONS.contains(&ext.as_str())
+        .unwrap_or("");
+    codesight_language_support::is_code_extension(ext)
 }
 
 #[derive(Copy, Clone)]
@@ -323,15 +309,14 @@ fn indexable_domain(path: &str) -> Option<IndexableDomain> {
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+        .unwrap_or("");
     if ext.is_empty() {
         return Some(IndexableDomain::Code);
     }
-    if CODE_EXTENSIONS.contains(&ext.as_str()) {
+    if codesight_language_support::is_code_extension(ext) {
         return Some(IndexableDomain::Code);
     }
-    if DOC_EXTENSIONS.contains(&ext.as_str()) {
+    if codesight_language_support::is_doc_extension(ext) {
         return Some(IndexableDomain::Docs);
     }
     None

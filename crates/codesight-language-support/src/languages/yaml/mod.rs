@@ -1,7 +1,11 @@
 //! YAML host + OpenAPI / Ansible host profiles.
 
+pub mod extractor;
+
 use std::path::{Component, Path};
 
+use anyhow::Result;
+use codesight_core::StoredSymbol;
 use tree_sitter::Language as TsLanguage;
 
 use crate::family::{LanguageFamily, NestingMode};
@@ -39,6 +43,9 @@ impl Language for YamlSupport {
     }
     fn nesting_mode(&self) -> NestingMode {
         NestingMode::Indent
+    }
+    fn extract_symbols(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
+        extractor::YamlExtractor.extract(file_path, source)
     }
 }
 

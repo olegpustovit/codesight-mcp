@@ -188,16 +188,15 @@ pub fn root_package_from_specifier(name: &str, specifier: &str) -> String {
     }
 }
 
-/// Ask each registered language for its extra live-root files.
-pub fn additional_live_root_files(
+/// Ask each registered language for its extra live-roots. Returns the
+/// structured [`LiveRoot`] list so callers can attach per-reason evidence
+/// notes without branching on the emitting language.
+pub fn additional_live_roots(
     root: Option<&Path>,
     all_files: &[String],
-) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for lang in builtin_registry().all() {
-        out.extend(lang.additional_live_root_files(root, all_files));
-    }
-    out.sort();
-    out.dedup();
-    out
+) -> Vec<crate::traits::LiveRoot> {
+    builtin_registry()
+        .all()
+        .flat_map(|lang| lang.additional_live_roots(root, all_files))
+        .collect()
 }

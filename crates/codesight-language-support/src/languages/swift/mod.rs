@@ -5,7 +5,7 @@ use tree_sitter::Language as TsLanguage;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::SWIFT_MANIFEST;
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, SWIFT};
-use crate::signature_density::measure_colon_after_name;
+use crate::signature_density::{measure_colon_after_name, normalize_type_token};
 use crate::traits::Language;
 
 pub struct Swift;
@@ -55,6 +55,19 @@ impl Language for Swift {
         true
     }
     fn measured_type_density(&self, src: &str) -> Option<f64> {
-        measure_colon_after_name(src, "swift", false, |_| false)
+        measure_colon_after_name(src, self, false, |_| false)
+    }
+    fn uses_colon_return_suffix(&self) -> bool {
+        true
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        let normalized = normalize_type_token(token);
+        if normalized.is_empty() {
+            return 0.0;
+        }
+        if normalized == "any" {
+            return 0.0;
+        }
+        1.0
     }
 }

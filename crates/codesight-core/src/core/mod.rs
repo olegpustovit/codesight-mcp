@@ -3,4 +3,5 @@
 
 pub mod language_id;
 pub mod pipeline;
+pub mod symbol_id;
 pub mod symbols;

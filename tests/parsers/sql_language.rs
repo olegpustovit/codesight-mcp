@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor, SqlExtractor};
+use codesight_language_support::LanguageRegistry;
+use codesight_language_support::languages::sql::extractor::SqlExtractor;
 use codesight_core::SymbolKind;
 
 // ── Inline fixtures (matching reference Python) ─────────────────────────────
@@ -295,17 +296,17 @@ FROM {{ ref('raw_orders') }}
 // ── Extension / registry tests ──────────────────────────────────────────────
 #[test]
 fn test_sql_extension_registered() {
-    let registry = ExtractorRegistry::default();
+    let registry = LanguageRegistry::default();
     let ext = registry.extractor_for_path(Path::new("test.sql"));
     assert!(
         ext.is_some(),
-        ".sql should be recognized by ExtractorRegistry"
+        ".sql should be recognized by LanguageRegistry"
     );
     assert_eq!(ext.unwrap().language_name(), "sql");
 }
 #[test]
 fn test_sql_language_in_registry() {
-    let registry = ExtractorRegistry::default();
+    let registry = LanguageRegistry::default();
     let ext = registry.extractor_for_path(Path::new("anything.sql"));
     assert!(ext.is_some(), "sql language should be in registry");
 }

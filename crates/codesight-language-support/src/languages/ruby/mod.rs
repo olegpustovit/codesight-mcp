@@ -46,4 +46,25 @@ impl Language for Ruby {
     fn fallback_type_baseline(&self) -> Option<f64> {
         Some(0.1)
     }
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        &[
+            "if", "elsif", "unless", "while", "until", "case", "when",
+            "rescue", "and", "or",
+        ]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &["&&", "||"]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["#"]
+    }
+    fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
+        // RSpec (`describe`, `context`, `it`) + Minitest (`test_…`).
+        let name = id.leaf_name();
+        name.starts_with("test_")
+            || matches!(
+                id.parent_path().rsplit('.').next().unwrap_or(""),
+                "describe" | "context" | "it"
+            )
+    }
 }

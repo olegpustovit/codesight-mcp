@@ -2,14 +2,43 @@
 
 use std::collections::HashMap;
 
+use codesight_core::SymbolIdRef;
 use codesight_language_support::{
     is_conventional_path, max_nesting_depth_for_path, test_weight_multiplier,
 };
+use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::agent_readiness::compute_file_churn;
-use crate::complexity::{complexity_assessment, cyclomatic_complexity};
+use crate::complexity::{ComplexityAssessment, cyclomatic_complexity_for_path};
+use crate::thresholds::THRESHOLDS;
 use codesight_storage::storage::{AnalysisSymbol, IndexStore};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HotspotAssessment {
+    Low,
+    Medium,
+    High,
+}
+
+impl HotspotAssessment {
+    /// Bucket a hotspot score using the central [`THRESHOLDS`]. When git is
+    /// unavailable or churn is zero the assessment is forced to `Low` —
+    /// there's no signal to escalate on.
+    pub fn classify(score: f64, git_available: bool, churn: u64) -> Self {
+        if !git_available || churn == 0 {
+            return Self::Low;
+        }
+        if score > THRESHOLDS.hotspot_high_min {
+            Self::High
+        } else if score > THRESHOLDS.hotspot_medium_min {
+            Self::Medium
+        } else {
+            Self::Low
+        }
+    }
+}
 
 
 pub fn complexity_payload(store: &IndexStore, symbol_id: &str) -> anyhow::Result<Option<Value>> {
@@ -21,7 +50,7 @@ pub fn complexity_payload(store: &IndexStore, symbol_id: &str) -> anyhow::Result
         .end_line
         .saturating_sub(rec.start_line)
         .saturating_add(1);
-    let cyclomatic = cyclomatic_complexity(&rec.stored_source);
+    let cyclomatic = cyclomatic_complexity_for_path(&rec.stored_source, &rec.file_path);
     let branch_hints = cyclomatic.saturating_sub(1);
     let first_line = rec.stored_source.lines().next().unwrap_or("");
     let param_count = count_params(first_line);
@@ -30,7 +59,7 @@ pub fn complexity_payload(store: &IndexStore, symbol_id: &str) -> anyhow::Result
     // the function body as depth 1 (its `{` or first indent), so subtract.
     let max_nesting =
         max_nesting_depth_for_path(&rec.stored_source, &rec.file_path).saturating_sub(1);
-    let assessment = complexity_assessment(cyclomatic);
+    let assessment = ComplexityAssessment::classify(cyclomatic);
     let repo_path = rec.root_path.to_string_lossy().to_string();
 
     Ok(Some(json!({
@@ -112,7 +141,8 @@ pub fn hotspots_payload_from_cached(
             continue;
         }
 
-        let cyclomatic = cyclomatic_complexity(&symbol.source_text) as u64;
+        let cyclomatic =
+            cyclomatic_complexity_for_path(&symbol.source_text, &symbol.file_path) as u64;
         if cyclomatic < min_complexity {
             continue;
         }
@@ -120,15 +150,7 @@ pub fn hotspots_payload_from_cached(
         let churn = file_churn.get(&symbol.file_path).copied().unwrap_or(0);
         let test_weight = test_weight_multiplier(&symbol.file_path);
         let hotspot_score = cyclomatic as f64 * (1.0f64 + churn as f64).ln() * test_weight;
-        let assessment = if !git_available || churn == 0 {
-            "low"
-        } else if hotspot_score > 50.0 {
-            "high"
-        } else if hotspot_score > 20.0 {
-            "medium"
-        } else {
-            "low"
-        };
+        let assessment = HotspotAssessment::classify(hotspot_score, git_available, churn);
 
         let rounded_score = (hotspot_score * 100.0).round() / 100.0;
         hotspots.push(json!({
@@ -177,7 +199,8 @@ pub fn top_hotspot_files_from_cached(
         if !include_conventional && is_conventional_path(&symbol.file_path) {
             continue;
         }
-        let cyclomatic = cyclomatic_complexity(&symbol.source_text) as f64;
+        let cyclomatic =
+            cyclomatic_complexity_for_path(&symbol.source_text, &symbol.file_path) as f64;
         let churn = file_churn.get(&symbol.file_path).copied().unwrap_or(0);
         let test_weight = test_weight_multiplier(&symbol.file_path);
         let score = cyclomatic * (1.0 + churn as f64).ln() * test_weight;
@@ -189,12 +212,7 @@ pub fn top_hotspot_files_from_cached(
 }
 
 pub fn extract_symbol_name_from_id(id: &str) -> String {
-    let after_colons = id.rsplit("::").next().unwrap_or(id);
-    after_colons
-        .split('#')
-        .next()
-        .unwrap_or(after_colons)
-        .to_string()
+    SymbolIdRef::new(id).leaf_name().to_string()
 }
 
 /// Count parameters in a function signature while ignoring nested generic/composite commas.

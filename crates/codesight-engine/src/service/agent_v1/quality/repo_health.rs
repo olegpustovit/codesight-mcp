@@ -14,11 +14,10 @@ impl CodeService {
     ) -> anyhow::Result<Value> {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         let mut meta = store.repo_metadata()?;
-        if let Ok(root) = store.root_path()
-            && let Some(backend) = self.indexer()
-        {
+        if let Ok(root) = store.root_path() {
+            let indexer = self.indexer();
             meta.is_stale = store
-                .is_stale(&root, |p| backend.detect_language(&root, p).is_some())
+                .is_stale(&root, |p| indexer.detect_language(&root, p).is_some())
                 .ok();
         }
         let raw_bytes = meta.estimated_naive_tokens.saturating_mul(4);

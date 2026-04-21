@@ -107,6 +107,19 @@ impl Language for JavaScript {
     fn is_restricted(&self, source_text: &str, name: &str) -> bool {
         js_is_restricted(source_text, name)
     }
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        &["if", "else if", "for", "while", "do", "catch", "case"]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &["&&", "||"]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["//"]
+    }
+    fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
+        let name = id.leaf_name().to_ascii_lowercase();
+        name.starts_with("test") || name.ends_with("spec")
+    }
     fn family(&self) -> LanguageFamily {
         LanguageFamily::ScriptedDynamic
     }
@@ -120,6 +133,6 @@ impl Language for JavaScript {
         true
     }
     fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_colon_after_name(source, "javascript", false, |_| false)
+        measure_colon_after_name(source, self, false, |_| false)
     }
 }

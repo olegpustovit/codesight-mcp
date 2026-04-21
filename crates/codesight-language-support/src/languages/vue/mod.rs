@@ -1,7 +1,11 @@
 //! Vue wrapper language + Nuxt framework providers.
 
+pub mod extractor;
 pub mod imports;
 pub mod nuxt;
+
+use anyhow::Result;
+use codesight_core::StoredSymbol;
 
 use crate::imports_types::ImportEdge;
 use crate::languages::builtins::VUE_MANIFEST;
@@ -27,5 +31,8 @@ impl Language for VueSupport {
     }
     fn extract_imports(&self, source: &str) -> Vec<ImportEdge> {
         imports::extract(source)
+    }
+    fn extract_symbols(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
+        extractor::VueExtractor.extract(file_path, source)
     }
 }

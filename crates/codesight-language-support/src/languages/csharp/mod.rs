@@ -8,7 +8,7 @@ use tree_sitter::Language as TsLanguage;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::CSHARP_MANIFEST;
 use crate::manifest::{CSHARP, GrammarSpec, LanguageId, LanguageManifest};
-use crate::signature_density::measure_type_before_name;
+use crate::signature_density::{measure_type_before_name, normalize_type_token};
 use crate::traits::Language;
 
 pub struct CSharp;
@@ -79,7 +79,34 @@ impl Language for CSharp {
         true
     }
     fn measured_type_density(&self, src: &str) -> Option<f64> {
-        measure_type_before_name(src, "csharp")
+        measure_type_before_name(src, self)
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        let normalized = normalize_type_token(token);
+        if normalized.is_empty() {
+            return 0.0;
+        }
+        if matches!(normalized.as_str(), "dynamic" | "object") {
+            return 0.0;
+        }
+        1.0
+    }
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        &[
+            "if", "else if", "for", "foreach", "while", "do", "switch", "case", "catch",
+        ]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &["&&", "||"]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["//"]
+    }
+    fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
+        // MSTest / xUnit / NUnit conventions: method names starting with
+        // `Test` / `Should` / `When` are common, but file-level test
+        // detection is the more reliable signal. Keep this narrow.
+        id.leaf_name().starts_with("Test")
     }
 }
 

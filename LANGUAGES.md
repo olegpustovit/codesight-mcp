@@ -1,6 +1,6 @@
 # LANGUAGES.md — pluggable per-language support
 
-**Status:** proposal, 2026-04-20.
+**Status:** landed 2026-04-20. Implementation log at §11.
 
 ## The one rule, unchanged
 
@@ -12,25 +12,25 @@ whole mental model. Nothing else gets to own language-specific behavior.
 
 ## 1. Why
 
-Language-specific behavior is still split across `codesight-analysis`,
-`codesight-imports`, `codesight-extractors`, `codesight-framework`,
-`codesight-backend-lsp`, and a few storage call sites. The result is not
-"some duplication." The result is contradictory behavior that compiles.
+Before this refactor, language-specific behavior was split across
+`codesight-analysis`, several storage call sites, and separate
+imports / extractors / framework / LSP-backend crates. The result was not
+"some duplication." The result was contradictory behavior that compiled.
 
-Representative drift points today:
+Representative drift points that motivated the consolidation:
 
-| Concern | Current home |
+| Concern | Former home |
 |---|---|
-| Path → language identity | `codesight-imports`, `codesight-analysis`, `codesight-backend-lsp`, `codesight-extractors` |
+| Path → language identity | imports, analysis, LSP backend, extractors |
 | Entrypoints / test files / fixtures | `codesight-analysis` |
-| Import extraction / alias loading / resolution | `codesight-imports` |
-| Package / workspace manifest parsing | `codesight-imports`, plus PHP logic in `codesight-analysis` |
+| Import extraction / alias loading / resolution | imports crate |
+| Package / workspace manifest parsing | imports crate, plus PHP logic in `codesight-analysis` |
 | Type-density / signature heuristics / visibility rules | `codesight-analysis` |
-| Query-pack catalogs / overlays / special path classifiers | `codesight-extractors` |
-| Framework metadata / extra imports / layer hints | `codesight-framework` |
+| Query-pack catalogs / overlays / special path classifiers | extractors crate |
+| Framework metadata / extra imports / layer hints | framework crate |
 | Raw language string branches in storage / analysis | `codesight-storage`, `codesight-analysis`, extractor internals |
 
-Already-observed failures from this shape:
+Failures observed in that shape:
 
 1. Two `is_test_file` definitions disagree.
 2. `tsx` exists in extraction catalogs but is absent from `language_profile`, so type-density is wrong.
@@ -100,10 +100,11 @@ crates/codesight-language-support/
 │       └── ...
 ```
 
-Builtin query packs move from `runtime/queries/<lang>/` into the owning
-language folder. `runtime/queries/` goes away. Workspace-local overlays
-do **not** go away; they remain a workspace feature and are loaded by
-the registry. See §3.5.
+Builtin query packs live inside the owning crate at
+`crates/codesight-language-support/src/languages/<lang>/queries/` via
+`include_str!`. The previous workspace-root `runtime/queries/` directory
+is gone. Workspace-local overlays (`.codesight/queries/`) are preserved
+as a workspace feature and loaded by the registry. See §3.5.
 
 ### 2.2 Supported implementation shapes
 
@@ -137,11 +138,9 @@ language folder under `languages/<lang>/`.
 
 ```text
 L0      codesight-core
+L0.75   codesight-language-support
 L0.5    codesight-backend
-L0.75   codesight-language-support   ← new
 L1      codesight-analysis
-L1      codesight-imports            ← shrinks heavily or disappears into L0.75
-L1      codesight-extractors         ← shrinks to generic engines only
 L1      codesight-retrieval
 L1      codesight-engine
 L2      mcp-rpc

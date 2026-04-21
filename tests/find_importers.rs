@@ -2,11 +2,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use codesight_imports::imports::{
+use codesight_language_support::dep_graph::build_dependency_graph;
+use codesight_language_support::imports_orchestration::{
     extract_imports, load_tsconfig_aliases, parse_tsconfig_paths, resolve_imports_to_files,
     resolve_specifier,
 };
-use codesight_engine::indexing::dep_graph::build_dependency_graph;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TestExtractImportsJS (8 tests) — JS/TS import extraction

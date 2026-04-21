@@ -11,7 +11,7 @@ use crate::service::agent_v1::util_graph::{build_caller_parents, reconstruct_cal
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
-use codesight_analysis::complexity::cyclomatic_complexity;
+use codesight_analysis::complexity::cyclomatic_complexity_for_path;
 use codesight_analysis::impact;
 use codesight_storage::storage::IndexStore;
 
@@ -46,14 +46,14 @@ impl CodeService {
             .handle_partial_group_imports
             .as_deref()
             .unwrap_or("warn");
-        let plan = impact::path_rename::preview_rust_path_rename(
+        let plan = impact::preview_rust_path_rename(
             &store,
             from,
             to,
             args.scope.as_deref(),
             partial_mode,
         )?;
-        let (files, changes) = impact::path_rename::summarize_path_rename(&plan);
+        let (files, changes) = impact::summarize_path_rename(&plan);
         let raw_bytes = store.repo_total_bytes().unwrap_or(0);
         let timer = MetaBuilder::new(raw_bytes);
 
@@ -102,7 +102,7 @@ impl CodeService {
                 "changes": changes,
                 "unhandled": plan.unhandled,
                 "collisions": plan.collisions,
-                "paths": impact::path_rename::affected_paths(&plan),
+                "paths": impact::affected_paths(&plan),
             },
             "applied": applied,
         });
@@ -534,7 +534,8 @@ fn complexity_budget_snapshot(store: &IndexStore) -> anyhow::Result<Value> {
         if kind != "function" && kind != "method" {
             continue;
         }
-        let cyclomatic = cyclomatic_complexity(&symbol.source_text) as u64;
+        let cyclomatic =
+            cyclomatic_complexity_for_path(&symbol.source_text, &symbol.file_path) as u64;
         total_cyclomatic = total_cyclomatic.saturating_add(cyclomatic);
         max_per_fn = max_per_fn.max(cyclomatic);
     }

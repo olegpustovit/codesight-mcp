@@ -3,9 +3,10 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
-use codesight_extractors::extractors::{
-    ExtractorRegistry, LanguageExtractor, LessExtractor, SassExtractor, StylExtractor,
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
+use codesight_language_support::LanguageRegistry;
+use codesight_language_support::languages::scss::extractor::{
+    LessExtractor, SassExtractor, StylExtractor,
 };
 use codesight_core::SymbolKind;
 
@@ -132,7 +133,7 @@ fn scss_syms() -> Vec<codesight_core::StoredSymbol> {
 
 #[test]
 fn test_css_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("static/css/main.css"));
     assert!(ext.is_some(), "CSS file should be detected");
     assert_eq!(ext.unwrap().language_name(), "css");
@@ -294,10 +295,10 @@ fn test_css_symbol_has_byte_info() {
     }
 }
 
-/// Ref: test_css_via_parse_file — exercise the ExtractorRegistry dispatch path.
+/// Ref: test_css_via_parse_file — exercise the LanguageRegistry dispatch path.
 #[test]
 fn test_css_via_parse_file() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new("styles/main.css"))
         .expect("registry should find CSS extractor");
@@ -356,7 +357,7 @@ fn test_css_no_symbols_file() {
 /// Ref: test_scss_extension_detected
 #[test]
 fn test_scss_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("styles/main.scss"));
     assert!(ext.is_some(), "SCSS file should be detected");
     assert_eq!(ext.unwrap().language_name(), "scss");
@@ -365,7 +366,7 @@ fn test_scss_extension_detected() {
 /// Ref: test_sass_extension_detected
 #[test]
 fn test_sass_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("styles/main.sass"));
     assert!(ext.is_some(), "Sass file should be detected");
     assert_eq!(ext.unwrap().language_name(), "sass");
@@ -374,7 +375,7 @@ fn test_sass_extension_detected() {
 /// Ref: test_less_extension_detected
 #[test]
 fn test_less_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("styles/main.less"));
     assert!(ext.is_some(), "Less file should be detected");
     assert_eq!(ext.unwrap().language_name(), "less");
@@ -383,7 +384,7 @@ fn test_less_extension_detected() {
 /// Ref: test_styl_extension_detected
 #[test]
 fn test_styl_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("styles/main.styl"));
     assert!(ext.is_some(), "Styl file should be detected");
     assert_eq!(ext.unwrap().language_name(), "styl");
@@ -590,10 +591,10 @@ fn test_scss_symbol_has_byte_info() {
     }
 }
 
-/// Ref: test_scss_via_parse_file — exercise ExtractorRegistry dispatch for SCSS.
+/// Ref: test_scss_via_parse_file — exercise LanguageRegistry dispatch for SCSS.
 #[test]
 fn test_scss_via_parse_file() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new("styles/main.scss"))
         .expect("registry should find SCSS extractor");

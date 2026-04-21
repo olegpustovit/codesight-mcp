@@ -4,10 +4,8 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use codesight_imports::{
-    imports::{extract_imports, language_for_path, package_reference_evidence},
-    packages,
-};
+use codesight_language_support::imports_orchestration::{extract_imports, language_for_path};
+use codesight_language_support::packages::{self, package_reference_evidence};
 
 use codesight_storage::storage::{IndexStore, list_repo_summaries};
 

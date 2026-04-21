@@ -9,6 +9,7 @@ use crate::languages::builtins::TSX_MANIFEST;
 use crate::languages::javascript::{
     JS_ENTRYPOINTS, js_is_restricted, js_is_test_file, js_package_name_for_dir, js_root_package,
 };
+use crate::languages::typescript::ts_type_token_score;
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, TSX};
 use crate::signature_density::measure_colon_after_name;
 use crate::traits::{ImportExtractionMode, Language};
@@ -70,6 +71,12 @@ impl Language for Tsx {
         true
     }
     fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_colon_after_name(source, "tsx", false, |_| false)
+        measure_colon_after_name(source, self, false, |_| false)
+    }
+    fn uses_colon_return_suffix(&self) -> bool {
+        true
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        ts_type_token_score(token)
     }
 }

@@ -8,11 +8,7 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 
 fn make_service_with(index_root: &std::path::Path) -> CodeService {
-    let mut router = codesight_backend::BackendRouter::new();
-    router.register(std::sync::Arc::new(
-        codesight_backend::TreeSitterBackend::new(),
-    ));
-    CodeService::with_backends(AppConfig::new(index_root.to_path_buf()), router).unwrap()
+    CodeService::new(AppConfig::new(index_root.to_path_buf())).unwrap()
 }
 
 fn big_rust_file(lines: usize) -> String {

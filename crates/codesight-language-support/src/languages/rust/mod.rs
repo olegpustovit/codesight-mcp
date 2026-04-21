@@ -6,7 +6,7 @@
 
 pub mod imports;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -16,7 +16,7 @@ use crate::family::{LanguageFamily, NestingMode};
 use crate::imports_types::ImportEdge;
 use crate::languages::builtins::RUST_MANIFEST;
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, RUST};
-use crate::signature_density::measure_colon_after_name;
+use crate::signature_density::{measure_colon_after_name, normalize_type_token};
 use crate::traits::{ImportExtractionMode, Language};
 
 /// Rust receiver detector — filters `self` / `&self` / `&mut self` from
@@ -73,6 +73,36 @@ impl Language for Rust {
         imports::extract(source)
     }
 
+    fn resolve_import_edge(
+        &self,
+        edge: &ImportEdge,
+        from_file: &str,
+        _source_files: &HashSet<String>,
+        known_files_vec: &[String],
+        _alias_map: Option<&HashMap<String, Vec<String>>>,
+        workspace_crates: Option<&HashMap<String, String>>,
+    ) -> Option<String> {
+        imports::resolve_edge(edge, from_file, known_files_vec, workspace_crates)
+    }
+
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        // `match` is the main decision construct in Rust; `if let` /
+        // `while let` share `if` / `while`. Each `=>` arm on a line bumps
+        // complexity via the operator sweep.
+        &["if", "else if", "for", "while", "loop", "match"]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &["&&", "||", "=>"]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["//"]
+    }
+    fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
+        // Rust inline tests: `tests` parent scope (most common) or `#[test]`
+        // functions named `test_…` at any depth.
+        id.has_scope("tests") || id.leaf_name().starts_with("test_")
+    }
+
     // ── Packages ───────────────────────────────────────────────────────
     fn package_name_for_dir(&self, dir: &Path) -> Option<String> {
         let cargo_toml = dir.join("Cargo.toml");
@@ -114,14 +144,37 @@ impl Language for Rust {
         }) || path.rsplit('/').next().unwrap_or(path) == "build.rs"
     }
 
-    fn additional_live_root_files(
+    fn additional_live_roots(
         &self,
         root: Option<&Path>,
         all_files: &[String],
-    ) -> Vec<String> {
+    ) -> Vec<crate::traits::LiveRoot> {
+        use crate::traits::{LiveRoot, LiveRootConfidence};
         let mut roots = Vec::new();
-        roots.extend(detect_foreign_trait_impl_files(root, all_files));
-        roots.extend(detect_cargo_target_files(root, all_files));
+        for path in detect_cargo_target_files(root, all_files) {
+            let message = format!(
+                "file '{path}' is a Cargo [[test]]/[[example]]/[[bench]]/[[bin]] target"
+            );
+            roots.push(LiveRoot {
+                path,
+                reason: "cargo_target",
+                message,
+                confidence: LiveRootConfidence::Structural,
+                explicit: true,
+            });
+        }
+        for path in detect_foreign_trait_impl_files(root, all_files) {
+            let message = format!(
+                "file '{path}' contains `impl <ForeignTrait> for X` — reached at runtime via vtable"
+            );
+            roots.push(LiveRoot {
+                path,
+                reason: "foreign_trait_impl",
+                message,
+                confidence: LiveRootConfidence::Heuristic,
+                explicit: false,
+            });
+        }
         roots
     }
 
@@ -149,7 +202,18 @@ impl Language for Rust {
         true
     }
     fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_colon_after_name(source, "rust", true, is_rust_receiver)
+        measure_colon_after_name(source, self, true, is_rust_receiver)
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        // `dyn Any` / `Box<dyn Any>` / `impl Any` — Rust's escape hatches.
+        let normalized = normalize_type_token(token);
+        if normalized.is_empty() {
+            return 0.0;
+        }
+        if normalized.contains("<any>") || normalized.contains("dynany") {
+            return 0.0;
+        }
+        1.0
     }
 }
 

@@ -1,8 +1,9 @@
 mod core;
 
 pub use core::pipeline::StoredSymbol;
+pub use core::symbol_id::{SymbolId, SymbolIdRef};
 pub use core::symbols::{ExtractionTier, FactQuality, SymbolKind};
-pub use core::{pipeline, symbols};
+pub use core::{pipeline, symbol_id, symbols};
 
 pub use core::language_id;
 pub use core::language_id::{

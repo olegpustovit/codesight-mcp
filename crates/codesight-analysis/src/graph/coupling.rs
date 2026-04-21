@@ -4,16 +4,43 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
+use crate::thresholds::current_thresholds;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CouplingAssessment {
+    /// Instability ≤ `thresholds.coupling_stable_max`.
+    Stable,
+    /// Between the stable ceiling and the unstable floor — neither extreme.
+    Balanced,
+    /// Instability ≥ `thresholds.coupling_unstable_min`.
+    Unstable,
+    /// No afferent or efferent coupling.
+    Isolated,
+}
+
+impl CouplingAssessment {
+    pub fn classify(instability: Option<f64>) -> Self {
+        let thresholds = current_thresholds();
+        match instability {
+            Some(i) if i <= thresholds.coupling_stable_max => Self::Stable,
+            Some(i) if i >= thresholds.coupling_unstable_min => Self::Unstable,
+            Some(_) => Self::Balanced,
+            None => Self::Isolated,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CouplingMetrics {
     pub module: String,
-    /// Afferent coupling: number of files that import this file
+    /// Afferent coupling: number of files that import this file.
     pub ca: usize,
-    /// Efferent coupling: number of files this file imports
+    /// Efferent coupling: number of files this file imports.
     pub ce: usize,
-    /// Instability: Ce / (Ca + Ce), or None if both are 0
+    /// Instability: `Ce / (Ca + Ce)`, or `None` when both are zero.
     pub instability: Option<f64>,
-    pub assessment: String,
+    pub assessment: CouplingAssessment,
     pub importers: Vec<String>,
     pub dependencies: Vec<String>,
 }
@@ -37,19 +64,12 @@ pub fn compute_coupling(file_path: &str, adj: &HashMap<String, Vec<String>>) -> 
         None
     };
 
-    let assessment = match instability {
-        Some(i) if i <= 0.3 => "stable".to_string(),
-        Some(i) if i >= 0.7 => "unstable".to_string(),
-        Some(_) => "balanced".to_string(),
-        None => "isolated".to_string(),
-    };
-
     CouplingMetrics {
         module: file_path.to_string(),
         ca,
         ce,
         instability,
-        assessment,
+        assessment: CouplingAssessment::classify(instability),
         importers,
         dependencies,
     }

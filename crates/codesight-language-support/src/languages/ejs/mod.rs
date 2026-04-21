@@ -1,5 +1,10 @@
 //! EJS templates.
 
+pub mod extractor;
+
+use anyhow::Result;
+use codesight_core::StoredSymbol;
+use codesight_core::symbols::ExtractionTier;
 use tree_sitter::Language as TsLanguage;
 
 use crate::languages::builtins::EJS_MANIFEST;
@@ -28,5 +33,11 @@ impl Language for EjsSupport {
     }
     fn grammar_spec(&self) -> Option<&'static GrammarSpec> {
         Some(&GRAMMAR)
+    }
+    fn extraction_tier(&self) -> ExtractionTier {
+        ExtractionTier::ManualOverride
+    }
+    fn extract_symbols(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
+        extractor::EjsExtractor.extract(file_path, source)
     }
 }

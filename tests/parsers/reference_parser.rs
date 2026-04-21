@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
-use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
+use codesight_language_support::LanguageRegistry;
 use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
@@ -122,7 +122,7 @@ fn format_id(file: &str, qualified: &str, kind: SymbolKind) -> String {
 }
 
 fn unknown_extension_yields_no_extractor() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     assert!(
         reg.extractor_for_path(Path::new("opaque.unknown"))
             .is_none()

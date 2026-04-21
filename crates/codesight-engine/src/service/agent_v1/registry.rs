@@ -1,4 +1,8 @@
-//! Static dispatch table for `agent-v1` tools (additive extension point).
+//! Static dispatch table for `agent-v1` tools.
+//!
+//! Each row owns the tool's name, its handler, and its timeout class — one
+//! source of truth. New tools add one entry here; no parallel string match
+//! lives elsewhere.
 
 use serde_json::Value;
 
@@ -8,20 +12,43 @@ use crate::service::savings::MetaBuilder;
 
 type AgentV1Handler = fn(&CodeService, Value) -> anyhow::Result<Value>;
 
-static AGENT_V1_HANDLERS: &[(&str, AgentV1Handler)] = &[
-    ("ingest_sources", CodeService::ingest_sources),
-    ("catalog_sources", CodeService::catalog_sources),
-    ("search_catalog", CodeService::search_catalog),
-    ("read_content", CodeService::read_content),
-    ("inspect_structure", CodeService::inspect_structure),
-    ("inspect_graph", CodeService::inspect_graph),
-    ("evaluate_impact", CodeService::evaluate_impact),
-    ("evaluate_quality", CodeService::evaluate_quality),
-    ("assemble_context", CodeService::assemble_context),
-    ("manage_indexes", CodeService::manage_indexes),
-    ("search_columns", CodeService::search_columns),
-    ("check_references", CodeService::check_references),
-    ("get_cross_repo_map", CodeService::get_cross_repo_map),
+/// Per-tool wall-clock timeout budget. Exceeding it yields a categorized
+/// `TIMEOUT` error. The budget shape matches tool cost: targeted reads are
+/// fast, analysis rollups take longer, ingest can legitimately run for tens
+/// of seconds on a cold repo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeoutClass {
+    FastRead,
+    Default,
+    Heavy,
+    Ingest,
+}
+
+impl TimeoutClass {
+    pub const fn as_ms(self) -> u64 {
+        match self {
+            Self::FastRead => 3_000,
+            Self::Default => 5_000,
+            Self::Heavy => 15_000,
+            Self::Ingest => 60_000,
+        }
+    }
+}
+
+static AGENT_V1_HANDLERS: &[(&str, AgentV1Handler, TimeoutClass)] = &[
+    ("ingest_sources", CodeService::ingest_sources, TimeoutClass::Ingest),
+    ("catalog_sources", CodeService::catalog_sources, TimeoutClass::FastRead),
+    ("search_catalog", CodeService::search_catalog, TimeoutClass::Default),
+    ("read_content", CodeService::read_content, TimeoutClass::FastRead),
+    ("inspect_structure", CodeService::inspect_structure, TimeoutClass::FastRead),
+    ("inspect_graph", CodeService::inspect_graph, TimeoutClass::Default),
+    ("evaluate_impact", CodeService::evaluate_impact, TimeoutClass::Heavy),
+    ("evaluate_quality", CodeService::evaluate_quality, TimeoutClass::Heavy),
+    ("assemble_context", CodeService::assemble_context, TimeoutClass::Heavy),
+    ("manage_indexes", CodeService::manage_indexes, TimeoutClass::Ingest),
+    ("search_columns", CodeService::search_columns, TimeoutClass::Default),
+    ("check_references", CodeService::check_references, TimeoutClass::Default),
+    ("get_cross_repo_map", CodeService::get_cross_repo_map, TimeoutClass::Default),
 ];
 
 pub(in crate::service) fn dispatch_tool(
@@ -29,12 +56,24 @@ pub(in crate::service) fn dispatch_tool(
     tool_name: &str,
     arguments: Value,
 ) -> anyhow::Result<Option<Value>> {
-    for (name, handler) in AGENT_V1_HANDLERS {
+    for (name, handler, _) in AGENT_V1_HANDLERS {
         if *name == tool_name {
             return Ok(Some(handler(svc, arguments)?));
         }
     }
     Ok(None)
+}
+
+/// Look up the timeout budget (milliseconds) for `tool_name`. Unknown tools
+/// fall back to [`TimeoutClass::Default`]; they'll still hit the `NOT_FOUND`
+/// branch below but won't hang waiting for a budget decision.
+pub fn timeout_ms(tool_name: &str) -> u64 {
+    for (name, _, class) in AGENT_V1_HANDLERS {
+        if *name == tool_name {
+            return class.as_ms();
+        }
+    }
+    TimeoutClass::Default.as_ms()
 }
 
 pub(in crate::service) fn not_found(svc: &CodeService, tool_name: &str) -> anyhow::Result<Value> {

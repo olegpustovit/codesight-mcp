@@ -2,6 +2,7 @@
 
 pub mod nextjs;
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use tree_sitter::Language as TsLanguage;
@@ -12,7 +13,7 @@ use crate::languages::javascript::{
     JS_ENTRYPOINTS, js_is_restricted, js_is_test_file, js_package_name_for_dir, js_root_package,
 };
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, TYPESCRIPT};
-use crate::signature_density::measure_colon_after_name;
+use crate::signature_density::{measure_colon_after_name, normalize_type_token};
 use crate::traits::{ImportExtractionMode, Language};
 
 pub struct TypeScript;
@@ -50,6 +51,22 @@ impl Language for TypeScript {
     fn imports_query(&self) -> Option<&'static str> {
         Some(include_str!("queries/imports.scm"))
     }
+    fn path_aliases(&self, root: &Path) -> HashMap<String, Vec<String>> {
+        crate::imports_orchestration::load_tsconfig_aliases(&root.to_string_lossy())
+    }
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        &["if", "else if", "for", "while", "do", "catch", "case"]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &["&&", "||"]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["//"]
+    }
+    fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
+        let name = id.leaf_name().to_ascii_lowercase();
+        name.starts_with("test") || name.ends_with("spec")
+    }
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         JS_ENTRYPOINTS
     }
@@ -72,6 +89,28 @@ impl Language for TypeScript {
         true
     }
     fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_colon_after_name(source, "typescript", false, |_| false)
+        measure_colon_after_name(source, self, false, |_| false)
     }
+    fn uses_colon_return_suffix(&self) -> bool {
+        true
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        ts_type_token_score(token)
+    }
+}
+
+/// TypeScript / TSX weak-type scoring — `any` / `object` collapse to zero,
+/// `unknown` stays at 0.3 (narrower than `any` but still an escape hatch).
+pub(crate) fn ts_type_token_score(token: &str) -> f64 {
+    let normalized = normalize_type_token(token);
+    if normalized.is_empty() {
+        return 0.0;
+    }
+    if normalized == "unknown" {
+        return 0.3;
+    }
+    if matches!(normalized.as_str(), "any" | "object") || normalized.contains("<any>") {
+        return 0.0;
+    }
+    1.0
 }

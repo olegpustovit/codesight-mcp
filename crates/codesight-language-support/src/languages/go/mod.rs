@@ -10,14 +10,14 @@ use crate::imports_types::ImportEdge;
 use crate::languages::builtins::GO_MANIFEST;
 use crate::manifest::{GO, GrammarSpec, LanguageId, LanguageManifest};
 use crate::signature_density::{
-    find_matching_delimiter, split_top_level, take_until_top_level_char, type_token_score,
+    find_matching_delimiter, normalize_type_token, split_top_level, take_until_top_level_char,
 };
 use crate::traits::{ImportExtractionMode, Language};
 
 /// Go-specific signature density: `func (recv) name(params) ret {...}`.
 /// Handles grouped parameters (`x, y int`), variadic (`...T`), and the
 /// Go convention where a missing return type counts as typed (implicit void).
-fn measure_go_signature(source: &str) -> Option<f64> {
+fn measure_go_signature(lang: &Go, source: &str) -> Option<f64> {
     let func_idx = source.find("func")?;
     let mut scan = source[func_idx + 4..].trim_start();
     if scan.starts_with('(') {
@@ -59,7 +59,7 @@ fn measure_go_signature(source: &str) -> Option<f64> {
             + pending_names;
         let ty = part[last_space + 1..].trim();
         total_slots += names.max(1);
-        score_sum += type_token_score(ty, "go") * names.max(1) as f64;
+        score_sum += lang.type_token_score(ty) * names.max(1) as f64;
         pending_names = 0;
     }
     if pending_names > 0 {
@@ -74,7 +74,7 @@ fn measure_go_signature(source: &str) -> Option<f64> {
         if return_ty.is_empty() {
             score_sum += 1.0;
         } else {
-            score_sum += type_token_score(return_ty, "go");
+            score_sum += lang.type_token_score(return_ty);
         }
     }
 
@@ -131,6 +131,27 @@ impl Language for Go {
         Some(include_str!("queries/imports.scm"))
     }
 
+    fn branch_keywords(&self) -> &'static [&'static str] {
+        // Go has no `while` / `elif`; `switch` arms + `select` channel
+        // arms use `case`.
+        &["if", "else if", "for", "switch", "case", "select"]
+    }
+    fn branch_operators(&self) -> &'static [&'static str] {
+        &["&&", "||"]
+    }
+    fn line_comment_prefixes(&self) -> &'static [&'static str] {
+        &["//"]
+    }
+    fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
+        // Go convention: `TestXxx`, `BenchmarkXxx`, `FuzzXxx`, `ExampleXxx`
+        // functions in `_test.go` files (file detection handled elsewhere).
+        let name = id.leaf_name();
+        name.starts_with("Test")
+            || name.starts_with("Benchmark")
+            || name.starts_with("Fuzz")
+            || name.starts_with("Example")
+    }
+
     fn display_import_lines(&self, edges: &[ImportEdge]) -> Vec<String> {
         // Go's conventional `import ( … )` block display — one line per spec
         // inside the block.
@@ -185,6 +206,16 @@ impl Language for Go {
         true
     }
     fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_go_signature(source)
+        measure_go_signature(self, source)
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        let normalized = normalize_type_token(token);
+        if normalized.is_empty() {
+            return 0.0;
+        }
+        if matches!(normalized.as_str(), "any" | "interface{}") {
+            return 0.0;
+        }
+        1.0
     }
 }

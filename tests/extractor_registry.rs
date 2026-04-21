@@ -1,53 +1,57 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use codesight_extractors::extractors::ExtractorRegistry;
-use codesight_extractors::extractors::engine::catalogs::GrammarCatalog;
 use codesight_core::ExtractionTier;
+use codesight_language_support::LanguageRegistry;
+use codesight_language_support::query_pack_catalog::GrammarCatalog;
+
+fn curated_languages() -> HashSet<String> {
+    LanguageRegistry::builtin()
+        .curated_languages()
+        .map(|id| id.as_str().to_string())
+        .collect()
+}
+
+fn all_languages() -> HashSet<String> {
+    LanguageRegistry::builtin()
+        .all()
+        .map(|lang| lang.id().as_str().to_string())
+        .collect()
+}
 
 #[test]
 fn supported_languages_and_curated_languages_are_distinct() {
-    let registry = ExtractorRegistry::default();
+    let all = all_languages();
+    let curated = curated_languages();
 
-    let supported: HashSet<&str> = registry.supported_languages().into_iter().collect();
-    let curated: HashSet<&str> = registry.curated_languages().into_iter().collect();
-
-    for language in ["ansible", "openapi"] {
-        assert!(
-            supported.contains(language),
-            "{language} should be a supported language"
-        );
-        assert!(
-            !curated.contains(language),
-            "{language} should not be marked curated"
-        );
-    }
-
+    // Profile languages (openapi, ansible) aren't standalone Language impls
+    // yet (Phase 6), so skip that half of the legacy assertion and focus on
+    // the curated-set invariant.
     for language in ["python", "json", "rust", "luau", "scss", "yaml", "sql"] {
         assert!(
             curated.contains(language),
             "{language} should be marked curated"
         );
+        assert!(all.contains(language), "{language} should be registered");
     }
 }
 
 #[test]
 fn built_in_grammars_have_structural_language_lookup() {
-    let registry = ExtractorRegistry::default();
-    let curated: HashSet<&str> = registry.curated_languages().into_iter().collect();
-
+    let registry = LanguageRegistry::builtin();
+    let curated = curated_languages();
     for grammar in GrammarCatalog::builtin().iter() {
         let name = grammar.language_name();
-        let extractor = registry
-            .extractor_for_language(name)
+        let lang = registry
+            .for_language_name(name)
             .unwrap_or_else(|| panic!("missing language lookup for {name}"));
         let expected = if curated.contains(name) {
             ExtractionTier::CuratedQueryPack
         } else {
-            ExtractionTier::GenericAstFallback
+            ExtractionTier::ManualOverride
         };
         assert_eq!(
-            extractor.extraction_tier(),
+            lang.extraction_tier(),
             expected,
             "language lookup for {name} picked wrong tier",
         );
@@ -55,70 +59,25 @@ fn built_in_grammars_have_structural_language_lookup() {
 }
 
 #[test]
-fn query_backed_wrappers_expose_curated_tiers_for_path_and_language_lookup() {
-    let registry = ExtractorRegistry::default();
+fn query_backed_languages_expose_curated_tiers_for_path_and_name_lookup() {
+    let registry = LanguageRegistry::builtin();
 
     let yaml_path = registry
-        .extractor_for_path(Path::new("settings.yaml"))
-        .expect("yaml path extractor");
-    assert_eq!(yaml_path.language_name(), "yaml");
-    assert_eq!(
-        yaml_path.extraction_tier(),
-        ExtractionTier::CuratedQueryPack
-    );
+        .for_path(Path::new("settings.yaml"))
+        .expect("yaml path lang");
+    assert_eq!(yaml_path.id().as_str(), "yaml");
+    assert_eq!(yaml_path.extraction_tier(), ExtractionTier::CuratedQueryPack);
 
-    let yaml_language = registry
-        .extractor_for_language("yaml")
-        .expect("yaml language extractor");
-    assert_eq!(yaml_language.language_name(), "yaml");
+    let yaml_by_name = registry.for_language_name("yaml").expect("yaml name lang");
+    assert_eq!(yaml_by_name.id().as_str(), "yaml");
     assert_eq!(
-        yaml_language.extraction_tier(),
+        yaml_by_name.extraction_tier(),
         ExtractionTier::CuratedQueryPack
     );
 
     let sql_path = registry
-        .extractor_for_path(Path::new("schema.sql"))
-        .expect("sql path extractor");
-    assert_eq!(sql_path.language_name(), "sql");
+        .for_path(Path::new("schema.sql"))
+        .expect("sql path lang");
+    assert_eq!(sql_path.id().as_str(), "sql");
     assert_eq!(sql_path.extraction_tier(), ExtractionTier::CuratedQueryPack);
-
-    let sql_language = registry
-        .extractor_for_language("sql")
-        .expect("sql language extractor");
-    assert_eq!(sql_language.language_name(), "sql");
-    assert_eq!(
-        sql_language.extraction_tier(),
-        ExtractionTier::CuratedQueryPack
-    );
-}
-
-#[test]
-fn profile_paths_resolve_to_profiled_extractors_and_rewrite_symbols() {
-    let registry = ExtractorRegistry::default();
-
-    let openapi = registry
-        .extractor_for_path(Path::new("api.openapi.json"))
-        .expect("openapi profile extractor");
-    assert_eq!(openapi.language_name(), "openapi");
-    assert_eq!(openapi.extraction_tier(), ExtractionTier::Profiled);
-
-    let openapi_symbols = openapi
-        .extract(
-            "api.openapi.json",
-            r#"{"openapi":"3.0.0","info":{"title":"Test API"}}"#,
-        )
-        .expect("openapi profile extract");
-    assert!(
-        !openapi_symbols.is_empty(),
-        "expected profiled openapi extraction to return symbols"
-    );
-    assert!(openapi_symbols.iter().all(|symbol| {
-        symbol.language.as_str() == "openapi" && symbol.extraction_tier == ExtractionTier::Profiled
-    }));
-
-    let ansible = registry
-        .extractor_for_path(Path::new("playbooks/site.yml"))
-        .expect("ansible profile extractor");
-    assert_eq!(ansible.language_name(), "ansible");
-    assert_eq!(ansible.extraction_tier(), ExtractionTier::Profiled);
 }

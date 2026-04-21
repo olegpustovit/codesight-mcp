@@ -9,7 +9,7 @@ use crate::imports_types::ImportEdge;
 use crate::languages::builtins::DART_MANIFEST;
 use crate::manifest::{DART, GrammarSpec, LanguageId, LanguageManifest};
 use crate::traits::{ImportExtractionMode, Language};
-use crate::signature_density::measure_type_before_name;
+use crate::signature_density::{measure_type_before_name, normalize_type_token};
 
 pub struct Dart;
 
@@ -67,6 +67,16 @@ impl Language for Dart {
         true
     }
     fn measured_type_density(&self, src: &str) -> Option<f64> {
-        measure_type_before_name(src, "dart")
+        measure_type_before_name(src, self)
+    }
+    fn type_token_score(&self, token: &str) -> f64 {
+        let normalized = normalize_type_token(token);
+        if normalized.is_empty() {
+            return 0.0;
+        }
+        if normalized == "dynamic" {
+            return 0.0;
+        }
+        1.0
     }
 }

@@ -9,141 +9,118 @@ crate boundaries, data flow, or the MCP surface. For configuration knobs, see
 
 ```
 codesight-mcp/                          ← product crate (root Cargo.toml)
-├── src/
-│   ├── cli/                            ← operator subcommands (`check`)
-│   ├── config/                         ← layered AppConfig + env + trust
-│   ├── service/                        ← MCP boundary + agent-v1 dispatch
-│   ├── indexing/                       ← crawl, delta orchestration (code_index, dep_graph)
-│   ├── server_support/                 ← repo-id, path map, reindex state
-│   ├── security/                       ← binary policy, secret policy, paths
-│   └── tools.json                      ← frozen MCP contract
+├── src/                                ← thin CLI entry + /stdio adapter (wires engine)
 └── crates/
+    ├── codesight-core/                 ← L0 primitives (symbols, fact quality, LanguageId)
+    ├── codesight-storage/              ← L0 SQLite schema + migrations + reads/writes
+    ├── codesight-retrieval/            ← L0 ranking, summarization, section parsing, embedder
+    ├── codesight-language-support/     ← L0.75 one folder per language owns identity,
+    │                                      SCM, extraction, imports, packages, liveness,
+    │                                      complexity, frameworks, host profiles
     ├── codesight-analysis/             ← graph, quality, dead-code, readiness, evidence
-    ├── codesight-core/                 ← shared primitives (symbols, fact quality)
-    ├── codesight-extractors/           ← SCM engine + curated query packs
-    ├── codesight-framework/            ← dbt / laravel / nextjs / nuxt detection
-    ├── codesight-imports/              ← multilingual import extraction + package manifest registry
-    ├── codesight-retrieval/            ← ranking, summarization, section parsing, embedder
-    └── codesight-storage/              ← SQLite schema + migrations + reads/writes
+    ├── codesight-backend/              ← L0.5 CodeBackend trait + tree-sitter impl
+    ├── codesight-engine/               ← L1 MCP tool dispatch + indexing orchestration
+    └── mcp-rpc/                        ← L2 JSON-RPC stdio framing
 ```
 
-**Dependency direction is inward.** `codesight-core` is the base; `extractors`
-and `storage` depend on it; `framework` depends on `extractors` (for shared
-`parse_tree`); `imports` depends on both core and extractors; `analysis` and
-`retrieval` both depend on core + storage. The product crate depends on every
-inner crate. Nothing in the crates depends on the product layer.
+**Dependency direction is inward.** `codesight-core` is the base; every other
+crate depends on it. `codesight-language-support` owns every per-language
+heuristic (symbol extraction, imports, packages, entrypoints, complexity,
+frameworks) behind the `Language` trait — a single default-bodied trait with
+opt-in overrides. `codesight-backend` depends on the trait + core, exposing
+tree-sitter via the `treesitter` feature. `codesight-analysis` and
+`codesight-retrieval` depend on `core + storage`. `codesight-engine` depends
+on everything below L1 and never on a concrete backend. `mcp-rpc` is a leaf
+protocol crate — zero `codesight_*` deps.
 
 ### Workspace dependency graph (current snapshot)
 
-Extracted from `cargo metadata --format-version 1 --no-deps` on 2026-04-15;
-regenerate whenever a workspace crate is added or an edge changes.
+| From → To                      | core | storage | language-support | retrieval | analysis | backend | engine | mcp-rpc |
+|--------------------------------|:----:|:-------:|:----------------:|:---------:|:--------:|:-------:|:------:|:-------:|
+| `codesight-core`               |  —   |    ✗    |        ✗         |     ✗     |    ✗     |    ✗    |   ✗    |    ✗    |
+| `codesight-storage`            |  ✓   |    —    |        ✗         |     ✗     |    ✗     |    ✗    |   ✗    |    ✗    |
+| `codesight-language-support`   |  ✓   |    ✗    |        —         |     ✗     |    ✗     |    ✗    |   ✗    |    ✗    |
+| `codesight-retrieval`          |  ✓   |    ✓    |        ✗         |     —     |    ✗     |    ✗    |   ✗    |    ✗    |
+| `codesight-analysis`           |  ✓   |    ✓    |        ✓         |     ✗     |    —     |    ✗    |   ✗    |    ✗    |
+| `codesight-backend`            |  ✓   |    ✗    |        ✓         |     ✗     |    ✗     |    —    |   ✗    |    ✗    |
+| `codesight-engine`             |  ✓   |    ✓    |        ✓         |     ✓     |    ✓     |    ✓    |   —    |    ✓    |
+| `mcp-rpc`                      |  ✗   |    ✗    |        ✗         |     ✗     |    ✗     |    ✗    |   ✗    |    —    |
+| `codesight-mcp` (root)         |  ✓   |    ✗    |        ✗         |     ✗     |    ✗     |    ✓    |   ✓    |    ✓    |
 
-| From → To              | `codesight-core` | `codesight-analysis` | `codesight-extractors` | `codesight-framework` | `codesight-imports` | `codesight-retrieval` | `codesight-storage` | `codesight-mcp` |
-|------------------------|:----------------:|:--------------------:|:----------------------:|:---------------------:|:-------------------:|:---------------------:|:-------------------:|:---------------:|
-| `codesight-core`       |        —         |          ✗           |           ✗            |           ✗           |          ✗          |           ✗           |          ✗          |        ✗        |
-| `codesight-analysis`   |        ✓         |          —           |           ✗            |           ✗           |          ✗          |           ✗           |          ✓          |        ✗        |
-| `codesight-extractors` |        ✓         |          ✗           |           —            |           ✗           |          ✗          |           ✗           |          ✗          |        ✗        |
-| `codesight-framework`  |        ✗         |          ✗           |           ✓            |           —           |          ✗          |           ✗           |          ✗          |        ✗        |
-| `codesight-imports`    |        ✓         |          ✗           |           ✓            |           ✗           |          —          |           ✗           |          ✗          |        ✗        |
-| `codesight-retrieval`  |        ✓         |          ✗           |           ✗            |           ✗           |          ✗          |           —           |          ✓          |        ✗        |
-| `codesight-storage`    |        ✓         |          ✗           |           ✗            |           ✗           |          ✗          |           ✗           |          —          |        ✗        |
-| `codesight-mcp`        |        ✓         |          ✓           |           ✓            |           ✓           |          ✓          |           ✓           |          ✓          |        —        |
+Rules enforced by `tests/crate_graph.rs`:
 
-Rules enforced by this table:
-
-- `codesight-core` is a leaf — it depends on no other workspace crate.
-- `codesight-extractors` and `codesight-storage` do not depend on each other.
-- `codesight-framework` depends only on `codesight-extractors` (for the
-  shared `parse_tree` helper) — no storage, no core.
-- `codesight-mcp` is the only consumer that pulls in every inner crate.
-- Additional workspace crates are allowed when they preserve these dependency
-  invariants and own a coherent domain boundary.
-- Any new crate member or new edge requires updating this table **and** the
-  relevant worklog entry in [`REFACTOR_WORKLOG.md`](REFACTOR_WORKLOG.md) in the
-  same patch.
-
+- `codesight-core` and `mcp-rpc` are leaves.
+- `codesight-language-support` may depend only on `-core` — no upward reach
+  into backend, engine, analysis, retrieval, or storage.
+- `codesight-backend` depends on `-core` + `-language-support` only.
+- `codesight-engine` pulls no concrete backend types through its lib.
+- Root `codesight-mcp` depends on engine + backend + mcp-rpc only.
 
 ### Why this split
 
-- `codesight-storage` and `codesight-extractors` are the two pieces most likely
-  to get heavier over time (new languages, new query packs, schema evolution).
-  Isolating them shortens the compile loop for the rest of the product.
+- `codesight-language-support` is the single touch-point for adding or
+  modifying a language. One folder (`src/languages/<lang>/`) owns the whole
+  lifecycle — identity, grammar, SCM, extraction, imports, package
+  discovery, entrypoints, complexity, frameworks. The `Language` trait is
+  fully default-bodied so a minimal lang is a struct + `id()` + `manifest()`.
 - `codesight-core` holds only primitives that are legitimately shared: the
-  `Symbol` / `FactQuality` taxonomy, small serde DTOs, the error marker traits.
-  It is deliberately small so it stays stable.
-- What still lives in the product crate is the orchestration layer — ingest
-  (`src/indexing/code_index.rs`), MCP dispatch (`src/service/`), CLI
-  (`src/cli/`), config/security/server-support, and the file-level dependency
-  graph (`src/indexing/dep_graph.rs`) that bridges `codesight_imports` into
-  ingest. Future splits should prefer self-contained domains that reduce
-  root-crate dependency load before carving out tightly-coupled orchestration
-  code.
+  `Symbol` / `FactQuality` / `LanguageId` types and small serde DTOs. It
+  stays small and stable.
+- `codesight-engine` is the orchestration layer — indexing, MCP dispatch,
+  config/security/server-support, agent-v1 handlers. Backend-agnostic via
+  the `CodeBackend` trait.
 
-### Shipped splits (2026-04-15)
+### Shipped consolidation (2026-04-21)
 
-- `codesight-framework` — dbt / Laravel / Next.js / Nuxt detection,
-  `FrameworkProvider` trait, `FrameworkRegistry`, `impl_framework_provider!`
-  macro. Depends on `codesight-extractors` only.
-- `codesight-imports` — multilingual import extraction + package manifest
-  registry. Depends on `codesight-core` and `codesight-extractors`.
+- `codesight-language-support` — absorbed the former
+  `codesight-extractors`, `codesight-framework`, and `codesight-imports`
+  crates. One folder per language under `src/languages/<lang>/` owns the
+  grammar handle, SCM (embedded via `include_str!`), symbol extraction,
+  import extraction + resolution, package discovery, entrypoints, test
+  detection, complexity, and framework providers. Host profiles (openapi,
+  ansible) are sibling `Language` impls reusing the host grammar. Depends
+  only on `codesight-core`.
+- `codesight-backend` — holds `CodeBackend` trait + optional tree-sitter
+  impl (Cargo `treesitter` feature). Dispatches via the `Language` trait.
 - `codesight-retrieval` — ranking, section parsing, fusion/RRF, fuzzy
-  matching, summarizer config, dense embedder (bundled model assets now live
-  inside the crate). Depends on `codesight-core` and `codesight-storage`.
-- `codesight-analysis` — graph (calls, coupling, cycles, layers, pagerank,
-  PSR-4), quality, dead-code, agent readiness, evidence, impact, test gaps.
-  Depends on `codesight-core` and `codesight-storage`.
-
-### Carve-outs from the analysis split
-
-Three modules stayed in the root crate to keep `codesight-analysis` from
-needing a forbidden edge to `codesight-imports`:
-
-- `import_graph` lives as `src/indexing/dep_graph.rs`, next to its
-  `codesight_imports::imports` inputs.
-- `reference_check` lives at `src/service/agent_v1/reference_check/` — it
-  consumes both `codesight_imports::imports` and `codesight_imports::packages`.
-- `doc_coverage_payload` is parked at
-  `src/service/agent_v1/quality/doc_coverage.rs` until `DocStore` is promoted
-  from `src/storage/doc_index/` into `codesight-storage`; once that lands the
-  helper can rejoin `codesight_analysis::quality`.
+  matching, summarizer config, dense embedder. Depends on core + storage.
+- `codesight-analysis` — graph (calls, coupling, cycles, layers, pagerank),
+  quality, dead-code, agent readiness, evidence, impact, test gaps.
+  Depends on core + storage + language-support.
 
 ### Planned split roadmap
 
 The roadmap is empty. Future workspace crates are evaluated case-by-case
 against the dependency invariants enforced by `tests/crate_graph.rs`. A
 module becomes a crate only when it owns a coherent domain, exports a narrow
-API, and removes real compile and dependency weight from `codesight-mcp`.
+API, and removes real compile and dependency weight from the product.
 
-Modules that should stay in the root crate for now:
-
-- `src/service/**`, `src/mcp.rs`, and `src/cli/**` are orchestration and public-boundary code. They should depend on inner crates, not become them.
-- `src/config/**`, `src/security/**`, and `src/server_support/**` are too small and too boundary-oriented to justify workspace overhead.
-- `src/indexing/code_index.rs` and watcher/freshness coordination stay in the product crate — it composes storage + analysis + imports through their public facades.
-- `codesight-core` stays deliberately small. It is not the place to park every type that happens to cross a crate boundary.
+- Per-language logic always lives under
+  `crates/codesight-language-support/src/languages/<lang>/`. A new lang
+  never spawns a new crate — it's a folder.
+- `codesight-core` stays deliberately small. It is not the place to park
+  every type that happens to cross a crate boundary.
 
 ## Data flow: `ingest_sources` → retrieval
 
 ```
 MCP client
-  │  JSON-RPC over stdio
+  │  JSON-RPC over stdio (mcp-rpc)
   ▼
-src/mcp.rs
-  │  parse request, route to dispatch
+src/ (thin adapter) → codesight-engine::service
+  │  dispatch via agent-v1 + tools.json (coerce → validate)
   ▼
-src/service/agent_v1/mod.rs::dispatch
-  │  1. coerce-then-validate against src/tools.json  (P4)
-  │  2. routes to registry::dispatch_tool
+codesight-engine::indexing::code_index
+  │  crawl, delta, symbol extraction
   ▼
-src/service/agent_v1/<tool>.rs (e.g. ingest.rs, catalog_search.rs)
-  │  validate args, shape response envelope
+codesight-backend (treesitter feature)
+  │  tree-sitter parse → SCM extraction
   ▼
-src/indexing/code_index.rs  (ingest)
-  │  crawl → extractors → storage
+codesight-language-support
+  │  Language::extract_symbols, extract_imports,
+  │  package discovery, entrypoint/liveness metadata
   ▼
-crates/codesight-extractors
-  │  SCM engine + curated query packs (tree-sitter)
-  ▼
-crates/codesight-storage
+codesight-storage
      WAL-configured SQLite, forward-only migrations
 ```
 
@@ -191,16 +168,17 @@ heuristic evidence is labeled and treated as secondary. See
 ## Known heuristic islands
 
 These exist because upstream grammar crates are still pinned to an
-incompatible tree-sitter release. Each has a named exit criterion in its
-residual facade:
+incompatible tree-sitter release. Each language's `Language::extract_symbols`
+override lives under `crates/codesight-language-support/src/languages/<lang>/`:
 
-- `vue`  — waiting on a `tree-sitter-vue` port on tree-sitter ≥ 0.26.
+- `vue` — waiting on a `tree-sitter-vue` port on tree-sitter ≥ 0.26.
 - `razor` — same situation.
 - `blade` — same situation.
 
-Everything else should trend toward structural extraction via query packs
-or the generic AST fallback. New Rust extractors require stating why Tier
-1–3 (query pack / generic AST / container + injection) are insufficient.
+Everything else trends toward structural extraction via the default SCM
+pipeline (`grammar_spec() → tags.scm`) or the generic AST fallback. A
+bespoke extractor requires stating why the curated query pack is
+insufficient.
 
 ## Observability
 
@@ -209,7 +187,7 @@ All logs go through `tracing`; library code contains no bare `eprintln!` or
 **stderr** only so JSON-RPC on stdout stays clean. Log format is selectable
 via `--log-format json|pretty` or `CODESIGHT_LOG_FORMAT`. Filtering uses
 `RUST_LOG` with the standard `EnvFilter` syntax; the default fallback is
-`warn,codesight_mcp=info,codesight_analysis=info,codesight_extractors=info,codesight_framework=info,codesight_imports=info,codesight_retrieval=info,codesight_storage=info`.
+`warn,codesight_mcp=info,codesight_engine=info,codesight_analysis=info,codesight_backend=info,codesight_language_support=info,codesight_retrieval=info,codesight_storage=info`.
 
 Dispatch, ingest, and extraction boundaries are instrumented with spans;
 the per-file extract span is `DEBUG` so hot loops stay quiet by default.

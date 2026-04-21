@@ -1,14 +1,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
-use codesight_storage::storage::AnalysisSymbol;
+use codesight_language_support::traits::LiveRootConfidence;
 
 use crate::evidence::EvidenceNote;
 
-use super::entrypoints::{
-    detect_cargo_target_files, detect_foreign_trait_impl_files, detect_main_guard_files,
-    entrypoint_root_notes, is_test_file,
-};
+use super::entrypoints::{detect_language_live_roots, entrypoint_root_notes, is_test_file};
 
 pub(crate) struct RepoReachability {
     pub live_roots: HashSet<String>,
@@ -21,28 +18,23 @@ pub(crate) struct RepoReachability {
 pub(crate) fn build_repo_reachability(
     all_files: &[String],
     dep_graph: &HashMap<String, Vec<String>>,
-    all_symbols: &[AnalysisSymbol],
     root_path: Option<&Path>,
     include_tests: bool,
     entry_patterns: &[String],
 ) -> RepoReachability {
-    let main_guard_files = detect_main_guard_files(root_path, all_files, all_symbols);
-    let cargo_target_files = detect_cargo_target_files(root_path, all_files);
-    // FEEDBACK.md §2: structs that only exist to satisfy a foreign trait
-    // (Drop, Dispatcher, serde::Deserialize, …) are reached at runtime via
-    // vtable; no symbol-reference edge points at them. Treat their
-    // enclosing file as a live root.
-    let foreign_trait_impl_files = detect_foreign_trait_impl_files(root_path, all_files);
+    let language_roots = detect_language_live_roots(root_path, all_files);
+    let all_files_set: HashSet<&str> = all_files.iter().map(String::as_str).collect();
+
     let mut live_roots = HashSet::new();
     let mut explicit_live_roots = HashSet::new();
     let mut evidence_notes = Vec::new();
     let mut explicit_roots_found = false;
+    let mut language_entry_contributed = false;
 
     for file in all_files {
         if !include_tests && is_test_file(file) {
             continue;
         }
-
         let entry_notes = entrypoint_root_notes(file, entry_patterns);
         if !entry_notes.is_empty() {
             explicit_roots_found = true;
@@ -50,45 +42,37 @@ pub(crate) fn build_repo_reachability(
             explicit_live_roots.insert(file.clone());
             evidence_notes.extend(entry_notes);
         }
+    }
 
-        if main_guard_files.contains(file) {
-            live_roots.insert(file.clone());
-            explicit_live_roots.insert(file.clone());
-            evidence_notes.push(EvidenceNote::heuristic(
-                "main_guard",
-                format!("file '{file}' contains a __name__ == '__main__' style guard"),
-            ));
+    for root in language_roots {
+        if !all_files_set.contains(root.path.as_str()) {
+            continue;
         }
-
-        if cargo_target_files.contains(file) {
+        if !include_tests && is_test_file(&root.path) {
+            continue;
+        }
+        live_roots.insert(root.path.clone());
+        if root.explicit {
+            explicit_live_roots.insert(root.path.clone());
             explicit_roots_found = true;
-            live_roots.insert(file.clone());
-            explicit_live_roots.insert(file.clone());
-            evidence_notes.push(EvidenceNote::structural(
-                "cargo_target",
-                format!("file '{file}' is a Cargo [[test]]/[[example]]/[[bench]]/[[bin]] target"),
-            ));
         }
-
-        if foreign_trait_impl_files.contains(file) {
-            live_roots.insert(file.clone());
-            explicit_live_roots.insert(file.clone());
-            evidence_notes.push(EvidenceNote::heuristic(
-                "foreign_trait_impl",
-                format!(
-                    "file '{file}' contains `impl <ForeignTrait> for X` — reached at runtime via vtable"
-                ),
-            ));
-        }
+        language_entry_contributed = true;
+        evidence_notes.push(match root.confidence {
+            LiveRootConfidence::Structural => EvidenceNote::structural(root.reason, root.message),
+            LiveRootConfidence::Heuristic => EvidenceNote::heuristic(root.reason, root.message),
+        });
     }
 
     let active_graph = filtered_graph(dep_graph, include_tests);
     let reachable_files = traverse_reachable_files(&active_graph, &live_roots);
-    let framework_warning = if explicit_roots_found || !main_guard_files.is_empty() {
+    let framework_warning = if explicit_roots_found || language_entry_contributed {
         None
     } else {
         Some(
-            "No standard entry points detected (e.g. main.py, app.py). Dead code results may be inaccurate without known entry points. Consider specifying entry_point_patterns.".to_string(),
+            "No explicit entry points detected. Dead-code results may be inaccurate \
+             without known entry points — configure `entry_point_patterns` or add a \
+             language that declares live roots."
+                .to_string(),
         )
     };
 

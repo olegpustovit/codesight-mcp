@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::ExtractorRegistry;
+use codesight_language_support::LanguageRegistry;
 use codesight_core::{StoredSymbol, SymbolKind};
 use codesight_mcp::test_support::code_reference_fixtures_dir;
 
@@ -12,7 +12,7 @@ fn fixture_source() -> String {
 }
 
 fn extract_symbols() -> Vec<StoredSymbol> {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg
         .extractor_for_path(Path::new("app/Sample.al"))
         .expect("al extractor");
@@ -26,7 +26,7 @@ fn extract_symbols() -> Vec<StoredSymbol> {
 
 #[test]
 fn test_al_extension_detected() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("app/MyCodeunit.al"));
     assert!(ext.is_some(), ".al should be detected");
     assert_eq!(ext.unwrap().language_name(), "al");
@@ -34,7 +34,7 @@ fn test_al_extension_detected() {
 
 #[test]
 fn test_al_extension_in_registry() {
-    let reg = ExtractorRegistry::default();
+    let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("test.al"));
     assert!(ext.is_some(), ".al must be registered");
     assert_eq!(ext.unwrap().language_name(), "al");

@@ -16,7 +16,7 @@ use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
-use codesight_analysis::complexity::cyclomatic_complexity;
+use codesight_analysis::complexity::cyclomatic_complexity_for_path;
 use codesight_analysis::quality;
 
 impl CodeService {
@@ -156,7 +156,8 @@ impl CodeService {
             if kind_lower != "function" && kind_lower != "method" {
                 continue;
             }
-            let cyclomatic = cyclomatic_complexity(&sym.source_text) as u64;
+            let cyclomatic =
+                cyclomatic_complexity_for_path(&sym.source_text, &sym.file_path) as u64;
             if cyclomatic < min_complexity {
                 continue;
             }

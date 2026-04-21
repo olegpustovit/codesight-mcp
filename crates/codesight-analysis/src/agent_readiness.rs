@@ -8,15 +8,24 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use codesight_core::SymbolIdRef;
 use codesight_language_support::{
-    fallback_type_baseline_for_path, has_restricted_visibility, is_test_file,
+    builtin_registry, fallback_type_baseline_for_path, has_restricted_visibility, is_test_file,
     language_family_for_path, max_nesting_depth_for_path, measured_type_density_for_path,
 };
 use codesight_language_support::family::LanguageFamily;
 use codesight_storage::storage::AnalysisSymbol;
 
-use crate::complexity::cyclomatic_complexity;
+use crate::complexity::cyclomatic_complexity_for_path;
 use crate::thresholds::current_thresholds;
+
+/// True when `sym`'s stable id is recognized as a test by its owning
+/// language. Falls back to `false` when no language claims the file.
+fn is_language_test_id(sym: &AnalysisSymbol) -> bool {
+    builtin_registry()
+        .for_path(Path::new(&sym.file_path))
+        .is_some_and(|lang| lang.is_test_symbol_id(SymbolIdRef::new(&sym.id)))
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct AgentReadinessDimensions {
@@ -114,7 +123,7 @@ pub fn tested_file_set(
     }
 
     for sym in all_symbols {
-        if sym.id.contains("::tests.") {
+        if is_language_test_id(sym) {
             tested.insert(sym.file_path.clone());
         }
     }
@@ -436,7 +445,7 @@ fn build_function_facts<'a>(
             let file_fan_in = *fan_in.get(&sym.file_path).unwrap_or(&0);
             let file_churn = *churn.get(&sym.file_path).unwrap_or(&0);
             let importance = importance_weight(file_fan_in, file_churn);
-            let cyclomatic = cyclomatic_complexity(&sym.source_text);
+            let cyclomatic = cyclomatic_complexity_for_path(&sym.source_text, &sym.file_path);
             let nesting_depth = max_nesting_depth_for_path(&sym.source_text, &sym.file_path);
             let line_span = sym.end_line.saturating_sub(sym.start_line) + 1;
             let (type_annotation_score, type_annotation_method) =
@@ -594,7 +603,7 @@ fn compute_test_oracle_quality(
             *test_file_function_counts
                 .entry(sym.file_path.as_str())
                 .or_default() += 1;
-        } else if sym.id.contains("::tests.") {
+        } else if is_language_test_id(sym) {
             *inline_test_counts
                 .entry(sym.file_path.as_str())
                 .or_default() += 1;
@@ -733,7 +742,7 @@ fn is_navigability_symbol(kind: &str) -> bool {
 }
 
 fn is_test_symbol(sym: &AnalysisSymbol) -> bool {
-    is_test_file(&sym.file_path) || sym.id.contains("::tests.")
+    is_test_file(&sym.file_path) || is_language_test_id(sym)
 }
 
 /// Compute nesting depth for `source` given the file path. Exposed for the

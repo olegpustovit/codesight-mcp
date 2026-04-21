@@ -21,9 +21,10 @@ Three rules are non-negotiable:
 ### 1. Shrink the code. Always.
 
 - LoC and per-module cyclomatic complexity only go down or stay flat. 
-- Defaults come from `crates/codesight-analysis/src/thresholds.rs`, surfaced
-  via `evaluate_quality ... _meta_verbose=true`. Override only through
-  `CODESIGHT_THRESHOLD_*` env vars.
+- Defaults come from `crates/codesight-analysis/src/thresholds.rs` — plain
+  constants in `pub const THRESHOLDS: Thresholds = Thresholds { ... }`,
+  surfaced via `evaluate_quality ... _meta_verbose=true`. Edit the constants
+  directly if a threshold has to move.
 
   | Signal | Default | Action when missed |
   |---|---|---|
@@ -142,27 +143,29 @@ roll back the same session.
 | [`crates/codesight-engine/`](crates/codesight-engine) | **L1 engine.** MCP tool dispatch, indexing orchestration, `AppConfig`, security, server support, `tools.json` contract. Backend-agnostic. |
 | [`crates/codesight-engine/src/tools.json`](crates/codesight-engine/src/tools.json) | **Frozen MCP contract.** Schema + handler ship together. |
 | [`crates/codesight-backend/`](crates/codesight-backend) | **L0.5.** `CodeBackend` + `BackendRouter`; tree-sitter + LSP impls are Cargo features (`treesitter`, `lsp`) in the same crate. Engine uses `default-features = false`. |
-| [`crates/codesight-core/`](crates/codesight-core) | L0 primitives: `Symbol`, `FactQuality`, pipeline types. |
-| [`crates/codesight-analysis/`](crates/codesight-analysis) | Quality, impact, graph analysis. |
-| [`crates/codesight-extractors/`](crates/codesight-extractors) | Tree-sitter SCM engine + query packs. Implementation detail of the tree-sitter backend. |
-| [`crates/codesight-framework/`](crates/codesight-framework) | dbt / laravel / nextjs / nuxt detection providers. |
-| [`crates/codesight-imports/`](crates/codesight-imports) | Multilingual import extraction. |
+| [`crates/codesight-core/`](crates/codesight-core) | L0 primitives: `Symbol`, `FactQuality`, pipeline types, `LanguageId` constants. |
+| [`crates/codesight-language-support/`](crates/codesight-language-support) | **L0.75.** One folder per language under `src/languages/<lang>/` — owns identity, grammar + SCM (embedded via `include_str!` from `queries/`), symbol extraction, import extraction + resolution, package discovery, entrypoints, tests, visibility, complexity, and framework providers. Single `Language` trait with default bodies; overrides are opt-in. Host profiles (openapi, ansible) are sibling `Language` impls that share the host grammar. |
+| [`crates/codesight-analysis/`](crates/codesight-analysis) | Quality, impact, graph analysis (cycles, coupling, call graph, layer checks). |
 | [`crates/codesight-retrieval/`](crates/codesight-retrieval) | BM25, fuzzy, embedder, section builders. |
 | [`crates/codesight-storage/`](crates/codesight-storage) | WAL SQLite + forward-only migrations. |
 | [`crates/mcp-rpc/`](crates/mcp-rpc) | L2: stdio JSON-RPC framing. `Dispatcher` trait (server) + `McpClient` (client). No `codesight_*` deps. |
-| [`runtime/queries/`](runtime/queries) | Tree-sitter `.scm` queries (30 langs). |
 | [`tests/`](tests) | Integration tests. `tests/crate_graph.rs` enforces layering. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Crate split, data flow, FactQuality, SQLite config. |
 
 Layer invariants (enforced by `tests/crate_graph.rs`):
 
-- **L0** (primitives): `codesight-core` ← `-analysis` / `-extractors` /
-  `-retrieval` / `-storage` / `-imports` / `-framework`. No upward deps.
+- **L0** (primitives): `codesight-core` ← `-analysis` / `-retrieval` /
+  `-storage`. No upward deps.
+- **L0.75** (language support): `codesight-language-support` owns every
+  per-language heuristic. May depend only on `codesight-core`. Never reaches
+  upward into backend, engine, analysis, retrieval, or storage.
 - **L0.5** (backend): `codesight-backend` holds the trait and optional impls.
-  Concrete backend code never depends on the engine.
-- **L1** (engine): `codesight-engine` depends on the trait + L0. **Does not
-  depend on any concrete backend** (Phase C gate — `cargo check -p
-  codesight-engine` pulls no tree-sitter / LSP types through its lib).
+  Depends on `-core` + `-language-support`. Concrete backend code never
+  depends on the engine.
+- **L1** (engine): `codesight-engine` depends on the trait + L0 +
+  language-support. **Does not depend on any concrete backend** — `cargo
+  check -p codesight-engine` pulls no tree-sitter / LSP types through its
+  lib.
 - **L2** (protocol): `mcp-rpc` has zero `codesight_*` deps.
 
 ## Working rules
@@ -177,8 +180,7 @@ Layer invariants (enforced by `tests/crate_graph.rs`):
    with it.
 3. Structural parsers (tree-sitter, `.scm`, injections) before string
    scanning. Heuristics live at the edges.
-4. New languages land as `runtime/queries/<lang>/tags.scm`. Rust extractor
-   override only when grammar or semantics require it.
+4. New languages land as `crates/codesight-language-support/src/languages/<lang>/` — one folder with `mod.rs` (struct + `impl Language`), `queries/tags.scm`, and any per-language overrides (imports, extractor, packages, complexity). SCM is `include_str!`-embedded, not read from disk. Sibling profile variants (openapi, ansible) register as additional `Language` impls that share the host grammar.
 5. Keep `lib.rs` skeletal — module declarations and re-exports.
 6. All SQLite through `codesight_storage::db::open_rw`/`open_ro`.
 7. All logs through `tracing`. No bare `eprintln!`/`println!` in libraries.

@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use codesight_extractors::extractors::engine::scm::{ScmExtractor, parse_scm_header, query_files_slice};
-use codesight_extractors::extractors::{ExtractorRegistry, LanguageExtractor};
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
+use codesight_language_support::LanguageRegistry;
 use codesight_core::SymbolKind;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
@@ -140,10 +140,10 @@ fn test_lua_colon_method_kind_parent_docstring() {
 }
 ///
 /// Reference asserts: LANGUAGE_EXTENSIONS[".lua"] == "lua"
-/// Rust equivalent: ExtractorRegistry resolves "addon.lua" to the lua extractor.
+/// Rust equivalent: LanguageRegistry resolves "addon.lua" to the lua extractor.
 #[test]
 fn test_lua_extension_registered() {
-    let registry = ExtractorRegistry::default();
+    let registry = LanguageRegistry::default();
     let ext = registry.extractor_for_path(Path::new("addon.lua"));
     assert!(ext.is_some(), ".lua extension should be registered");
     assert_eq!(

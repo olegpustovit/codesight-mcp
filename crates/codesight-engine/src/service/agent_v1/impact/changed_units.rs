@@ -109,20 +109,7 @@ impl CodeService {
         };
 
         let changed_files: Vec<&str> = diff_output.lines().filter(|l| !l.is_empty()).collect();
-        let backend = match self.require_indexer() {
-            Ok(b) => b.clone(),
-            Err(err) => {
-                return self.error_response(
-                    &timer,
-                    ToolError {
-                        category: ToolErrorCategory::Internal,
-                        code: "NO_BACKEND",
-                        message: err.to_string(),
-                        detail: json!({}),
-                    },
-                );
-            }
-        };
+        let indexer = self.indexer().clone();
 
         let mut added_symbols = Vec::new();
         let mut removed_symbols = Vec::new();
@@ -136,13 +123,13 @@ impl CodeService {
                 old_content.as_deref().unwrap_or(""),
                 file,
                 &root,
-                &backend,
+                &indexer,
             );
             let new_syms = extract_symbol_names_from_content(
                 new_content.as_deref().unwrap_or(""),
                 file,
                 &root,
-                &backend,
+                &indexer,
             );
 
             let old_map: std::collections::HashMap<&str, &str> = old_syms

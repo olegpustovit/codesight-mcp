@@ -9,11 +9,7 @@ use serde_json::json;
 use tempfile::tempdir;
 
 fn make_service(index_root: &std::path::Path) -> CodeService {
-    let mut router = codesight_backend::BackendRouter::new();
-    router.register(std::sync::Arc::new(
-        codesight_backend::TreeSitterBackend::new(),
-    ));
-    CodeService::with_backends(AppConfig::new(index_root.to_path_buf()), router).unwrap()
+    CodeService::new(AppConfig::new(index_root.to_path_buf())).unwrap()
 }
 
 /// Build a mini workspace where three Rust files all import the same target.

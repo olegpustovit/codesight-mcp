@@ -9,7 +9,8 @@ use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 use codesight_storage::storage::{IndexStore, list_repo_summaries};
-use codesight_imports::imports::{extract_imports, language_for_path, package_reference_evidence};
+use codesight_language_support::imports_orchestration::{extract_imports, language_for_path};
+use codesight_language_support::packages::package_reference_evidence;
 
 impl CodeService {
     pub(super) fn graph_dependency_cycles(
@@ -113,13 +114,14 @@ impl CodeService {
                     && let Ok(s) = IndexStore::open(db_path)
                     && let Ok(snap) = registry.snapshot(&summary.repo, &s)
                 {
-                    repo_entries.push(codesight_imports::packages::RepoEntry {
+                    repo_entries.push(codesight_language_support::packages::RepoEntry {
                         repo_id: summary.repo.clone(),
                         package_names: snap.package_names.clone(),
                     });
                 }
             }
-            let registry = codesight_imports::packages::build_package_registry(&repo_entries);
+            let registry =
+                codesight_language_support::packages::build_package_registry(&repo_entries);
             let mut cross_repo_edges: Vec<Value> = Vec::new();
             if let Ok(all_contents) = store.all_file_contents() {
                 for (file, content) in &all_contents {

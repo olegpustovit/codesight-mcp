@@ -2,10 +2,9 @@ use std::collections::BTreeSet;
 
 use codesight_analysis::evidence::EvidenceNote;
 use codesight_analysis::graph as dep_graph;
-use codesight_imports::{
-    imports::{ImportEdge, extract_imports, language_for_path},
-    packages::extract_root_package_from_specifier,
-};
+use codesight_language_support::imports_orchestration::{extract_imports, language_for_path};
+use codesight_language_support::imports_types::ImportEdge;
+use codesight_language_support::packages::extract_root_package_from_specifier;
 
 use codesight_storage::storage::IndexStore;
 

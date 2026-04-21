@@ -35,54 +35,13 @@ pub(in crate::service) fn path_matches_filter(
     }
     if let Some(pat) = file_pattern
         && !pat.is_empty()
-        && !glob_match_path(pat, path)
+        && globset::Glob::new(pat)
+            .map(|g| !g.compile_matcher().is_match(path))
+            .unwrap_or(true)
     {
         return false;
     }
     true
-}
-
-/// Minimal glob matcher: `**` matches any sequence (including `/`), `*`
-/// matches any non-`/` sequence, `?` matches a single char. Good enough for
-/// "match these repo-relative paths" without pulling in a full globset.
-fn glob_match_path(pattern: &str, path: &str) -> bool {
-    // Convert to a regex: `**` → `.*`, `*` → `[^/]*`, `?` → `.`, escape
-    // other special chars. Anchored at both ends.
-    let mut regex = String::with_capacity(pattern.len() + 4);
-    regex.push('^');
-    let bytes = pattern.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'*' => {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'*' {
-                    regex.push_str(".*");
-                    i += 2;
-                } else {
-                    regex.push_str("[^/]*");
-                    i += 1;
-                }
-            }
-            b'?' => {
-                regex.push('.');
-                i += 1;
-            }
-            b'.' | b'+' | b'(' | b')' | b'|' | b'^' | b'$' | b'{' | b'}' | b'[' | b']'
-            | b'\\' => {
-                regex.push('\\');
-                regex.push(bytes[i] as char);
-                i += 1;
-            }
-            other => {
-                regex.push(other as char);
-                i += 1;
-            }
-        }
-    }
-    regex.push('$');
-    regex::Regex::new(&regex)
-        .map(|re| re.is_match(path))
-        .unwrap_or(false)
 }
 
 /// Round a ranker score to 3 decimal places for JSON serialization so f64
