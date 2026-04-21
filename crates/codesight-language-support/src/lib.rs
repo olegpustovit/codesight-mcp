@@ -1,25 +1,20 @@
 //! codesight-language-support — every language owns its behavior through
 //! `languages/<lang>/`. One crate, one trait, one registry.
-//!
-//! Phase B (LANGUAGES.md §8.B): per-language manifests populate identity
-//! (extensions, filename overrides, compound extensions, backend ids, host
-//! profiles, content probes) and the registry implements the §3.3
-//! detection pipeline end-to-end. Downstream crates route their
-//! path-identity lookups through this crate instead of their own string
-//! tables; grammar + extraction behavior moves in Phase C.
 #![forbid(unsafe_code)]
 
 pub mod facade;
+pub mod fallback;
+pub mod family;
 pub mod frameworks;
 pub mod grammars;
+pub mod imports_types;
 pub mod languages;
 pub mod manifest;
 pub mod nesting;
 pub mod registry;
-pub mod simple;
-pub mod support;
+pub mod scm_imports;
+pub mod signature_density;
 pub mod traits;
-pub mod type_density;
 pub mod workspace;
 
 pub use facade::{
@@ -30,38 +25,29 @@ pub use facade::{
     nesting_mode_for_path, root_package_from_specifier, supports_import_extraction,
     test_weight_multiplier,
 };
-pub use nesting::{max_nesting_depth_for_path, max_nesting_depth_with_mode};
-
+pub use fallback::{FALLBACK_LANGUAGE, FallbackLanguage};
+pub use family::{LanguageFamily, NestingMode};
+pub use imports_types::{ImportEdge, source_slice};
 pub use grammars::{
-    builtin_extractor_version_stamp, builtin_grammar, builtin_grammars, builtin_query_packs,
-    BuiltinQueryPackRow,
+    BuiltinQueryPackRow, builtin_extractor_version_stamp, builtin_grammar, builtin_grammars,
+    builtin_query_packs,
 };
-pub use workspace::{
-    project_extra_extensions, project_query_pack_roots, read_project_config,
-    CodesightProjectConfig, PROJECT_CONFIG_FILE,
-};
-
 pub use manifest::{
-    AL, ASM, BASH, BLADE, BackendIds, C, CPP, CSHARP, CSS, DART, EJS, ELIXIR, ERLANG, FORTRAN,
-    GLEAM, GO, GrammarSpec, HostProfile, JAVA, JAVASCRIPT, JSON, JSX, KOTLIN, LESS, LUA, LUAU,
-    LanguageId, LanguageManifest, MARKDOWN, NIX, PERL, PHP, PYTHON, ProfileId, RAZOR, RUBY, RUST,
-    ResolvedLanguage, SASS, SCSS, SQL, STYL, SWIFT, TOML, TREE_SITTER_QUERY, TSX, TYPESCRIPT,
-    UNKNOWN_LANGUAGE, VERSE, VUE, XML, YAML,
+    AL, ASM, BASH, BLADE, C, CPP, CSHARP, CSS, DART, EJS, ELIXIR, ERLANG, FORTRAN, GLEAM, GO,
+    GrammarSpec, HostProfile, JAVA, JAVASCRIPT, JSON, JSX, KOTLIN, LESS, LUA, LUAU, LanguageId,
+    LanguageManifest, MARKDOWN, NIX, PERL, PHP, PYTHON, ProfileId, RAZOR, RUBY, RUST, SASS, SCSS,
+    SQL, STYL, SWIFT, TOML, TREE_SITTER_QUERY, TSX, TYPESCRIPT, UNKNOWN_LANGUAGE, VERSE, VUE, XML,
+    YAML, ResolvedLanguage,
 };
+pub use nesting::{max_nesting_depth_for_path, max_nesting_depth_with_mode};
 pub use registry::LanguageRegistry;
-pub use simple::SimpleLanguage;
-pub use support::LanguageSupport;
-pub use traits::{
-    ComplexityModel, DefaultComplexity, ImportExtractionMode, ImportResolution, LivenessPolicy,
-    NoopExtraction, NoopImports, NoopLiveness, NoopPackages, PackageManifest,
-    PermissiveVisibility, SymbolExtraction, VisibilityModel,
+pub use traits::{ImportExtractionMode, Language};
+pub use workspace::{
+    CodesightProjectConfig, PROJECT_CONFIG_FILE, project_extra_extensions,
+    project_query_pack_roots, read_project_config,
 };
 
-/// Process-wide lazy registry, used by downstream callers that need a
-/// stable path-identity lookup without owning their own instance. Matches
-/// the caching behavior the old `language_for_path` string table had for
-/// free — `LanguageRegistry::builtin()` is cheap today but will pull in a
-/// grammar catalog in Phase C.
+/// Process-wide lazy registry.
 pub fn builtin_registry() -> &'static LanguageRegistry {
     use std::sync::OnceLock;
     static REGISTRY: OnceLock<LanguageRegistry> = OnceLock::new();

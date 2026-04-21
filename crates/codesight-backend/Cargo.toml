@@ -8,19 +8,10 @@ license = "Apache-2.0"
 [features]
 default = ["treesitter"]
 treesitter = ["dep:anyhow", "dep:codesight-extractors"]
-lsp = [
-    "dep:anyhow",
-    "dep:serde_json",
-    "dep:tokio",
-    "dep:toml",
-]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
 codesight-core = { path = "../codesight-core" }
 codesight-extractors = { path = "../codesight-extractors", optional = true }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", optional = true }
 thiserror = "2"
-tokio = { version = "1", features = ["rt", "macros", "time", "process", "io-util", "sync"], optional = true }
-toml = { version = "0.8", optional = true }

@@ -10,7 +10,6 @@ mod luau;
 pub(crate) mod profiles;
 mod razor;
 mod registry_builder;
-mod residual;
 mod scss;
 mod sql;
 mod verse;

@@ -7,7 +7,7 @@ use codesight_language_support::{
     is_entrypoint_basename, is_test_file, language_family_for_path,
     max_nesting_depth_for_path, measured_type_density_for_path, test_weight_multiplier,
 };
-use codesight_language_support::traits::complexity::LanguageFamily;
+use codesight_language_support::family::LanguageFamily;
 
 // ── §4.4 liveness ───────────────────────────────────────────────────────────
 

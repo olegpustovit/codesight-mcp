@@ -1,23 +1,16 @@
-//! Manifest types and builtin `LanguageId` constants.
+//! Manifest types and re-exports for builtin `LanguageId` constants.
 //!
 //! `LanguageManifest` is the single source of truth for:
 //!   * path → language identity (filename overrides, compound exts, exts),
 //!   * grammar + builtin query pack,
-//!   * backend routing (LSP),
 //!   * host-profile attachment (§3.3 host profiles),
 //!   * source-aware content probes.
-//!
-//! Phase A: types only. No manifest instances are declared until per-language
-//! folders land in Phase C. Keeping the module free of manifest values means
-//! adding a field here has zero blast radius today.
 
 use std::path::Path;
 
 // `LanguageId` and its builtin constants live in `codesight-core` (L0) so
 // pipeline types (`StoredSymbol`, `IndexedFileUpdate`, `FileFingerprint`)
-// can hold typed language identity without reaching up into L0.75
-// (LANGUAGES.md §7.1.1). We re-export the type and every constant so
-// downstream callers can keep importing them from this crate.
+// can hold typed language identity without reaching up into L0.75.
 pub use codesight_core::language_id::{
     AL, ASM, BASH, BLADE, C, CPP, CSHARP, CSS, DART, EJS, ELIXIR, ERLANG, FORTRAN, GLEAM, GO, JAVA,
     JAVASCRIPT, JSON, JSX, KOTLIN, LESS, LUA, LUAU, LanguageId, MARKDOWN, NIX, PERL, PHP, PYTHON,
@@ -86,11 +79,6 @@ impl GrammarSpec {
     }
 }
 
-/// Which external backends this language opts into.
-pub struct BackendIds {
-    pub lsp: Option<&'static str>,
-}
-
 /// A host-language semantic overlay (OpenAPI / Ansible / Next.js / dbt / ...).
 ///
 /// Profiles are attached *after* the host language is identified — they do
@@ -105,7 +93,7 @@ pub struct HostProfile {
 }
 
 /// Complete per-language metadata. Replaces `language_for_path`,
-/// `language_profile`, the builtin grammar catalog, and `LspBackend::language_for`.
+/// `language_profile`, and the builtin grammar catalog.
 pub struct LanguageManifest {
     pub display_name: &'static str,
     pub aliases: &'static [&'static str],
@@ -113,7 +101,6 @@ pub struct LanguageManifest {
     pub filename_overrides: &'static [&'static str],
     pub compound_extensions: &'static [&'static str],
     pub grammar: Option<&'static GrammarSpec>,
-    pub backend_ids: BackendIds,
     pub profiles: &'static [HostProfile],
     pub content_probe: Option<fn(path: &Path, source: &str) -> Option<LanguageId>>,
 }
@@ -124,8 +111,6 @@ mod tests {
 
     #[test]
     fn language_id_is_a_typed_newtype_not_a_string_alias() {
-        // Guardrail for LANGUAGES.md §7.1.1: `LanguageId` must be a newtype,
-        // not something callers can confuse with a string.
         let rust_id: LanguageId = RUST;
         assert_eq!(rust_id.as_str(), "rust");
         assert_ne!(rust_id, TYPESCRIPT);

@@ -1,10 +1,5 @@
 //! `LanguageRegistry` — the single entry point every crate above L0.75
-//! uses to look up language identity and behavior (LANGUAGES.md §3.4).
-//!
-//! Phase B: the registry is populated with every builtin manifest and
-//! implements the §3.3 detection pipeline end-to-end. Phase C will plug in
-//! workspace-local overlay and `extra_extensions` loading through the same
-//! `for_workspace_root` surface.
+//! uses to look up language identity and behavior.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -12,10 +7,10 @@ use std::sync::Arc;
 
 use crate::languages::register_builtins;
 use crate::manifest::{HostProfile, LanguageId, ProfileId, ResolvedLanguage, UNKNOWN_LANGUAGE};
-use crate::support::LanguageSupport;
+use crate::traits::Language;
 
 pub struct LanguageRegistry {
-    by_id: HashMap<LanguageId, Arc<dyn LanguageSupport>>,
+    by_id: HashMap<LanguageId, Arc<dyn Language>>,
     by_filename: HashMap<String, LanguageId>,
     by_compound_ext: HashMap<String, LanguageId>,
     by_ext: HashMap<String, LanguageId>,
@@ -48,22 +43,10 @@ impl LanguageRegistry {
     }
 
     /// Registry populated from builtin languages plus workspace-local overlays
-    /// and `.codesight.toml` `extra_extensions` (LANGUAGES.md §3.5).
-    ///
-    /// Phase C: applies `.codesight.toml` `extra_extensions`. Query pack
-    /// overlays (`.codesight/queries/`, `query_pack_roots`) remain in
-    /// `codesight-extractors::QueryPackCatalog::for_workspace_root` since
-    /// those produce compiled SCM extractors; both paths read through
-    /// [`crate::workspace`] helpers to keep the config schema the single
-    /// source of truth.
+    /// and `.codesight.toml` `extra_extensions`.
     pub fn for_workspace_root(root: &Path) -> anyhow::Result<Self> {
         let mut reg = Self::builtin();
         let extras = crate::workspace::project_extra_extensions(root);
-        // Translate `"ext" -> "language_name"` strings from `.codesight.toml`
-        // into the typed (extension, LanguageId) form `apply_extra_extensions`
-        // expects. Unknown names resolve to `UNKNOWN_LANGUAGE` which
-        // `apply_extra_extensions` rejects — caller can surface the rejected
-        // list to the user through `cli::check`.
         let typed: HashMap<String, LanguageId> = extras
             .iter()
             .map(|(ext, lang_name)| {
@@ -88,15 +71,15 @@ impl LanguageRegistry {
         Ok(reg)
     }
 
-    pub fn get(&self, id: LanguageId) -> Option<&dyn LanguageSupport> {
+    pub fn get(&self, id: LanguageId) -> Option<&dyn Language> {
         self.by_id.get(&id).map(Arc::as_ref)
     }
 
-    pub fn for_path(&self, path: &Path) -> Option<&dyn LanguageSupport> {
+    pub fn for_path(&self, path: &Path) -> Option<&dyn Language> {
         self.resolve_get(self.identify_path(path))
     }
 
-    pub fn for_file(&self, path: &Path, source: Option<&str>) -> Option<&dyn LanguageSupport> {
+    pub fn for_file(&self, path: &Path, source: Option<&str>) -> Option<&dyn Language> {
         let id = match source {
             Some(src) => self.identify_with_source(path, src),
             None => self.identify_path(path),
@@ -104,13 +87,12 @@ impl LanguageRegistry {
         self.resolve_get(id)
     }
 
-    /// Host-language identity from `path` alone (LANGUAGES.md §3.3 steps 1–4).
+    /// Host-language identity from `path` alone.
     pub fn identify_path(&self, path: &Path) -> LanguageId {
         self.identify_path_no_probe(path)
     }
 
-    /// Source-aware identity including the content-probe tie-breaker
-    /// (LANGUAGES.md §3.3 step 5).
+    /// Source-aware identity including the content-probe tie-breaker.
     pub fn identify_with_source(&self, path: &Path, source: &str) -> LanguageId {
         let host = self.identify_path_no_probe(path);
         if host == UNKNOWN_LANGUAGE {
@@ -146,7 +128,7 @@ impl LanguageRegistry {
         }
     }
 
-    pub fn all(&self) -> impl Iterator<Item = &dyn LanguageSupport> {
+    pub fn all(&self) -> impl Iterator<Item = &dyn Language> {
         self.by_id.values().map(Arc::as_ref)
     }
 
@@ -160,7 +142,7 @@ impl LanguageRegistry {
         }
     }
 
-    pub fn register(&mut self, language: Arc<dyn LanguageSupport>) {
+    pub fn register(&mut self, language: Arc<dyn Language>) {
         let id = language.id();
         let manifest = language.manifest();
         for name in manifest.filename_overrides {
@@ -170,8 +152,6 @@ impl LanguageRegistry {
             self.by_compound_ext.insert(ext.to_ascii_lowercase(), id);
         }
         for ext in manifest.extensions {
-            // First-writer wins so shared extensions (e.g. `.h` belongs to
-            // CPP first, refined to C via content_probe) stay authoritative.
             self.by_ext
                 .entry(ext.to_ascii_lowercase())
                 .or_insert(id);
@@ -184,9 +164,6 @@ impl LanguageRegistry {
         self.by_id.insert(id, language);
     }
 
-    /// Registers an existing language under additional extensions. Returns
-    /// the list of extension strings that were rejected: unknown
-    /// `LanguageId`, empty extension, or dot-only extension.
     pub fn apply_extra_extensions(
         &mut self,
         mappings: &HashMap<String, LanguageId>,
@@ -204,13 +181,11 @@ impl LanguageRegistry {
     }
 
     fn identify_path_no_probe(&self, path: &Path) -> LanguageId {
-        // 1. exact filename override
         if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
             let lower = file_name.to_ascii_lowercase();
             if let Some(id) = self.by_filename.get(&lower) {
                 return *id;
             }
-            // 2. compound extension (e.g. `.blade.php`, `.d.ts`)
             for (compound, id) in &self.by_compound_ext {
                 let suffix = format!(".{compound}");
                 if lower.ends_with(&suffix) && lower.len() > suffix.len() {
@@ -222,11 +197,9 @@ impl LanguageRegistry {
             Some(e) => e.to_ascii_lowercase(),
             None => return UNKNOWN_LANGUAGE,
         };
-        // 3. workspace extra extensions
         if let Some(id) = self.extra_ext.get(&ext) {
             return *id;
         }
-        // 4. simple extension
         self.by_ext.get(&ext).copied().unwrap_or(UNKNOWN_LANGUAGE)
     }
 
@@ -250,7 +223,7 @@ impl LanguageRegistry {
         best.map(|p| p.id)
     }
 
-    fn resolve_get(&self, id: LanguageId) -> Option<&dyn LanguageSupport> {
+    fn resolve_get(&self, id: LanguageId) -> Option<&dyn Language> {
         if id == UNKNOWN_LANGUAGE {
             None
         } else {
@@ -385,15 +358,9 @@ mod tests {
         assert!(r.get(UNKNOWN_LANGUAGE).is_none());
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Phase C parity tests — LANGUAGES.md §7.2 items 2, 3, 7, 8, 9, 10.
-
-    /// §7.2.2 — every curated manifest is reachable from a registered grammar.
     #[test]
     fn phase_c_every_curated_manifest_has_grammar_and_tags() {
         let r = reg();
-        // Every language that has a grammar attached must also have a
-        // non-empty `tags_scm`; a grammar with no tags is unusable.
         let mut checked = 0usize;
         for lang in r.all() {
             if let Some(grammar) = lang.manifest().grammar {
@@ -402,7 +369,6 @@ mod tests {
                     "{} grammar has empty tags_scm",
                     lang.id()
                 );
-                // Grammar must also be resolvable by the lookup helper.
                 assert!(
                     crate::grammars::builtin_grammar(grammar.grammar_name).is_some(),
                     "{} grammar_name {:?} is not resolvable",
@@ -418,13 +384,8 @@ mod tests {
         );
     }
 
-    /// §7.2.3 — curated set remains stable after Phase C.
     #[test]
     fn phase_c_curated_set_matches_query_pack_directories() {
-        // Every pack id from the language-support query-pack table must
-        // correspond to either a curated LanguageId in the registry (tree-sitter
-        // backed) or an alias exposed via `manifest.aliases`. Packs that do
-        // not resolve are dead weight.
         let r = reg();
         let resolved = |pack_id: &str| -> bool {
             r.all().any(|lang| {
@@ -441,8 +402,6 @@ mod tests {
         }
     }
 
-    /// §7.2.7 — workspace overlay is picked up by `for_workspace_root` and
-    /// applied exactly once regardless of call count.
     #[test]
     fn phase_c_for_workspace_root_applies_extra_extensions_idempotently() {
         use std::fs;
@@ -464,10 +423,6 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 
-    /// §7.2.8 — overlay metadata validation (keyed by
-    /// `QueryPackCatalog::for_workspace_root` but gated through the
-    /// language-crate helper — the contract is that the metadata schema
-    /// stays centrally defined).
     #[test]
     fn phase_c_workspace_config_rejects_unknown_keys() {
         use crate::workspace::read_project_config;
@@ -481,44 +436,26 @@ mod tests {
             "[nonsense]\nnope = true\n",
         )
         .unwrap();
-        // `deny_unknown_fields` isn't enabled on the top-level struct, so the
-        // config silently ignores unknown sections — but `extra_extensions`
-        // and `query_pack_roots` are strongly typed and would error if
-        // malformed. The contract here is: bogus config does not panic.
         let cfg = read_project_config(&tmp);
         assert!(cfg.is_some());
         let _ = fs::remove_dir_all(&tmp);
     }
 
-    /// §7.2.9 — `extra_extensions` validation: empty ext, dot-only, empty
-    /// language, and unknown language all either reject or warn and do not
-    /// register.
     #[test]
     fn phase_c_extra_extensions_rejects_malformed_entries() {
         let mut r = LanguageRegistry::builtin();
         let mut mappings = HashMap::new();
-        // Empty extension.
         mappings.insert(String::new(), RUST);
-        // Dot-only extension.
         mappings.insert(".".to_string(), RUST);
-        // Unknown LanguageId (synthetic — not in the builtin set).
         mappings.insert(".xx".to_string(), LanguageId::new("nosuchlanguage"));
         let rejected = r.apply_extra_extensions(&mappings);
-        // All three malformed entries are rejected.
         assert_eq!(rejected.len(), 3);
-        // The bad mappings did not leak into the extension table.
         assert_eq!(r.identify_path(Path::new("foo.xx")), UNKNOWN_LANGUAGE);
     }
 
-    /// §7.2.10 — every injections.scm child language target resolves to a
-    /// real `LanguageId` (aliases allowed — the lookup map is
-    /// grammar-name keyed).
     #[test]
     fn phase_c_injection_targets_resolve_to_registered_languages() {
         let r = reg();
-        // Scan every grammar's injections for `(#set! "injection.language"
-        // "<lang>")` hints — the only form injections.scm uses. If any
-        // language slipped out of the registry, this test fails loudly.
         for lang in r.all() {
             let Some(grammar) = lang.manifest().grammar else {
                 continue;
@@ -533,7 +470,6 @@ mod tests {
                 let Some(idx) = line.find("injection.language") else {
                     continue;
                 };
-                // Parse the following quoted string literal.
                 let rest = &line[idx + "injection.language".len()..];
                 let quote_start = rest
                     .char_indices()
@@ -543,20 +479,18 @@ mod tests {
                 let after = &rest[start + 1..];
                 let Some(end) = after.find('"') else { continue };
                 let target = &after[..end];
-                let resolved = r
-                    .all()
-                    .any(|entry| {
-                        let manifest = entry.manifest();
-                        entry.id().as_str().eq_ignore_ascii_case(target)
-                            || manifest
-                                .aliases
-                                .iter()
-                                .any(|a| a.eq_ignore_ascii_case(target))
-                            || manifest
-                                .grammar
-                                .map(|g| g.grammar_name.eq_ignore_ascii_case(target))
-                                .unwrap_or(false)
-                    });
+                let resolved = r.all().any(|entry| {
+                    let manifest = entry.manifest();
+                    entry.id().as_str().eq_ignore_ascii_case(target)
+                        || manifest
+                            .aliases
+                            .iter()
+                            .any(|a| a.eq_ignore_ascii_case(target))
+                        || manifest
+                            .grammar
+                            .map(|g| g.grammar_name.eq_ignore_ascii_case(target))
+                            .unwrap_or(false)
+                });
                 assert!(
                     resolved,
                     "{} injections.scm references unknown language {:?}",

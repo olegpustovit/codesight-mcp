@@ -56,11 +56,10 @@ pub(crate) fn detect_main_guard_files(
     all_files: &[String],
     all_symbols: &[AnalysisSymbol],
 ) -> HashSet<String> {
-    let python = builtin_registry().get(PYTHON).map(|lang| lang.liveness());
-    let mut files: HashSet<String> = python
-        .map(|policy| {
-            policy
-                .additional_live_root_files(root_path, all_files)
+    let mut files: HashSet<String> = builtin_registry()
+        .get(PYTHON)
+        .map(|lang| {
+            lang.additional_live_root_files(root_path, all_files)
                 .into_iter()
                 .collect()
         })
@@ -105,7 +104,7 @@ fn rust_live_roots(
     let Some(rust) = builtin_registry().get(RUST) else {
         return HashSet::new();
     };
-    let all = rust.liveness().additional_live_root_files(root_path, all_files);
+    let all = rust.additional_live_root_files(root_path, all_files);
     match which {
         Filter::Cargo => all
             .into_iter()

@@ -312,6 +312,3 @@ pub mod treesitter;
 
 #[cfg(feature = "treesitter")]
 pub use treesitter::{default_router, TreeSitterBackend};
-
-#[cfg(feature = "lsp")]
-pub mod lsp;

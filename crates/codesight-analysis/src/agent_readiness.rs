@@ -12,7 +12,7 @@ use codesight_language_support::{
     fallback_type_baseline_for_path, has_restricted_visibility, is_test_file,
     language_family_for_path, max_nesting_depth_for_path, measured_type_density_for_path,
 };
-use codesight_language_support::traits::complexity::LanguageFamily;
+use codesight_language_support::family::LanguageFamily;
 use codesight_storage::storage::AnalysisSymbol;
 
 use crate::complexity::cyclomatic_complexity;

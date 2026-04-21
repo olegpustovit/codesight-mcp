@@ -99,7 +99,7 @@ pub fn discover_package_names(root: &Path) -> Vec<String> {
         }
         let dir = entry.path();
         for lang in registry.all() {
-            if let Some(name) = lang.packages().package_name_for_dir(dir)
+            if let Some(name) = lang.package_name_for_dir(dir)
                 && seen.insert(name.clone())
             {
                 ordered.push(name);

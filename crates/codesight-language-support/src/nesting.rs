@@ -5,7 +5,7 @@
 //! a path and source; the façade picks the right scanner.
 
 use crate::facade::nesting_mode_for_path;
-use crate::traits::complexity::NestingMode;
+use crate::family::NestingMode;
 
 /// Compute nesting depth for `source` using the scanner matching `path`'s
 /// language. Callers that already have a `NestingMode` in hand can call

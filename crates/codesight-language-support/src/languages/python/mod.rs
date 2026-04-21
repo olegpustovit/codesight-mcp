@@ -1,0 +1,243 @@
+//! Python language implementation.
+
+use std::fs;
+use std::path::Path;
+
+use tree_sitter::Language as TsLanguage;
+
+use crate::family::{LanguageFamily, NestingMode};
+use crate::languages::builtins::PYTHON_MANIFEST;
+use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, PYTHON};
+use crate::signature_density::measure_colon_after_name;
+use crate::traits::{ImportExtractionMode, Language};
+
+/// Python receiver detector — filters `self` / `cls` from parameter lists.
+fn is_python_receiver(param: &str) -> bool {
+    let name = param.split(':').next().unwrap_or(param).trim();
+    matches!(name, "self" | "cls" | "*self" | "*cls")
+}
+
+pub struct Python;
+
+fn load() -> TsLanguage {
+    tree_sitter_python::LANGUAGE.into()
+}
+
+pub static GRAMMAR: GrammarSpec = GrammarSpec {
+    grammar_name: "python",
+    loader: load,
+    tags_scm: include_str!("queries/tags.scm"),
+    injections_scm: None,
+};
+
+fn python_root_package(specifier: &str) -> String {
+    if specifier.starts_with('.') {
+        return String::new();
+    }
+    specifier.split('.').next().unwrap_or("").to_string()
+}
+
+impl Language for Python {
+    fn id(&self) -> LanguageId {
+        PYTHON
+    }
+    fn manifest(&self) -> &'static LanguageManifest {
+        &PYTHON_MANIFEST
+    }
+
+    fn grammar_spec(&self) -> Option<&'static GrammarSpec> {
+        Some(&GRAMMAR)
+    }
+
+    fn extraction_mode(&self) -> Option<ImportExtractionMode> {
+        Some(ImportExtractionMode::TreeSitterFirst)
+    }
+
+    fn root_package_from_specifier(&self, specifier: &str) -> String {
+        python_root_package(specifier)
+    }
+
+    fn imports_query(&self) -> Option<&'static str> {
+        Some(include_str!("queries/imports.scm"))
+    }
+
+    fn top_level_import_stems(&self, source: &str, _path: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for edge in self.extract_imports(source) {
+            let s = edge.specifier.trim();
+            if s.is_empty() || s.starts_with('.') {
+                continue;
+            }
+            if let Some(stem) = s.split('.').next().filter(|x| !x.is_empty()) {
+                out.push(stem.to_string());
+            }
+        }
+        out
+    }
+
+    fn display_import_lines_from_source(&self, content: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for line in content.lines() {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
+            if t.starts_with("import ") || t.starts_with("from ") {
+                out.push(t.to_string());
+            }
+        }
+        out
+    }
+
+    fn package_name_for_dir(&self, dir: &Path) -> Option<String> {
+        let pyproject = dir.join("pyproject.toml");
+        if pyproject.is_file()
+            && let Ok(content) = fs::read_to_string(&pyproject)
+            && let Some(name) = parse_pyproject_name(&content)
+        {
+            return Some(name.replace('_', "-"));
+        }
+        let setup_cfg = dir.join("setup.cfg");
+        if setup_cfg.is_file()
+            && let Ok(content) = fs::read_to_string(&setup_cfg)
+        {
+            return parse_setup_cfg_name(&content);
+        }
+        None
+    }
+
+    fn entrypoint_basenames(&self) -> &'static [&'static str] {
+        &[
+            "main.py",
+            "__main__.py",
+            "__init__.py",
+            "app.py",
+            "application.py",
+            "wsgi.py",
+            "asgi.py",
+            "manage.py",
+            "setup.py",
+            "conftest.py",
+        ]
+    }
+
+    fn is_test_file(&self, path: &str) -> bool {
+        let basename = path.rsplit('/').next().unwrap_or(path);
+        let lower = path.to_ascii_lowercase();
+        basename.starts_with("test_")
+            || basename.starts_with("tests")
+            || basename.ends_with("_test.py")
+            || lower.contains("/tests/")
+            || lower.contains("/test/")
+            || lower.contains("/__tests__/")
+            || lower.contains("/spec/")
+    }
+
+    fn is_conventional_path(&self, path: &str) -> bool {
+        path.rsplit('/').next().unwrap_or(path) == "conftest.py"
+    }
+
+    fn additional_live_root_files(
+        &self,
+        root: Option<&Path>,
+        all_files: &[String],
+    ) -> Vec<String> {
+        let Some(root) = root else {
+            return Vec::new();
+        };
+        let mut files = Vec::new();
+        for file in all_files {
+            if !file.ends_with(".py") {
+                continue;
+            }
+            let abs = root.join(file);
+            if let Ok(content) = fs::read_to_string(&abs)
+                && content.contains("__name__")
+                && content.contains("__main__")
+            {
+                files.push(file.clone());
+            }
+        }
+        files
+    }
+
+    fn is_restricted(&self, _source_text: &str, name: &str) -> bool {
+        name.starts_with('_')
+    }
+
+    fn family(&self) -> LanguageFamily {
+        LanguageFamily::ScriptedDynamic
+    }
+    fn nesting_mode(&self) -> NestingMode {
+        NestingMode::Indent
+    }
+    fn fallback_type_baseline(&self) -> Option<f64> {
+        Some(0.4)
+    }
+    fn supports_measured_types(&self) -> bool {
+        true
+    }
+    fn measured_type_density(&self, source: &str) -> Option<f64> {
+        measure_colon_after_name(source, "python", false, is_python_receiver)
+    }
+}
+
+fn parse_pyproject_name(content: &str) -> Option<String> {
+    let table: toml::Value = content.parse().ok()?;
+    table
+        .get("project")?
+        .get("name")?
+        .as_str()
+        .map(str::to_string)
+}
+
+fn parse_setup_cfg_name(content: &str) -> Option<String> {
+    let mut in_metadata = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_metadata = trimmed == "[metadata]";
+            continue;
+        }
+        if in_metadata && let Some(rest) = trimmed.strip_prefix("name") {
+            let rest = rest.trim_start();
+            if let Some(value) = rest.strip_prefix('=') {
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pyproject_name_wins_over_setup_cfg() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("pyproject.toml"),
+            "[project]\nname = \"my_lib\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            Python.package_name_for_dir(tmp.path()),
+            Some("my-lib".into())
+        );
+    }
+
+    #[test]
+    fn setup_cfg_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("setup.cfg"),
+            "[metadata]\nname = other-lib\n",
+        )
+        .unwrap();
+        assert_eq!(
+            Python.package_name_for_dir(tmp.path()),
+            Some("other-lib".into())
+        );
+    }
+}

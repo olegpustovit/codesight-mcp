@@ -1,36 +1,37 @@
-//! Single subsystem for structural import extraction and resolution.
+//! Import-edge orchestration.
 //!
-//! Tree-sitter is the primary extractor for Python, JS/TS/TSX/JSX, Go, and Rust when the
-//! parse tree has no errors; line-based parsers provide fallback and cover Vue, SQL, and Dart.
+//! Per-language extractors now live in `codesight-language-support`. This
+//! module is a thin dispatcher: resolve the language from the path, call
+//! `Language::extract_imports`, attach a [`FactQuality`] tag for storage.
 
-mod bundle;
 mod cross_repo;
-mod fallback;
-mod python_stems;
 mod resolve;
-mod tree_sitter;
 
-pub use bundle::context_bundle_import_lines;
-pub use codesight_language_support::ImportExtractionMode;
+pub use codesight_language_support::{ImportEdge, ImportExtractionMode};
+
+/// Lines shown in `assemble_context` / `context_bundle` responses.
+/// Dispatches to the language's `display_import_lines_from_source` — Go and
+/// Python override; every other language renders via ES-module format.
+pub fn context_bundle_import_lines(
+    content: &str,
+    file_path: &str,
+    _language: &str,
+) -> Vec<String> {
+    let registry = codesight_language_support::builtin_registry();
+    match registry.for_path(std::path::Path::new(file_path)) {
+        Some(lang) => lang.display_import_lines_from_source(content),
+        None => Vec::new(),
+    }
+}
 pub use cross_repo::{
     PackageMatchKind, PackageReferenceEvidence, PackageReferenceMatcher, package_reference_evidence,
 };
-pub use python_stems::python_top_level_import_stems;
 pub use resolve::{
     load_tsconfig_aliases, parse_tsconfig_paths, resolve_import_edge_for_graph,
     resolve_imports_to_files, resolve_specifier,
 };
 
-use serde::{Deserialize, Serialize};
-
 use codesight_core::symbols::FactQuality;
-
-/// A structured import edge extracted from source code.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ImportEdge {
-    pub specifier: String,
-    pub names: Vec<String>,
-}
 
 pub fn import_extraction_mode(language: &str) -> Option<ImportExtractionMode> {
     codesight_language_support::import_extraction_mode_for_language(language)
@@ -41,8 +42,11 @@ pub fn supports_import_extraction(language: &str) -> bool {
 }
 
 #[must_use]
-fn import_fact_quality_for(language: &str, tree_sitter_used: bool) -> FactQuality {
-    match import_extraction_mode(language) {
+fn import_fact_quality_for(
+    mode: Option<ImportExtractionMode>,
+    tree_sitter_used: bool,
+) -> FactQuality {
+    match mode {
         Some(ImportExtractionMode::FallbackOnly) => FactQuality::Heuristic,
         Some(_) if tree_sitter_used => FactQuality::BaselineStructural,
         Some(_) => FactQuality::Heuristic,
@@ -50,57 +54,54 @@ fn import_fact_quality_for(language: &str, tree_sitter_used: bool) -> FactQualit
     }
 }
 
-/// Extract structured import edges together with coarse quality for dependency-graph storage.
-///
-/// Tree-sitter-backed paths for supported languages map to [`FactQuality::BaselineStructural`];
-/// line fallbacks and `FallbackOnly` languages map to [`FactQuality::Heuristic`].
+/// Extract structured import edges together with coarse quality for
+/// dependency-graph storage.
 #[must_use]
 pub fn extract_imports_with_quality(
     content: &str,
     file_path: &str,
     language: &str,
 ) -> (Vec<ImportEdge>, FactQuality) {
-    let lang = language.to_ascii_lowercase();
-    let path_lang = language_for_path(file_path);
-    let effective = if lang == "unknown" && path_lang != "unknown" {
-        path_lang.to_string()
-    } else {
-        lang.clone()
+    let registry = codesight_language_support::builtin_registry();
+    let path_lang = registry.for_path(std::path::Path::new(file_path));
+    let named_lang = lookup_by_name(registry, language);
+    let lang = named_lang.or(path_lang);
+
+    let Some(lang) = lang else {
+        return (Vec::new(), FactQuality::Heuristic);
     };
 
-    let (edges, used_tree_sitter) = match effective.as_str() {
-        "python" => match tree_sitter::extract_python_imports_ts(content) {
-            Some(v) => (v, true),
-            None => (fallback::python::extract_imports(content), false),
-        },
-        "javascript" | "typescript" | "tsx" | "jsx" | "js" | "ts" => {
-            match tree_sitter::extract_js_imports_ts(content, &effective) {
-                Some(v) => (v, true),
-                None => (fallback::js_ts::extract_imports(content), false),
-            }
-        }
-        "vue" => (fallback::vue::extract_imports(content), false),
-        "sql" => (fallback::sql::extract_imports(content), false),
-        "dart" => (fallback::dart::extract_imports(content), false),
-        "go" | "golang" => match tree_sitter::extract_go_imports_ts(content) {
-            Some(v) if !v.is_empty() => (v, true),
-            _ => (fallback::go::extract_imports(content), false),
-        },
-        "rust" | "rs" => match tree_sitter::extract_rust_imports_ts(content) {
-            Some(v) => (v, true),
-            None => (fallback::rust::extract_imports(content), false),
-        },
-        _ => (Vec::new(), false),
-    };
-
-    let edges = fallback::helpers::deduplicate_edges(edges);
-    let quality = import_fact_quality_for(&effective, used_tree_sitter);
+    let edges = lang.extract_imports(content);
+    let edges = codesight_language_support::imports_types::deduplicate_edges(edges);
+    // Coarse quality: TreeSitterFirst + non-empty result → structural,
+    // otherwise heuristic. We don't know here whether ts or fallback ran;
+    // approximate by `TreeSitterFirst && !empty`.
+    let ts_used = matches!(lang.extraction_mode(), Some(ImportExtractionMode::TreeSitterFirst))
+        && !edges.is_empty();
+    let quality = import_fact_quality_for(lang.extraction_mode(), ts_used);
     (edges, quality)
 }
 
-/// Detect language from file path extension. Thin adapter over
-/// [`codesight_language_support::LanguageRegistry`] — the registry owns
-/// the full identity table (LANGUAGES.md §5 `language_for_path` migration).
+fn lookup_by_name(
+    registry: &'static codesight_language_support::LanguageRegistry,
+    name: &str,
+) -> Option<&'static dyn codesight_language_support::Language> {
+    if name.is_empty() || name.eq_ignore_ascii_case("unknown") {
+        return None;
+    }
+    registry.all().find(|lang| {
+        let id = lang.id().as_str();
+        if id.eq_ignore_ascii_case(name) {
+            return true;
+        }
+        lang.manifest()
+            .aliases
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(name))
+    })
+}
+
+/// Detect language id string from a file path.
 pub fn language_for_path(file_path: &str) -> &'static str {
     codesight_language_support::builtin_registry()
         .identify_path(std::path::Path::new(file_path))
@@ -110,6 +111,17 @@ pub fn language_for_path(file_path: &str) -> &'static str {
 /// Extract structured import edges from source content for any supported language.
 pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<ImportEdge> {
     extract_imports_with_quality(content, file_path, language).0
+}
+
+/// Top-level Python module stems (kept as a free fn for the existing callers
+/// in storage that need per-file Python stem extraction without a registry
+/// round-trip). Delegates to the Python lang impl.
+pub fn python_top_level_import_stems(content: &str, file_path: &str) -> Vec<String> {
+    let registry = codesight_language_support::builtin_registry();
+    let Some(python) = registry.get(codesight_language_support::PYTHON) else {
+        return Vec::new();
+    };
+    python.top_level_import_stems(content, file_path)
 }
 
 #[cfg(test)]
