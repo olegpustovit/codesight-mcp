@@ -136,3 +136,81 @@ fn workspace_crate_dependency_invariants_hold() {
         );
     }
 }
+
+/// L0.75 content lint: per-language behavior lives in
+/// `codesight-language-support`. The analysis and engine crates must not
+/// branch on language-name string literals or on raw source-file extensions
+/// — both belong behind a `Language` trait method.
+#[test]
+fn analysis_and_engine_have_no_per_language_branches() {
+    use std::fs;
+    use std::path::Path;
+
+    // Match arms keyed on language identifiers / source-file extensions.
+    const BANNED: &[&str] = &[
+        "\"python\" =>",
+        "\"rust\" =>",
+        "\"javascript\" =>",
+        "\"typescript\" =>",
+        "\"ruby\" =>",
+        "\"go\" =>",
+        "\"php\" =>",
+        "\"java\" =>",
+        "\"kotlin\" =>",
+        "\"swift\" =>",
+        "\"elixir\" =>",
+        "\".py\" =>",
+        "\".rs\" =>",
+        "\".go\" =>",
+        "\".ts\" =>",
+        "\".js\" =>",
+        "\".rb\" =>",
+        ".ends_with(\".py\")",
+        ".ends_with(\".rs\")",
+        ".ends_with(\".go\")",
+        ".ends_with(\".ts\")",
+        ".ends_with(\".js\")",
+        ".ends_with(\".rb\")",
+    ];
+
+    fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let mut offenders: Vec<String> = Vec::new();
+    for root in ["crates/codesight-analysis/src", "crates/codesight-engine/src"] {
+        let mut files = Vec::new();
+        walk(Path::new(root), &mut files);
+        for file in files {
+            let Ok(content) = fs::read_to_string(&file) else { continue };
+            for pat in BANNED {
+                if let Some(pos) = content.find(pat) {
+                    // Skip comment lines to reduce false positives on docs.
+                    let line_start = content[..pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
+                    let line = &content[line_start..content[line_start..]
+                        .find('\n')
+                        .map(|e| line_start + e)
+                        .unwrap_or(content.len())];
+                    if line.trim_start().starts_with("//") {
+                        continue;
+                    }
+                    offenders.push(format!("{}: {}", file.display(), pat));
+                }
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "per-language branches found in analysis/engine — push to Language trait:\n  {}",
+        offenders.join("\n  ")
+    );
+}

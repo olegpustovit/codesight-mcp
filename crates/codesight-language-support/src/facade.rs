@@ -67,6 +67,13 @@ pub fn has_restricted_visibility(path: &str, source_text: &str, name: &str) -> b
         .unwrap_or(false)
 }
 
+/// Class-hierarchy advisory note for `path`, or `None` when the language
+/// either models class inheritance normally (C++/Java/Python) or is not
+/// registered.
+pub fn class_hierarchy_note_for_path(path: &str) -> Option<&'static str> {
+    lookup_for_path(path).and_then(|lang| lang.class_hierarchy_note())
+}
+
 /// Whole-word match for `name` in `source`, using the owning language's
 /// identifier-boundary rules when `path` resolves to a registered
 /// language; falls back to the ASCII default otherwise.

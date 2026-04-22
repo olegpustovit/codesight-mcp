@@ -31,12 +31,13 @@ pub mod workspace;
 pub mod workspace_pack;
 
 pub use facade::{
-    additional_live_roots, all_entrypoint_basenames, fallback_type_baseline_for_path,
-    function_length_warn_for_path, has_restricted_visibility, import_extraction_mode_for_language,
-    is_conventional_path, is_entrypoint_basename, is_test_file, is_test_fixture,
-    language_family_for_path, language_id_for_path, measured_type_density_for_path,
-    mentions_identifier_ci_in_file, mentions_identifier_in_file, nesting_mode_for_path,
-    root_package_from_specifier, supports_import_extraction, test_weight_multiplier,
+    additional_live_roots, all_entrypoint_basenames, class_hierarchy_note_for_path,
+    fallback_type_baseline_for_path, function_length_warn_for_path, has_restricted_visibility,
+    import_extraction_mode_for_language, is_conventional_path, is_entrypoint_basename,
+    is_test_file, is_test_fixture, language_family_for_path, language_id_for_path,
+    measured_type_density_for_path, mentions_identifier_ci_in_file, mentions_identifier_in_file,
+    nesting_mode_for_path, root_package_from_specifier, supports_import_extraction,
+    test_weight_multiplier,
 };
 pub use extensions::{
     DOC_EXTENSIONS, code_extensions, is_code_extension, is_doc_extension,

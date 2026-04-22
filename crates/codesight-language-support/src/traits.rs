@@ -14,7 +14,6 @@ use codesight_core::StoredSymbol;
 use codesight_core::symbols::ExtractionTier;
 
 use crate::family::{LanguageFamily, NestingMode};
-use crate::fallback;
 use crate::frameworks::FrameworkProvider;
 use crate::imports_types::ImportEdge;
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest};
@@ -329,8 +328,8 @@ pub trait Language: Send + Sync {
     /// True when the symbol at `source_text` with the given `name` is
     /// restricted (non-public) under this language's visibility model.
     /// Default: underscore-prefix convention (Python/Ruby/Perl/Lua style).
-    fn is_restricted(&self, source_text: &str, name: &str) -> bool {
-        fallback::underscore_prefix_restricted(source_text, name)
+    fn is_restricted(&self, _source_text: &str, name: &str) -> bool {
+        name.starts_with('_')
     }
 
     // ── Complexity / type density ────────────────────────────────────────
@@ -343,11 +342,21 @@ pub trait Language: Send + Sync {
     }
 
     fn function_length_warn(&self) -> Option<u32> {
-        fallback::function_length_warn(self.family())
+        match self.family() {
+            LanguageFamily::BracedStatic => Some(75),
+            LanguageFamily::ScriptedDynamic => Some(40),
+            LanguageFamily::FunctionalExpression => Some(30),
+            LanguageFamily::DeclarativeMarkup | LanguageFamily::Unknown => None,
+        }
     }
 
     fn fallback_type_baseline(&self) -> Option<f64> {
-        fallback::fallback_type_baseline(self.family())
+        match self.family() {
+            LanguageFamily::BracedStatic => Some(1.0),
+            LanguageFamily::ScriptedDynamic => Some(0.3),
+            LanguageFamily::FunctionalExpression => Some(0.5),
+            LanguageFamily::DeclarativeMarkup | LanguageFamily::Unknown => None,
+        }
     }
 
     fn supports_measured_types(&self) -> bool {
@@ -443,6 +452,15 @@ pub trait Language: Send + Sync {
     /// the serialized shape.
     fn is_test_symbol_id(&self, _id: codesight_core::SymbolIdRef<'_>) -> bool {
         false
+    }
+
+    /// Advisory note to surface when `inspect_structure view=class_hierarchy`
+    /// is requested on a file whose language does not model inheritance the
+    /// way C++/Java/Python do (Rust traits, Go interfaces, etc.). Default
+    /// `None`. Languages that want to steer callers toward the right
+    /// relationship graph override.
+    fn class_hierarchy_note(&self) -> Option<&'static str> {
+        None
     }
 
     /// Whole-word match for `name` inside `source` under this language's

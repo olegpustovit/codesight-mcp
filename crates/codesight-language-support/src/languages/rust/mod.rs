@@ -122,6 +122,14 @@ impl Language for Rust {
         // functions named `test_…` at any depth.
         id.has_scope("tests") || id.leaf_name().starts_with("test_")
     }
+    fn class_hierarchy_note(&self) -> Option<&'static str> {
+        Some(
+            "Rust structs do not use class inheritance. Trait impls and \
+             trait bounds live in a separate graph — use `inspect_graph \
+             graph=references` or `graph=related` against the target symbol \
+             instead.",
+        )
+    }
 
     // ── Packages ───────────────────────────────────────────────────────
     fn package_name_for_dir(&self, dir: &Path) -> Option<String> {
@@ -160,6 +168,12 @@ impl Language for Rust {
         path.contains("/fixtures/")
             || path.starts_with("fixtures/")
             || path.contains("/lang_samples/")
+            // insta snapshots: .snap is the committed baseline, .snap.new
+            // is the most recent divergence awaiting review, .pending.snap
+            // is the current-run candidate that hasn't been accepted yet.
+            || path.ends_with(".snap")
+            || path.ends_with(".snap.new")
+            || path.ends_with(".pending.snap")
     }
 
     fn is_conventional_path(&self, path: &str) -> bool {
@@ -491,6 +505,19 @@ fn detect_cargo_target_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rust_is_test_fixture_detects_insta_snapshot_extensions() {
+        let rust = Rust;
+        assert!(rust.is_test_fixture("src/tests/__snapshots__/greet.snap"));
+        assert!(rust.is_test_fixture("src/tests/greet.snap.new"));
+        assert!(rust.is_test_fixture("src/tests/greet.pending.snap"));
+        // fixtures/ and lang_samples/ keep working.
+        assert!(rust.is_test_fixture("fixtures/hello.rs"));
+        assert!(rust.is_test_fixture("tests/lang_samples/sample.rs"));
+        // Ordinary source files are not fixtures.
+        assert!(!rust.is_test_fixture("src/lib.rs"));
+    }
 
     #[test]
     fn workspace_crates_dash_becomes_underscore_and_points_at_lib_rs() {

@@ -1,9 +1,77 @@
 # SUPERPLAN.md — codesight-mcp Mega Trim
 
+**STATUS: COMPLETE.** Every phase landed or has a reasoned close below.
+
 Living plan. Each phase is independent, reversible via `git`, compiles at the
 boundary. Per AGENTS.md: zero backwards compatibility, no shims, renames
 propagate in the same patch. No `cargo check` between edits inside a phase.
 `cargo nextest run --lib` at phase end only.
+
+## Progress log (session 2026-04-22 night+1 — final sweep, all deferrals closed)
+
+Every open item in Phase 5a remainder, 6d, 8, and 9 was revisited and either
+landed or closed with explicit rationale. No open items remain.
+
+- **Phase 5a remainder (petgraph).** `longest_path_in_dag` in
+  `quality_signal/graph_math.rs` replaced with
+  `petgraph::algo::toposort` + linear DP (−14 LoC, same semantics).
+  `compute_pagerank` kept (petgraph 0.6 has no built-in; the power-iteration
+  form is already minimal). `condensed_dependency_depth` kept (its caller
+  passes pre-computed Tarjan SCCs; switching to `petgraph::algo::condensation`
+  would churn the signature for neutral LoC).
+- **Phase 6 — `Language::class_hierarchy_note` trait method** added
+  (default `None`); Rust + Go override. Deletes the match-on-extension
+  branch in `engine/service/agent_v1/structure.rs`. L0.75 boundary tightened
+  by one more call site.
+- **Phase 6d lint** landed in `tests/crate_graph.rs::analysis_and_engine_have_no_per_language_branches`.
+  Scans every `.rs` in `codesight-analysis/src/` and `codesight-engine/src/`
+  for language-name match arms (`"python" =>`, `"rust" =>`, …) and raw
+  source-extension checks (`.ends_with(".py")`, …). Currently clean; the
+  test is the guard.
+- **Phase 8 re-confirmed no-op.** `fn sym` in `agent_readiness/mod.rs:230`
+  returns `AnalysisSymbol`; `fn sym` in `graph/calls.rs:205` returns
+  `SymbolInfo`. Different types, different args (`ExtractionTier` on one,
+  not the other). `fn adj` / `fn make_verifiability` are each single-site.
+  No real duplication.
+- **Phase 9 deferral — git shell-out kept.** `util/graph.rs::git_head_sha`
+  + `git_show_file` are 10 LoC each with `Option<String>` graceful fallback.
+  `gix` pulls ~20 transitive crates; `git2` needs `libgit2-sys`. PATH
+  dependency is acceptable.
+- **Phase 9 deferral — `src/cli/hooks.rs` already lean.** `handle_grep` /
+  `handle_glob` / `handle_bash` use `starts_with` on tiny const arrays
+  (not pattern matching). `detect_use_prefix_rewrite` is a `use foo::bar`
+  parser using `split` on punctuation. No hand-rolled regex/glob to swap.
+- **Phase 9 fallback.rs ↔ traits.rs cycle broken.** `traits.rs` no longer
+  imports `crate::fallback`: `underscore_prefix_restricted` /
+  `function_length_warn` / `fallback_type_baseline` are now inlined in the
+  trait default bodies. `fallback.rs` only keeps the two path heuristics
+  (`generic_is_test_file`, `generic_is_test_fixture`) consumed from
+  `facade.rs`. Edge graph is now a tree.
+- **Phase 9 cyclomatic dispatch budget.** Added inline microbench
+  `complexity::tests::dispatch_stays_under_budget`: 10 000 calls to
+  `cyclomatic_complexity_for_path` complete in ~120 ms debug / ~30 ms
+  release. Well under the <200 ms AGENTS.md §5 budget.
+- **Phase 9 MODEL_PRICING kept in source.** Three rows that change ~yearly.
+  Runtime TOML would add ~20 LoC of load plumbing for zero benefit.
+- **Phase 9 insta snap extensions.** `Rust::is_test_fixture` now flags
+  `.snap`, `.snap.new`, and `.pending.snap`. Unit test
+  `rust_is_test_fixture_detects_insta_snapshot_extensions` guards it.
+- **Phase 9 tree-sitter registry "cycle".** Confirmed false positive from
+  the hub-and-spoke static registration pattern (`registry.rs` ↔ each
+  `languages/*/mod.rs`). No real Rust dep cycle (all modules belong to one
+  crate). Real cycle count modulo this: 0 (the fallback/traits edge is
+  now gone). Detector improvement is out of scope.
+- **Phase 9 `catalog_search/plan.rs` audit.** `estimate_candidate_file_bytes`
+  queries storage for sum of actual on-disk file sizes. No language
+  heuristics, no size expectations. The flag in the plan was unfounded.
+- **Phase 9 `dead_code/reachability.rs` per-language audit.** Production
+  code routes through `is_test_file` / `is_test_fixture` facade (each
+  language owns its own override). The `_test.go` / `conftest.py` /
+  `_spec.rb` strings elsewhere are only in assertion messages in test code.
+
+Tests: workspace lib 350/350; integration (crate_graph, symbol_diff,
+find_importers, find_dead_code, dead_code_v2, call_hierarchy,
+quality_signal, repo_health, pagerank, complexity) 191/191.
 
 ## Progress log (session 2026-04-22 night — Phase 6 long-tail mentions_identifier)
 

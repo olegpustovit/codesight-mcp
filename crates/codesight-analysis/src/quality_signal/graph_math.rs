@@ -3,6 +3,9 @@
 
 use std::collections::HashMap;
 
+use petgraph::algo::toposort;
+use petgraph::graph::DiGraph;
+
 fn top_level_module(path: &str) -> &str {
     path.split('/').next().unwrap_or(".")
 }
@@ -66,46 +69,35 @@ pub fn condensed_dependency_depth(
     longest_path_in_dag(&dag, scc_count)
 }
 
-/// Longest path in a DAG using Kahn's algorithm + DP.
+/// Longest path in a DAG via `petgraph::algo::toposort` + linear DP.
 fn longest_path_in_dag(dag: &HashMap<usize, Vec<usize>>, node_count: usize) -> Option<usize> {
-    let mut in_degree = vec![0usize; node_count];
-    for targets in dag.values() {
-        for &t in targets {
-            if t < node_count {
-                in_degree[t] += 1;
+    let mut g: DiGraph<(), ()> = DiGraph::with_capacity(node_count, 0);
+    let nodes: Vec<_> = (0..node_count).map(|_| g.add_node(())).collect();
+    for (&u, targets) in dag {
+        if u >= node_count {
+            continue;
+        }
+        for &v in targets {
+            if v < node_count {
+                g.add_edge(nodes[u], nodes[v], ());
             }
         }
     }
 
-    let mut queue: std::collections::VecDeque<usize> = in_degree
-        .iter()
-        .enumerate()
-        .filter(|&(_, d)| *d == 0)
-        .map(|(i, _)| i)
-        .collect();
-
+    let order = toposort(&g, None).ok()?;
     let mut dist = vec![0usize; node_count];
     let mut max_depth = 0usize;
-
-    while let Some(u) = queue.pop_front() {
-        if let Some(targets) = dag.get(&u) {
-            for &v in targets {
-                if v >= node_count {
-                    continue;
-                }
-                let new_dist = dist[u] + 1;
-                if new_dist > dist[v] {
-                    dist[v] = new_dist;
-                    max_depth = max_depth.max(new_dist);
-                }
-                in_degree[v] -= 1;
-                if in_degree[v] == 0 {
-                    queue.push_back(v);
-                }
+    for n in order {
+        let u = n.index();
+        for vn in g.neighbors(n) {
+            let v = vn.index();
+            let new_dist = dist[u] + 1;
+            if new_dist > dist[v] {
+                dist[v] = new_dist;
+                max_depth = max_depth.max(new_dist);
             }
         }
     }
-
     Some(max_depth)
 }
 

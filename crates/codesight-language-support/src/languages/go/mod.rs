@@ -198,6 +198,13 @@ impl Language for Go {
     fn is_test_file(&self, path: &str) -> bool {
         path.ends_with("_test.go")
     }
+    fn class_hierarchy_note(&self) -> Option<&'static str> {
+        Some(
+            "Go types do not use class inheritance. Interface \
+             satisfaction is structural — use `inspect_graph` to trace \
+             method and embedding relationships.",
+        )
+    }
 
     fn is_restricted(&self, _source_text: &str, name: &str) -> bool {
         name.chars().next().map(|ch| !ch.is_uppercase()).unwrap_or(true)

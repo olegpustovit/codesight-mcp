@@ -437,26 +437,8 @@ impl CodeService {
         // empty, emit a diagnostic note so clients don't confuse "no edges"
         // with "class not found".
         if view.ancestor_count == 0 && view.descendant_count == 0 {
-            let file = view.class.file.as_str();
-            let ext = std::path::Path::new(file)
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
-            let note = match ext {
-                "rs" => Some(
-                    "Rust structs do not use class inheritance. Trait impls and \
-                     trait bounds live in a separate graph — use `inspect_graph \
-                     graph=references` or `graph=related` against the target symbol \
-                     instead.",
-                ),
-                "go" => Some(
-                    "Go types do not use class inheritance. Interface \
-                     satisfaction is structural — use `inspect_graph` to trace \
-                     method and embedding relationships.",
-                ),
-                _ => None,
-            };
-            if let Some(msg) = note
+            if let Some(msg) =
+                codesight_language_support::class_hierarchy_note_for_path(view.class.file.as_str())
                 && let Some(obj) = body.as_object_mut()
             {
                 obj.insert("note".to_string(), json!(msg));

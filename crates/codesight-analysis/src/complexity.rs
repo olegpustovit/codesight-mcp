@@ -79,4 +79,25 @@ mod tests {
         assert_eq!(ComplexityAssessment::classify(8), ComplexityAssessment::Medium);
         assert_eq!(ComplexityAssessment::classify(20), ComplexityAssessment::High);
     }
+
+    /// Dispatch budget guard: storage-time indexing calls
+    /// `cyclomatic_complexity_for_path` once per extracted symbol, so the
+    /// per-call cost has to stay well below AGENTS.md's <200 ms cold
+    /// dispatch budget. Hot path: phf lookup + vtable call.
+    #[test]
+    fn dispatch_stays_under_budget() {
+        let src = "fn f(x: i32) -> i32 {\n    if x > 0 { 1 } else if x < 0 { -1 } else { 0 }\n}\n";
+        let start = std::time::Instant::now();
+        let mut total = 0usize;
+        for _ in 0..10_000 {
+            total += cyclomatic_complexity_for_path(src, "lib.rs");
+        }
+        let elapsed = start.elapsed();
+        assert!(total > 0, "sanity check: fn should report >0 complexity");
+        assert!(
+            elapsed.as_millis() < 200,
+            "10k cyclomatic_complexity_for_path calls took {elapsed:?} — \
+             trait dispatch is blowing the <200ms budget"
+        );
+    }
 }
