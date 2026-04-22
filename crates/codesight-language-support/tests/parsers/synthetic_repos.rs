@@ -1,7 +1,8 @@
 //! Synthetic multi-file Python repo layouts for filesystem-only checks.
 
-use codesight_mcp::test_support::{write_hierarchy_repo, write_medium_repo, write_small_repo};
 use tempfile::tempdir;
+
+use super::support::{write_hierarchy_repo, write_medium_repo, write_small_repo};
 
 #[test]
 fn small_repo_files_on_disk() {

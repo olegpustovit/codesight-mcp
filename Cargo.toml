@@ -7,7 +7,6 @@ members = [
     "crates/codesight-language-support",
     "crates/codesight-retrieval",
     "crates/codesight-storage",
-    "crates/mcp-rpc",
 ]
 resolver = "2"
 
@@ -27,7 +26,7 @@ codesight-engine = { path = "crates/codesight-engine" }
 codesight-language-support = { path = "crates/codesight-language-support" }
 codesight-retrieval = { path = "crates/codesight-retrieval" }
 codesight-storage = { path = "crates/codesight-storage" }
-mcp-rpc = { path = "crates/mcp-rpc" }
+rmcp = { version = "1.5", default-features = false, features = ["server", "transport-io", "macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -46,22 +45,6 @@ tempfile = "3"
 # the full test suite). Dev-only: the feature exposes time manipulation
 # that must not ship in the production binary.
 tokio = { version = "1", features = ["test-util"] }
-# Tests directly exercise grammar-loading across the supported language set;
-# they are grammar-consumers, not through-the-extractor tests.
-tree-sitter = "0.26.8"
-tree-sitter-bash = "0.25.1"
-tree-sitter-css = "0.25.0"
-tree-sitter-json = "0.24.8"
-tree-sitter-lua = "0.5.0"
-tree-sitter-luau = "1.2.0"
-tree-sitter-php = "0.24.2"
-tree-sitter-scss = "1.0.0"
-tree-sitter-sequel = "0.3.11"
-tree-sitter-swift = "0.7.1"
-tree-sitter-yaml = "0.7.2"
-tree-sitter-dart = "0.1.0"
-tree-sitter-nix = "0.3.0"
-tree-sitter-xml = "0.7.0"
 
 [profile.release]
 lto = true

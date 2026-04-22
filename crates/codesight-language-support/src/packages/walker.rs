@@ -8,29 +8,29 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use walkdir::{DirEntry, WalkDir};
 
 /// Maximum directory depth to scan.
 pub const MAX_DEPTH: usize = 12;
 
-const PRUNED_DIR_NAMES: &[&str] = &[
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    "out",
-    "bin",
-    "obj",
-    "vendor",
-    "__pycache__",
-    "venv",
-    ".venv",
-    ".tox",
-    ".git",
-    ".hg",
-    ".svn",
-];
+/// Build a sorted, deduplicated snapshot of every `Language::pruned_dirs`
+/// override registered in [`crate::builtin_registry`]. VCS metadata
+/// (`.git`, `.hg`, `.svn`) and the dot-prefix rule stay generic in
+/// [`is_pruned`] — those aren't language-owned.
+fn pruned_dirs() -> &'static [&'static str] {
+    static DIRS: OnceLock<Vec<&'static str>> = OnceLock::new();
+    DIRS.get_or_init(|| {
+        let mut out: Vec<&'static str> = crate::builtin_registry()
+            .all()
+            .flat_map(|l| l.pruned_dirs().iter().copied())
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    })
+}
 
 fn is_pruned(entry: &DirEntry) -> bool {
     if entry.depth() == 0 {
@@ -45,7 +45,7 @@ fn is_pruned(entry: &DirEntry) -> bool {
     if name.starts_with('.') {
         return true;
     }
-    PRUNED_DIR_NAMES.contains(&name)
+    pruned_dirs().contains(&name)
 }
 
 /// Walk `root` and return every package name declared by any supported

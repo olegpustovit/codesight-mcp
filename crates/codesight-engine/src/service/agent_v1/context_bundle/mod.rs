@@ -1,5 +1,6 @@
 mod gather;
 mod shape;
+mod tail;
 
 use serde_json::{Value, json};
 

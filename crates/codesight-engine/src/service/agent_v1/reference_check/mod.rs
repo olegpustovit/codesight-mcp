@@ -1,14 +1,9 @@
 //! Reference existence / usage evidence for `check_references`.
 
-mod evidence;
-
 use serde_json::{Value, json};
 
-use codesight_analysis::evidence::EvidenceNote;
-
+use codesight_analysis::evidence::{IdentifierReferenceEvidence, ReferenceEvidenceProvider};
 use codesight_storage::storage::IndexStore;
-
-use self::evidence::{IdentifierReferenceEvidence, ReferenceEvidenceProvider};
 
 pub fn check_identifiers_batch(
     store: &IndexStore,
@@ -42,8 +37,6 @@ pub fn check_refs_existence(
     store: &IndexStore,
     refs: &[(String, String)],
 ) -> anyhow::Result<Value> {
-    // Two batch queries replace 2N single-key calls
-    // (symbol_record + file_exists per ref).
     let symbol_ids: Vec<&str> = refs
         .iter()
         .filter(|(k, _)| k == "symbol")
@@ -83,7 +76,7 @@ fn identifier_result(evidence: IdentifierReferenceEvidence) -> Value {
         "import_count": evidence.import_files.len(),
         "content_count": evidence.content_count(),
         "referencing_files": evidence.referencing_files(),
-        "evidence_notes": serialize_notes(&evidence.evidence_notes),
+        "evidence_notes": serde_json::to_value(&evidence.evidence_notes).unwrap_or_else(|_| json!([])),
         "evidence_breakdown": {
             "structural_import_files": evidence.import_files,
             "symbol_reference_files": evidence.symbol_reference_files,
@@ -92,6 +85,3 @@ fn identifier_result(evidence: IdentifierReferenceEvidence) -> Value {
     })
 }
 
-fn serialize_notes(notes: &[EvidenceNote]) -> Value {
-    serde_json::to_value(notes).unwrap_or_else(|_| json!([]))
-}

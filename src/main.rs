@@ -4,7 +4,6 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand, ValueEnum};
 use codesight_engine::{config::AppConfig, service::CodeService};
 use codesight_mcp::cli::{check, hooks, init};
-use mcp_rpc::{DispatchConfig, run_stdio};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum)]
@@ -170,9 +169,6 @@ fn init_tracing(log_format: LogFormat) {
 }
 
 fn run() -> anyhow::Result<()> {
-    // Log the build stamp up front so operators can detect a stale
-    // long-running MCP server after an on-disk fix has landed. Every
-    // response also carries these fields in `_meta` for the same reason.
     tracing::info!(
         version = codesight_engine::config::BUILD_VERSION,
         sha = codesight_engine::config::BUILD_SHA,
@@ -184,15 +180,63 @@ fn run() -> anyhow::Result<()> {
     service.enable_background_watch();
     let service = Arc::new(service);
     service.install_arc_handle();
-    run_stdio(service, dispatch_config())
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(run_rmcp_stdio(service))
 }
 
-fn dispatch_config() -> DispatchConfig {
-    use codesight_engine::config::defaults::{DISPATCH_CONCURRENCY, SHUTDOWN_DRAIN_SECS};
-    DispatchConfig::new(
-        DISPATCH_CONCURRENCY,
-        std::time::Duration::from_secs(SHUTDOWN_DRAIN_SECS),
-    )
+async fn run_rmcp_stdio(service: Arc<CodeService>) -> anyhow::Result<()> {
+    use codesight_engine::config::defaults::SHUTDOWN_DRAIN_SECS;
+    use rmcp::ServiceExt;
+    use rmcp::transport::io::stdio;
+
+    let running = service
+        .clone()
+        .serve(stdio())
+        .await
+        .map_err(|err| anyhow::anyhow!("rmcp stdio serve failed: {err}"))?;
+    let cancel = running.cancellation_token();
+
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        tracing::info!("shutdown signal received, cancelling rmcp service");
+        cancel.cancel();
+    });
+
+    let quit = running
+        .waiting()
+        .await
+        .map_err(|err| anyhow::anyhow!("rmcp service join error: {err}"))?;
+    tracing::info!(reason = ?quit, "rmcp service exited");
+
+    let _ = SHUTDOWN_DRAIN_SECS; // preserved for documentation parity with the old drain budget
+    service.config().checkpoint_all_wal();
+    tracing::info!("shutdown_complete");
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{SignalKind, signal};
+    match signal(SignalKind::terminate()) {
+        Ok(mut term) => {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to install SIGTERM handler, falling back to ctrl_c");
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn build_service() -> anyhow::Result<CodeService> {

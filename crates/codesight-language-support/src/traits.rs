@@ -407,6 +407,15 @@ pub trait Language: Send + Sync {
         &["//", "#", "--"]
     }
 
+    /// Line-leading prefixes that mark a declaration / import / export
+    /// rather than an identifier usage site. Used by reference-evidence
+    /// fallback scans to avoid counting `class Foo` as a reference to
+    /// some earlier `Foo`. Default empty — languages with distinct
+    /// declaration keywords override.
+    fn declaration_line_prefixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Per-language cyclomatic-complexity heuristic. Default runs the
     /// generic branch counter over `branch_keywords()`, `branch_operators()`,
     /// and `line_comment_prefixes()` — plus a `?` ternary scan that avoids
@@ -441,6 +450,28 @@ pub trait Language: Send + Sync {
     /// Stored as `fn() -> Box<dyn FrameworkProvider>` rather than static refs
     /// so each discovery run gets a fresh loader state.
     fn framework_providers(&self) -> &'static [fn() -> Box<dyn FrameworkProvider>] {
+        &[]
+    }
+
+    /// Return a simple `FrameworkProfile` — `ignore_patterns`,
+    /// `entry_point_patterns`, `layer_definitions` — when this language
+    /// recognizes a framework marker at `root`. Default `None`. Languages
+    /// that own multiple frameworks implement internal priority here.
+    fn simple_framework_profile(
+        &self,
+        _root: &Path,
+    ) -> Option<crate::frameworks::profiles::FrameworkProfile> {
+        None
+    }
+
+    // ── Package / build discovery ────────────────────────────────────────
+    /// Directory names whose subtrees this language's ecosystem treats as
+    /// generated / vendored / build-output, and that `packages::walker`
+    /// should prune. VCS metadata (`.git`, `.hg`, `.svn`) and dot-prefixed
+    /// directories are handled generically in the walker; per-language
+    /// names (`node_modules`, `target`, `__pycache__`, `vendor`, …) live
+    /// on the language that owns them.
+    fn pruned_dirs(&self) -> &'static [&'static str] {
         &[]
     }
 }

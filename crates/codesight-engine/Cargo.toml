@@ -10,13 +10,12 @@ license = "Apache-2.0"
 anyhow = "1"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
-async-trait = "0.1"
 codesight-analysis = { path = "../codesight-analysis" }
 codesight-core = { path = "../codesight-core" }
 codesight-language-support = { path = "../codesight-language-support" }
 codesight-retrieval = { path = "../codesight-retrieval" }
 codesight-storage = { path = "../codesight-storage" }
-mcp-rpc = { path = "../mcp-rpc" }
+rmcp = { version = "1.5", default-features = false, features = ["server", "transport-io", "macros"] }
 dirs = "6.0.0"
 globset = "0.4"
 ignore = "0.4"

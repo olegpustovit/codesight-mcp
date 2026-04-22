@@ -142,6 +142,9 @@ impl Language for Go {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
     }
+    fn declaration_line_prefixes(&self) -> &'static [&'static str] {
+        &["import ", "package ", "func ", "type ", "var ", "const "]
+    }
     fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
         // Go convention: `TestXxx`, `BenchmarkXxx`, `FuzzXxx`, `ExampleXxx`
         // functions in `_test.go` files (file detection handled elsewhere).
@@ -183,6 +186,10 @@ impl Language for Go {
             }
         }
         None
+    }
+
+    fn pruned_dirs(&self) -> &'static [&'static str] {
+        &["vendor"]
     }
 
     fn entrypoint_basenames(&self) -> &'static [&'static str] {

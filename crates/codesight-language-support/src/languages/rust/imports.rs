@@ -628,16 +628,16 @@ mod rust_resolve_tests {
     fn workspace_crate_bare_use_resolves_to_lib_rs() {
         let known = files(&[
             "src/main.rs",
-            "crates/mcp-rpc/src/lib.rs",
-            "crates/mcp-rpc/src/server.rs",
+            "crates/my-lib/src/lib.rs",
+            "crates/my-lib/src/inner.rs",
         ]);
         let mut ws = HashMap::new();
         ws.insert(
-            "mcp_rpc".to_string(),
-            "crates/mcp-rpc/src/lib.rs".to_string(),
+            "my_lib".to_string(),
+            "crates/my-lib/src/lib.rs".to_string(),
         );
-        let got = resolve_rust_specifier("mcp_rpc::run_stdio", "src/main.rs", &known, Some(&ws));
-        assert_eq!(got.as_deref(), Some("crates/mcp-rpc/src/lib.rs"));
+        let got = resolve_rust_specifier("my_lib::do_thing", "src/main.rs", &known, Some(&ws));
+        assert_eq!(got.as_deref(), Some("crates/my-lib/src/lib.rs"));
     }
 
     #[test]

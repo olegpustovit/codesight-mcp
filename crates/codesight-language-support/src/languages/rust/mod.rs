@@ -97,6 +97,26 @@ impl Language for Rust {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
     }
+    fn declaration_line_prefixes(&self) -> &'static [&'static str] {
+        &[
+            "use ",
+            "pub use ",
+            "mod ",
+            "pub mod ",
+            "fn ",
+            "pub fn ",
+            "struct ",
+            "pub struct ",
+            "enum ",
+            "pub enum ",
+            "trait ",
+            "pub trait ",
+            "impl ",
+            "type ",
+            "const ",
+            "static ",
+        ]
+    }
     fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
         // Rust inline tests: `tests` parent scope (most common) or `#[test]`
         // functions named `test_…` at any depth.
@@ -116,6 +136,10 @@ impl Language for Rust {
             .get("name")?
             .as_str()
             .map(str::to_string)
+    }
+
+    fn pruned_dirs(&self) -> &'static [&'static str] {
+        &["target"]
     }
 
     // ── Liveness ───────────────────────────────────────────────────────
@@ -472,17 +496,17 @@ mod tests {
     fn workspace_crates_dash_becomes_underscore_and_points_at_lib_rs() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        fs::create_dir_all(root.join("crates/mcp-rpc/src")).unwrap();
+        fs::create_dir_all(root.join("crates/my-lib/src")).unwrap();
         fs::write(
-            root.join("crates/mcp-rpc/Cargo.toml"),
-            "[package]\nname = \"mcp-rpc\"\nversion = \"0.1.0\"\n",
+            root.join("crates/my-lib/Cargo.toml"),
+            "[package]\nname = \"my-lib\"\nversion = \"0.1.0\"\n",
         )
         .unwrap();
-        fs::write(root.join("crates/mcp-rpc/src/lib.rs"), "").unwrap();
+        fs::write(root.join("crates/my-lib/src/lib.rs"), "").unwrap();
         let map = workspace_crates_from_root(root);
         assert_eq!(
-            map.get("mcp_rpc").map(String::as_str),
-            Some("crates/mcp-rpc/src/lib.rs")
+            map.get("my_lib").map(String::as_str),
+            Some("crates/my-lib/src/lib.rs")
         );
     }
 

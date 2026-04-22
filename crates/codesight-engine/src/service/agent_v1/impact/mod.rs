@@ -1,8 +1,12 @@
 //! Impact analyses — dispatches `evaluate_impact` to per-analysis submodules.
 
 mod blast_radius;
+mod change_velocity;
 mod changed_units;
 mod diff;
+mod impact_preview;
+mod path_rename;
+mod rename_safety;
 
 use serde_json::{Value, json};
 

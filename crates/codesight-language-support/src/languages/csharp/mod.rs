@@ -66,6 +66,10 @@ impl Language for CSharp {
         None
     }
 
+    fn pruned_dirs(&self) -> &'static [&'static str] {
+        &["bin", "obj"]
+    }
+
     fn is_restricted(&self, src: &str, name: &str) -> bool {
         cfamily_is_restricted(src, name)
     }

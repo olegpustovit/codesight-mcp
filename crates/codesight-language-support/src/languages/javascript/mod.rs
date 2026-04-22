@@ -76,6 +76,8 @@ pub(super) const JS_ENTRYPOINTS: &[&str] = &[
     "main.js", "index.js", "app.js", "server.js", "main.ts", "index.ts", "app.ts", "server.ts",
 ];
 
+pub(crate) const JS_PRUNED_DIRS: &[&str] = &["node_modules", "dist", "build", "out"];
+
 impl Language for JavaScript {
     fn id(&self) -> LanguageId {
         JAVASCRIPT
@@ -98,6 +100,9 @@ impl Language for JavaScript {
     fn package_name_for_dir(&self, dir: &Path) -> Option<String> {
         js_package_name_for_dir(dir)
     }
+    fn pruned_dirs(&self) -> &'static [&'static str] {
+        JS_PRUNED_DIRS
+    }
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         JS_ENTRYPOINTS
     }
@@ -115,6 +120,9 @@ impl Language for JavaScript {
     }
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
+    }
+    fn declaration_line_prefixes(&self) -> &'static [&'static str] {
+        &["import ", "export ", "function ", "class "]
     }
     fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
         let name = id.leaf_name().to_ascii_lowercase();

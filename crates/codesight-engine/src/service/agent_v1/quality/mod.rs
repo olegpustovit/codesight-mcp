@@ -1,5 +1,9 @@
 pub mod doc_coverage;
+mod broken_links;
+mod hotspots;
+mod refactor_targets;
 mod repo_health;
+mod test_gaps;
 
 use serde_json::{Value, json};
 
@@ -26,7 +30,20 @@ impl CodeService {
             "dead_code_v2" => self.quality_dead_code_v2(&args, &timer),
             "quality_signal" => self.quality_signal_handler(&args, &timer),
             "regression_check" => self.quality_regression_check(&args, &timer),
-            tail => self.evaluate_quality_tail(&args, tail, &timer),
+            "hotspots" => self.quality_hotspots(&args, &timer),
+            "refactor_targets" => self.quality_refactor_targets(&args, &timer),
+            "broken_links" => self.quality_broken_links(&args, &timer),
+            "doc_coverage" => self.quality_doc_coverage(&args, &timer),
+            "test_gaps" => self.quality_test_gaps(&args, &timer),
+            unknown => self.error_response(
+                &timer,
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "INVALID_REQUEST",
+                    message: format!("Unknown quality analysis '{unknown}'."),
+                    detail: json!({ "analysis": unknown }),
+                },
+            ),
         }?;
         if let Some(meta) = response.get_mut("_meta").and_then(Value::as_object_mut) {
             meta.insert(

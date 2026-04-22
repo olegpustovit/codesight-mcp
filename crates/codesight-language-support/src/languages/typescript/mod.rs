@@ -1,6 +1,7 @@
 //! TypeScript language.
 
 pub mod nextjs;
+mod simple_framework;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -48,6 +49,15 @@ impl Language for TypeScript {
     fn package_name_for_dir(&self, dir: &Path) -> Option<String> {
         js_package_name_for_dir(dir)
     }
+    fn pruned_dirs(&self) -> &'static [&'static str] {
+        crate::languages::javascript::JS_PRUNED_DIRS
+    }
+    fn simple_framework_profile(
+        &self,
+        root: &Path,
+    ) -> Option<crate::frameworks::profiles::FrameworkProfile> {
+        simple_framework::detect(root)
+    }
     fn imports_query(&self) -> Option<&'static str> {
         Some(include_str!("queries/imports.scm"))
     }
@@ -62,6 +72,17 @@ impl Language for TypeScript {
     }
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
+    }
+    fn declaration_line_prefixes(&self) -> &'static [&'static str] {
+        &[
+            "import ",
+            "export ",
+            "function ",
+            "class ",
+            "interface ",
+            "type ",
+            "enum ",
+        ]
     }
     fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
         let name = id.leaf_name().to_ascii_lowercase();

@@ -1,5 +1,8 @@
-//! Merged parser-only test binary. See `.cursor/plans/test-suite-speedup-wave2.plan.md` Lever 3.
-//! Each module is a former top-level integration test, kept verbatim under `tests/parsers/`.
+//! Merged parser-only test binary. Each module is a former top-level
+//! integration test, kept verbatim under `tests/parsers/`.
+
+#[path = "parsers/_support.rs"]
+mod support;
 
 #[path = "parsers/al.rs"]
 mod al;

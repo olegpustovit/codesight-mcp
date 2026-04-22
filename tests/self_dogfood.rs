@@ -212,28 +212,6 @@ fn importers_resolve_cross_crate_use() {
     );
 }
 
-/// Real-repo self-check: hidden behind `#[ignore]` so the full `cargo
-/// nextest run` doesn't do a slow reindex of the whole workspace — CI runs
-/// this explicitly with `--run-ignored all` (or at least a targeted
-/// `--test self_dogfood`) when we want to guard against repo-specific drift.
-#[test]
-#[ignore]
-fn real_repo_mcp_rpc_server_is_not_dead() {
-    // The original bug: `dead_code` flagged `crates/mcp-rpc/src/server.rs`
-    // even though `src/main.rs` contains `use mcp_rpc::{DispatchConfig,
-    // run_stdio}`. Post-Phase 1 this must not happen.
-    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let ws = tempdir().unwrap();
-    let (config, sid, _) = index_code_fixture(&ws.path().join("idx"), repo_root).unwrap();
-    let store = open_code_store(&config, &sid).unwrap();
-
-    let dead = dead_files(&store);
-    assert!(
-        !dead.iter().any(|f| f == "crates/mcp-rpc/src/server.rs"),
-        "regression: crates/mcp-rpc/src/server.rs marked dead",
-    );
-}
-
 #[test]
 fn impl_drop_on_otherwise_unreferenced_struct_stays_live() {
     // Phase 2: a struct that exists only to satisfy `impl Drop for X` has

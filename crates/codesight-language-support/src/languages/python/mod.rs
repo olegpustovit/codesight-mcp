@@ -72,6 +72,9 @@ impl Language for Python {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["#"]
     }
+    fn declaration_line_prefixes(&self) -> &'static [&'static str] {
+        &["import ", "from ", "def ", "class ", "async def "]
+    }
     fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
         // Pytest + unittest convention: `test_foo` functions, `TestFoo`
         // classes.
@@ -157,6 +160,10 @@ impl Language for Python {
             return parse_setup_cfg_name(&content);
         }
         None
+    }
+
+    fn pruned_dirs(&self) -> &'static [&'static str] {
+        &["__pycache__", "venv", ".venv", ".tox"]
     }
 
     fn entrypoint_basenames(&self) -> &'static [&'static str] {

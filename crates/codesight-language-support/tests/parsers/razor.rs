@@ -5,7 +5,8 @@ use std::path::Path;
 use codesight_language_support::LanguageRegistry;
 use codesight_language_support::languages::razor::extractor::RazorExtractor;
 use codesight_core::{StoredSymbol, SymbolKind};
-use codesight_mcp::test_support::code_reference_fixtures_dir;
+
+use super::support::code_reference_fixtures_dir;
 
 fn fixture_source(name: &str) -> String {
     let path = code_reference_fixtures_dir().join("razor").join(name);

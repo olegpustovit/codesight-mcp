@@ -2,6 +2,7 @@
 
 pub mod fqn;
 pub mod laravel;
+mod simple_framework;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -114,6 +115,15 @@ impl Language for Php {
     }
     fn namespace_map(&self, root: &Path) -> HashMap<String, String> {
         read_composer_psr4(root).unwrap_or_default()
+    }
+    fn pruned_dirs(&self) -> &'static [&'static str] {
+        &["vendor"]
+    }
+    fn simple_framework_profile(
+        &self,
+        root: &Path,
+    ) -> Option<crate::frameworks::profiles::FrameworkProfile> {
+        simple_framework::detect(root)
     }
     fn resolve_fqn(
         &self,

@@ -22,7 +22,6 @@ fn workspace_crate_dependency_invariants_hold() {
         "codesight-language-support",
         "codesight-retrieval",
         "codesight-storage",
-        "mcp-rpc",
     ] {
         assert!(
             names.contains(&expected),
@@ -33,6 +32,7 @@ fn workspace_crate_dependency_invariants_hold() {
         "codesight-backend",
         "codesight-extractors",
         "codesight-imports",
+        "mcp-rpc",
     ] {
         assert!(
             !names.contains(&gone),
@@ -94,20 +94,10 @@ fn workspace_crate_dependency_invariants_hold() {
         "codesight-engine",
         "codesight-retrieval",
         "codesight-storage",
-        "mcp-rpc",
     ] {
         assert!(
             !lang_deps.contains(&banned.to_string()),
             "codesight-language-support must not depend on {banned}: {lang_deps:?}"
-        );
-    }
-
-    // ── L2: protocol ────────────────────────────────────────────────────
-    let rpc_deps = ws_deps("mcp-rpc");
-    for nope in ["codesight-core", "codesight-engine", "codesight-storage"] {
-        assert!(
-            !rpc_deps.contains(&nope.to_string()),
-            "mcp-rpc must stay generic; found dep {nope}: {rpc_deps:?}"
         );
     }
 
@@ -118,7 +108,6 @@ fn workspace_crate_dependency_invariants_hold() {
         "codesight-analysis",
         "codesight-retrieval",
         "codesight-language-support",
-        "mcp-rpc",
     ] {
         assert!(
             engine_deps.contains(&required.to_string()),
@@ -137,9 +126,10 @@ fn workspace_crate_dependency_invariants_hold() {
         );
     }
 
-    // Root binary depends on engine + mcp-rpc.
+    // Root binary depends on engine. The MCP protocol layer is now `rmcp`
+    // (external crate), so there's no internal workspace member for it.
     let root_deps = ws_deps("codesight-mcp");
-    for required in ["codesight-engine", "mcp-rpc"] {
+    for required in ["codesight-engine"] {
         assert!(
             root_deps.contains(&required.to_string()),
             "root missing required dep {required}: {root_deps:?}"

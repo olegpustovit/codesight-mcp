@@ -1,9 +1,54 @@
-//! Doc-coverage payload builder.
+//! `evaluate_quality analysis=doc_coverage` — match symbols to documentation sections.
 
 use serde_json::{Value, json};
 
+use crate::service::CodeService;
+use crate::service::agent_v1::args::EvaluateQualityArgs;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
+use crate::service::require_store;
+use crate::service::savings::MetaBuilder;
 use codesight_analysis::quality::extract_symbol_name_from_id;
 use codesight_storage::storage::doc_index::DocStore;
+
+impl CodeService {
+    pub(super) fn quality_doc_coverage(
+        &self,
+        args: &EvaluateQualityArgs,
+        timer: &MetaBuilder,
+    ) -> anyhow::Result<Value> {
+        let doc_store =
+            require_store!(doc: self, &args.source_id, args.repo_path.as_deref(), timer);
+
+        let mut symbol_ids: Vec<String> = args
+            .refs
+            .as_ref()
+            .map(|refs| {
+                refs.iter()
+                    .filter(|r| r.kind == "symbol")
+                    .filter_map(|r| r.stable_id.clone().or(r.id.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        symbol_ids.truncate(200);
+        if symbol_ids.is_empty() {
+            return self.error_response(
+                timer,
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "INVALID_REQUEST",
+                    message: "doc_coverage requires at least one `refs[*]` entry with kind=symbol."
+                        .to_string(),
+                    detail: json!({
+                        "analysis": "doc_coverage",
+                        "hint": "Pass symbol refs resolved from search_catalog or inspect_structure."
+                    }),
+                },
+            );
+        }
+        let data = doc_coverage_payload(&doc_store, &symbol_ids)?;
+        self.success_response(timer, data)
+    }
+}
 
 pub fn doc_coverage_payload(doc_store: &DocStore, symbol_ids: &[String]) -> anyhow::Result<Value> {
     if symbol_ids.is_empty() {
