@@ -66,6 +66,46 @@ impl Language for Python {
     fn branch_keywords(&self) -> &'static [&'static str] {
         &["if", "elif", "for", "while", "except", "and", "or"]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "__init__",
+            "__new__",
+            "__repr__",
+            "__str__",
+            "__eq__",
+            "__ne__",
+            "__lt__",
+            "__le__",
+            "__gt__",
+            "__ge__",
+            "__hash__",
+            "__len__",
+            "__iter__",
+            "__next__",
+            "__enter__",
+            "__exit__",
+            "__aenter__",
+            "__aexit__",
+            "__call__",
+            "__getitem__",
+            "__setitem__",
+            "__delitem__",
+            "__contains__",
+            "__add__",
+            "__sub__",
+            "__mul__",
+            "__div__",
+            "__truediv__",
+            "__mod__",
+            "__bool__",
+            "__format__",
+            "__getattr__",
+            "__setattr__",
+            "setUp",
+            "tearDown",
+            "main",
+        ]
+    }
     fn branch_operators(&self) -> &'static [&'static str] {
         &[]
     }

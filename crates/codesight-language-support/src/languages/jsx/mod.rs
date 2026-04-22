@@ -61,4 +61,7 @@ impl Language for Jsx {
     fn measured_type_density(&self, source: &str) -> Option<f64> {
         measure_colon_after_name(source, self, false, |_| false)
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        crate::languages::javascript::JavaScript.idiomatic_symbol_names()
+    }
 }

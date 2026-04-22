@@ -6,8 +6,9 @@ use std::collections::{HashMap, HashSet};
 
 use codesight_language_support::family::LanguageFamily;
 use codesight_language_support::{
-    fallback_type_baseline_for_path, has_restricted_visibility, is_test_file,
-    language_family_for_path, max_nesting_depth_for_path, measured_type_density_for_path,
+    fallback_type_baseline_for_path, has_restricted_visibility,
+    idiomatic_symbol_names_for_path, is_test_file, language_family_for_path,
+    max_nesting_depth_for_path, measured_type_density_for_path,
 };
 use codesight_storage::storage::AnalysisSymbol;
 
@@ -102,6 +103,18 @@ pub(super) fn build_function_facts<'a>(
         .collect()
 }
 
+/// Whether `sym.name` is idiomatic for the language that owns `sym.file_path`.
+/// Idiomatic names (Rust `new`, Python `__init__`, Java `equals`, Go `String`,
+/// …) repeat across files by language convention and a competent reader
+/// disambiguates them by owning type — they should not count toward the
+/// `symbol_uniqueness` collision tally. Language-owned list lives on the
+/// `Language` trait (L0.75); this function is the L1 dispatch.
+fn is_idiomatic_for_language(sym: &AnalysisSymbol) -> bool {
+    idiomatic_symbol_names_for_path(&sym.file_path)
+        .iter()
+        .any(|idiom| *idiom == sym.name.as_str())
+}
+
 pub(super) fn compute_symbol_uniqueness(
     all_symbols: &[AnalysisSymbol],
     fan_in: &HashMap<String, usize>,
@@ -111,6 +124,7 @@ pub(super) fn compute_symbol_uniqueness(
         .iter()
         .filter(|sym| is_navigability_symbol(&sym.kind))
         .filter(|sym| !is_test_symbol(sym))
+        .filter(|sym| !is_idiomatic_for_language(sym))
         .collect();
     if important.is_empty() {
         return 1.0;
@@ -364,4 +378,81 @@ fn measure_type_annotation(sym: &AnalysisSymbol) -> (f64, TypeAnnotationMethod) 
         fallback_type_baseline_for_path(&sym.file_path).unwrap_or(0.0),
         TypeAnnotationMethod::BaselineFallback,
     )
+}
+
+#[cfg(test)]
+mod idiomatic_exemption_tests {
+    use super::*;
+
+    fn sym(file: &str, name: &str) -> AnalysisSymbol {
+        AnalysisSymbol {
+            id: format!("{file}::{name}#function"),
+            kind: "function".into(),
+            name: name.into(),
+            file_path: file.into(),
+            start_line: 1,
+            end_line: 5,
+            source_text: String::new(),
+        }
+    }
+
+    #[test]
+    fn rust_fn_new_collision_does_not_drag_uniqueness_down() {
+        // 50 files each with a `fn new`. Without the exemption, variants=50
+        // for every "new" symbol and the score collapses to near 0.
+        let syms: Vec<AnalysisSymbol> = (0..50)
+            .map(|i| sym(&format!("src/mod_{i}.rs"), "new"))
+            .collect();
+        let score = compute_symbol_uniqueness(&syms, &HashMap::new(), &HashMap::new());
+        assert!(
+            score >= 0.99,
+            "expected ~1.0 when every symbol is idiomatic Rust `new`, got {score}"
+        );
+    }
+
+    #[test]
+    fn python_dunder_collisions_are_exempt() {
+        let syms: Vec<AnalysisSymbol> = (0..40)
+            .map(|i| sym(&format!("pkg/mod_{i}.py"), "__init__"))
+            .collect();
+        let score = compute_symbol_uniqueness(&syms, &HashMap::new(), &HashMap::new());
+        assert!(
+            score >= 0.99,
+            "expected ~1.0 when every symbol is Python `__init__`, got {score}"
+        );
+    }
+
+    #[test]
+    fn non_idiomatic_collisions_still_penalise() {
+        // 20 Rust files each defining `fn frobnicate` — not idiomatic.
+        let syms: Vec<AnalysisSymbol> = (0..20)
+            .map(|i| sym(&format!("src/mod_{i}.rs"), "frobnicate"))
+            .collect();
+        let score = compute_symbol_uniqueness(&syms, &HashMap::new(), &HashMap::new());
+        assert!(
+            score < 0.1,
+            "expected heavy penalty for 20-way collision on non-idiomatic name, got {score}"
+        );
+    }
+
+    #[test]
+    fn exemption_is_per_language_not_global() {
+        // `initialize` is idiomatic Ruby, not Rust. A Rust file with
+        // `fn initialize` should not get the free pass Ruby gets.
+        let syms = vec![
+            sym("lib/a.rb", "initialize"),
+            sym("lib/b.rb", "initialize"),
+            sym("lib/c.rb", "initialize"),
+            sym("src/x.rs", "initialize"),
+            sym("src/y.rs", "initialize"),
+            sym("src/z.rs", "initialize"),
+        ];
+        // The Ruby trio is exempt; the Rust trio still collides 3-way.
+        // Variants-minus-1 = 2 on three remaining files; score = 1/(1+2)=0.33.
+        let score = compute_symbol_uniqueness(&syms, &HashMap::new(), &HashMap::new());
+        assert!(
+            (0.3..0.4).contains(&score),
+            "expected Rust-only collision around 0.33, got {score}"
+        );
+    }
 }

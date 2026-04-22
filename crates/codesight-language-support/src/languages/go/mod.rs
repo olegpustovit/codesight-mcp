@@ -136,6 +136,35 @@ impl Language for Go {
         // arms use `case`.
         &["if", "else if", "for", "switch", "case", "select"]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        // Constructors `NewXxx` collapse to exact `New` only; method
+        // names like `String` / `Error` / `ServeHTTP` satisfy stdlib
+        // interfaces and repeat across types by design.
+        &[
+            "New",
+            "String",
+            "Error",
+            "ServeHTTP",
+            "Read",
+            "Write",
+            "Close",
+            "Len",
+            "Less",
+            "Swap",
+            "MarshalJSON",
+            "UnmarshalJSON",
+            "MarshalText",
+            "UnmarshalText",
+            "MarshalBinary",
+            "UnmarshalBinary",
+            "Format",
+            "Scan",
+            "Value",
+            "Reset",
+            "init",
+            "main",
+        ]
+    }
     fn branch_operators(&self) -> &'static [&'static str] {
         &["&&", "||"]
     }

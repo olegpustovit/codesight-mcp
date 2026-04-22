@@ -52,6 +52,38 @@ impl Language for Ruby {
             "rescue", "and", "or",
         ]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "initialize",
+            "to_s",
+            "to_str",
+            "to_a",
+            "to_h",
+            "to_i",
+            "to_f",
+            "to_sym",
+            "inspect",
+            "hash",
+            "eql?",
+            "==",
+            "<=>",
+            "each",
+            "each_with_index",
+            "map",
+            "select",
+            "reject",
+            "call",
+            "new",
+            "setup",
+            "teardown",
+            "before",
+            "after",
+            "describe",
+            "context",
+            "it",
+            "let",
+        ]
+    }
     fn branch_operators(&self) -> &'static [&'static str] {
         &["&&", "||"]
     }

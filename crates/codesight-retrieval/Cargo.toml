@@ -10,6 +10,7 @@ codesight-core = { path = "../codesight-core" }
 codesight-storage = { path = "../codesight-storage" }
 dirs = "6.0.0"
 model2vec-rs = "0.1"
+phf = { version = "0.11", features = ["macros"] }
 serde_json = "1"
 serde_yaml = "0.9"
 tracing = "0.1"

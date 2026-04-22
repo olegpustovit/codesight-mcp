@@ -90,6 +90,40 @@ impl Language for Cpp {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "main",
+            "operator=",
+            "operator==",
+            "operator!=",
+            "operator<",
+            "operator<=",
+            "operator>",
+            "operator>=",
+            "operator+",
+            "operator-",
+            "operator*",
+            "operator/",
+            "operator[]",
+            "operator()",
+            "begin",
+            "end",
+            "cbegin",
+            "cend",
+            "size",
+            "empty",
+            "clear",
+            "push_back",
+            "pop_back",
+            "front",
+            "back",
+            "insert",
+            "erase",
+            "find",
+            "at",
+            "swap",
+        ]
+    }
 }
 
 /// Rewrite emitted symbols' language from C++ to C when the file is a `.h`

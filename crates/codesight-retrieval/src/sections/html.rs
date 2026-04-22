@@ -182,79 +182,77 @@ fn decode_html_entities(s: &str) -> String {
     result
 }
 
+static NAMED_ENTITIES: phf::Map<&'static str, char> = phf::phf_map! {
+    "amp" => '&',
+    "lt" => '<',
+    "gt" => '>',
+    "quot" => '"',
+    "apos" => '\'',
+    "nbsp" => '\u{00A0}',
+    "eacute" => '\u{00E9}',
+    "Eacute" => '\u{00C9}',
+    "mdash" => '\u{2014}',
+    "ndash" => '\u{2013}',
+    "lsquo" => '\u{2018}',
+    "rsquo" => '\u{2019}',
+    "ldquo" => '\u{201C}',
+    "rdquo" => '\u{201D}',
+    "copy" => '\u{00A9}',
+    "reg" => '\u{00AE}',
+    "trade" => '\u{2122}',
+    "hellip" => '\u{2026}',
+    "bull" => '\u{2022}',
+    "middot" => '\u{00B7}',
+    "laquo" => '\u{00AB}',
+    "raquo" => '\u{00BB}',
+    "frac12" => '\u{00BD}',
+    "frac14" => '\u{00BC}',
+    "frac34" => '\u{00BE}',
+    "deg" => '\u{00B0}',
+    "micro" => '\u{00B5}',
+    "para" => '\u{00B6}',
+    "sect" => '\u{00A7}',
+    "uml" => '\u{00A8}',
+    "agrave" => '\u{00E0}',
+    "egrave" => '\u{00E8}',
+    "igrave" => '\u{00EC}',
+    "ograve" => '\u{00F2}',
+    "ugrave" => '\u{00F9}',
+    "aacute" => '\u{00E1}',
+    "iacute" => '\u{00ED}',
+    "oacute" => '\u{00F3}',
+    "uacute" => '\u{00FA}',
+    "acirc" => '\u{00E2}',
+    "ecirc" => '\u{00EA}',
+    "icirc" => '\u{00EE}',
+    "ocirc" => '\u{00F4}',
+    "ucirc" => '\u{00FB}',
+    "atilde" => '\u{00E3}',
+    "ntilde" => '\u{00F1}',
+    "otilde" => '\u{00F5}',
+    "auml" => '\u{00E4}',
+    "euml" => '\u{00EB}',
+    "iuml" => '\u{00EF}',
+    "ouml" => '\u{00F6}',
+    "uuml" => '\u{00FC}',
+    "ccedil" => '\u{00E7}',
+    "szlig" => '\u{00DF}',
+};
+
 fn decode_entity(entity: &str) -> Option<char> {
-    // Numeric references
     if let Some(num_str) = entity.strip_prefix('#') {
-        if let Some(hex_str) = num_str
+        let (radix, digits) = match num_str
             .strip_prefix('x')
             .or_else(|| num_str.strip_prefix('X'))
         {
-            u32::from_str_radix(hex_str, 16)
-                .ok()
-                .and_then(char::from_u32)
-        } else {
-            num_str.parse::<u32>().ok().and_then(char::from_u32)
-        }
-    } else {
-        // Named references (common ones)
-        match entity {
-            "amp" => Some('&'),
-            "lt" => Some('<'),
-            "gt" => Some('>'),
-            "quot" => Some('"'),
-            "apos" => Some('\''),
-            "nbsp" => Some('\u{00A0}'),
-            "eacute" => Some('\u{00E9}'),
-            "Eacute" => Some('\u{00C9}'),
-            "mdash" => Some('\u{2014}'),
-            "ndash" => Some('\u{2013}'),
-            "lsquo" => Some('\u{2018}'),
-            "rsquo" => Some('\u{2019}'),
-            "ldquo" => Some('\u{201C}'),
-            "rdquo" => Some('\u{201D}'),
-            "copy" => Some('\u{00A9}'),
-            "reg" => Some('\u{00AE}'),
-            "trade" => Some('\u{2122}'),
-            "hellip" => Some('\u{2026}'),
-            "bull" => Some('\u{2022}'),
-            "middot" => Some('\u{00B7}'),
-            "laquo" => Some('\u{00AB}'),
-            "raquo" => Some('\u{00BB}'),
-            "frac12" => Some('\u{00BD}'),
-            "frac14" => Some('\u{00BC}'),
-            "frac34" => Some('\u{00BE}'),
-            "deg" => Some('\u{00B0}'),
-            "micro" => Some('\u{00B5}'),
-            "para" => Some('\u{00B6}'),
-            "sect" => Some('\u{00A7}'),
-            "uml" => Some('\u{00A8}'),
-            "agrave" => Some('\u{00E0}'),
-            "egrave" => Some('\u{00E8}'),
-            "igrave" => Some('\u{00EC}'),
-            "ograve" => Some('\u{00F2}'),
-            "ugrave" => Some('\u{00F9}'),
-            "aacute" => Some('\u{00E1}'),
-            "iacute" => Some('\u{00ED}'),
-            "oacute" => Some('\u{00F3}'),
-            "uacute" => Some('\u{00FA}'),
-            "acirc" => Some('\u{00E2}'),
-            "ecirc" => Some('\u{00EA}'),
-            "icirc" => Some('\u{00EE}'),
-            "ocirc" => Some('\u{00F4}'),
-            "ucirc" => Some('\u{00FB}'),
-            "atilde" => Some('\u{00E3}'),
-            "ntilde" => Some('\u{00F1}'),
-            "otilde" => Some('\u{00F5}'),
-            "auml" => Some('\u{00E4}'),
-            "euml" => Some('\u{00EB}'),
-            "iuml" => Some('\u{00EF}'),
-            "ouml" => Some('\u{00F6}'),
-            "uuml" => Some('\u{00FC}'),
-            "ccedil" => Some('\u{00E7}'),
-            "szlig" => Some('\u{00DF}'),
-            _ => None,
-        }
+            Some(hex) => (16, hex),
+            None => (10, num_str),
+        };
+        return u32::from_str_radix(digits, radix)
+            .ok()
+            .and_then(char::from_u32);
     }
+    NAMED_ENTITIES.get(entity).copied()
 }
 
 /// Extract sections from an HTML document by converting to markdown first.

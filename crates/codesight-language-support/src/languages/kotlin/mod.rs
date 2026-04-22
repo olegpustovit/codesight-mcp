@@ -73,6 +73,37 @@ impl Language for Kotlin {
     fn branch_keywords(&self) -> &'static [&'static str] {
         &["if", "else if", "for", "while", "do", "when", "catch"]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "equals",
+            "hashCode",
+            "toString",
+            "compareTo",
+            "invoke",
+            "iterator",
+            "hasNext",
+            "next",
+            "component1",
+            "component2",
+            "component3",
+            "copy",
+            "plus",
+            "minus",
+            "times",
+            "div",
+            "get",
+            "set",
+            "contains",
+            "close",
+            "main",
+            "onCreate",
+            "onDestroy",
+            "onStart",
+            "onStop",
+            "onResume",
+            "onPause",
+        ]
+    }
     fn branch_operators(&self) -> &'static [&'static str] {
         &["&&", "||"]
     }

@@ -73,6 +73,43 @@ impl Language for TypeScript {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "constructor",
+            "toString",
+            "valueOf",
+            "toJSON",
+            "then",
+            "catch",
+            "finally",
+            "render",
+            "componentDidMount",
+            "componentWillUnmount",
+            "componentDidUpdate",
+            "shouldComponentUpdate",
+            "getDerivedStateFromProps",
+            "handleClick",
+            "handleChange",
+            "handleSubmit",
+            "default",
+            "index",
+            "main",
+            "init",
+            "setup",
+            "teardown",
+            "beforeEach",
+            "afterEach",
+            "beforeAll",
+            "afterAll",
+            "describe",
+            "it",
+            "test",
+            "ngOnInit",
+            "ngOnDestroy",
+            "ngOnChanges",
+            "ngAfterViewInit",
+        ]
+    }
     fn declaration_line_prefixes(&self) -> &'static [&'static str] {
         &[
             "import ",

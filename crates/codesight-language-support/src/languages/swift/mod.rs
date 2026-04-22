@@ -70,4 +70,24 @@ impl Language for Swift {
         }
         1.0
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "init",
+            "deinit",
+            "description",
+            "hash",
+            "copy",
+            "main",
+            "viewDidLoad",
+            "viewWillAppear",
+            "viewDidAppear",
+            "viewWillDisappear",
+            "viewDidDisappear",
+            "body",
+            "makeUIView",
+            "updateUIView",
+            "makeUIViewController",
+            "updateUIViewController",
+        ]
+    }
 }

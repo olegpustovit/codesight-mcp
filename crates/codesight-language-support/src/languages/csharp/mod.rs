@@ -100,6 +100,32 @@ impl Language for CSharp {
             "if", "else if", "for", "foreach", "while", "do", "switch", "case", "catch",
         ]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "Equals",
+            "GetHashCode",
+            "ToString",
+            "CompareTo",
+            "Dispose",
+            "Finalize",
+            "Clone",
+            "GetEnumerator",
+            "MoveNext",
+            "Reset",
+            "Current",
+            "Main",
+            "Configure",
+            "ConfigureServices",
+            "OnGet",
+            "OnPost",
+            "OnPut",
+            "OnDelete",
+            "Invoke",
+            "InvokeAsync",
+            "ExecuteAsync",
+            "HandleAsync",
+        ]
+    }
     fn branch_operators(&self) -> &'static [&'static str] {
         &["&&", "||"]
     }

@@ -91,6 +91,51 @@ impl Language for Rust {
         // complexity via the operator sweep.
         &["if", "else if", "for", "while", "loop", "match"]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "new",
+            "default",
+            "from",
+            "into",
+            "try_from",
+            "try_into",
+            "as_ref",
+            "as_mut",
+            "as_str",
+            "as_bytes",
+            "clone",
+            "eq",
+            "ne",
+            "cmp",
+            "partial_cmp",
+            "hash",
+            "fmt",
+            "drop",
+            "deref",
+            "deref_mut",
+            "len",
+            "is_empty",
+            "iter",
+            "iter_mut",
+            "into_iter",
+            "next",
+            "build",
+            "builder",
+            "push",
+            "pop",
+            "get",
+            "get_mut",
+            "insert",
+            "remove",
+            "contains",
+            "index",
+            "index_mut",
+            "borrow",
+            "borrow_mut",
+            "to_string",
+            "to_owned",
+        ]
+    }
     fn branch_operators(&self) -> &'static [&'static str] {
         &["&&", "||", "=>"]
     }

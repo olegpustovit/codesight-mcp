@@ -79,4 +79,7 @@ impl Language for Tsx {
     fn type_token_score(&self, token: &str) -> f64 {
         ts_type_token_score(token)
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        crate::languages::typescript::TypeScript.idiomatic_symbol_names()
+    }
 }

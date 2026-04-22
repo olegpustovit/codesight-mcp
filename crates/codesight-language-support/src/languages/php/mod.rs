@@ -119,6 +119,44 @@ impl Language for Php {
     fn pruned_dirs(&self) -> &'static [&'static str] {
         &["vendor"]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "__construct",
+            "__destruct",
+            "__toString",
+            "__invoke",
+            "__get",
+            "__set",
+            "__isset",
+            "__unset",
+            "__call",
+            "__callStatic",
+            "__clone",
+            "__sleep",
+            "__wakeup",
+            "__serialize",
+            "__unserialize",
+            "jsonSerialize",
+            "offsetGet",
+            "offsetSet",
+            "offsetExists",
+            "offsetUnset",
+            "count",
+            "current",
+            "key",
+            "next",
+            "rewind",
+            "valid",
+            "getIterator",
+            "handle",
+            "up",
+            "down",
+            "setUp",
+            "tearDown",
+            "boot",
+            "register",
+        ]
+    }
     fn simple_framework_profile(
         &self,
         root: &Path,

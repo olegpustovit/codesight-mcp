@@ -76,6 +76,37 @@ impl Language for Java {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "equals",
+            "hashCode",
+            "toString",
+            "compareTo",
+            "clone",
+            "finalize",
+            "iterator",
+            "hasNext",
+            "next",
+            "remove",
+            "size",
+            "isEmpty",
+            "get",
+            "set",
+            "put",
+            "add",
+            "contains",
+            "run",
+            "call",
+            "close",
+            "main",
+            "builder",
+            "build",
+            "of",
+            "valueOf",
+            "getInstance",
+            "newInstance",
+        ]
+    }
     fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
         // JUnit 4/5 convention: `test…` methods plus `@Test`-annotated
         // ones. We only see leaf names, so match the prefix.

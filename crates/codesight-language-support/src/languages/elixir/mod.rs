@@ -47,4 +47,27 @@ impl Language for Elixir {
     fn fallback_type_baseline(&self) -> Option<f64> {
         Some(0.3)
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        // OTP-pattern callbacks and protocol implementations repeat
+        // across every GenServer / GenStateMachine / Supervisor in a
+        // project by design.
+        &[
+            "start_link",
+            "start",
+            "init",
+            "handle_call",
+            "handle_cast",
+            "handle_info",
+            "handle_continue",
+            "handle_event",
+            "terminate",
+            "code_change",
+            "child_spec",
+            "new",
+            "call",
+            "cast",
+            "reply",
+            "stop",
+        ]
+    }
 }

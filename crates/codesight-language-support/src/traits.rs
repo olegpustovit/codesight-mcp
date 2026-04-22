@@ -535,4 +535,90 @@ pub trait Language: Send + Sync {
     fn pruned_dirs(&self) -> &'static [&'static str] {
         &[]
     }
+
+    /// Method / function names whose repetition across files is idiomatic
+    /// for the language and should not be scored as a uniqueness collision
+    /// by `symbol_uniqueness`. Default: empty — every language opts in
+    /// explicitly.
+    ///
+    /// Examples: Rust `new`/`default`/`from`, Go `New`/`String`/`Error`,
+    /// Python `__init__`/`__repr__`, Java `equals`/`hashCode`/`toString`,
+    /// JS/TS `constructor`/`render`, Ruby `initialize`/`to_s`,
+    /// PHP `__construct`, Elixir `start_link`/`handle_call`.
+    ///
+    /// A reader of the language expects dozens of these per repo and
+    /// disambiguates by owning type, not by name. Counting every `fn new`
+    /// as an ambiguity would cap Rust codebases near 0.2 by construction.
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[]
+    }
+}
+
+#[cfg(test)]
+mod default_body_tests {
+    use super::*;
+    use crate::builtin_registry;
+    use crate::fallback::FALLBACK_LANGUAGE;
+
+    #[test]
+    fn function_length_warn_covers_every_non_markup_family() {
+        for lang in builtin_registry().all() {
+            let expected = match lang.family() {
+                LanguageFamily::BracedStatic => Some(75),
+                LanguageFamily::ScriptedDynamic => Some(40),
+                LanguageFamily::FunctionalExpression => Some(30),
+                LanguageFamily::DeclarativeMarkup | LanguageFamily::Unknown => None,
+            };
+            assert_eq!(
+                lang.function_length_warn(),
+                expected,
+                "{} mismatched function_length_warn",
+                lang.language_name()
+            );
+        }
+    }
+
+    #[test]
+    fn fallback_type_baseline_returns_valid_range() {
+        for lang in builtin_registry().all() {
+            match lang.fallback_type_baseline() {
+                Some(v) => assert!(
+                    (0.0..=1.0).contains(&v),
+                    "{} baseline {v} outside [0,1]",
+                    lang.language_name()
+                ),
+                None => assert!(matches!(
+                    lang.family(),
+                    LanguageFamily::DeclarativeMarkup | LanguageFamily::Unknown
+                )),
+            }
+        }
+    }
+
+    #[test]
+    fn branch_keywords_default_has_common_tokens() {
+        let kws = (&FALLBACK_LANGUAGE as &dyn Language).branch_keywords();
+        for expected in ["if", "else if", "for", "while", "case", "and", "or"] {
+            assert!(kws.contains(&expected), "default missing {expected}");
+        }
+    }
+
+    #[test]
+    fn normalise_body_for_dedup_strips_blanks_and_line_comments() {
+        let lang: &dyn Language = &FALLBACK_LANGUAGE;
+        let src = "fn a() {\n  // gone\n\n  return 1;\n}\n";
+        let out = lang.normalise_body_for_dedup(src);
+        let out_str = std::str::from_utf8(&out).unwrap();
+        assert!(!out_str.contains("// gone"));
+        assert!(!out_str.contains("\n\n"));
+        assert!(out_str.contains("return 1;"));
+    }
+
+    #[test]
+    fn normalise_body_for_dedup_is_deterministic_across_whitespace() {
+        let lang: &dyn Language = &FALLBACK_LANGUAGE;
+        let a = lang.normalise_body_for_dedup("x = 1\n\ny = 2\n");
+        let b = lang.normalise_body_for_dedup("  x = 1\ny = 2");
+        assert_eq!(a, b);
+    }
 }

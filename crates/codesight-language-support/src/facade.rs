@@ -67,6 +67,15 @@ pub fn has_restricted_visibility(path: &str, source_text: &str, name: &str) -> b
         .unwrap_or(false)
 }
 
+/// Names the owning language considers idiomatic method / function names
+/// that should not be scored as collisions by `symbol_uniqueness`. Returns
+/// an empty slice when the path does not resolve to a registered language.
+pub fn idiomatic_symbol_names_for_path(path: &str) -> &'static [&'static str] {
+    lookup_for_path(path)
+        .map(|lang| lang.idiomatic_symbol_names())
+        .unwrap_or(&[])
+}
+
 /// Class-hierarchy advisory note for `path`, or `None` when the language
 /// either models class inheritance normally (C++/Java/Python) or is not
 /// registered.

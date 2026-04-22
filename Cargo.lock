@@ -515,6 +515,7 @@ dependencies = [
  "codesight-storage",
  "dirs",
  "model2vec-rs",
+ "phf",
  "serde_json",
  "serde_yaml",
  "tracing",

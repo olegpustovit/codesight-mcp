@@ -124,6 +124,41 @@ impl Language for JavaScript {
     fn declaration_line_prefixes(&self) -> &'static [&'static str] {
         &["import ", "export ", "function ", "class "]
     }
+    fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
+        &[
+            "constructor",
+            "toString",
+            "valueOf",
+            "toJSON",
+            "then",
+            "catch",
+            "finally",
+            "render",
+            "componentDidMount",
+            "componentWillUnmount",
+            "componentDidUpdate",
+            "shouldComponentUpdate",
+            "getDerivedStateFromProps",
+            "handleClick",
+            "handleChange",
+            "handleSubmit",
+            "getInitialState",
+            "getDefaultProps",
+            "default",
+            "index",
+            "main",
+            "init",
+            "setup",
+            "teardown",
+            "beforeEach",
+            "afterEach",
+            "beforeAll",
+            "afterAll",
+            "describe",
+            "it",
+            "test",
+        ]
+    }
     fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
         let name = id.leaf_name().to_ascii_lowercase();
         name.starts_with("test") || name.ends_with("spec")
