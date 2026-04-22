@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
-use crate::service::agent_v1::util_graph::{
+use crate::service::agent_v1::util::graph::{
     extract_symbol_names_from_content, git_head_sha, git_show_file,
 };
 use crate::service::helpers::{ToolError, ToolErrorCategory};

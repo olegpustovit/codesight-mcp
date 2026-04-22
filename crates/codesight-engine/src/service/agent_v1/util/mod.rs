@@ -1,5 +1,6 @@
 //! Shared helpers for agent-v1 handlers, split by intent.
 
+pub(in crate::service) mod graph;
 mod json_shape;
 mod neighbors;
 mod scope;

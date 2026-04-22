@@ -71,4 +71,23 @@ impl Language for SqlSupport {
             &["--"],
         )
     }
+
+    fn normalise_body_for_dedup(&self, source: &str) -> Vec<u8> {
+        // SQL is case-insensitive for keywords and identifiers — two queries
+        // that differ only in keyword case must hash to the same value.
+        // Apply the generic normalization (strip `--` line comments, trim,
+        // collapse blanks) over a lower-cased copy of the source.
+        let mut out = String::with_capacity(source.len());
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("--") {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&trimmed.to_ascii_lowercase());
+        }
+        out.into_bytes()
+    }
 }

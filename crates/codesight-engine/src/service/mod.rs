@@ -1,8 +1,8 @@
 pub mod agent_v1;
 mod args;
 mod code_tools;
-pub(crate) mod cross_repo_map;
 mod doc_tools;
+mod envelope;
 pub(crate) mod file_watcher;
 pub(crate) mod helpers;
 pub mod savings;
@@ -11,7 +11,8 @@ use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
-use serde_json::{Map, Value, json};
+use envelope::{compact_meta, extract_read_content_paths, panic_message, requested_bool, requested_string};
+use serde_json::{Value, json};
 use tracing::instrument;
 
 use codesight_analysis::complexity::cyclomatic_complexity_for_path;
@@ -57,110 +58,6 @@ const MAX_QUERY_LEN: usize = 1000;
 
 use crate::server_support::agent_readiness_cache;
 
-fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = payload.downcast_ref::<&'static str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "non-string panic payload".to_string()
-    }
-}
-
-fn requested_bool(arguments: &Value, key: &str) -> bool {
-    match arguments.get(key) {
-        Some(Value::Bool(value)) => *value,
-        Some(Value::String(value)) => value.eq_ignore_ascii_case("true"),
-        _ => false,
-    }
-}
-
-fn requested_string<'a>(arguments: &'a Value, key: &str) -> Option<&'a str> {
-    arguments
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-}
-
-/// Collect file paths whose content was returned by a successful
-/// `read_content` call. Walks the `data.items[].ref.path` shape.
-fn extract_read_content_paths(response: &Value) -> Vec<String> {
-    let Some(items) = response
-        .pointer("/data/items")
-        .and_then(Value::as_array)
-    else {
-        return Vec::new();
-    };
-    let mut out: Vec<String> = Vec::new();
-    for item in items {
-        if let Some(path) = item
-            .pointer("/ref/path")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-        {
-            out.push(path.to_string());
-        }
-    }
-    out
-}
-
-fn compact_meta(meta: &mut Map<String, Value>) {
-    let default_unit_kinds = json!({
-        "symbol": true,
-        "section": false,
-        "file": false,
-    });
-    let mut minimal = Map::new();
-    for key in ["timing_ms", "tokens_saved", "error_category"] {
-        if let Some(value) = meta.get(key).cloned() {
-            minimal.insert(key.to_string(), value);
-        }
-    }
-    for key in [
-        "source",
-        "methodology",
-        "confidence",
-        "confidence_level",
-        "suggestion",
-        "next_step_hint",
-    ] {
-        if let Some(value) = meta.get(key).cloned() {
-            minimal.insert(key.to_string(), value);
-        }
-    }
-    for key in ["fuzzy_applied", "semantic_applied", "truncated", "domain_explicit"] {
-        if meta.get(key).and_then(Value::as_bool) == Some(true)
-            && let Some(value) = meta.get(key).cloned()
-        {
-            minimal.insert(key.to_string(), value);
-        }
-    }
-    if let Some(value) = meta.get("query_mode_effective").cloned()
-        && value != Value::String("keyword".to_string())
-    {
-        minimal.insert("query_mode_effective".to_string(), value);
-    }
-    if let Some(value) = meta.get("domain_effective").cloned()
-        && value != Value::String("code".to_string())
-    {
-        minimal.insert("domain_effective".to_string(), value);
-    }
-    if let Some(value) = meta.get("truncated_by").cloned()
-        && value
-            .as_array()
-            .map(|items| !items.is_empty())
-            .unwrap_or(false)
-    {
-        minimal.insert("truncated_by".to_string(), value);
-    }
-    if let Some(value) = meta.get("unit_kinds_effective").cloned()
-        && value != default_unit_kinds
-    {
-        minimal.insert("unit_kinds_effective".to_string(), value);
-    }
-    *meta = minimal;
-}
-
 pub struct CodeService {
     config: AppConfig,
     ledger: SavingsLedger,
@@ -169,10 +66,9 @@ pub struct CodeService {
     watchers: file_watcher::WatcherManager,
     embedder: codesight_retrieval::embedder::EmbedderSlot,
     /// Process-wide per-source snapshot cache used by cross-source paths
-    /// (`get_cross_repo_map`, cross-repo `inspect_graph`, `catalog_sources`).
-    /// Each loop body that used to reopen an SQLite handle and run a handful
-    /// of cheap queries now takes a `RwLock::read` + fingerprint compare on
-    /// the warm path.
+    /// (cross-repo `inspect_graph`, `catalog_sources`). Each loop body that
+    /// used to reopen an SQLite handle and run a handful of cheap queries
+    /// now takes a `RwLock::read` + fingerprint compare on the warm path.
     source_registry: Arc<crate::server_support::source_registry::SourceRegistry>,
     /// Weak back-reference installed by [`CodeService::install_arc_handle`].
     /// Populated on the production path (Arc-wrapped server, watchers, hooks)

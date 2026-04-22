@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use codesight_language_support::is_non_code_reference_path;
+use codesight_language_support::text_match::ci_word_match;
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
@@ -7,28 +9,6 @@ use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
-
-fn ci_word_match(body: &str, name: &str) -> bool {
-    let body_lc = body.to_lowercase();
-    let name_lc = name.to_lowercase();
-    codesight_analysis::graph::word_match(&body_lc, &name_lc)
-}
-
-/// File extensions treated as data/docs — hits in these almost never match
-/// "who references fn X". `include_non_code=true` opts back in.
-const NON_CODE_EXTENSIONS: &[&str] = &[
-    "json", "yaml", "yml", "toml", "xml", "md", "mdx", "csv", "tsv", "lock",
-];
-
-fn is_non_code_path(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    let Some(dot) = lower.rfind('.') else {
-        return false;
-    };
-    NON_CODE_EXTENSIONS
-        .iter()
-        .any(|ext| &lower[dot + 1..] == *ext)
-}
 
 struct RefFilter<'a> {
     scope: Option<&'a str>,
@@ -54,7 +34,7 @@ impl<'a> RefFilter<'a> {
     }
 
     fn admits(&self, path: &str) -> bool {
-        if !self.include_non_code && is_non_code_path(path) {
+        if !self.include_non_code && is_non_code_reference_path(path) {
             return false;
         }
         if let Some(prefix) = self.scope
@@ -138,7 +118,7 @@ impl CodeService {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
 
         if let Some(identifiers) = &args.identifiers {
-            return self.find_references_batch(&store, identifiers, args, ci_word_match);
+            return self.find_references_batch(&store, identifiers, args);
         }
 
         let Some(identifier) = args.identifier.as_deref() else {
@@ -153,7 +133,7 @@ impl CodeService {
             );
         };
 
-        self.find_references_single(&store, identifier, args, ci_word_match)
+        self.find_references_single(&store, identifier, args)
     }
 
     fn find_references_batch(
@@ -161,7 +141,6 @@ impl CodeService {
         store: &codesight_storage::storage::IndexStore,
         identifiers: &[String],
         args: &InspectGraphArgs,
-        ci_word_match: fn(&str, &str) -> bool,
     ) -> anyhow::Result<Value> {
         let sym_infos = store.all_symbols_with_source()?;
         let all_contents = store.all_file_contents().unwrap_or_default();
@@ -202,7 +181,7 @@ impl CodeService {
             .iter()
             .filter_map(|r| r.get("reference_count")?.as_u64())
             .sum::<u64>() as usize;
-        self.success_response_with_meta_extra(
+        self.success_response_with_warnings(
             &MetaBuilder::new(0),
             json!({
                 "graph": "find_references",
@@ -210,10 +189,6 @@ impl CodeService {
                 "results": results,
             }),
             Vec::new(),
-            [(
-                "tip".to_string(),
-                json!("Use check_references for import-only checks."),
-            )],
         )
     }
 
@@ -222,7 +197,6 @@ impl CodeService {
         store: &codesight_storage::storage::IndexStore,
         identifier: &str,
         args: &InspectGraphArgs,
-        ci_word_match: fn(&str, &str) -> bool,
     ) -> anyhow::Result<Value> {
         let sym_infos = store.all_symbols_with_source()?;
         let all_contents = store.all_file_contents().unwrap_or_default();
@@ -290,7 +264,7 @@ impl CodeService {
                 .map(|(file, callers)| json!({ "file": file, "calling_symbols": callers }))
                 .collect();
             let total_count = refs.len();
-            return self.success_response_with_meta_extra(
+            return self.success_response_with_warnings(
                 &MetaBuilder::new(0),
                 json!({
                     "graph": "find_references",
@@ -300,15 +274,11 @@ impl CodeService {
                     "call_chain": chain,
                 }),
                 Vec::new(),
-                [(
-                    "tip".to_string(),
-                    json!("Use check_references for import-only checks."),
-                )],
             );
         }
 
         let total_count = refs.len();
-        self.success_response_with_meta_extra(
+        self.success_response_with_warnings(
             &MetaBuilder::new(0),
             json!({
                 "graph": "find_references",
@@ -317,10 +287,6 @@ impl CodeService {
                 "references": refs,
             }),
             Vec::new(),
-            [(
-                "tip".to_string(),
-                json!("Use check_references for import-only checks."),
-            )],
         )
     }
 }
@@ -344,12 +310,12 @@ mod tests {
 
     #[test]
     fn non_code_path_classifier() {
-        assert!(is_non_code_path("scripts/stress/x.json"));
-        assert!(is_non_code_path("docs/README.md"));
-        assert!(is_non_code_path("Cargo.lock"));
-        assert!(!is_non_code_path("src/main.rs"));
-        assert!(!is_non_code_path("foo.py"));
-        assert!(!is_non_code_path("no-extension"));
+        assert!(is_non_code_reference_path("scripts/stress/x.json"));
+        assert!(is_non_code_reference_path("docs/README.md"));
+        assert!(is_non_code_reference_path("Cargo.lock"));
+        assert!(!is_non_code_reference_path("src/main.rs"));
+        assert!(!is_non_code_reference_path("foo.py"));
+        assert!(!is_non_code_reference_path("no-extension"));
     }
 
     #[test]

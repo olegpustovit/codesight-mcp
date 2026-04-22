@@ -9,7 +9,7 @@ use tree_sitter::Node;
 
 use codesight_core::symbols::{ExtractionTier, SymbolKind};
 
-use crate::extract_common::{node_text, parse_tree, push_symbol};
+use crate::extract_tree_sitter::{node_text, parse_tree, push_symbol};
 use crate::query_pack_catalog::QueryPackCatalog;
 use crate::scm_engine::ScmExtractor;
 

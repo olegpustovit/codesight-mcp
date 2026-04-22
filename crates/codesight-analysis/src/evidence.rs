@@ -158,7 +158,7 @@ impl ReferenceEvidenceProvider {
             {
                 continue;
             }
-            if dep_graph::word_match(&sym.source, identifier) {
+            if codesight_language_support::text_match::word_match(&sym.source, identifier) {
                 symbol_reference_files.insert(sym.file.clone());
             }
         }
@@ -234,6 +234,6 @@ fn file_has_fallback_content_reference(
         if decl_prefixes.iter().any(|p| trimmed.starts_with(p)) {
             return false;
         }
-        dep_graph::word_match(trimmed, identifier)
+        codesight_language_support::text_match::word_match(trimmed, identifier)
     })
 }

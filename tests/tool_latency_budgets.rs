@@ -317,30 +317,18 @@ fn tool_latency_budgets_suite() {
     );
 
     // ── Cohort C: cross-source scaling canary ────────────────────────────
-    // `get_cross_repo_map` iterates every registered source and, prior to the
-    // `SourceRegistry` cache, reopened a SQLite handle + read package_names
-    // per source on every call. With the registry warm, package_names is an
-    // `Arc::clone` off a `RwLock::read`. Called twice so the warm call is
-    // also measured — the first call may still bear the per-source SQLite
-    // open cost; the second is the regression surface we care about.
+    // `catalog_sources` iterates every registered source and reads
+    // `repo_summary()` + `root_path()` through the registry. Prior to the
+    // `SourceRegistry` cache, this reopened a SQLite handle per source on
+    // every call; with the registry warm, package_names is an `Arc::clone`
+    // off a `RwLock::read`.
     within_budget(
         &svc,
-        "get_cross_repo_map",
+        "catalog_sources",
         json!({}),
         500,
-        "gcm_cross_repo_map_cold",
+        "cs_catalog_sources_cold",
     );
-    within_budget(
-        &svc,
-        "get_cross_repo_map",
-        json!({}),
-        300,
-        "gcm_cross_repo_map_warm_cohort_c_canary_source_registry",
-    );
-
-    // `catalog_sources` runs the same per-source metadata read loop and
-    // should track `get_cross_repo_map` closely on the warm path since both
-    // reach for `repo_summary()` + `root_path()` through the registry.
     within_budget(
         &svc,
         "catalog_sources",

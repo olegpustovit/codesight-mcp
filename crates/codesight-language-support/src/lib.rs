@@ -4,9 +4,9 @@
 pub mod complexity;
 pub mod dep_graph;
 pub mod extensions;
-pub mod extract_common;
+pub mod extract_dedup;
 pub mod extract_error;
-pub mod extract_fallback;
+pub mod extract_tree_sitter;
 pub mod facade;
 pub mod fallback;
 pub mod family;
@@ -25,6 +25,7 @@ pub mod registry;
 pub mod scm_engine;
 pub mod scm_imports;
 pub mod signature_density;
+pub mod text_match;
 pub mod traits;
 pub mod workspace;
 pub mod workspace_pack;
@@ -37,7 +38,10 @@ pub use facade::{
     nesting_mode_for_path, root_package_from_specifier, supports_import_extraction,
     test_weight_multiplier,
 };
-pub use extensions::{DOC_EXTENSIONS, code_extensions, is_code_extension, is_doc_extension};
+pub use extensions::{
+    DOC_EXTENSIONS, code_extensions, is_code_extension, is_doc_extension,
+    is_non_code_reference_path,
+};
 pub use fallback::{FALLBACK_LANGUAGE, FallbackLanguage};
 pub use family::{LanguageFamily, NestingMode};
 pub use imports_types::{ImportEdge, source_slice};

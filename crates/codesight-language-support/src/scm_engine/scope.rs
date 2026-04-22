@@ -2,7 +2,7 @@
 
 use codesight_core::StoredSymbol;
 use codesight_core::symbols::ExtractionTier;
-use crate::extract_common::qualify;
+use crate::extract_tree_sitter::qualify;
 
 use super::ScmExtractor;
 use super::capture::{OwnedCapture, StandaloneDocCapture};

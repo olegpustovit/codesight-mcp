@@ -9,40 +9,8 @@ use std::collections::{HashMap, HashSet};
 use serde::Serialize;
 
 use codesight_core::symbols::ExtractionTier;
+use codesight_language_support::text_match::iter_identifiers;
 use codesight_storage::storage::SymbolSourceRecord;
-
-/// Check if `body` contains `name` as a whole-word match (not a partial match).
-/// Uses simple word-boundary heuristic: the character before and after `name`
-/// must not be alphanumeric or underscore.
-pub fn word_match(body: &str, name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-    let name_bytes = name.as_bytes();
-    let body_bytes = body.as_bytes();
-    let nlen = name_bytes.len();
-
-    let mut start = 0;
-    while start + nlen <= body_bytes.len() {
-        if let Some(pos) = body[start..].find(name) {
-            let abs_pos = start + pos;
-            let before_ok = abs_pos == 0 || !is_word_char(body_bytes[abs_pos - 1]);
-            let after_ok =
-                abs_pos + nlen >= body_bytes.len() || !is_word_char(body_bytes[abs_pos + nlen]);
-            if before_ok && after_ok {
-                return true;
-            }
-            start = abs_pos + 1;
-        } else {
-            break;
-        }
-    }
-    false
-}
-
-fn is_word_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
 
 /// A caller/callee edge in the call graph.
 #[derive(Debug, Clone, Serialize)]
@@ -140,14 +108,6 @@ fn build_call_edges_with_policy(symbols: &[SymbolInfo], policy: CallEdgePolicy) 
     }
 
     edges
-}
-
-/// Yield every maximal run of `[A-Za-z0-9_]` in `src` — i.e. every
-/// identifier-shaped token. Matches the old `word_match` definition of
-/// "word character" so edge semantics are unchanged.
-fn iter_identifiers(src: &str) -> impl Iterator<Item = &str> {
-    src.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .filter(|s| !s.is_empty())
 }
 
 /// Build call edges from a list of symbols by checking if a symbol's body

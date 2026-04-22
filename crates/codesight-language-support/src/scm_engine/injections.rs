@@ -25,7 +25,7 @@ use streaming_iterator::StreamingIterator;
 use tree_sitter::{Query, QueryCursor, Tree};
 
 use codesight_core::StoredSymbol;
-use crate::extract_common::node_text;
+use crate::extract_tree_sitter::node_text;
 use crate::host_segments::{RemapOptions, SegmentOrigin, extract_host_segment};
 
 use super::ScmExtractor;

@@ -509,21 +509,15 @@ def build_cases(S: str) -> list[Case]:
             note="12 small symbols; should amortize across one DB connection.",
         ),
         # ---------- Cohort C: cross-source scaling ----------
-        # Both fan out over every registered source on this machine. Warm
-        # path should be ≤ 200 ms once the SourceRegistry is populated; cold
-        # path trades an extra SELECT indexed_at per source for correctness
+        # Fans out over every registered source on this machine. Warm path
+        # should be ≤ 200 ms once the SourceRegistry is populated; cold path
+        # trades an extra SELECT indexed_at per source for correctness
         # against external reindexes.
         Case(
-            "gcm_cross_repo_map_all",
-            "get_cross_repo_map",
+            "cs_catalog_sources_all",
+            "catalog_sources",
             {},
-            note="Cohort C: per-source package_names via SourceRegistry snapshot.",
-        ),
-        Case(
-            "gcm_cross_repo_map_filtered",
-            "get_cross_repo_map",
-            {"source_id": S},
-            note="Cohort C: filtered to one source, still walks the summary list.",
+            note="Cohort C: per-source repo_summary + root_path via SourceRegistry snapshot.",
         ),
     ]
 

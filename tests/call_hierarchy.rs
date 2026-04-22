@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use codesight_analysis::graph::word_match;
+use codesight_language_support::text_match::word_match;
 use codesight_engine::config::AppConfig;
 use codesight_engine::service::CodeService;
 use serde_json::{Value, json};

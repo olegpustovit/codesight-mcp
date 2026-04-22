@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::config::BYTES_PER_TOKEN;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::AssembleContextArgs;
-use crate::service::agent_v1::graph_tail::find_references::collect_references;
+use crate::service::agent_v1::graph::find_references::collect_references;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;

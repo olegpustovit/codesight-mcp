@@ -202,6 +202,13 @@ fn coerce(value: &mut Value, schema: &Value) {
             {
                 *value = Value::Number(num);
             }
+        } else if (types.contains(&"array") || types.contains(&"object"))
+            && !types.contains(&"string")
+            && let Ok(parsed) = serde_json::from_str::<Value>(s)
+            && ((types.contains(&"array") && parsed.is_array())
+                || (types.contains(&"object") && parsed.is_object()))
+        {
+            *value = parsed;
         }
     }
 
@@ -320,6 +327,33 @@ mod tests {
         let mut args = json!({ "limit": "42" });
         coerce(&mut args, &schema);
         assert_eq!(args, json!({ "limit": 42 }));
+    }
+
+    #[test]
+    fn coerces_stringified_array() {
+        let out = coerce_and_validate(
+            "inspect_structure",
+            json!({
+                "source_id": "r",
+                "view": "file_outline",
+                "file_paths": "[\"src/a.py\", \"src/b.py\"]",
+            }),
+        )
+        .unwrap();
+        assert_eq!(out["file_paths"], json!(["src/a.py", "src/b.py"]));
+    }
+
+    #[test]
+    fn coerces_stringified_object() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "ref": { "type": "object" }
+            }
+        });
+        let mut args = json!({ "ref": "{\"path\":\"x.rs\"}" });
+        coerce(&mut args, &schema);
+        assert_eq!(args, json!({ "ref": { "path": "x.rs" } }));
     }
 
     #[test]

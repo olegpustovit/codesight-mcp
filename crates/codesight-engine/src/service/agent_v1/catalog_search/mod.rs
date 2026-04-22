@@ -1,6 +1,7 @@
 //! `search_catalog` — BM25 symbols/files/sections with optional fuzzy + semantic layers.
 
 mod dense;
+mod files;
 mod fuzzy;
 mod plan;
 mod response;

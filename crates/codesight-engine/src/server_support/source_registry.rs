@@ -1,9 +1,9 @@
 //! Process-wide cache of small, frequently re-read per-source metadata
 //! (root path, package names, file paths, repo summary).
 //!
-//! Cross-source tools (`cross_repo_map`, `inspect_graph` with
-//! `cross_repo=true`, `catalog_sources`) loop over N registered sources and
-//! call 1–4 cheap-but-non-free `IndexStore` methods on each. Each call opens
+//! Cross-source tools (`inspect_graph` with `cross_repo=true`,
+//! `catalog_sources`) loop over N registered sources and call 1–4
+//! cheap-but-non-free `IndexStore` methods on each. Each call opens
 //! a fresh read-only SQLite connection through `open_read_only`, runs a
 //! small indexed query, and decodes a handful of rows. On a 10-source setup
 //! the overhead stacks to 50–100 ms *just for the opens and stale checks*.

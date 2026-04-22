@@ -10,7 +10,7 @@ mod pagerank;
 
 pub use calls::{
     CallEdge, SymbolInfo, build_call_edges, build_call_edges_including_heuristic, find_callees,
-    find_callers, word_match,
+    find_callers,
 };
 pub use coupling::{CouplingMetrics, compute_coupling};
 pub use cycles::find_cycles;

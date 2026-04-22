@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
+use codesight_language_support::is_test_file;
 use codesight_language_support::traits::LiveRootConfidence;
 
 use crate::evidence::EvidenceNote;
 
-use super::entrypoints::{detect_language_live_roots, entrypoint_root_notes, is_test_file};
+use super::entrypoints::{detect_language_live_roots, entrypoint_root_notes};
 
 pub(crate) struct RepoReachability {
     pub live_roots: HashSet<String>,

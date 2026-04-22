@@ -5,7 +5,7 @@ use tree_sitter::Node;
 
 use codesight_core::symbols::SymbolKind;
 
-use crate::extract_common::{node_text, parse_tree, push_symbol, push_symbol_prequalified};
+use crate::extract_tree_sitter::{node_text, parse_tree, push_symbol, push_symbol_prequalified};
 
 pub struct LuauExtractor;
 

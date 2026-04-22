@@ -445,6 +445,33 @@ pub trait Language: Send + Sync {
         false
     }
 
+    /// Normalise a function body for structural duplicate detection. The
+    /// returned bytes feed a stable hasher (blake3) — two bodies that
+    /// should be considered duplicates must normalise identically.
+    ///
+    /// Default: strip blank lines and line-comment lines (using this
+    /// language's `line_comment_prefixes()`), trim each remaining line, and
+    /// join with `\n`. Per-language overrides preserve structure the default
+    /// destroys (Python/YAML indentation, SQL keyword case, …).
+    fn normalise_body_for_dedup(&self, source: &str) -> Vec<u8> {
+        let prefixes = self.line_comment_prefixes();
+        let mut out = String::with_capacity(source.len());
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if prefixes.iter().any(|p| trimmed.starts_with(p)) {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(trimmed);
+        }
+        out.into_bytes()
+    }
+
     // ── Frameworks (per-project providers this language contributes) ─────
     /// Static list of framework-provider factories this language ships with.
     /// Stored as `fn() -> Box<dyn FrameworkProvider>` rather than static refs

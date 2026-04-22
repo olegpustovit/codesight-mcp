@@ -7,12 +7,11 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
+use codesight_language_support::{is_test_file, is_test_fixture};
 use codesight_storage::storage::{AnalysisSymbol, IndexStore};
 
 use crate::evidence::EvidenceNote;
-use crate::graph as dep_graph;
 
-use self::entrypoints::{is_test_file, is_test_fixture};
 use self::reachability::build_repo_reachability;
 
 /// Build the `data` object for `evaluate_quality` with `analysis: "dead_code"`.
@@ -245,7 +244,7 @@ fn is_barrel_exported(symbol: &AnalysisSymbol, all_file_contents: &[(String, Str
     all_file_contents.iter().any(|(file, content)| {
         file.ends_with("__init__.py")
             && file != &symbol.file_path
-            && dep_graph::word_match(content, &symbol.name)
+            && codesight_language_support::text_match::word_match(content, &symbol.name)
     })
 }
 

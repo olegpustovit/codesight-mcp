@@ -22,9 +22,6 @@ const READ_TOOLS: &[&str] = &[
     "evaluate_impact",
     "evaluate_quality",
     "assemble_context",
-    "search_columns",
-    "check_references",
-    "get_cross_repo_map",
 ];
 
 pub(super) fn is_read_tool(tool: &str) -> bool {

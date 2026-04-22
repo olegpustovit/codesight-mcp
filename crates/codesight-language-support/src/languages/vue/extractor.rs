@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use codesight_core::StoredSymbol;
 use codesight_core::symbols::{ExtractionTier, SymbolKind};
 
-use crate::extract_common::{first_line, node_text, parse_tree, qualify, source_slice};
+use crate::extract_tree_sitter::{first_line, node_text, parse_tree, qualify, source_slice};
 use crate::host_segments::{
     RemapOptions, SegmentOrigin, extract_host_segment, find_html_tag_blocks,
 };

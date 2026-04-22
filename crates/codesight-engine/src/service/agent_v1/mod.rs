@@ -3,26 +3,19 @@
 mod args;
 mod catalog;
 mod catalog_search;
-mod catalog_search_files;
 mod content;
 mod context;
-mod context_bundle;
-mod cross_repo_tool;
 mod file_tree;
 mod freshness;
 mod graph;
-mod graph_tail;
 mod impact;
 mod index_admin;
 mod ingest;
 pub mod quality;
-mod reference_check;
 mod session_admin;
-mod reference_tool;
 pub(crate) mod registry;
 mod structure;
 mod util;
-mod util_graph;
 pub mod validate;
 
 use serde_json::Value;

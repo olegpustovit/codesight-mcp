@@ -1,4 +1,11 @@
-//! Context assembly (bundle, ranked, …).
+//! Context assembly — unified dispatcher for every `assemble_context` mode.
+
+mod bundle;
+mod gather;
+mod query_suggestions;
+mod rename;
+mod section;
+mod shape;
 
 use serde_json::{Value, json};
 
@@ -275,7 +282,19 @@ impl CodeService {
         match args.mode.to_ascii_lowercase().as_str() {
             "bundle" => self.assemble_bundle(&args, &timer),
             "ranked" => self.assemble_ranked(&args, &timer),
-            tail => self.assemble_context_tail(&args, tail, &timer),
+            "section_context" => self.context_section(&args, &timer),
+            "query_suggestions" => self.context_query_suggestions(&args, &timer),
+            "context_bundle" => self.assemble_context_bundle(&args, &timer),
+            "rename_plan" => self.context_rename_plan(&args, &timer),
+            _ => self.error_response(
+                &timer,
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "INVALID_REQUEST",
+                    message: format!("Unknown assemble_context mode '{}'.", args.mode),
+                    detail: json!({ "mode": args.mode }),
+                },
+            ),
         }
     }
 }

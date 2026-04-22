@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
-use crate::service::agent_v1::util_graph::simple_text_diff;
+use crate::service::agent_v1::util::graph::simple_text_diff;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;

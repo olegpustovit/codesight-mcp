@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Parser, QueryCursor, Tree};
 
-use crate::extract_common::{first_line, node_text, source_slice};
+use crate::extract_tree_sitter::{first_line, node_text, source_slice};
 
 use codesight_core::symbols::SymbolKind;
 

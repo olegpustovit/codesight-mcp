@@ -11,9 +11,6 @@ use codesight_language_support::traits::LiveRoot;
 
 use crate::evidence::EvidenceNote;
 
-pub(crate) use codesight_language_support::is_test_file;
-pub(crate) use codesight_language_support::is_test_fixture;
-
 pub(crate) fn entrypoint_root_notes(
     file_path: &str,
     entry_patterns: &[String],
@@ -32,7 +29,7 @@ pub(crate) fn entrypoint_root_notes(
     }
 
     for pattern in entry_patterns {
-        if glob_match(pattern, file_path) {
+        if glob_matches(pattern, file_path) {
             notes.push(EvidenceNote::heuristic(
                 "entrypoint_pattern",
                 format!("path matched configured entry_point_patterns value '{pattern}'"),
@@ -56,11 +53,19 @@ pub(crate) fn detect_language_live_roots(
         .collect()
 }
 
-fn glob_match(pattern: &str, path: &str) -> bool {
-    let re_str = pattern.replace('.', r"\.").replace('*', "[^/]*");
-    regex::Regex::new(&format!("(?:^|/){re_str}$"))
-        .map(|re| re.is_match(path))
-        .unwrap_or(false)
+/// Glob match anchored at a path segment boundary. Matches either the full
+/// path or a suffix starting after any `/`. Patterns support shell
+/// wildcards (`*`, `?`, `[abc]`, `{a,b}`).
+fn glob_matches(pattern: &str, path: &str) -> bool {
+    let Ok(glob) = globset::Glob::new(pattern) else {
+        return false;
+    };
+    let matcher = glob.compile_matcher();
+    if matcher.is_match(path) {
+        return true;
+    }
+    path.match_indices('/')
+        .any(|(i, _)| matcher.is_match(&path[i + 1..]))
 }
 
 #[cfg(test)]

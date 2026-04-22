@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use codesight_core::symbols::ExtractionTier;
 use crate::query_pack_catalog::QueryPackCatalog;
 use crate::scm_engine::ScmExtractor;
-use crate::extract_fallback::{dedup_symbols_by_start_byte, sort_symbols_by_span};
+use crate::extract_dedup::{dedup_symbols_by_start_byte, sort_symbols_by_span};
 
 pub struct SqlExtractor;
 

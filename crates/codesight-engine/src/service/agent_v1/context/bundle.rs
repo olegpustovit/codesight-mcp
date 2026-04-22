@@ -1,9 +1,6 @@
-mod gather;
-mod shape;
-mod tail;
-
 use serde_json::{Value, json};
 
+use super::shape;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::AssembleContextArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
@@ -11,7 +8,7 @@ use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 
 impl CodeService {
-    pub(in crate::service) fn assemble_context_bundle(
+    pub(super) fn assemble_context_bundle(
         &self,
         args: &AssembleContextArgs,
         timer: &MetaBuilder,

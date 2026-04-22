@@ -82,6 +82,38 @@ impl Language for Python {
         name.starts_with("test_") || name.starts_with("Test")
     }
 
+    fn normalise_body_for_dedup(&self, source: &str) -> Vec<u8> {
+        // Python indentation is structurally significant — a body that nests
+        // a block one level deeper is a different function, not the same
+        // function with extra whitespace. Preserve the leading run by
+        // measuring tab-as-4 indent depth and re-emitting the line with
+        // spaces, while still stripping trailing whitespace and `#` line
+        // comments.
+        let mut out = String::with_capacity(source.len());
+        for line in source.lines() {
+            let trimmed = line.trim_end();
+            if trimmed.trim_start().is_empty() {
+                continue;
+            }
+            if trimmed.trim_start().starts_with('#') {
+                continue;
+            }
+            let indent: usize = trimmed
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .map(|c| if c == '\t' { 4 } else { 1 })
+                .sum();
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            for _ in 0..indent {
+                out.push(' ');
+            }
+            out.push_str(trimmed.trim_start());
+        }
+        out.into_bytes()
+    }
+
     fn resolve_import_edge(
         &self,
         edge: &ImportEdge,

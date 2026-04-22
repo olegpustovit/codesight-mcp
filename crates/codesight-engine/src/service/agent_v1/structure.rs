@@ -16,7 +16,7 @@ use crate::service::agent_v1::file_tree::{
     normalize_file_tree_path_prefix,
 };
 use crate::service::agent_v1::util::pack_catalog_items_to_token_budget;
-use crate::service::agent_v1::util_graph::build_toc_tree;
+use crate::service::agent_v1::util::graph::build_toc_tree;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::savings::MetaBuilder;

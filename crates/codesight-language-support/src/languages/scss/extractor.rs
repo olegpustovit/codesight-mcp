@@ -5,7 +5,7 @@ use tree_sitter::Node;
 
 use codesight_core::symbols::SymbolKind;
 
-use crate::extract_common::{first_line, node_text, parse_tree, push_symbol, source_slice};
+use crate::extract_tree_sitter::{first_line, node_text, parse_tree, push_symbol, source_slice};
 
 pub struct ScssExtractor;
 

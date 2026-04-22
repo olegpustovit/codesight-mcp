@@ -46,9 +46,6 @@ static AGENT_V1_HANDLERS: &[(&str, AgentV1Handler, TimeoutClass)] = &[
     ("evaluate_quality", CodeService::evaluate_quality, TimeoutClass::Heavy),
     ("assemble_context", CodeService::assemble_context, TimeoutClass::Heavy),
     ("manage_indexes", CodeService::manage_indexes, TimeoutClass::Ingest),
-    ("search_columns", CodeService::search_columns, TimeoutClass::Default),
-    ("check_references", CodeService::check_references, TimeoutClass::Default),
-    ("get_cross_repo_map", CodeService::get_cross_repo_map, TimeoutClass::Default),
 ];
 
 pub(in crate::service) fn dispatch_tool(
