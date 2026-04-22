@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use codesight_language_support::imports_orchestration::{extract_imports, language_for_path};
 use codesight_language_support::imports_types::ImportEdge;
+use codesight_language_support::mentions_identifier_in_file;
 use codesight_language_support::packages::extract_root_package_from_specifier;
 use codesight_language_support::{FALLBACK_LANGUAGE, Language, builtin_registry};
 use codesight_storage::storage::IndexStore;
@@ -158,7 +159,7 @@ impl ReferenceEvidenceProvider {
             {
                 continue;
             }
-            if codesight_language_support::text_match::word_match(&sym.source, identifier) {
+            if mentions_identifier_in_file(&sym.file, &sym.source, identifier) {
                 symbol_reference_files.insert(sym.file.clone());
             }
         }
@@ -234,6 +235,6 @@ fn file_has_fallback_content_reference(
         if decl_prefixes.iter().any(|p| trimmed.starts_with(p)) {
             return false;
         }
-        codesight_language_support::text_match::word_match(trimmed, identifier)
+        lang.mentions_identifier(trimmed, identifier)
     })
 }

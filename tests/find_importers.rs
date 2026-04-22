@@ -1339,44 +1339,6 @@ fn find_references_dbt_ref_reference() {
     );
 }
 #[test]
-fn find_references_meta_tip_present() {
-    let ws = tempfile::tempdir().unwrap();
-    let src = ws.path();
-    std::fs::write(src.join("app.js"), "function main() {}\n").unwrap();
-
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
-    let r = svc
-        .dispatch(
-            "ingest_sources",
-            serde_json::json!({"path": src.to_string_lossy(), "domains": "code"}),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap());
-    let sid = r["data"]["source_id"].as_str().unwrap();
-
-    let refs = svc
-        .dispatch(
-            "inspect_graph",
-            serde_json::json!({
-                "source_id": sid,
-                "graph": "find_references",
-                "identifier": "anything",
-                "_meta_verbose": true,
-            }),
-        )
-        .unwrap();
-    assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
-    assert!(
-        refs["_meta"]["tip"].is_string(),
-        "_meta.tip should be present: {:?}",
-        refs["_meta"]
-    );
-}
-
-#[test]
 fn find_references_batch_identifiers() {}
 
 #[test]

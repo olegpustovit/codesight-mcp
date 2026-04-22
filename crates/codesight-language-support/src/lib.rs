@@ -35,8 +35,8 @@ pub use facade::{
     function_length_warn_for_path, has_restricted_visibility, import_extraction_mode_for_language,
     is_conventional_path, is_entrypoint_basename, is_test_file, is_test_fixture,
     language_family_for_path, language_id_for_path, measured_type_density_for_path,
-    nesting_mode_for_path, root_package_from_specifier, supports_import_extraction,
-    test_weight_multiplier,
+    mentions_identifier_ci_in_file, mentions_identifier_in_file, nesting_mode_for_path,
+    root_package_from_specifier, supports_import_extraction, test_weight_multiplier,
 };
 pub use extensions::{
     DOC_EXTENSIONS, code_extensions, is_code_extension, is_doc_extension,

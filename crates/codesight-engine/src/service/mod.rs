@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
-use envelope::{compact_meta, extract_read_content_paths, panic_message, requested_bool, requested_string};
+use envelope::{compact_meta, extract_read_content_paths};
 use serde_json::{Value, json};
 use tracing::instrument;
 
@@ -462,20 +462,35 @@ impl CodeService {
 
     #[instrument(level = "info", skip(self, arguments), fields(tool = tool_name))]
     pub fn dispatch(&self, tool_name: &str, arguments: Value) -> anyhow::Result<Value> {
-        let meta_verbose = requested_bool(&arguments, "_meta_verbose");
-        let source_id = requested_string(&arguments, "source_id").map(str::to_string);
-        let impact_analysis = if tool_name == "evaluate_impact" {
-            requested_string(&arguments, "analysis").map(str::to_string)
-        } else {
-            None
+        let meta_verbose = match arguments.get("_meta_verbose") {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::String(s)) => s.eq_ignore_ascii_case("true"),
+            _ => false,
         };
+        let non_empty_str = |key: &str| {
+            arguments
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        };
+        let source_id = non_empty_str("source_id");
+        let impact_analysis = (tool_name == "evaluate_impact")
+            .then(|| non_empty_str("analysis"))
+            .flatten();
         let result = catch_unwind(AssertUnwindSafe(|| {
             agent_v1::dispatch(self, tool_name, arguments)
         }));
         let dispatched = match result {
             Ok(inner) => inner,
             Err(panic_payload) => {
-                let message = panic_message(&panic_payload);
+                let message = if let Some(s) = panic_payload.downcast_ref::<&'static str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "non-string panic payload".to_string()
+                };
                 tracing::error!(tool = tool_name, %message, "tool handler panicked");
                 Err(ToolError::new(
                     ToolErrorCategory::Internal,

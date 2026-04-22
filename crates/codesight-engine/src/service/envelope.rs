@@ -1,33 +1,8 @@
-//! Response-envelope helpers: `compact_meta`, `panic_message`,
-//! `extract_read_content_paths`, and the `requested_*` arg accessors.
-//! Extracted from `service/mod.rs` so the `CodeService` impl stays legible.
+//! Response-envelope helpers: `compact_meta` and
+//! `extract_read_content_paths`. Extracted from `service/mod.rs` so the
+//! `CodeService` impl stays legible.
 
 use serde_json::{Map, Value, json};
-
-pub(super) fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = payload.downcast_ref::<&'static str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "non-string panic payload".to_string()
-    }
-}
-
-pub(super) fn requested_bool(arguments: &Value, key: &str) -> bool {
-    match arguments.get(key) {
-        Some(Value::Bool(value)) => *value,
-        Some(Value::String(value)) => value.eq_ignore_ascii_case("true"),
-        _ => false,
-    }
-}
-
-pub(super) fn requested_string<'a>(arguments: &'a Value, key: &str) -> Option<&'a str> {
-    arguments
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-}
 
 /// Collect file paths whose content was returned by a successful
 /// `read_content` call. Walks the `data.items[].ref.path` shape.

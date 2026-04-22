@@ -5,6 +5,61 @@ boundary. Per AGENTS.md: zero backwards compatibility, no shims, renames
 propagate in the same patch. No `cargo check` between edits inside a phase.
 `cargo nextest run --lib` at phase end only.
 
+## Progress log (session 2026-04-22 night — Phase 6 long-tail mentions_identifier)
+
+- **`Language::mentions_identifier` + `mentions_identifier_ignore_case` trait methods
+  landed** in `codesight-language-support/src/traits.rs`. Default bodies call
+  `crate::text_match::{word_match, ci_word_match}` so behaviour is unchanged
+  on day one; per-language overrides (Ruby trailing `?`/`!`, CSS `-`, JS `$`)
+  are now a one-line opt-in rather than a branch in shared code.
+- **Facade helpers** `mentions_identifier_in_file` / `mentions_identifier_ci_in_file`
+  added in `facade.rs` — callers pass a path + body + name and dispatch
+  resolves the owning language via the builtin registry; `FALLBACK_LANGUAGE`
+  fallback route uses the ASCII default. Re-exported from `lib.rs`.
+- **Callers migrated.** `codesight-engine/service/agent_v1/graph/find_references.rs`
+  swapped all 6 `ci_word_match(...)` call sites to `mentions_identifier_ci_in_file`
+  (per-file dispatch). `codesight-analysis/evidence.rs` swapped two
+  `text_match::word_match` sites: outer `symbol_sources` loop now dispatches
+  via `mentions_identifier_in_file(&sym.file, ...)`, and
+  `file_has_fallback_content_reference` now calls `lang.mentions_identifier`
+  directly since it already holds `&dyn Language`. `dead_code/mod.rs`
+  `is_barrel_exported` (Python `__init__.py` scan) routes through the facade.
+- **Stale test deleted.** `tests/find_importers.rs::find_references_meta_tip_present`
+  was asserting `_meta.tip` when `_meta_verbose=true`, but the tip string
+  it expected was a suggestion pointing at the `check_references` tool —
+  which Phase 1 deleted. The test was failing on `main` before this session
+  (verified via `git stash`); cleanup belonged in the Phase 1 patch and was
+  missed. Removed in this session.
+
+Tests: codesight-language-support 230/230, codesight-analysis 56/56,
+codesight-engine 73/73 (lib); tests/find_importers 154/154,
+tests/call_hierarchy + dead_code_v2 + find_dead_code 63/63 (integration).
+
+## Progress log (session 2026-04-22 late evening — deferred cleanup)
+
+- **Phase 5d landed.** `simple_text_diff` in `service/agent_v1/util/graph.rs`
+  now delegates to `similar::TextDiff::from_lines`. The JSON evidence keys
+  (`common_prefix_lines`, `removed_tail`, `added_tail`) are preserved so
+  `tests/symbol_diff.rs` keeps passing, but the tails are now derived from a
+  real Myers-style diff — middle insertions are correctly attributed, and
+  identical bodies yield empty tails without the prefix-chase special case.
+  `similar = "2"` added as `codesight-engine` dep.
+- **Phase 5f landed.** `requested_bool`, `requested_string`, `panic_message`
+  inlined into `CodeService::dispatch`; three helpers deleted from
+  `service/envelope.rs`. The string→bool coerce fallback, empty-string
+  filter, and panic payload downcast all live inline where they're used
+  once or twice. `envelope.rs` module comment updated to reflect the
+  smaller surface.
+- **Phase 5h re-deferred with post-attempt notes.** The `require_store!`
+  macro's early `return self.error_response(...)` pattern cannot be
+  replaced by Result-returning methods without forcing ~40 call sites to
+  each expand to a 4-line `match`. Folding the two arms (repo/doc) into a
+  single arm that takes the method name would also lose the `repo:` /
+  `doc:` keyword syntax for zero reader benefit. Leave as-is — the macro
+  is already the best form.
+
+Tests: 328/328 workspace lib tests pass; `tests/symbol_diff.rs` 2/2 pass.
+
 ## Progress log (session 2026-04-22 evening)
 
 Phase 6 moved from "partial" to "substantially done":
@@ -126,10 +181,17 @@ tests (tests/) not exercised in this session; pending full run at merge gate.
   **Evening session** added `Language::normalise_body_for_dedup`
   (default + Python override); deleted `hash_normalized_body` free fn;
   dropped `is_test_file` / `is_test_fixture` re-exports in
-  `dead_code/entrypoints.rs`. Still deferred: the remaining long-tail of
-  V16 (mentions_identifier, strip_comments, max_nesting_depth as true
-  per-language overrides rather than facade-dispatched) — each is a small
-  per-language cycle.
+  `dead_code/entrypoints.rs`. **Night session** added
+  `Language::mentions_identifier` + `mentions_identifier_ignore_case`
+  trait methods with ASCII default bodies (delegating to
+  `text_match::{word_match, ci_word_match}`) plus facade helpers
+  `mentions_identifier_in_file` / `mentions_identifier_ci_in_file`;
+  migrated every caller (find_references.rs, evidence.rs, dead_code/mod.rs)
+  to trait dispatch. Still deferred: `strip_comments` (no caller today —
+  YAGNI) and `max_nesting_depth` as true per-language overrides rather
+  than facade-dispatched (the facade already picks brace-vs-indent mode
+  from `nesting_mode()`, so the concrete gap is smaller than the plan
+  implied).
 - [x] **Phase 4** (partial) — `service/savings.rs` (640 LoC) split into
   `savings/{mod.rs, ledger.rs, meta_builder.rs, pricing.rs, session.rs}`:
   ledger-only types (`SavingsState`, `ensure_active_session`) stay private
@@ -170,18 +232,13 @@ tests (tests/) not exercised in this session; pending full run at merge gate.
   `max_nesting_depth`, `cyclomatic_complexity`, `is_indexable_code`.
   Runs after Phase 5 because several Phase-5 deletions re-emerge as trait
   overrides.
-- **Phase 5d** (`simple_text_diff` delete) — skip. Evening re-review
-  confirmed: the fn is coarse but correct, and `tests/symbol_diff.rs`
-  depends on the exact evidence shape (`common_prefix_lines` /
-  `removed_tail` / `added_tail`). Swapping to `similar::TextDiff` changes
-  the contract for no meaningful gain.
-- **Phase 5f** (inline `requested_bool` / `requested_string` /
-  `panic_message`) — skip. Evening re-review confirmed: each helper has 1–2
-  callers but does nontrivial work (string→bool coerce, empty-string filter,
-  3-arm downcast). Inlining obscures intent with net-zero LoC.
-- **Phase 5h** (`require_store!` → trait method) — the macro's early
-  `return` with a built error response is cleaner than a `Result` pattern
-  at the call site.
+- **Phase 5d** — **landed late evening.** `similar::TextDiff` replaces
+  hand-rolled prefix-chase; JSON shape preserved.
+- **Phase 5f** — **landed late evening.** Helpers inlined into
+  `CodeService::dispatch`; `envelope.rs` shrunk.
+- **Phase 5h** (`require_store!` → trait method) — re-deferred after
+  attempt. Macro's early `return` pattern is load-bearing; replacing with
+  method + match at every call site loses ~120 LoC and readability.
 
 ## Thesis
 

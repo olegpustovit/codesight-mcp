@@ -67,6 +67,24 @@ pub fn has_restricted_visibility(path: &str, source_text: &str, name: &str) -> b
         .unwrap_or(false)
 }
 
+/// Whole-word match for `name` in `source`, using the owning language's
+/// identifier-boundary rules when `path` resolves to a registered
+/// language; falls back to the ASCII default otherwise.
+pub fn mentions_identifier_in_file(path: &str, source: &str, name: &str) -> bool {
+    match lookup_for_path(path) {
+        Some(lang) => lang.mentions_identifier(source, name),
+        None => crate::text_match::word_match(source, name),
+    }
+}
+
+/// Case-insensitive variant of [`mentions_identifier_in_file`].
+pub fn mentions_identifier_ci_in_file(path: &str, source: &str, name: &str) -> bool {
+    match lookup_for_path(path) {
+        Some(lang) => lang.mentions_identifier_ignore_case(source, name),
+        None => crate::text_match::ci_word_match(source, name),
+    }
+}
+
 /// True when any registered language classifies `path` as a test file.
 pub fn is_test_file(path: &str) -> bool {
     if let Some(lang) = lookup_for_path(path)

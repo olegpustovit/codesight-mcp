@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use codesight_language_support::{is_test_file, is_test_fixture};
+use codesight_language_support::{is_test_file, is_test_fixture, mentions_identifier_in_file};
 use codesight_storage::storage::{AnalysisSymbol, IndexStore};
 
 use crate::evidence::EvidenceNote;
@@ -244,7 +244,7 @@ fn is_barrel_exported(symbol: &AnalysisSymbol, all_file_contents: &[(String, Str
     all_file_contents.iter().any(|(file, content)| {
         file.ends_with("__init__.py")
             && file != &symbol.file_path
-            && codesight_language_support::text_match::word_match(content, &symbol.name)
+            && mentions_identifier_in_file(file, content, &symbol.name)
     })
 }
 

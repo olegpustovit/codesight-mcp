@@ -133,16 +133,27 @@ pub(in crate::service) fn reconstruct_caller_chain(
 }
 
 pub(in crate::service) fn simple_text_diff(a: &str, b: &str) -> Value {
-    let la: Vec<_> = a.lines().collect();
-    let lb: Vec<_> = b.lines().collect();
-    let mut i = 0usize;
-    while i < la.len() && i < lb.len() && la[i] == lb[i] {
-        i += 1;
+    use similar::{ChangeTag, DiffOp, TextDiff};
+
+    let diff = TextDiff::from_lines(a, b);
+    let common_prefix_lines = match diff.ops().first() {
+        Some(DiffOp::Equal { len, .. }) => *len,
+        _ => 0,
+    };
+    let mut removed_tail: Vec<String> = Vec::new();
+    let mut added_tail: Vec<String> = Vec::new();
+    for change in diff.iter_all_changes() {
+        let line = change.value().trim_end_matches('\n').to_string();
+        match change.tag() {
+            ChangeTag::Delete => removed_tail.push(line),
+            ChangeTag::Insert => added_tail.push(line),
+            ChangeTag::Equal => {}
+        }
     }
     json!({
-        "common_prefix_lines": i,
-        "removed_tail": la.get(i..).unwrap_or(&[]),
-        "added_tail": lb.get(i..).unwrap_or(&[]),
+        "common_prefix_lines": common_prefix_lines,
+        "removed_tail": removed_tail,
+        "added_tail": added_tail,
     })
 }
 

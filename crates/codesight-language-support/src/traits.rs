@@ -445,6 +445,22 @@ pub trait Language: Send + Sync {
         false
     }
 
+    /// Whole-word match for `name` inside `source` under this language's
+    /// identifier boundary rules. Default: ASCII `[A-Za-z0-9_]` boundary
+    /// via [`crate::text_match::word_match`]. Per-language overrides carry
+    /// non-ASCII identifier semantics (Ruby's trailing `?`/`!`, CSS `-`,
+    /// JS `$`) without every caller having to branch on language id.
+    fn mentions_identifier(&self, source: &str, name: &str) -> bool {
+        crate::text_match::word_match(source, name)
+    }
+
+    /// Case-insensitive variant of [`Self::mentions_identifier`]. Default
+    /// lowercases both sides and delegates; languages whose identifier
+    /// boundary is case-sensitive (most of them) inherit this for free.
+    fn mentions_identifier_ignore_case(&self, source: &str, name: &str) -> bool {
+        crate::text_match::ci_word_match(source, name)
+    }
+
     /// Normalise a function body for structural duplicate detection. The
     /// returned bytes feed a stable hasher (blake3) — two bodies that
     /// should be considered duplicates must normalise identically.

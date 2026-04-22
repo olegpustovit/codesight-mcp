@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use codesight_language_support::is_non_code_reference_path;
-use codesight_language_support::text_match::ci_word_match;
+use codesight_language_support::mentions_identifier_ci_in_file;
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
@@ -87,7 +87,7 @@ pub(crate) fn collect_references(
             seen_files.insert(sym.file.clone());
             continue;
         }
-        if ci_word_match(&sym.source, name) {
+        if mentions_identifier_ci_in_file(&sym.file, &sym.source, name) {
             out.push(RefMatch {
                 file: sym.file.clone(),
                 line: sym.line,
@@ -101,7 +101,7 @@ pub(crate) fn collect_references(
         if seen_files.contains(file) || !filter.admits(file) {
             continue;
         }
-        if ci_word_match(content, name) {
+        if mentions_identifier_ci_in_file(file, content, name) {
             out.push(RefMatch {
                 file: file.clone(),
                 line: 0,
@@ -158,7 +158,9 @@ impl CodeService {
                 if sym.name.eq_ignore_ascii_case(ident) {
                     continue;
                 }
-                if ci_word_match(&sym.source, ident) && seen_files.insert(sym.file.clone()) {
+                if mentions_identifier_ci_in_file(&sym.file, &sym.source, ident)
+                    && seen_files.insert(sym.file.clone())
+                {
                     file_refs.push(compact_match_row(&sym.file, sym.line, &sym.name, &sym.kind));
                 }
             }
@@ -166,7 +168,7 @@ impl CodeService {
                 if seen_files.contains(file) || !filter.admits(file) {
                     continue;
                 }
-                if ci_word_match(content, ident) {
+                if mentions_identifier_ci_in_file(file, content, ident) {
                     seen_files.insert(file.clone());
                     file_refs.push(compact_match_row(file, 0, ident, "text_match"));
                 }
@@ -216,7 +218,7 @@ impl CodeService {
             if sym.name.eq_ignore_ascii_case(identifier) {
                 continue;
             }
-            if ci_word_match(&sym.source, identifier) {
+            if mentions_identifier_ci_in_file(&sym.file, &sym.source, identifier) {
                 seen_files.insert(sym.file.clone());
                 refs.push(compact_match_row(&sym.file, sym.line, &sym.name, &sym.kind));
             }
@@ -226,7 +228,7 @@ impl CodeService {
             if seen_files.contains(file) || !filter.admits(file) {
                 continue;
             }
-            if ci_word_match(content, identifier) {
+            if mentions_identifier_ci_in_file(file, content, identifier) {
                 seen_files.insert(file.clone());
                 refs.push(compact_match_row(file, 0, identifier, "text_match"));
             }
@@ -250,7 +252,7 @@ impl CodeService {
                 if !filter.admits(&sym.file) {
                     continue;
                 }
-                if ci_word_match(&sym.source, identifier) {
+                if mentions_identifier_ci_in_file(&sym.file, &sym.source, identifier) {
                     per_file.entry(sym.file.clone()).or_default().push(json!({
                         "id": sym.id,
                         "name": sym.name,
