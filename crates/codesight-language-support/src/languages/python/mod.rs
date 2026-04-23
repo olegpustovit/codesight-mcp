@@ -1,5 +1,7 @@
 //! Python language implementation.
 
+pub mod imports;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -164,6 +166,7 @@ impl Language for Python {
         _workspace_crates: Option<&HashMap<String, String>>,
     ) -> Option<String> {
         if let Some(p) = crate::imports_orchestration::resolve_specifier(
+            self,
             &edge.specifier,
             from_file,
             source_files,
@@ -179,11 +182,7 @@ impl Language for Python {
             if top.is_empty() {
                 return None;
             }
-            let resolved = crate::imports_orchestration::resolve_imports_to_files(
-                &[top],
-                known_files_vec,
-                from_file,
-            );
+            let resolved = imports::resolve_imports_to_files(&[top], known_files_vec, from_file);
             return resolved.into_iter().next();
         }
         None
@@ -267,6 +266,10 @@ impl Language for Python {
 
     fn is_conventional_path(&self, path: &str) -> bool {
         path.rsplit('/').next().unwrap_or(path) == "conftest.py"
+    }
+
+    fn conventional_dirs(&self) -> &'static [&'static str] {
+        &["tests/", "scripts/", "fixtures/"]
     }
 
     fn additional_live_roots(

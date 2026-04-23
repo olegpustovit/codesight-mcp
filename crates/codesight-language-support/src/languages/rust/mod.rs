@@ -212,7 +212,6 @@ impl Language for Rust {
     fn is_test_fixture(&self, path: &str) -> bool {
         path.contains("/fixtures/")
             || path.starts_with("fixtures/")
-            || path.contains("/lang_samples/")
             // insta snapshots: .snap is the committed baseline, .snap.new
             // is the most recent divergence awaiting review, .pending.snap
             // is the current-run candidate that hasn't been accepted yet.
@@ -225,6 +224,10 @@ impl Language for Rust {
         CONVENTIONAL_RUST_DIRS.iter().any(|dir| {
             path.starts_with(dir) || path.contains(&format!("/{dir}"))
         }) || path.rsplit('/').next().unwrap_or(path) == "build.rs"
+    }
+
+    fn conventional_dirs(&self) -> &'static [&'static str] {
+        CONVENTIONAL_RUST_DIRS
     }
 
     fn additional_live_roots(
@@ -437,7 +440,6 @@ const CONVENTIONAL_RUST_DIRS: &[&str] = &[
     "benches/",
     "fixtures/",
     "testdata/",
-    "stress/",
 ];
 
 fn detect_foreign_trait_impl_files(
@@ -557,9 +559,9 @@ mod tests {
         assert!(rust.is_test_fixture("src/tests/__snapshots__/greet.snap"));
         assert!(rust.is_test_fixture("src/tests/greet.snap.new"));
         assert!(rust.is_test_fixture("src/tests/greet.pending.snap"));
-        // fixtures/ and lang_samples/ keep working.
+        // fixtures/ keeps working.
         assert!(rust.is_test_fixture("fixtures/hello.rs"));
-        assert!(rust.is_test_fixture("tests/lang_samples/sample.rs"));
+        assert!(rust.is_test_fixture("tests/fixtures/lang_samples/sample.rs"));
         // Ordinary source files are not fixtures.
         assert!(!rust.is_test_fixture("src/lib.rs"));
     }

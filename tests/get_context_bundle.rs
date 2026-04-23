@@ -200,7 +200,7 @@ fn case_meta_envelope() {
 fn case_extract_imports_python() {
     let content = "import os\nfrom sys import argv\n\nx = 1\nfrom pathlib import Path\n";
     assert_eq!(
-        context_bundle_import_lines(content, "m.py", "python").len(),
+        context_bundle_import_lines(content, "m.py").len(),
         3
     );
 }
@@ -208,7 +208,7 @@ fn case_extract_imports_python() {
 fn case_extract_imports_go() {
     let content = "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc main() {}\n";
     assert_eq!(
-        context_bundle_import_lines(content, "main.go", "go").len(),
+        context_bundle_import_lines(content, "main.go").len(),
         4
     );
 }

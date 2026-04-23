@@ -3,10 +3,29 @@
 use std::collections::{HashMap, HashSet};
 
 use codesight_language_support::dep_graph::build_dependency_graph;
-use codesight_language_support::imports_orchestration::{
-    extract_imports, load_tsconfig_aliases, parse_tsconfig_paths, resolve_imports_to_files,
-    resolve_specifier,
+use codesight_language_support::imports_orchestration::extract_imports;
+use codesight_language_support::languages::python::imports::resolve_imports_to_files;
+use codesight_language_support::languages::typescript::TypeScript;
+use codesight_language_support::languages::typescript::tsconfig::{
+    load_tsconfig_aliases, parse_tsconfig_paths,
 };
+
+/// Test helper — exercises the generic resolver with JS/TS semantics, which
+/// is what every caller in this file is checking.
+fn resolve_specifier(
+    specifier: &str,
+    from_file: &str,
+    source_files: &HashSet<String>,
+    alias_map: Option<&HashMap<String, Vec<String>>>,
+) -> Option<String> {
+    codesight_language_support::imports_orchestration::resolve_specifier(
+        &TypeScript,
+        specifier,
+        from_file,
+        source_files,
+        alias_map,
+    )
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TestExtractImportsJS (8 tests) — JS/TS import extraction

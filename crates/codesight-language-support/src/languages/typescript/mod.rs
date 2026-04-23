@@ -2,8 +2,9 @@
 
 pub mod nextjs;
 mod simple_framework;
+pub mod tsconfig;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use tree_sitter::Language as TsLanguage;
@@ -11,7 +12,8 @@ use tree_sitter::Language as TsLanguage;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::TYPESCRIPT_MANIFEST;
 use crate::languages::javascript::{
-    JS_ENTRYPOINTS, js_is_restricted, js_is_test_file, js_package_name_for_dir, js_root_package,
+    JS_ENTRYPOINTS, js_is_restricted, js_is_test_file, js_package_name_for_dir,
+    js_resolve_relative, js_root_package,
 };
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, TYPESCRIPT};
 use crate::signature_density::{measure_colon_after_name, normalize_type_token};
@@ -62,7 +64,21 @@ impl Language for TypeScript {
         Some(include_str!("queries/imports.scm"))
     }
     fn path_aliases(&self, root: &Path) -> HashMap<String, Vec<String>> {
-        crate::imports_orchestration::load_tsconfig_aliases(&root.to_string_lossy())
+        tsconfig::load_tsconfig_aliases(&root.to_string_lossy())
+    }
+    fn resolve_relative_specifier(
+        &self,
+        specifier: &str,
+        from_file: &str,
+        source_files: &HashSet<String>,
+    ) -> Option<String> {
+        js_resolve_relative(specifier, from_file, source_files)
+    }
+    fn conventional_dirs(&self) -> &'static [&'static str] {
+        &["tests/", "__tests__/", "spec/", "fixtures/", "scripts/", "examples/"]
+    }
+    fn is_test_fixture(&self, path: &str) -> bool {
+        path.contains("/__snapshots__/")
     }
     fn branch_keywords(&self) -> &'static [&'static str] {
         &["if", "else if", "for", "while", "do", "catch", "case"]

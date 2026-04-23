@@ -142,50 +142,30 @@ pub fn is_entrypoint_basename(basename: &str) -> bool {
     false
 }
 
-/// Conventional-path check: returns `true` when any language tags the path
-/// as conventional OR when it hits the generic non-production directory set.
+/// Conventional-path check: `true` when the owning language tags the path
+/// as conventional, or when any registered language's `conventional_dirs`
+/// prefix matches. Language-specific basenames like `build.rs` /
+/// `conftest.py` live on the owning language's `is_conventional_path`.
 pub fn is_conventional_path(path: &str) -> bool {
     if let Some(lang) = lookup_for_path(path)
         && lang.is_conventional_path(path)
     {
         return true;
     }
-    const GENERIC_DIRS: &[&str] = &[
-        "scripts/",
-        "tests/",
-        "examples/",
-        "benches/",
-        "fixtures/",
-        "testdata/",
-        "stress/",
-    ];
-    if GENERIC_DIRS
-        .iter()
-        .any(|dir| path.starts_with(dir) || path.contains(&format!("/{dir}")))
-    {
-        return true;
+    for lang in builtin_registry().all() {
+        for dir in lang.conventional_dirs() {
+            if path.starts_with(dir) || path.contains(&format!("/{dir}")) {
+                return true;
+            }
+        }
     }
-    let basename = path.rsplit('/').next().unwrap_or(path);
-    matches!(basename, "build.rs" | "conftest.py")
+    false
 }
 
 /// Soft test-weight multiplier for hotspot scoring: test files get 0.3×,
-/// production gets 1.0×.
+/// production gets 1.0×. Relies entirely on per-language `is_test_file`.
 pub fn test_weight_multiplier(path: &str) -> f64 {
-    let basename = path.rsplit('/').next().unwrap_or(path);
-    let generic = path.starts_with("tests/")
-        || path.contains("/tests/")
-        || basename.ends_with("_test.py")
-        || basename.ends_with(".test.ts")
-        || basename.ends_with(".test.tsx")
-        || basename.ends_with(".test.js")
-        || basename.ends_with(".test.jsx")
-        || basename.ends_with("_spec.rb");
-    if generic || is_test_file(path) {
-        0.3
-    } else {
-        1.0
-    }
+    if is_test_file(path) { 0.3 } else { 1.0 }
 }
 
 fn lookup_for_name(name: &str) -> Option<&'static dyn Language> {

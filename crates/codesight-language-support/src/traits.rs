@@ -249,11 +249,41 @@ pub trait Language: Send + Sync {
         _workspace_crates: Option<&HashMap<String, String>>,
     ) -> Option<String> {
         crate::imports_orchestration::resolve_specifier(
+            self,
             &edge.specifier,
             from_file,
             source_files,
             alias_map,
         )
+    }
+
+    /// Resolve a `./` or `../` relative import specifier for this language.
+    /// Default: normalize against `from_file` and try the exact path only.
+    /// JS-family languages (JavaScript, TypeScript, JSX, TSX, Vue) override
+    /// with extension and index-file probing.
+    fn resolve_relative_specifier(
+        &self,
+        specifier: &str,
+        from_file: &str,
+        source_files: &std::collections::HashSet<String>,
+    ) -> Option<String> {
+        let dir = match from_file.rfind('/') {
+            Some(idx) => &from_file[..idx],
+            None => ".",
+        };
+        let joined = format!("{dir}/{specifier}");
+        let mut parts: Vec<&str> = Vec::new();
+        for component in joined.split('/') {
+            match component {
+                "." | "" => {}
+                ".." => {
+                    parts.pop();
+                }
+                other => parts.push(other),
+            }
+        }
+        let normalized = parts.join("/");
+        source_files.contains(&normalized).then_some(normalized)
     }
 
     // ── Packages / workspaces ────────────────────────────────────────────
@@ -305,6 +335,15 @@ pub trait Language: Send + Sync {
     /// benches/, …).
     fn is_conventional_path(&self, _path: &str) -> bool {
         false
+    }
+
+    /// Directory prefixes this language's ecosystem treats as non-production
+    /// (scripts, examples, benches, testdata, fixtures, …). The facade
+    /// unions these across every registered language to answer
+    /// [`crate::facade::is_conventional_path`] for paths whose own language
+    /// did not claim them. Default empty.
+    fn conventional_dirs(&self) -> &'static [&'static str] {
+        &[]
     }
 
     /// Hook for Rust's foreign-trait impl sweep, Python's

@@ -118,9 +118,6 @@ impl CodeService {
                     .to_string()
             });
             let signature = meta.map(|m| m.signature.clone()).unwrap_or_default();
-            let lang = meta
-                .and_then(|m| m.language.clone())
-                .unwrap_or_else(|| "python".to_string());
 
             let file_content = if let Some(cached) = file_cache.get(&record.file_path) {
                 cached.clone()
@@ -146,7 +143,7 @@ impl CodeService {
                 file_cache.insert(record.file_path.clone(), content.clone());
                 content
             };
-            let imports = context_bundle_import_lines(&file_content, &record.file_path, &lang);
+            let imports = context_bundle_import_lines(&file_content, &record.file_path);
 
             rows.push(BundleRow {
                 sym_id: record.id.clone(),

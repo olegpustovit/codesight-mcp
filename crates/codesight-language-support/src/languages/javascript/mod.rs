@@ -1,5 +1,8 @@
 //! JavaScript language (JSX handled separately via `jsx` module).
 
+pub mod imports;
+
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -10,6 +13,14 @@ use crate::languages::builtins::JAVASCRIPT_MANIFEST;
 use crate::manifest::{GrammarSpec, JAVASCRIPT, LanguageId, LanguageManifest};
 use crate::signature_density::measure_colon_after_name;
 use crate::traits::{ImportExtractionMode, Language};
+
+pub(crate) fn js_resolve_relative(
+    specifier: &str,
+    from_file: &str,
+    source_files: &HashSet<String>,
+) -> Option<String> {
+    imports::resolve_js_relative(specifier, from_file, source_files)
+}
 
 pub struct JavaScript;
 
@@ -109,8 +120,22 @@ impl Language for JavaScript {
     fn is_test_file(&self, path: &str) -> bool {
         js_is_test_file(path)
     }
+    fn is_test_fixture(&self, path: &str) -> bool {
+        path.contains("/__snapshots__/")
+    }
     fn is_restricted(&self, source_text: &str, name: &str) -> bool {
         js_is_restricted(source_text, name)
+    }
+    fn resolve_relative_specifier(
+        &self,
+        specifier: &str,
+        from_file: &str,
+        source_files: &HashSet<String>,
+    ) -> Option<String> {
+        js_resolve_relative(specifier, from_file, source_files)
+    }
+    fn conventional_dirs(&self) -> &'static [&'static str] {
+        &["tests/", "__tests__/", "spec/", "fixtures/", "scripts/", "examples/"]
     }
     fn branch_keywords(&self) -> &'static [&'static str] {
         &["if", "else if", "for", "while", "do", "catch", "case"]
