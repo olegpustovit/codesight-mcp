@@ -33,13 +33,14 @@ pub fn normalize_type_token(token: &str) -> String {
 /// Measure colon-after-name family (Rust, Python, TS, JS, Kotlin, Swift,
 /// Scala). `implicit_unit_return` is Rust's `()` default; `is_receiver`
 /// filters `self` / `cls`.
-pub fn measure_colon_after_name<F>(
+pub fn measure_colon_after_name<L, F>(
     source: &str,
-    lang: &dyn Language,
+    lang: &L,
     implicit_unit_return: bool,
     is_receiver: F,
 ) -> Option<f64>
 where
+    L: Language + ?Sized,
     F: Fn(&str) -> bool,
 {
     let open = source.find('(')?;
@@ -71,7 +72,7 @@ where
 }
 
 /// C/C++/Java/C#/Dart family: `RetType name(ParamType name, ...)`.
-pub fn measure_type_before_name(source: &str, lang: &dyn Language) -> Option<f64> {
+pub fn measure_type_before_name<L: Language + ?Sized>(source: &str, lang: &L) -> Option<f64> {
     let open = source.find('(')?;
     let close = find_matching_delimiter(source, open, '(', ')')?;
     let before_open = source[..open].trim();
@@ -105,9 +106,9 @@ fn extract_colon_param_type(param: &str) -> Option<&str> {
 /// Return-type extractor: `: Type` (TS, Kotlin, Scala, PHP) or `-> Type`
 /// (Rust, Python, Go). The colon-suffix form is only accepted when the
 /// language's family uses it — detected via the `TypeReturnStyle` hook.
-pub fn extract_return_type_after_params<'a>(
+pub fn extract_return_type_after_params<'a, L: Language + ?Sized>(
     suffix: &'a str,
-    lang: &dyn Language,
+    lang: &L,
 ) -> Option<&'a str> {
     let trimmed = suffix.trim_start();
     if lang.uses_colon_return_suffix() && trimmed.starts_with(':') {

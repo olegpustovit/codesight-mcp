@@ -147,7 +147,7 @@ fn test_lua_extension_registered() {
     let ext = registry.extractor_for_path(Path::new("addon.lua"));
     assert!(ext.is_some(), ".lua extension should be registered");
     assert_eq!(
-        ext.unwrap().language_name(),
+        ext.unwrap().id().as_str(),
         "lua",
         ".lua should resolve to language 'lua'"
     );

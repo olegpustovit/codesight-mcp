@@ -17,7 +17,7 @@ fn extract_symbols() -> Vec<StoredSymbol> {
     let ext = reg
         .extractor_for_path(Path::new("resources/views/profile.blade.php"))
         .expect("blade extractor");
-    ext.extract("resources/views/profile.blade.php", &fixture_source())
+    ext.extract_symbols("resources/views/profile.blade.php", &fixture_source())
         .expect("extraction should succeed")
 }
 
@@ -30,7 +30,7 @@ fn test_blade_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("resources/views/home.blade.php"));
     assert!(ext.is_some(), ".blade.php should be detected");
-    assert_eq!(ext.unwrap().language_name(), "blade");
+    assert_eq!(ext.unwrap().id().as_str(), "blade");
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn test_blade_not_confused_with_php() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("app/Http/Controllers/HomeController.php"));
     assert!(ext.is_some(), ".php should be detected");
-    assert_eq!(ext.unwrap().language_name(), "php");
+    assert_eq!(ext.unwrap().id().as_str(), "php");
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn test_blade_extension_in_registry() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("test.blade.php"));
     assert!(ext.is_some(), ".blade.php must be registered");
-    assert_eq!(ext.unwrap().language_name(), "blade");
+    assert_eq!(ext.unwrap().id().as_str(), "blade");
 }
 
 // ---------------------------------------------------------------------------

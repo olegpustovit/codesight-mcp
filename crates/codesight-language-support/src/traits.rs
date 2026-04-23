@@ -66,6 +66,20 @@ pub struct LiveRoot {
     pub explicit: bool,
 }
 
+/// Shape of a language's primary type-annotation convention. Drives the
+/// default [`Language::measured_type_density`] — languages only declare
+/// their style and inherit the walker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeAnnotationStyle {
+    /// `name: Type` (TypeScript, Kotlin, Swift, JavaScript w/ JSDoc).
+    ColonAfterName,
+    /// `Type name` (C, C++, C#, Java, Dart).
+    TypeBeforeName,
+    /// Language computes its own density (Go grouped params, PHP unions,
+    /// Python receivers, Rust receivers).
+    Custom,
+}
+
 /// Everything a language owns. New-language onboarding is a single `impl
 /// Language for MyLang { fn id() = …; fn manifest() = …; /* overrides */ }`
 /// — any unoverridden method inherits [`crate::FallbackLanguage`]'s default.
@@ -129,25 +143,6 @@ pub trait Language: Send + Sync {
             return Ok(Vec::new());
         }
         crate::scm_engine::extract_with_spec(self.id().as_str(), spec, file_path, source)
-    }
-
-    /// Legacy alias for `self.id().as_str()`.
-    fn language_name(&self) -> &'static str {
-        self.id().as_str()
-    }
-
-    /// Legacy alias for `self.manifest().extensions`.
-    fn supported_extensions(&self) -> &'static [&'static str] {
-        self.manifest().extensions
-    }
-
-    /// Legacy alias for `self.extract_symbols(...)`.
-    fn extract(
-        &self,
-        file_path: &str,
-        source: &str,
-    ) -> anyhow::Result<Vec<StoredSymbol>> {
-        self.extract_symbols(file_path, source)
     }
 
     /// Post-extraction symbol fixup — runs after `extract_symbols` / the SCM
@@ -319,15 +314,86 @@ pub trait Language: Send + Sync {
         &[]
     }
 
-    /// Whether this language considers `path` a test file.
-    fn is_test_file(&self, _path: &str) -> bool {
+    /// Basename prefixes (case-insensitive) that mark a test file (Python's
+    /// `test_`, `tests`). Default empty.
+    fn test_file_basename_prefixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Lowercased path suffixes that mark a test file (`.test.ts`,
+    /// `_test.go`, `_spec.rb`). Default empty.
+    fn test_file_suffixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Lowercased path substrings (directory markers) that mark a test file
+    /// (`/tests/`, `/__tests__/`, `/spec/`). Default empty.
+    fn test_file_dirs(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Whether this language considers `path` a test file. Default scans
+    /// [`Self::test_file_basename_prefixes`], [`Self::test_file_suffixes`],
+    /// and [`Self::test_file_dirs`] (matched with a leading `/` anchor so
+    /// `"/tests/"` catches both `tests/foo.rs` and `src/tests/bar.rs`).
+    /// Languages with exotic rules override.
+    fn is_test_file(&self, path: &str) -> bool {
+        let lower = path.to_ascii_lowercase();
+        let basename = lower.rsplit('/').next().unwrap_or(&lower);
+        if self
+            .test_file_basename_prefixes()
+            .iter()
+            .any(|p| basename.starts_with(p))
+        {
+            return true;
+        }
+        if self
+            .test_file_suffixes()
+            .iter()
+            .any(|s| lower.ends_with(s))
+        {
+            return true;
+        }
+        let anchored = format!("/{lower}");
+        if self
+            .test_file_dirs()
+            .iter()
+            .any(|d| anchored.contains(d))
+        {
+            return true;
+        }
         false
     }
 
+    /// Lowercased directory markers for fixture / snapshot trees
+    /// (`/__snapshots__/`, `/fixtures/`). Default empty.
+    fn test_fixture_dirs(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Lowercased path suffixes for fixture artifacts (`.snap`,
+    /// `.snap.new`, `.pending.snap`). Default empty.
+    fn test_fixture_suffixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Whether `path` is a fixture / golden / snapshot file this language's
-    /// reachability analysis should skip entirely.
-    fn is_test_fixture(&self, _path: &str) -> bool {
-        false
+    /// reachability analysis should skip entirely. Default scans
+    /// [`Self::test_fixture_dirs`] (anchored with leading `/`) and
+    /// [`Self::test_fixture_suffixes`].
+    fn is_test_fixture(&self, path: &str) -> bool {
+        let lower = path.to_ascii_lowercase();
+        if self
+            .test_fixture_suffixes()
+            .iter()
+            .any(|s| lower.ends_with(s))
+        {
+            return true;
+        }
+        let anchored = format!("/{lower}");
+        self.test_fixture_dirs()
+            .iter()
+            .any(|d| anchored.contains(d))
     }
 
     /// Whether `path` is a conventional non-production directory whose files
@@ -343,6 +409,14 @@ pub trait Language: Send + Sync {
     /// [`crate::facade::is_conventional_path`] for paths whose own language
     /// did not claim them. Default empty.
     fn conventional_dirs(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Basenames of "barrel" / package-index files that re-export symbols
+    /// for downstream importers (Python `__init__.py`, TS/JS `index.ts` etc).
+    /// Dead-code analysis treats a symbol as reachable if its name appears
+    /// inside any of these files. Default empty.
+    fn barrel_file_basenames(&self) -> &'static [&'static str] {
         &[]
     }
 
@@ -398,27 +472,81 @@ pub trait Language: Send + Sync {
         }
     }
 
-    fn supports_measured_types(&self) -> bool {
-        false
+    /// Shape of this language's type annotations. Drives the default
+    /// [`Self::measured_type_density`] and [`Self::supports_measured_types`]
+    /// so each language only needs to declare its style — no per-language
+    /// dispatch code. [`TypeAnnotationStyle::Custom`] means the language
+    /// implements its own signature walker (Go, Python, Rust, PHP).
+    fn type_annotation_style(&self) -> TypeAnnotationStyle {
+        TypeAnnotationStyle::Custom
     }
 
-    fn measured_type_density(&self, _source: &str) -> Option<f64> {
-        None
+    /// Whether measured type density is available for this language. Default
+    /// is `true` when [`Self::type_annotation_style`] is anything other than
+    /// [`TypeAnnotationStyle::Custom`]; languages with a bespoke walker
+    /// override to `true` as well.
+    fn supports_measured_types(&self) -> bool {
+        !matches!(self.type_annotation_style(), TypeAnnotationStyle::Custom)
+    }
+
+    /// Measure the density of informative type annotations in `source`.
+    /// Default dispatches on [`Self::type_annotation_style`]. Languages with
+    /// custom signature shapes (Go's grouped params, PHP's complex union
+    /// types) override.
+    fn measured_type_density(&self, source: &str) -> Option<f64> {
+        match self.type_annotation_style() {
+            TypeAnnotationStyle::ColonAfterName => {
+                crate::signature_density::measure_colon_after_name(source, self, false, |_| false)
+            }
+            TypeAnnotationStyle::TypeBeforeName => {
+                crate::signature_density::measure_type_before_name(source, self)
+            }
+            TypeAnnotationStyle::Custom => None,
+        }
+    }
+
+    /// Normalized type tokens that collapse to this language's "any" shape
+    /// via exact match (after `normalize_type_token`). Examples: Go's
+    /// `any` / `interface{}`, C#'s `dynamic` / `object`, Python's `any` /
+    /// `object`, Kotlin's `any`. Default empty — languages without a weak-
+    /// type vocabulary inherit the strict default.
+    fn weak_type_tokens(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Normalized type-token substrings that mark a weak annotation (e.g.
+    /// Rust's `<any>` and `dynany`, Python's `<any>` and `typing.any`).
+    /// Default empty.
+    fn weak_type_substrings(&self) -> &'static [&'static str] {
+        &[]
     }
 
     /// Score one type token from a signature: 1.0 when the annotation is
     /// informative, 0.0 when it collapses to the language's "any" shape
     /// (Python's `Any`, TypeScript's `any`, Go's `interface{}`, …), and
     /// intermediate values for languages that recognize soft gradations
-    /// (TypeScript's `unknown` → 0.3). Default: any non-empty normalized
-    /// token scores 1.0 — languages with weak-type vocabulary override.
+    /// (TypeScript's `unknown` → 0.3). Default uses `weak_type_tokens()` /
+    /// `weak_type_substrings()`; languages with gradations override.
     fn type_token_score(&self, token: &str) -> f64 {
         let normalized = crate::signature_density::normalize_type_token(token);
         if normalized.is_empty() {
-            0.0
-        } else {
-            1.0
+            return 0.0;
         }
+        if self
+            .weak_type_tokens()
+            .iter()
+            .any(|w| *w == normalized.as_str())
+        {
+            return 0.0;
+        }
+        if self
+            .weak_type_substrings()
+            .iter()
+            .any(|s| normalized.contains(s))
+        {
+            return 0.0;
+        }
+        1.0
     }
 
     /// True when this language writes a return-type after the parameter
@@ -629,6 +757,15 @@ pub trait Language: Send + Sync {
     fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
         &[]
     }
+
+    /// Per-language module-path rename engine. When `Some`, callers (today
+    /// `evaluate_impact analysis=path_rename`) dispatch through the engine to
+    /// preview a `from → to` prefix rewrite across the workspace. Default
+    /// `None` — languages without a native module-path convention (scripting
+    /// languages, config files, etc.) don't offer this surface.
+    fn path_rename_engine(&self) -> Option<&'static dyn crate::path_rename::PathRenameEngine> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -650,7 +787,7 @@ mod default_body_tests {
                 lang.function_length_warn(),
                 expected,
                 "{} mismatched function_length_warn",
-                lang.language_name()
+                lang.id().as_str()
             );
         }
     }
@@ -662,7 +799,7 @@ mod default_body_tests {
                 Some(v) => assert!(
                     (0.0..=1.0).contains(&v),
                     "{} baseline {v} outside [0,1]",
-                    lang.language_name()
+                    lang.id().as_str()
                 ),
                 None => assert!(matches!(
                     lang.family(),

@@ -142,6 +142,21 @@ pub fn is_entrypoint_basename(basename: &str) -> bool {
     false
 }
 
+/// True when `basename` is any registered language's barrel-index file
+/// (Python `__init__.py`, TS `index.ts`, …). Materialised once per process.
+pub fn is_barrel_basename(basename: &str) -> bool {
+    use std::collections::HashSet;
+    use std::sync::OnceLock;
+    static SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    let set = SET.get_or_init(|| {
+        builtin_registry()
+            .all()
+            .flat_map(|lang| lang.barrel_file_basenames().iter().copied())
+            .collect()
+    });
+    set.contains(basename)
+}
+
 /// Outline-noise predicate: `path` is config / manifest / build-script noise
 /// for some registered language. The basename set is materialised once on
 /// first call (union of every `Language::outline_noise_basenames`) so this

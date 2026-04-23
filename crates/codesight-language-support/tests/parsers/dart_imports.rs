@@ -31,7 +31,7 @@ fn test_dart_in_language_extractors() {
         ext.is_some(),
         "Dart must be registered in LanguageRegistry"
     );
-    assert_eq!(ext.unwrap().language_name(), "dart");
+    assert_eq!(ext.unwrap().id().as_str(), "dart");
 }
 
 #[test]

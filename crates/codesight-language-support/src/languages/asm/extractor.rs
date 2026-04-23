@@ -661,7 +661,6 @@ fn extract_ca65(file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
 #[cfg(test)]
 mod tests {
     use super::AsmExtractor;
-    use crate::scm_engine::ScmExtractor;
 
     #[test]
     fn nasm_extracts_labels_and_defines() {

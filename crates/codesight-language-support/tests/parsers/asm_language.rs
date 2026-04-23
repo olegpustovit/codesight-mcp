@@ -572,7 +572,7 @@ fn test_extension_mapping() {
             "extension .{ext} should map to an extractor"
         );
         assert_eq!(
-            extractor.unwrap().language_name(),
+            extractor.unwrap().id().as_str(),
             "asm",
             "extension .{ext} should map to the asm extractor"
         );
@@ -588,5 +588,5 @@ fn test_language_in_registry() {
         extractor.is_some(),
         "asm should be registered in LanguageRegistry"
     );
-    assert_eq!(extractor.unwrap().language_name(), "asm");
+    assert_eq!(extractor.unwrap().id().as_str(), "asm");
 }

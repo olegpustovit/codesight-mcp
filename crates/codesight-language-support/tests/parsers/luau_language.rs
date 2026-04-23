@@ -268,7 +268,7 @@ fn test_luau_extension_registered() {
     let ext = registry.extractor_for_path(Path::new("module.luau"));
     assert!(ext.is_some(), ".luau extension should be registered");
     assert_eq!(
-        ext.unwrap().language_name(),
+        ext.unwrap().id().as_str(),
         "luau",
         ".luau should resolve to language 'luau'"
     );
@@ -281,5 +281,5 @@ fn test_luau_language_in_registry() {
     // Verify that any .luau file resolves, confirming luau is in the registry.
     let ext = registry.extractor_for_path(Path::new("test.luau"));
     assert!(ext.is_some(), "luau should be in the extractor registry");
-    assert_eq!(ext.unwrap().language_name(), "luau");
+    assert_eq!(ext.unwrap().id().as_str(), "luau");
 }

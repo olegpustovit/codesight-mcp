@@ -98,11 +98,11 @@ fn test_yaml_extension_mapping() {
 
     let yaml_ext = reg.extractor_for_path(Path::new("settings.yaml"));
     assert!(yaml_ext.is_some(), ".yaml should be recognized");
-    assert_eq!(yaml_ext.unwrap().language_name(), "yaml");
+    assert_eq!(yaml_ext.unwrap().id().as_str(), "yaml");
 
     let yml_ext = reg.extractor_for_path(Path::new("settings.yml"));
     assert!(yml_ext.is_some(), ".yml should be recognized");
-    assert_eq!(yml_ext.unwrap().language_name(), "yaml");
+    assert_eq!(yml_ext.unwrap().id().as_str(), "yaml");
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +124,7 @@ fn test_ansible_path_heuristics_override_yaml() {
         let ext = reg.extractor_for_path(Path::new(path));
         assert!(ext.is_some(), "{path} should be recognized");
         assert_eq!(
-            ext.unwrap().language_name(),
+            ext.unwrap().id().as_str(),
             "ansible",
             "{path} should map to ansible, not yaml"
         );
@@ -142,11 +142,11 @@ fn test_openapi_basename_still_wins_over_yaml() {
 
     let openapi = reg.extractor_for_path(Path::new("openapi.yaml"));
     assert!(openapi.is_some(), "openapi.yaml should be recognized");
-    assert_eq!(openapi.unwrap().language_name(), "openapi");
+    assert_eq!(openapi.unwrap().id().as_str(), "openapi");
 
     let swagger = reg.extractor_for_path(Path::new("swagger.yml"));
     assert!(swagger.is_some(), "swagger.yml should be recognized");
-    assert_eq!(swagger.unwrap().language_name(), "openapi");
+    assert_eq!(swagger.unwrap().id().as_str(), "openapi");
 }
 
 // ---------------------------------------------------------------------------

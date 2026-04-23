@@ -26,6 +26,18 @@ pub struct SavingsLedger {
     path: PathBuf,
 }
 
+/// Input for [`SavingsLedger::record_tool_call`].
+#[derive(Debug, Clone, Copy)]
+pub struct ToolCallRecord<'a> {
+    pub tool: &'a str,
+    pub tokens_saved: u64,
+    pub timing_ms: f64,
+    pub ok: bool,
+    pub source_id: Option<&'a str>,
+    pub impact_analysis: Option<&'a str>,
+    pub variant: Option<&'a str>,
+}
+
 impl SavingsLedger {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
@@ -66,27 +78,20 @@ impl SavingsLedger {
         Ok((session, created))
     }
 
-    pub fn record_tool_call(
-        &self,
-        tool: &str,
-        tokens_saved: u64,
-        timing_ms: f64,
-        ok: bool,
-        source_id: Option<&str>,
-        impact_analysis: Option<&str>,
-        variant: Option<&str>,
-    ) -> io::Result<()> {
+    pub fn record_tool_call(&self, call: ToolCallRecord<'_>) -> io::Result<()> {
         let mut state = self.load()?;
         ensure_active_session(&mut state);
         let session = &mut state.current_session;
         if session.primary_source_id.is_none()
-            && let Some(source_id) = source_id.filter(|value| !value.is_empty())
+            && let Some(source_id) = call.source_id.filter(|value| !value.is_empty())
         {
             session.primary_source_id = Some(source_id.to_string());
         }
-        session.tokens_saved_total = session.tokens_saved_total.saturating_add(tokens_saved);
-        if tool == "evaluate_impact"
-            && let Some(analysis) = impact_analysis.filter(|value| !value.is_empty())
+        session.tokens_saved_total = session
+            .tokens_saved_total
+            .saturating_add(call.tokens_saved);
+        if call.tool == "evaluate_impact"
+            && let Some(analysis) = call.impact_analysis.filter(|value| !value.is_empty())
         {
             *session
                 .evaluate_impact_usage
@@ -94,11 +99,11 @@ impl SavingsLedger {
                 .or_default() += 1;
         }
         {
-            let entry = session.per_tool.entry(tool.to_string()).or_default();
+            let entry = session.per_tool.entry(call.tool.to_string()).or_default();
             entry.calls = entry.calls.saturating_add(1);
-            entry.tokens_saved = entry.tokens_saved.saturating_add(tokens_saved);
-            entry.timing_ms_sum += timing_ms;
-            if !ok {
+            entry.tokens_saved = entry.tokens_saved.saturating_add(call.tokens_saved);
+            entry.timing_ms_sum += call.timing_ms;
+            if !call.ok {
                 entry.error_count = entry.error_count.saturating_add(1);
             }
         }
@@ -108,13 +113,13 @@ impl SavingsLedger {
         // `"tool:variant"` so `session_stats` can answer "which enum value
         // failed?" without a parallel schema. The aggregate row is still
         // updated above so top-level roll-ups are unchanged.
-        if let Some(variant) = variant.filter(|value| !value.is_empty()) {
-            let key = format!("{tool}:{variant}");
+        if let Some(variant) = call.variant.filter(|value| !value.is_empty()) {
+            let key = format!("{tool}:{variant}", tool = call.tool);
             let entry = session.per_tool.entry(key).or_default();
             entry.calls = entry.calls.saturating_add(1);
-            entry.tokens_saved = entry.tokens_saved.saturating_add(tokens_saved);
-            entry.timing_ms_sum += timing_ms;
-            if !ok {
+            entry.tokens_saved = entry.tokens_saved.saturating_add(call.tokens_saved);
+            entry.timing_ms_sum += call.timing_ms;
+            if !call.ok {
                 entry.error_count = entry.error_count.saturating_add(1);
             }
         }

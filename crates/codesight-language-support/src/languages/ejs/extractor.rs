@@ -171,7 +171,6 @@ fn make_symbol(
 mod tests {
     use super::EjsExtractor;
     use codesight_core::symbols::SymbolKind;
-    use crate::scm_engine::ScmExtractor;
 
     const TEMPLATE: &str = r#"<!DOCTYPE html>
 <html>

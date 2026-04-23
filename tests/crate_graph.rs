@@ -129,12 +129,11 @@ fn workspace_crate_dependency_invariants_hold() {
     // Root binary depends on engine. The MCP protocol layer is now `rmcp`
     // (external crate), so there's no internal workspace member for it.
     let root_deps = ws_deps("codesight-mcp");
-    for required in ["codesight-engine"] {
-        assert!(
-            root_deps.contains(&required.to_string()),
-            "root missing required dep {required}: {root_deps:?}"
-        );
-    }
+    let required = "codesight-engine";
+    assert!(
+        root_deps.contains(&required.to_string()),
+        "root missing required dep {required}: {root_deps:?}"
+    );
 }
 
 /// L0.75 content lint: per-language behavior lives in

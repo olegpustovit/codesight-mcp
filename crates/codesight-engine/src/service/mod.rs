@@ -614,15 +614,15 @@ impl CodeService {
                     .unwrap_or(0.0);
                 let ok = value["ok"].as_bool().unwrap_or(false);
                 self.with_ledger_locked(|ledger| {
-                    let _ = ledger.record_tool_call(
-                        tool_name,
+                    let _ = ledger.record_tool_call(savings::ToolCallRecord {
+                        tool: tool_name,
                         tokens_saved,
                         timing_ms,
                         ok,
-                        source_id.as_deref(),
-                        impact_analysis.as_deref(),
-                        variant.as_deref(),
-                    );
+                        source_id: source_id.as_deref(),
+                        impact_analysis: impact_analysis.as_deref(),
+                        variant: variant.as_deref(),
+                    });
                     // Record read_content-specific detail when present.
                     if tool_name == "read_content"
                         && let Some(scopes) = value.pointer("/_meta/read_scopes")

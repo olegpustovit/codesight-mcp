@@ -191,7 +191,7 @@ impl CodeService {
             obj.insert(
                 "agent_readiness".into(),
                 json!({
-                    "score": scoped.signal.score as f64 / 10_000.0,
+                    "score": scoped.signal.score / 10_000.0,
                     "navigability": scoped.signal.dimensions.navigability,
                     "comprehensibility": scoped.signal.dimensions.comprehensibility,
                     "verifiability": scoped.signal.dimensions.verifiability,
@@ -221,7 +221,7 @@ impl CodeService {
             );
             self.record_agent_readiness_probe(
                 scope,
-                scoped.signal.score as f64 / 10_000.0,
+                scoped.signal.score / 10_000.0,
                 scoped.weakest_dimension,
                 current_thresholds().agent_readiness_min,
             );

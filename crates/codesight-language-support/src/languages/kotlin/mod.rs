@@ -5,8 +5,8 @@ use tree_sitter::Language as TsLanguage;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::KOTLIN_MANIFEST;
 use crate::manifest::{GrammarSpec, KOTLIN, LanguageId, LanguageManifest};
-use crate::signature_density::{measure_colon_after_name, normalize_type_token};
-use crate::traits::Language;
+use crate::traits::{Language, TypeAnnotationStyle};
+use crate::visibility::cfamily_is_restricted;
 
 pub struct Kotlin;
 
@@ -21,17 +21,6 @@ pub static GRAMMAR: GrammarSpec = GrammarSpec {
     injections_scm: None,
 };
 
-fn cfamily_is_restricted(source_text: &str, _name: &str) -> bool {
-    let trimmed = source_text.trim_start();
-    if trimmed.starts_with("private ")
-        || trimmed.starts_with("protected ")
-        || trimmed.starts_with("internal ")
-    {
-        return true;
-    }
-    !trimmed.starts_with("public ")
-}
-
 impl Language for Kotlin {
     fn id(&self) -> LanguageId {
         KOTLIN
@@ -42,8 +31,8 @@ impl Language for Kotlin {
     fn grammar_spec(&self) -> Option<&'static GrammarSpec> {
         Some(&GRAMMAR)
     }
-    fn is_restricted(&self, src: &str, name: &str) -> bool {
-        cfamily_is_restricted(src, name)
+    fn is_restricted(&self, src: &str, _name: &str) -> bool {
+        cfamily_is_restricted(src)
     }
     fn family(&self) -> LanguageFamily {
         LanguageFamily::BracedStatic
@@ -51,24 +40,14 @@ impl Language for Kotlin {
     fn nesting_mode(&self) -> NestingMode {
         NestingMode::Brace
     }
-    fn supports_measured_types(&self) -> bool {
-        true
-    }
-    fn measured_type_density(&self, src: &str) -> Option<f64> {
-        measure_colon_after_name(src, self, false, |_| false)
+    fn type_annotation_style(&self) -> TypeAnnotationStyle {
+        TypeAnnotationStyle::ColonAfterName
     }
     fn uses_colon_return_suffix(&self) -> bool {
         true
     }
-    fn type_token_score(&self, token: &str) -> f64 {
-        let normalized = normalize_type_token(token);
-        if normalized.is_empty() {
-            return 0.0;
-        }
-        if normalized == "any" {
-            return 0.0;
-        }
-        1.0
+    fn weak_type_tokens(&self) -> &'static [&'static str] {
+        &["any"]
     }
     fn branch_keywords(&self) -> &'static [&'static str] {
         &["if", "else if", "for", "while", "do", "when", "catch"]
@@ -103,9 +82,6 @@ impl Language for Kotlin {
             "onResume",
             "onPause",
         ]
-    }
-    fn branch_operators(&self) -> &'static [&'static str] {
-        &["&&", "||"]
     }
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]

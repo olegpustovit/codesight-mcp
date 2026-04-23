@@ -8,8 +8,8 @@ use crate::family::{LanguageFamily, NestingMode};
 use crate::imports_types::ImportEdge;
 use crate::languages::builtins::DART_MANIFEST;
 use crate::manifest::{DART, GrammarSpec, LanguageId, LanguageManifest};
-use crate::traits::{ImportExtractionMode, Language};
-use crate::signature_density::{measure_type_before_name, normalize_type_token};
+use crate::traits::{ImportExtractionMode, Language, TypeAnnotationStyle};
+use crate::visibility::cfamily_is_restricted;
 
 pub struct Dart;
 
@@ -27,17 +27,6 @@ pub static GRAMMAR: GrammarSpec = GrammarSpec {
     injections_scm: None,
 };
 
-fn cfamily_is_restricted(source_text: &str, _name: &str) -> bool {
-    let trimmed = source_text.trim_start();
-    if trimmed.starts_with("private ")
-        || trimmed.starts_with("protected ")
-        || trimmed.starts_with("internal ")
-    {
-        return true;
-    }
-    !trimmed.starts_with("public ")
-}
-
 impl Language for Dart {
     fn id(&self) -> LanguageId {
         DART
@@ -54,8 +43,8 @@ impl Language for Dart {
     fn extract_imports(&self, source: &str) -> Vec<ImportEdge> {
         imports::extract(source)
     }
-    fn is_restricted(&self, src: &str, name: &str) -> bool {
-        cfamily_is_restricted(src, name)
+    fn is_restricted(&self, src: &str, _name: &str) -> bool {
+        cfamily_is_restricted(src)
     }
     fn family(&self) -> LanguageFamily {
         LanguageFamily::BracedStatic
@@ -63,20 +52,10 @@ impl Language for Dart {
     fn nesting_mode(&self) -> NestingMode {
         NestingMode::Brace
     }
-    fn supports_measured_types(&self) -> bool {
-        true
+    fn type_annotation_style(&self) -> TypeAnnotationStyle {
+        TypeAnnotationStyle::TypeBeforeName
     }
-    fn measured_type_density(&self, src: &str) -> Option<f64> {
-        measure_type_before_name(src, self)
-    }
-    fn type_token_score(&self, token: &str) -> f64 {
-        let normalized = normalize_type_token(token);
-        if normalized.is_empty() {
-            return 0.0;
-        }
-        if normalized == "dynamic" {
-            return 0.0;
-        }
-        1.0
+    fn weak_type_tokens(&self) -> &'static [&'static str] {
+        &["dynamic"]
     }
 }

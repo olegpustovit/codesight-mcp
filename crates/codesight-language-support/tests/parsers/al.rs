@@ -17,7 +17,7 @@ fn extract_symbols() -> Vec<StoredSymbol> {
     let ext = reg
         .extractor_for_path(Path::new("app/Sample.al"))
         .expect("al extractor");
-    ext.extract("app/Sample.al", &fixture_source())
+    ext.extract_symbols("app/Sample.al", &fixture_source())
         .expect("extraction should succeed")
 }
 
@@ -30,7 +30,7 @@ fn test_al_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("app/MyCodeunit.al"));
     assert!(ext.is_some(), ".al should be detected");
-    assert_eq!(ext.unwrap().language_name(), "al");
+    assert_eq!(ext.unwrap().id().as_str(), "al");
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn test_al_extension_in_registry() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("test.al"));
     assert!(ext.is_some(), ".al must be registered");
-    assert_eq!(ext.unwrap().language_name(), "al");
+    assert_eq!(ext.unwrap().id().as_str(), "al");
 }
 
 // ---------------------------------------------------------------------------

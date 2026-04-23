@@ -345,7 +345,6 @@ fn extract_task_list(
 #[cfg(test)]
 mod tests {
     use super::YamlExtractor;
-    use crate::scm_engine::ScmExtractor;
 
     #[test]
     fn yaml_extracts_top_level_keys() {

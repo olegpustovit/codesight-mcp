@@ -110,9 +110,7 @@ pub(super) fn build_function_facts<'a>(
 /// `symbol_uniqueness` collision tally. Language-owned list lives on the
 /// `Language` trait (L0.75); this function is the L1 dispatch.
 fn is_idiomatic_for_language(sym: &AnalysisSymbol) -> bool {
-    idiomatic_symbol_names_for_path(&sym.file_path)
-        .iter()
-        .any(|idiom| *idiom == sym.name.as_str())
+    idiomatic_symbol_names_for_path(&sym.file_path).contains(&sym.name.as_str())
 }
 
 pub(super) fn compute_symbol_uniqueness(

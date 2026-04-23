@@ -302,7 +302,7 @@ fn test_sql_extension_registered() {
         ext.is_some(),
         ".sql should be recognized by LanguageRegistry"
     );
-    assert_eq!(ext.unwrap().language_name(), "sql");
+    assert_eq!(ext.unwrap().id().as_str(), "sql");
 }
 #[test]
 fn test_sql_language_in_registry() {

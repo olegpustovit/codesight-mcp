@@ -12,7 +12,7 @@ use crate::family::{LanguageFamily, NestingMode};
 use crate::imports_types::ImportEdge;
 use crate::languages::builtins::PYTHON_MANIFEST;
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, PYTHON};
-use crate::signature_density::{measure_colon_after_name, normalize_type_token};
+use crate::signature_density::measure_colon_after_name;
 use crate::traits::{ImportExtractionMode, Language};
 
 /// Python receiver detector — filters `self` / `cls` from parameter lists.
@@ -252,16 +252,16 @@ impl Language for Python {
         ]
     }
 
-    fn is_test_file(&self, path: &str) -> bool {
-        let basename = path.rsplit('/').next().unwrap_or(path);
-        let lower = path.to_ascii_lowercase();
-        basename.starts_with("test_")
-            || basename.starts_with("tests")
-            || basename.ends_with("_test.py")
-            || lower.contains("/tests/")
-            || lower.contains("/test/")
-            || lower.contains("/__tests__/")
-            || lower.contains("/spec/")
+    fn test_file_basename_prefixes(&self) -> &'static [&'static str] {
+        &["test_", "tests"]
+    }
+
+    fn test_file_suffixes(&self) -> &'static [&'static str] {
+        &["_test.py"]
+    }
+
+    fn test_file_dirs(&self) -> &'static [&'static str] {
+        &["/tests/", "/test/", "/__tests__/", "/spec/"]
     }
 
     fn is_conventional_path(&self, path: &str) -> bool {
@@ -270,6 +270,10 @@ impl Language for Python {
 
     fn conventional_dirs(&self) -> &'static [&'static str] {
         &["tests/", "scripts/", "fixtures/"]
+    }
+
+    fn barrel_file_basenames(&self) -> &'static [&'static str] {
+        &["__init__.py"]
     }
 
     fn additional_live_roots(
@@ -305,10 +309,6 @@ impl Language for Python {
         roots
     }
 
-    fn is_restricted(&self, _source_text: &str, name: &str) -> bool {
-        name.starts_with('_')
-    }
-
     fn family(&self) -> LanguageFamily {
         LanguageFamily::ScriptedDynamic
     }
@@ -324,18 +324,11 @@ impl Language for Python {
     fn measured_type_density(&self, source: &str) -> Option<f64> {
         measure_colon_after_name(source, self, false, is_python_receiver)
     }
-    fn type_token_score(&self, token: &str) -> f64 {
-        let normalized = normalize_type_token(token);
-        if normalized.is_empty() {
-            return 0.0;
-        }
-        if matches!(normalized.as_str(), "any" | "typing.any" | "object") {
-            return 0.0;
-        }
-        if normalized.contains("<any>") || normalized.contains("typing.any") {
-            return 0.0;
-        }
-        1.0
+    fn weak_type_tokens(&self) -> &'static [&'static str] {
+        &["any", "object"]
+    }
+    fn weak_type_substrings(&self) -> &'static [&'static str] {
+        &["<any>", "typing.any"]
     }
 }
 

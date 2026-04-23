@@ -18,7 +18,7 @@ fn extract_cshtml_symbols() -> Vec<StoredSymbol> {
     let ext = reg
         .extractor_for_path(Path::new("Views/Profile/Index.cshtml"))
         .expect("razor extractor");
-    ext.extract(
+    ext.extract_symbols(
         "Views/Profile/Index.cshtml",
         &fixture_source("sample.cshtml"),
     )
@@ -30,7 +30,7 @@ fn extract_blazor_symbols() -> Vec<StoredSymbol> {
     let ext = reg
         .extractor_for_path(Path::new("Pages/Counter.razor"))
         .expect("razor extractor");
-    ext.extract("Pages/Counter.razor", &fixture_source("Counter.razor"))
+    ext.extract_symbols("Pages/Counter.razor", &fixture_source("Counter.razor"))
         .expect("extraction should succeed")
 }
 
@@ -39,7 +39,7 @@ fn extract_layout_symbols() -> Vec<StoredSymbol> {
     let ext = reg
         .extractor_for_path(Path::new("Views/Shared/_Layout.cshtml"))
         .expect("razor extractor");
-    ext.extract(
+    ext.extract_symbols(
         "Views/Shared/_Layout.cshtml",
         &fixture_source("dotnet_aspnetcore_layout.cshtml"),
     )
@@ -55,7 +55,7 @@ fn test_cshtml_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("Views/Profile/Index.cshtml"));
     assert!(ext.is_some(), ".cshtml should be detected");
-    assert_eq!(ext.unwrap().language_name(), "razor");
+    assert_eq!(ext.unwrap().id().as_str(), "razor");
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn test_cshtml_extension_in_registry() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("test.cshtml"));
     assert!(ext.is_some(), ".cshtml must be registered");
-    assert_eq!(ext.unwrap().language_name(), "razor");
+    assert_eq!(ext.unwrap().id().as_str(), "razor");
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn test_parse_razor_code_block_handles_nested_braces_and_strings() {
     let ext = reg
         .extractor_for_path(Path::new("Views/Shared/Editor.cshtml"))
         .expect("razor extractor");
-    let symbols = ext.extract("Views/Shared/Editor.cshtml", source).unwrap();
+    let symbols = ext.extract_symbols("Views/Shared/Editor.cshtml", source).unwrap();
 
     let view = symbols
         .iter()
@@ -208,7 +208,7 @@ fn test_razor_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("Pages/Counter.razor"));
     assert!(ext.is_some(), ".razor should be detected");
-    assert_eq!(ext.unwrap().language_name(), "razor");
+    assert_eq!(ext.unwrap().id().as_str(), "razor");
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn test_razor_extension_in_registry() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("test.razor"));
     assert!(ext.is_some(), ".razor must be registered");
-    assert_eq!(ext.unwrap().language_name(), "razor");
+    assert_eq!(ext.unwrap().id().as_str(), "razor");
 }
 
 #[test]

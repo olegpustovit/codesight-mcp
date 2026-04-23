@@ -35,187 +35,81 @@ impl ScssExtractor {
     }
 }
 
+/// Extract a symbol name from a node given the handler strategy. Returns
+/// `Ok(None)` when this node should be skipped without descending.
+type NameExtractor = fn(Node<'_>, &str) -> Result<Option<String>>;
+
+struct NodeRule {
+    kind: &'static str,
+    symbol_kind: SymbolKind,
+    extractor: NameExtractor,
+}
+
+const RULES: &[NodeRule] = &[
+    NodeRule {
+        kind: "declaration",
+        symbol_kind: SymbolKind::Constant,
+        extractor: extract_declaration_variable,
+    },
+    NodeRule {
+        kind: "mixin_statement",
+        symbol_kind: SymbolKind::Function,
+        extractor: extract_prefixed_field_name,
+    },
+    NodeRule {
+        kind: "function_statement",
+        symbol_kind: SymbolKind::Function,
+        extractor: extract_prefixed_field_name,
+    },
+    NodeRule {
+        kind: "placeholder",
+        symbol_kind: SymbolKind::Class,
+        extractor: extract_placeholder_head,
+    },
+    NodeRule {
+        kind: "rule_set",
+        symbol_kind: SymbolKind::Class,
+        extractor: extract_selectors_head,
+    },
+    NodeRule {
+        kind: "media_statement",
+        symbol_kind: SymbolKind::Type,
+        extractor: extract_first_line_signature,
+    },
+    NodeRule {
+        kind: "supports_statement",
+        symbol_kind: SymbolKind::Type,
+        extractor: extract_first_line_signature,
+    },
+    NodeRule {
+        kind: "keyframes_statement",
+        symbol_kind: SymbolKind::Function,
+        extractor: extract_keyframes_name,
+    },
+];
+
 fn visit(
     node: Node<'_>,
     file_path: &str,
     source: &str,
     symbols: &mut Vec<codesight_core::StoredSymbol>,
 ) -> Result<()> {
-    match node.kind() {
-        "declaration" => {
-            // SCSS variables: $name: value; — property_name is a child
-            if let Some(prop) = find_child_of_kind(node, "property_name") {
-                let raw = node_text(prop, source)?;
-                if raw.starts_with('$') {
-                    push_symbol(
-                        symbols,
-                        file_path,
-                        "scss",
-                        &[],
-                        raw,
-                        SymbolKind::Constant,
-                        node,
-                        source,
-                        None,
-                    )?;
-                    return Ok(());
-                }
-            }
-            // Also check for variable child directly
-            if let Some(var) = find_child_of_kind(node, "variable") {
-                let raw = node_text(var, source)?;
-                push_symbol(
-                    symbols,
-                    file_path,
-                    "scss",
-                    &[],
-                    raw,
-                    SymbolKind::Constant,
-                    node,
-                    source,
-                    None,
-                )?;
-                return Ok(());
-            }
-        }
-        "mixin_statement" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let raw = node_text(name_node, source)?;
-                let name = format!("@mixin {raw}");
-                push_symbol(
-                    symbols,
-                    file_path,
-                    "scss",
-                    &[],
-                    &name,
-                    SymbolKind::Function,
-                    node,
-                    source,
-                    None,
-                )?;
-            }
-            return Ok(());
-        }
-        "function_statement" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let raw = node_text(name_node, source)?;
-                let name = format!("@function {raw}");
-                push_symbol(
-                    symbols,
-                    file_path,
-                    "scss",
-                    &[],
-                    &name,
-                    SymbolKind::Function,
-                    node,
-                    source,
-                    None,
-                )?;
-            }
-            return Ok(());
-        }
-        "placeholder" => {
-            // %name — the identifier child has the name without %
-            let raw = source_slice(node, source)?
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .split('{')
-                .next()
-                .unwrap_or("")
-                .trim();
-            if !raw.is_empty() {
-                push_symbol(
-                    symbols,
-                    file_path,
-                    "scss",
-                    &[],
-                    raw,
-                    SymbolKind::Class,
-                    node,
-                    source,
-                    None,
-                )?;
-            }
-            return Ok(());
-        }
-        "rule_set" => {
-            // selectors is a child type, not a field
-            if let Some(sel) = find_child_of_kind(node, "selectors") {
-                let name = source_slice(sel, source)?
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                if !name.is_empty() {
-                    push_symbol(
-                        symbols,
-                        file_path,
-                        "scss",
-                        &[],
-                        &name,
-                        SymbolKind::Class,
-                        node,
-                        source,
-                        None,
-                    )?;
-                }
-            }
-            return Ok(());
-        }
-        "media_statement" => {
-            let sig = first_line(node, source)?;
-            let name = sig.trim_end_matches('{').trim().to_string();
+    if let Some(rule) = RULES.iter().find(|r| r.kind == node.kind()) {
+        if let Some(name) = (rule.extractor)(node, source)? {
             push_symbol(
                 symbols,
                 file_path,
                 "scss",
                 &[],
                 &name,
-                SymbolKind::Type,
+                rule.symbol_kind,
                 node,
                 source,
                 None,
             )?;
-            return Ok(());
         }
-        "supports_statement" => {
-            let sig = first_line(node, source)?;
-            let name = sig.trim_end_matches('{').trim().to_string();
-            push_symbol(
-                symbols,
-                file_path,
-                "scss",
-                &[],
-                &name,
-                SymbolKind::Type,
-                node,
-                source,
-                None,
-            )?;
-            return Ok(());
-        }
-        "keyframes_statement" => {
-            if let Some(kn) = find_child_of_kind(node, "keyframes_name") {
-                let raw = node_text(kn, source)?;
-                let name = format!("@keyframes {raw}");
-                push_symbol(
-                    symbols,
-                    file_path,
-                    "scss",
-                    &[],
-                    &name,
-                    SymbolKind::Function,
-                    node,
-                    source,
-                    None,
-                )?;
-            }
-            return Ok(());
-        }
-        _ => {}
+        // Matched rules never descend — SCSS symbols are leaf-scoped.
+        return Ok(());
     }
 
     let mut cursor = node.walk();
@@ -223,6 +117,77 @@ fn visit(
         visit(child, file_path, source, symbols)?;
     }
     Ok(())
+}
+
+fn extract_declaration_variable(node: Node<'_>, source: &str) -> Result<Option<String>> {
+    if let Some(prop) = find_child_of_kind(node, "property_name") {
+        let raw = node_text(prop, source)?;
+        if raw.starts_with('$') {
+            return Ok(Some(raw.to_string()));
+        }
+    }
+    if let Some(var) = find_child_of_kind(node, "variable") {
+        return Ok(Some(node_text(var, source)?.to_string()));
+    }
+    Ok(None)
+}
+
+fn extract_prefixed_field_name(node: Node<'_>, source: &str) -> Result<Option<String>> {
+    let prefix = match node.kind() {
+        "mixin_statement" => "@mixin ",
+        "function_statement" => "@function ",
+        _ => return Ok(None),
+    };
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return Ok(None);
+    };
+    let raw = node_text(name_node, source)?;
+    Ok(Some(format!("{prefix}{raw}")))
+}
+
+fn extract_placeholder_head(node: Node<'_>, source: &str) -> Result<Option<String>> {
+    let raw = source_slice(node, source)?
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .split('{')
+        .next()
+        .unwrap_or("")
+        .trim();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(raw.to_string()))
+}
+
+fn extract_selectors_head(node: Node<'_>, source: &str) -> Result<Option<String>> {
+    let Some(sel) = find_child_of_kind(node, "selectors") else {
+        return Ok(None);
+    };
+    let name = source_slice(sel, source)?
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(name))
+}
+
+fn extract_first_line_signature(node: Node<'_>, source: &str) -> Result<Option<String>> {
+    let sig = first_line(node, source)?;
+    Ok(Some(sig.trim_end_matches('{').trim().to_string()))
+}
+
+fn extract_keyframes_name(node: Node<'_>, source: &str) -> Result<Option<String>> {
+    let Some(kn) = find_child_of_kind(node, "keyframes_name") else {
+        return Ok(None);
+    };
+    let raw = node_text(kn, source)?;
+    Ok(Some(format!("@keyframes {raw}")))
 }
 
 fn find_child_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
@@ -287,7 +252,6 @@ impl StylExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scm_engine::ScmExtractor;
 
     #[test]
     fn scss_extracts_variables_and_mixins() {

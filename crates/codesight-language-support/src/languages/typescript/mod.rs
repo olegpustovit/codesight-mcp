@@ -12,12 +12,13 @@ use tree_sitter::Language as TsLanguage;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::TYPESCRIPT_MANIFEST;
 use crate::languages::javascript::{
-    JS_ENTRYPOINTS, js_is_restricted, js_is_test_file, js_package_name_for_dir,
-    js_resolve_relative, js_root_package,
+    JS_ENTRYPOINTS, JS_TEST_FILE_DIRS, JS_TEST_FILE_SUFFIXES, JS_TEST_FIXTURE_DIRS,
+    js_package_name_for_dir, js_resolve_relative, js_root_package,
 };
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, TYPESCRIPT};
-use crate::signature_density::{measure_colon_after_name, normalize_type_token};
-use crate::traits::{ImportExtractionMode, Language};
+use crate::signature_density::normalize_type_token;
+use crate::traits::{ImportExtractionMode, Language, TypeAnnotationStyle};
+use crate::visibility::js_like_is_restricted;
 
 pub struct TypeScript;
 
@@ -57,6 +58,9 @@ impl Language for TypeScript {
     fn outline_noise_basenames(&self) -> &'static [&'static str] {
         &["tsconfig.json"]
     }
+    fn barrel_file_basenames(&self) -> &'static [&'static str] {
+        &["index.ts", "index.d.ts"]
+    }
     fn simple_framework_profile(
         &self,
         root: &Path,
@@ -78,16 +82,19 @@ impl Language for TypeScript {
         js_resolve_relative(specifier, from_file, source_files)
     }
     fn conventional_dirs(&self) -> &'static [&'static str] {
-        &["tests/", "__tests__/", "spec/", "fixtures/", "scripts/", "examples/"]
+        crate::languages::javascript::JS_CONVENTIONAL_DIRS
     }
-    fn is_test_fixture(&self, path: &str) -> bool {
-        path.contains("/__snapshots__/")
+    fn test_file_dirs(&self) -> &'static [&'static str] {
+        JS_TEST_FILE_DIRS
+    }
+    fn test_file_suffixes(&self) -> &'static [&'static str] {
+        JS_TEST_FILE_SUFFIXES
+    }
+    fn test_fixture_dirs(&self) -> &'static [&'static str] {
+        JS_TEST_FIXTURE_DIRS
     }
     fn branch_keywords(&self) -> &'static [&'static str] {
         &["if", "else if", "for", "while", "do", "catch", "case"]
-    }
-    fn branch_operators(&self) -> &'static [&'static str] {
-        &["&&", "||"]
     }
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
@@ -147,11 +154,8 @@ impl Language for TypeScript {
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         JS_ENTRYPOINTS
     }
-    fn is_test_file(&self, path: &str) -> bool {
-        js_is_test_file(path)
-    }
-    fn is_restricted(&self, source_text: &str, name: &str) -> bool {
-        js_is_restricted(source_text, name)
+    fn is_restricted(&self, source_text: &str, _name: &str) -> bool {
+        js_like_is_restricted(source_text)
     }
     fn family(&self) -> LanguageFamily {
         LanguageFamily::ScriptedDynamic
@@ -162,11 +166,8 @@ impl Language for TypeScript {
     fn fallback_type_baseline(&self) -> Option<f64> {
         Some(0.7)
     }
-    fn supports_measured_types(&self) -> bool {
-        true
-    }
-    fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_colon_after_name(source, self, false, |_| false)
+    fn type_annotation_style(&self) -> TypeAnnotationStyle {
+        TypeAnnotationStyle::ColonAfterName
     }
     fn uses_colon_return_suffix(&self) -> bool {
         true

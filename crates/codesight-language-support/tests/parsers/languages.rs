@@ -11,7 +11,7 @@ fn registry_extract(filename: &str, src: &str) -> Vec<codesight_core::StoredSymb
     let ext = reg
         .extractor_for_path(Path::new(filename))
         .unwrap_or_else(|| panic!("no extractor for {filename}"));
-    ext.extract(filename, src).unwrap()
+    ext.extract_symbols(filename, src).unwrap()
 }
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
@@ -880,7 +880,7 @@ data class Point(val x: Int, val y: Int)
     let reg = LanguageRegistry::default();
     let kts = reg.extractor_for_path(Path::new("build.gradle.kts"));
     assert!(kts.is_some(), ".kts must map to kotlin");
-    assert_eq!(kts.unwrap().language_name(), "kotlin");
+    assert_eq!(kts.unwrap().id().as_str(), "kotlin");
 }
 
 // ===========================================================================
@@ -1401,7 +1401,7 @@ fn test_parse_ejs() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("views/index.ejs"));
     assert!(ext.is_some(), ".ejs must map to ejs");
-    assert_eq!(ext.unwrap().language_name(), "ejs");
+    assert_eq!(ext.unwrap().id().as_str(), "ejs");
 }
 
 #[test]
@@ -1541,7 +1541,7 @@ UI<public> := module:
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("Fortnite.digest.verse"));
     assert!(ext.is_some(), ".verse must map to verse");
-    assert_eq!(ext.unwrap().language_name(), "verse");
+    assert_eq!(ext.unwrap().id().as_str(), "verse");
 }
 
 #[test]
@@ -1623,12 +1623,12 @@ fn test_xml_extension_mapping() {
     let reg = LanguageRegistry::default();
     let xml = reg.extractor_for_path(Path::new("config.xml"));
     assert!(xml.is_some(), ".xml must map to xml");
-    assert_eq!(xml.unwrap().language_name(), "xml");
+    assert_eq!(xml.unwrap().id().as_str(), "xml");
 
     // .svg also maps to xml
     let svg = reg.extractor_for_path(Path::new("icon.svg"));
     assert!(svg.is_some(), ".svg must map to xml");
-    assert_eq!(svg.unwrap().language_name(), "xml");
+    assert_eq!(svg.unwrap().id().as_str(), "xml");
 }
 
 // ===========================================================================
@@ -1720,11 +1720,11 @@ fn test_erlang_extension_mapping() {
     let reg = LanguageRegistry::default();
     let erl = reg.extractor_for_path(Path::new("mymod.erl"));
     assert!(erl.is_some(), ".erl must map to erlang");
-    assert_eq!(erl.unwrap().language_name(), "erlang");
+    assert_eq!(erl.unwrap().id().as_str(), "erlang");
 
     let hrl = reg.extractor_for_path(Path::new("header.hrl"));
     assert!(hrl.is_some(), ".hrl must map to erlang");
-    assert_eq!(hrl.unwrap().language_name(), "erlang");
+    assert_eq!(hrl.unwrap().id().as_str(), "erlang");
 }
 
 // ===========================================================================
@@ -1928,7 +1928,7 @@ fn test_fortran_extension_mapping() {
         let ext = reg.extractor_for_path(Path::new(ext_str));
         assert!(ext.is_some(), "{ext_str} should be recognized");
         assert_eq!(
-            ext.unwrap().language_name(),
+            ext.unwrap().id().as_str(),
             "fortran",
             "{ext_str} should map to fortran"
         );

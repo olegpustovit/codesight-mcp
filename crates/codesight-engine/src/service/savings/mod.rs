@@ -5,7 +5,7 @@ mod meta_builder;
 mod pricing;
 mod session;
 
-pub use ledger::SavingsLedger;
+pub use ledger::{SavingsLedger, ToolCallRecord};
 pub use meta_builder::{Meta, MetaBuilder, RetrievalClass};
 pub use session::{
     QualityHotspotMarker, QualitySnapshotMarker, ReadContentStats, SessionState,

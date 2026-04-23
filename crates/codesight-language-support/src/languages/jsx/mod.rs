@@ -6,12 +6,13 @@ use std::path::Path;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::JSX_MANIFEST;
 use crate::languages::javascript::{
-    GRAMMAR as JS_GRAMMAR, JS_ENTRYPOINTS, js_is_restricted, js_is_test_file,
-    js_package_name_for_dir, js_resolve_relative, js_root_package,
+    GRAMMAR as JS_GRAMMAR, JS_CONVENTIONAL_DIRS, JS_ENTRYPOINTS, JS_TEST_FILE_DIRS,
+    JS_TEST_FILE_SUFFIXES, JS_TEST_FIXTURE_DIRS, js_package_name_for_dir, js_resolve_relative,
+    js_root_package,
 };
 use crate::manifest::{GrammarSpec, JSX, LanguageId, LanguageManifest};
-use crate::signature_density::measure_colon_after_name;
-use crate::traits::{ImportExtractionMode, Language};
+use crate::traits::{ImportExtractionMode, Language, TypeAnnotationStyle};
+use crate::visibility::js_like_is_restricted;
 
 pub struct Jsx;
 
@@ -41,14 +42,17 @@ impl Language for Jsx {
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         JS_ENTRYPOINTS
     }
-    fn is_test_file(&self, path: &str) -> bool {
-        js_is_test_file(path)
+    fn test_file_dirs(&self) -> &'static [&'static str] {
+        JS_TEST_FILE_DIRS
     }
-    fn is_test_fixture(&self, path: &str) -> bool {
-        path.contains("/__snapshots__/")
+    fn test_file_suffixes(&self) -> &'static [&'static str] {
+        JS_TEST_FILE_SUFFIXES
     }
-    fn is_restricted(&self, source_text: &str, name: &str) -> bool {
-        js_is_restricted(source_text, name)
+    fn test_fixture_dirs(&self) -> &'static [&'static str] {
+        JS_TEST_FIXTURE_DIRS
+    }
+    fn is_restricted(&self, source_text: &str, _name: &str) -> bool {
+        js_like_is_restricted(source_text)
     }
     fn resolve_relative_specifier(
         &self,
@@ -59,7 +63,10 @@ impl Language for Jsx {
         js_resolve_relative(specifier, from_file, source_files)
     }
     fn conventional_dirs(&self) -> &'static [&'static str] {
-        &["tests/", "__tests__/", "spec/", "fixtures/", "scripts/", "examples/"]
+        JS_CONVENTIONAL_DIRS
+    }
+    fn barrel_file_basenames(&self) -> &'static [&'static str] {
+        &["index.jsx", "index.js"]
     }
     fn family(&self) -> LanguageFamily {
         LanguageFamily::ScriptedDynamic
@@ -70,11 +77,8 @@ impl Language for Jsx {
     fn fallback_type_baseline(&self) -> Option<f64> {
         Some(0.1)
     }
-    fn supports_measured_types(&self) -> bool {
-        true
-    }
-    fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_colon_after_name(source, self, false, |_| false)
+    fn type_annotation_style(&self) -> TypeAnnotationStyle {
+        TypeAnnotationStyle::ColonAfterName
     }
     fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
         crate::languages::javascript::JavaScript.idiomatic_symbol_names()

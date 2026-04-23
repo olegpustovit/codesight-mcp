@@ -7,7 +7,9 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 
-use codesight_language_support::{is_test_file, is_test_fixture, mentions_identifier_in_file};
+use codesight_language_support::{
+    is_barrel_basename, is_test_file, is_test_fixture, mentions_identifier_in_file,
+};
 use codesight_storage::storage::{AnalysisSymbol, IndexStore};
 
 use crate::evidence::EvidenceNote;
@@ -202,7 +204,7 @@ pub fn dead_code_v2_payload(store: &IndexStore, min_confidence: f64) -> anyhow::
             signals.push("not_barrel_exported");
             evidence_notes.push(EvidenceNote::heuristic(
                 "not_barrel_exported",
-                "symbol name was not found in package barrel files such as __init__.py",
+                "symbol name was not found in any package barrel file (__init__.py, index.ts, mod.rs, …)",
             ));
             confidence += 0.20;
         }
@@ -242,8 +244,11 @@ pub fn dead_code_v2_payload(store: &IndexStore, min_confidence: f64) -> anyhow::
 
 fn is_barrel_exported(symbol: &AnalysisSymbol, all_file_contents: &[(String, String)]) -> bool {
     all_file_contents.iter().any(|(file, content)| {
-        file.ends_with("__init__.py")
-            && file != &symbol.file_path
+        if file == &symbol.file_path {
+            return false;
+        }
+        let basename = file.rsplit('/').next().unwrap_or(file);
+        is_barrel_basename(basename)
             && mentions_identifier_in_file(file, content, &symbol.name)
     })
 }

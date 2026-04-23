@@ -54,7 +54,7 @@ fn test_json_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("package.json"));
     assert!(ext.is_some(), "registry should find an extractor for .json");
-    assert_eq!(ext.unwrap().language_name(), "json");
+    assert_eq!(ext.unwrap().id().as_str(), "json");
 }
 /// `".json" in LANGUAGE_EXTENSIONS` and maps to `"json"`.
 #[test]
@@ -62,7 +62,7 @@ fn test_json_extension_in_registry() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("anything.json"));
     assert!(ext.is_some(), ".json must be registered");
-    assert_eq!(ext.unwrap().language_name(), "json");
+    assert_eq!(ext.unwrap().id().as_str(), "json");
 }
 /// `api.openapi.json` and `api.swagger.json` should resolve to `"openapi"`,
 /// not `"json"`.  The current registry does not support compound extensions
@@ -73,11 +73,11 @@ fn test_openapi_json_not_overridden() {
 
     let openapi = reg.extractor_for_path(Path::new("api.openapi.json"));
     assert!(openapi.is_some());
-    assert_eq!(openapi.unwrap().language_name(), "openapi");
+    assert_eq!(openapi.unwrap().id().as_str(), "openapi");
 
     let swagger = reg.extractor_for_path(Path::new("api.swagger.json"));
     assert!(swagger.is_some());
-    assert_eq!(swagger.unwrap().language_name(), "openapi");
+    assert_eq!(swagger.unwrap().id().as_str(), "openapi");
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +188,7 @@ fn test_json_via_parse_file() {
         .extractor_for_path(Path::new("package.json"))
         .expect("registry should resolve package.json");
     let symbols = ext
-        .extract("package.json", PACKAGE_JSON)
+        .extract_symbols("package.json", PACKAGE_JSON)
         .expect("extraction should succeed");
     let names: HashSet<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains("name"), "missing 'name' via registry path");

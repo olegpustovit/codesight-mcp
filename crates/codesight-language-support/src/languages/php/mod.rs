@@ -14,10 +14,10 @@ use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::PHP_MANIFEST;
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, PHP};
 use crate::signature_density::{
-    extract_return_type_after_params, find_matching_delimiter, normalize_type_token,
-    split_top_level,
+    extract_return_type_after_params, find_matching_delimiter, split_top_level,
 };
 use crate::traits::Language;
+use crate::visibility::cfamily_is_restricted;
 
 /// PHP-specific signature density: `Type $name` parameter shape + `: Return`
 /// suffix. Distinct from colon-after-name (Rust/TS/Kotlin) and
@@ -76,14 +76,7 @@ impl Language for Php {
         Some(&GRAMMAR)
     }
     fn is_restricted(&self, source_text: &str, _name: &str) -> bool {
-        let trimmed = source_text.trim_start();
-        if trimmed.starts_with("private ")
-            || trimmed.starts_with("protected ")
-            || trimmed.starts_with("internal ")
-        {
-            return true;
-        }
-        !trimmed.starts_with("public ")
+        cfamily_is_restricted(source_text)
     }
     fn family(&self) -> LanguageFamily {
         LanguageFamily::ScriptedDynamic
@@ -103,15 +96,8 @@ impl Language for Php {
     fn uses_colon_return_suffix(&self) -> bool {
         true
     }
-    fn type_token_score(&self, token: &str) -> f64 {
-        let normalized = normalize_type_token(token);
-        if normalized.is_empty() {
-            return 0.0;
-        }
-        if normalized == "mixed" {
-            return 0.0;
-        }
-        1.0
+    fn weak_type_tokens(&self) -> &'static [&'static str] {
+        &["mixed"]
     }
     fn namespace_map(&self, root: &Path) -> HashMap<String, String> {
         read_composer_psr4(root).unwrap_or_default()

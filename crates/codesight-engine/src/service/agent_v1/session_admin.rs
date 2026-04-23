@@ -284,12 +284,12 @@ impl CodeService {
             "change_safety": dimension_delta(baseline.change_safety, after_dimensions["change_safety"].as_f64()),
         });
 
-        let agent_before = baseline.agent_readiness_score as f64 / 10_000.0;
-        let agent_after = after_agent as f64 / 10_000.0;
-        let structural_before = baseline.structural_score as f64 / 10_000.0;
-        let structural_after = after_structural as f64 / 10_000.0;
-        let overall_before = baseline.score as f64 / 10_000.0;
-        let overall_after = after_score as f64 / 10_000.0;
+        let agent_before = baseline.agent_readiness_score / 10_000.0;
+        let agent_after = after_agent / 10_000.0;
+        let structural_before = baseline.structural_score / 10_000.0;
+        let structural_after = after_structural / 10_000.0;
+        let overall_before = baseline.score / 10_000.0;
+        let overall_after = after_score / 10_000.0;
         let (new_hotspots, resolved_hotspots, largest_regression, largest_improvement) =
             hotspot_deltas(&baseline_hotspots, &after_hotspots);
         let weakest_regression = [

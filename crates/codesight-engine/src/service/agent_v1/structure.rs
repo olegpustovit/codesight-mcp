@@ -140,7 +140,7 @@ impl CodeService {
         }
         let mut distinctive_set: std::collections::HashSet<String> =
             std::collections::HashSet::new();
-        for (_, (kinds, paths)) in &buckets {
+        for (kinds, paths) in buckets.values() {
             let hits = store.files_with_symbol_kinds_batch(paths, kinds)?;
             distinctive_set.extend(hits);
         }
@@ -458,14 +458,14 @@ impl CodeService {
         // a separate graph. When the class was found but both sides are
         // empty, emit a diagnostic note so clients don't confuse "no edges"
         // with "class not found".
-        if view.ancestor_count == 0 && view.descendant_count == 0 {
-            if let Some(msg) =
+        if view.ancestor_count == 0
+            && view.descendant_count == 0
+            && let Some(msg) =
                 codesight_language_support::class_hierarchy_note_for_path(view.class.file.as_str())
-                && let Some(obj) = body.as_object_mut()
-            {
-                obj.insert("note".to_string(), json!(msg));
-                obj.insert("supports_hierarchy".to_string(), json!(false));
-            }
+            && let Some(obj) = body.as_object_mut()
+        {
+            obj.insert("note".to_string(), json!(msg));
+            obj.insert("supports_hierarchy".to_string(), json!(false));
         }
         self.success_response(&timer, body)
     }

@@ -118,7 +118,6 @@ fn extract_preceding_comment(source: &str, start_byte: usize) -> Option<String> 
 #[cfg(test)]
 mod tests {
     use super::SqlExtractor;
-    use crate::scm_engine::ScmExtractor;
 
     #[test]
     fn sql_extracts_ddl() {

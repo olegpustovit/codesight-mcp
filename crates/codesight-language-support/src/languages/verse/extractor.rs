@@ -287,7 +287,6 @@ fn make_symbol(
 mod tests {
     use super::VerseExtractor;
     use codesight_core::symbols::SymbolKind;
-    use crate::scm_engine::ScmExtractor;
 
     const VERSE_SOURCE: &str = "\
 # Module import path: /Fortnite.com/UI

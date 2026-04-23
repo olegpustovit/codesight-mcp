@@ -136,7 +136,7 @@ fn test_css_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("static/css/main.css"));
     assert!(ext.is_some(), "CSS file should be detected");
-    assert_eq!(ext.unwrap().language_name(), "css");
+    assert_eq!(ext.unwrap().id().as_str(), "css");
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn test_css_via_parse_file() {
         .extractor_for_path(Path::new("styles/main.css"))
         .expect("registry should find CSS extractor");
     let syms = ext
-        .extract("styles/main.css", CSS_SRC)
+        .extract_symbols("styles/main.css", CSS_SRC)
         .expect("extract failed");
     // SCM query extracts selectors + keyframes; fewer than the old CssExtractor's 7+.
     assert!(
@@ -360,7 +360,7 @@ fn test_scss_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("styles/main.scss"));
     assert!(ext.is_some(), "SCSS file should be detected");
-    assert_eq!(ext.unwrap().language_name(), "scss");
+    assert_eq!(ext.unwrap().id().as_str(), "scss");
 }
 
 /// Ref: test_sass_extension_detected
@@ -369,7 +369,7 @@ fn test_sass_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("styles/main.sass"));
     assert!(ext.is_some(), "Sass file should be detected");
-    assert_eq!(ext.unwrap().language_name(), "sass");
+    assert_eq!(ext.unwrap().id().as_str(), "sass");
 }
 
 /// Ref: test_less_extension_detected
@@ -378,7 +378,7 @@ fn test_less_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("styles/main.less"));
     assert!(ext.is_some(), "Less file should be detected");
-    assert_eq!(ext.unwrap().language_name(), "less");
+    assert_eq!(ext.unwrap().id().as_str(), "less");
 }
 
 /// Ref: test_styl_extension_detected
@@ -387,7 +387,7 @@ fn test_styl_extension_detected() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("styles/main.styl"));
     assert!(ext.is_some(), "Styl file should be detected");
-    assert_eq!(ext.unwrap().language_name(), "styl");
+    assert_eq!(ext.unwrap().id().as_str(), "styl");
 }
 
 /// Ref: test_scss_extension_in_registry
@@ -599,7 +599,7 @@ fn test_scss_via_parse_file() {
         .extractor_for_path(Path::new("styles/main.scss"))
         .expect("registry should find SCSS extractor");
     let syms = ext
-        .extract("styles/main.scss", SCSS_SRC)
+        .extract_symbols("styles/main.scss", SCSS_SRC)
         .expect("extract failed");
     assert!(
         syms.len() >= 6,

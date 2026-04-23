@@ -156,7 +156,7 @@ pub fn extract_with_spec(
     // caller observes the same cached pointer afterwards.
     let leaked: &'static ScmExtractor = {
         let mut guard = cache.write().expect("scm cache poisoned");
-        *guard
+        guard
             .entry(language_name.to_string())
             .or_insert_with(|| Box::leak(Box::new(extractor)))
     };

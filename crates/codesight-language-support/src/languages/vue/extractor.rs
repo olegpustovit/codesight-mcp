@@ -397,7 +397,6 @@ fn push_vue_symbol(
 mod tests {
     use super::VueExtractor;
     use codesight_core::symbols::SymbolKind;
-    use crate::scm_engine::ScmExtractor;
 
     const VUE_JS_SOURCE: &str = r#"<template>
   <div>{{ message }}</div>

@@ -141,7 +141,6 @@ fn extract_comment_before(node: Node<'_>, source: &str) -> Option<String> {
 mod tests {
     use super::LuauExtractor;
     use codesight_core::symbols::SymbolKind;
-    use crate::scm_engine::ScmExtractor;
 
     #[test]
     fn luau_extracts_functions_types_methods() {

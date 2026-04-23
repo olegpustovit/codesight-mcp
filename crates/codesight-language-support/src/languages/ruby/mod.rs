@@ -30,12 +30,11 @@ impl Language for Ruby {
     fn grammar_spec(&self) -> Option<&'static GrammarSpec> {
         Some(&GRAMMAR)
     }
-    fn is_test_file(&self, path: &str) -> bool {
-        let lower = path.to_ascii_lowercase();
-        lower.ends_with("_spec.rb") || lower.contains("/spec/")
+    fn test_file_suffixes(&self) -> &'static [&'static str] {
+        &["_spec.rb"]
     }
-    fn is_restricted(&self, _src: &str, name: &str) -> bool {
-        name.starts_with('_')
+    fn test_file_dirs(&self) -> &'static [&'static str] {
+        &["/spec/"]
     }
     fn family(&self) -> LanguageFamily {
         LanguageFamily::ScriptedDynamic
@@ -83,9 +82,6 @@ impl Language for Ruby {
             "it",
             "let",
         ]
-    }
-    fn branch_operators(&self) -> &'static [&'static str] {
-        &["&&", "||"]
     }
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["#"]

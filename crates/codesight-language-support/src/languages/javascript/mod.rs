@@ -11,8 +11,8 @@ use tree_sitter::Language as TsLanguage;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::JAVASCRIPT_MANIFEST;
 use crate::manifest::{GrammarSpec, JAVASCRIPT, LanguageId, LanguageManifest};
-use crate::signature_density::measure_colon_after_name;
-use crate::traits::{ImportExtractionMode, Language};
+use crate::traits::{ImportExtractionMode, Language, TypeAnnotationStyle};
+use crate::visibility::js_like_is_restricted;
 
 pub(crate) fn js_resolve_relative(
     specifier: &str,
@@ -59,35 +59,40 @@ pub(super) fn js_package_name_for_dir(dir: &Path) -> Option<String> {
     v.get("name")?.as_str().map(str::to_string)
 }
 
-pub(super) fn js_is_test_file(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    lower.contains("/__tests__/")
-        || lower.contains("/tests/")
-        || lower.contains("/test/")
-        || lower.contains("/spec/")
-        || lower.ends_with(".test.ts")
-        || lower.ends_with(".test.tsx")
-        || lower.ends_with(".test.js")
-        || lower.ends_with(".test.jsx")
-        || lower.ends_with("_test.ts")
-        || lower.ends_with("_test.js")
-        || lower.ends_with("_spec.ts")
-        || lower.ends_with("_spec.js")
-}
+pub(crate) const JS_TEST_FILE_DIRS: &[&str] = &[
+    "/__tests__/",
+    "/tests/",
+    "/test/",
+    "/spec/",
+];
 
-pub(super) fn js_is_restricted(source_text: &str, _name: &str) -> bool {
-    let trimmed = source_text.trim_start();
-    if trimmed.starts_with("private ") || trimmed.starts_with("protected ") {
-        return true;
-    }
-    !trimmed.starts_with("export ")
-}
+pub(crate) const JS_TEST_FILE_SUFFIXES: &[&str] = &[
+    ".test.ts",
+    ".test.tsx",
+    ".test.js",
+    ".test.jsx",
+    "_test.ts",
+    "_test.js",
+    "_spec.ts",
+    "_spec.js",
+];
+
+pub(crate) const JS_TEST_FIXTURE_DIRS: &[&str] = &["/__snapshots__/"];
 
 pub(super) const JS_ENTRYPOINTS: &[&str] = &[
     "main.js", "index.js", "app.js", "server.js", "main.ts", "index.ts", "app.ts", "server.ts",
 ];
 
 pub(crate) const JS_PRUNED_DIRS: &[&str] = &["node_modules", "dist", "build", "out"];
+
+pub(crate) const JS_CONVENTIONAL_DIRS: &[&str] = &[
+    "tests/",
+    "__tests__/",
+    "spec/",
+    "fixtures/",
+    "scripts/",
+    "examples/",
+];
 
 impl Language for JavaScript {
     fn id(&self) -> LanguageId {
@@ -117,17 +122,23 @@ impl Language for JavaScript {
     fn outline_noise_basenames(&self) -> &'static [&'static str] {
         &["package.json", "package-lock.json"]
     }
+    fn barrel_file_basenames(&self) -> &'static [&'static str] {
+        &["index.js", "index.mjs", "index.cjs"]
+    }
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         JS_ENTRYPOINTS
     }
-    fn is_test_file(&self, path: &str) -> bool {
-        js_is_test_file(path)
+    fn test_file_dirs(&self) -> &'static [&'static str] {
+        JS_TEST_FILE_DIRS
     }
-    fn is_test_fixture(&self, path: &str) -> bool {
-        path.contains("/__snapshots__/")
+    fn test_file_suffixes(&self) -> &'static [&'static str] {
+        JS_TEST_FILE_SUFFIXES
     }
-    fn is_restricted(&self, source_text: &str, name: &str) -> bool {
-        js_is_restricted(source_text, name)
+    fn test_fixture_dirs(&self) -> &'static [&'static str] {
+        JS_TEST_FIXTURE_DIRS
+    }
+    fn is_restricted(&self, source_text: &str, _name: &str) -> bool {
+        js_like_is_restricted(source_text)
     }
     fn resolve_relative_specifier(
         &self,
@@ -138,13 +149,10 @@ impl Language for JavaScript {
         js_resolve_relative(specifier, from_file, source_files)
     }
     fn conventional_dirs(&self) -> &'static [&'static str] {
-        &["tests/", "__tests__/", "spec/", "fixtures/", "scripts/", "examples/"]
+        JS_CONVENTIONAL_DIRS
     }
     fn branch_keywords(&self) -> &'static [&'static str] {
         &["if", "else if", "for", "while", "do", "catch", "case"]
-    }
-    fn branch_operators(&self) -> &'static [&'static str] {
-        &["&&", "||"]
     }
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
@@ -200,10 +208,7 @@ impl Language for JavaScript {
     fn fallback_type_baseline(&self) -> Option<f64> {
         Some(0.1)
     }
-    fn supports_measured_types(&self) -> bool {
-        true
-    }
-    fn measured_type_density(&self, source: &str) -> Option<f64> {
-        measure_colon_after_name(source, self, false, |_| false)
+    fn type_annotation_style(&self) -> TypeAnnotationStyle {
+        TypeAnnotationStyle::ColonAfterName
     }
 }

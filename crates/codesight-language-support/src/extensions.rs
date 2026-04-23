@@ -26,8 +26,8 @@ fn ext_lower<'a>(s: &'a str) -> std::borrow::Cow<'a, str> {
 pub fn code_extensions() -> Vec<&'static str> {
     let mut out: Vec<&'static str> = crate::builtin_registry()
         .all()
-        .flat_map(|l| l.supported_extensions().iter().copied())
-        .filter(|ext| !DOC_EXTENSIONS.iter().any(|d| *d == *ext))
+        .flat_map(|l| l.manifest().extensions.iter().copied())
+        .filter(|ext| !DOC_EXTENSIONS.contains(ext))
         .collect();
     out.sort_unstable();
     out.dedup();
@@ -39,19 +39,19 @@ pub fn code_extensions() -> Vec<&'static str> {
 pub fn is_code_extension(ext: &str) -> bool {
     let lower = ext_lower(ext);
     let lower = lower.as_ref();
-    if DOC_EXTENSIONS.iter().any(|d| *d == lower) {
+    if DOC_EXTENSIONS.contains(&lower) {
         return false;
     }
     crate::builtin_registry()
         .all()
-        .any(|l| l.supported_extensions().iter().any(|e| *e == lower))
+        .any(|l| l.manifest().extensions.contains(&lower))
 }
 
 /// True when `ext` (bare, no leading dot) is a doc-indexed extension.
 pub fn is_doc_extension(ext: &str) -> bool {
     let lower = ext_lower(ext);
     let lower = lower.as_ref();
-    DOC_EXTENSIONS.iter().any(|d| *d == lower)
+    DOC_EXTENSIONS.contains(&lower)
 }
 
 /// File extensions treated as data/docs for reference-search purposes. Hits

@@ -1,11 +1,11 @@
 //! Golden test for `evaluate_impact analysis=path_rename` — the 15
 //! canonical Rust import/path shapes we promise to rewrite (or explicitly
-//! leave alone). These tests drive `preview_rust_path_rename` directly so
+//! leave alone). These tests drive `preview_path_rename` directly so
 //! they stay fast and don't need the full service.
 
 use std::fs;
 
-use codesight_analysis::impact::{preview_rust_path_rename, summarize_path_rename};
+use codesight_analysis::impact::{preview_path_rename, summarize_path_rename};
 use codesight_core::pipeline::IndexedFileUpdate;
 use codesight_storage::storage::IndexStore;
 use tempfile::TempDir;
@@ -41,7 +41,9 @@ fn run(source: &str, from: &str, to: &str) -> (usize, usize, String) {
         )
         .unwrap();
 
-    let plan = preview_rust_path_rename(&store, from, to, None, "warn").unwrap();
+    let plan = preview_path_rename(&store, "rust", from, to, None, "warn")
+        .unwrap()
+        .expect("rust language should expose a path_rename engine");
     let (files, changes) = summarize_path_rename(&plan);
     let updated = plan
         .files_affected

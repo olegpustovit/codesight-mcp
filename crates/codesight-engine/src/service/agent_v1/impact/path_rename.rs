@@ -45,13 +45,30 @@ impl CodeService {
             .handle_partial_group_imports
             .as_deref()
             .unwrap_or("warn");
-        let plan = impact::preview_rust_path_rename(
+        // The handler is currently Rust-only; future language support plugs
+        // in by wiring `Language::path_rename_engine` and extending the arg
+        // schema with a `language` selector.
+        let Some(plan) = impact::preview_path_rename(
             &store,
+            "rust",
             from,
             to,
             args.scope.as_deref(),
             partial_mode,
-        )?;
+        )?
+        else {
+            let raw_bytes = store.repo_total_bytes().unwrap_or(0);
+            let timer = MetaBuilder::new(raw_bytes);
+            return self.error_response(
+                &timer,
+                ToolError {
+                    category: ToolErrorCategory::InvalidArgument,
+                    code: "PATH_RENAME_UNSUPPORTED",
+                    message: "path_rename: no engine registered for language 'rust'".to_string(),
+                    detail: json!({ "analysis": "path_rename" }),
+                },
+            );
+        };
         let (files, changes) = impact::summarize_path_rename(&plan);
         let raw_bytes = store.repo_total_bytes().unwrap_or(0);
         let timer = MetaBuilder::new(raw_bytes);

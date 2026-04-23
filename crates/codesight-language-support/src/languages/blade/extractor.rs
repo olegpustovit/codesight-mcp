@@ -16,7 +16,7 @@ impl BladeExtractor {
     }
 
     pub fn supported_extensions(&self) -> &'static [&'static str] {
-        // Compound extension matched before plain `.php` in `ExtractorRegistry::extractor_for_path`.
+        // Compound extension matched before plain `.php` in `LanguageRegistry::identify_path`.
         &["blade.php"]
     }
 

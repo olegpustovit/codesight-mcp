@@ -10,7 +10,7 @@ use crate::imports_types::ImportEdge;
 use crate::languages::builtins::GO_MANIFEST;
 use crate::manifest::{GO, GrammarSpec, LanguageId, LanguageManifest};
 use crate::signature_density::{
-    find_matching_delimiter, normalize_type_token, split_top_level, take_until_top_level_char,
+    find_matching_delimiter, split_top_level, take_until_top_level_char,
 };
 use crate::traits::{ImportExtractionMode, Language};
 
@@ -96,13 +96,9 @@ pub static GRAMMAR: GrammarSpec = GrammarSpec {
 
 fn go_root_package(specifier: &str) -> String {
     let parts: Vec<&str> = specifier.split('/').collect();
-    if parts.len() <= 3 {
-        if parts[0].contains('.') && parts.len() > 3 {
-            parts[..3].join("/")
-        } else {
-            specifier.to_string()
-        }
-    } else if parts[0].contains('.') {
+    // Hostname-rooted module paths (github.com/owner/repo/…) collapse to the
+    // first three segments; everything else is the module name as-is.
+    if parts.len() > 3 && parts[0].contains('.') {
         parts[..3].join("/")
     } else {
         specifier.to_string()
@@ -165,9 +161,6 @@ impl Language for Go {
             "main",
         ]
     }
-    fn branch_operators(&self) -> &'static [&'static str] {
-        &["&&", "||"]
-    }
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
     }
@@ -224,8 +217,8 @@ impl Language for Go {
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         &["main.go"]
     }
-    fn is_test_file(&self, path: &str) -> bool {
-        path.ends_with("_test.go")
+    fn test_file_suffixes(&self) -> &'static [&'static str] {
+        &["_test.go"]
     }
     fn class_hierarchy_note(&self) -> Option<&'static str> {
         Some(
@@ -251,14 +244,7 @@ impl Language for Go {
     fn measured_type_density(&self, source: &str) -> Option<f64> {
         measure_go_signature(self, source)
     }
-    fn type_token_score(&self, token: &str) -> f64 {
-        let normalized = normalize_type_token(token);
-        if normalized.is_empty() {
-            return 0.0;
-        }
-        if matches!(normalized.as_str(), "any" | "interface{}") {
-            return 0.0;
-        }
-        1.0
+    fn weak_type_tokens(&self) -> &'static [&'static str] {
+        &["any", "interface{}"]
     }
 }

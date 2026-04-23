@@ -5,6 +5,7 @@
 //! `codesight-analysis::dead_code::entrypoints`, and `quality.rs`.
 
 pub mod imports;
+pub mod path_rename;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -16,7 +17,7 @@ use crate::family::{LanguageFamily, NestingMode};
 use crate::imports_types::ImportEdge;
 use crate::languages::builtins::RUST_MANIFEST;
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, RUST};
-use crate::signature_density::{measure_colon_after_name, normalize_type_token};
+use crate::signature_density::measure_colon_after_name;
 use crate::traits::{ImportExtractionMode, Language};
 
 /// Rust receiver detector — filters `self` / `&self` / `&mut self` from
@@ -199,29 +200,32 @@ impl Language for Rust {
         &["build.rs", ".codesight.toml", ".mcp.json"]
     }
 
+    fn barrel_file_basenames(&self) -> &'static [&'static str] {
+        &["mod.rs", "lib.rs"]
+    }
+
     // ── Liveness ───────────────────────────────────────────────────────
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         &["main.rs", "lib.rs", "build.rs"]
     }
 
-    fn is_test_file(&self, path: &str) -> bool {
-        let lower = path.to_ascii_lowercase();
-        lower.ends_with("_test.rs")
-            || lower.contains("/tests/")
-            || lower.starts_with("tests/")
-            || lower.contains("/test/")
-            || lower.starts_with("test/")
+    fn test_file_suffixes(&self) -> &'static [&'static str] {
+        &["_test.rs"]
     }
 
-    fn is_test_fixture(&self, path: &str) -> bool {
-        path.contains("/fixtures/")
-            || path.starts_with("fixtures/")
-            // insta snapshots: .snap is the committed baseline, .snap.new
-            // is the most recent divergence awaiting review, .pending.snap
-            // is the current-run candidate that hasn't been accepted yet.
-            || path.ends_with(".snap")
-            || path.ends_with(".snap.new")
-            || path.ends_with(".pending.snap")
+    fn test_file_dirs(&self) -> &'static [&'static str] {
+        &["/tests/", "/test/"]
+    }
+
+    /// insta snapshots: `.snap` is the committed baseline, `.snap.new` is the
+    /// most recent divergence awaiting review, `.pending.snap` is the
+    /// current-run candidate that has not been accepted yet.
+    fn test_fixture_suffixes(&self) -> &'static [&'static str] {
+        &[".snap", ".snap.new", ".pending.snap"]
+    }
+
+    fn test_fixture_dirs(&self) -> &'static [&'static str] {
+        &["/fixtures/"]
     }
 
     fn is_conventional_path(&self, path: &str) -> bool {
@@ -232,6 +236,10 @@ impl Language for Rust {
 
     fn conventional_dirs(&self) -> &'static [&'static str] {
         CONVENTIONAL_RUST_DIRS
+    }
+
+    fn path_rename_engine(&self) -> Option<&'static dyn crate::path_rename::PathRenameEngine> {
+        Some(&path_rename::RUST_PATH_RENAME_ENGINE)
     }
 
     fn additional_live_roots(
@@ -294,16 +302,9 @@ impl Language for Rust {
     fn measured_type_density(&self, source: &str) -> Option<f64> {
         measure_colon_after_name(source, self, true, is_rust_receiver)
     }
-    fn type_token_score(&self, token: &str) -> f64 {
-        // `dyn Any` / `Box<dyn Any>` / `impl Any` — Rust's escape hatches.
-        let normalized = normalize_type_token(token);
-        if normalized.is_empty() {
-            return 0.0;
-        }
-        if normalized.contains("<any>") || normalized.contains("dynany") {
-            return 0.0;
-        }
-        1.0
+    /// Rust's escape hatches: `dyn Any` / `Box<dyn Any>` / `impl Any`.
+    fn weak_type_substrings(&self) -> &'static [&'static str] {
+        &["<any>", "dynany"]
     }
 }
 

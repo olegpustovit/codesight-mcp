@@ -119,7 +119,7 @@ fn codesight_queries_convention_loads_packs_without_toml_config() {
     let extractor = registry
         .extractor_for_path(Path::new("example.toyjson"))
         .expect("workspace extractor");
-    assert_eq!(extractor.language_name(), "toyjson");
+    assert_eq!(extractor.id().as_str(), "toyjson");
 }
 
 #[test]
@@ -154,10 +154,10 @@ fn workspace_query_pack_root_supports_pack_toml_metadata() {
     let extractor = registry
         .extractor_for_path(Path::new("example.toyjson"))
         .expect("workspace extractor");
-    assert_eq!(extractor.language_name(), "toyjson");
+    assert_eq!(extractor.id().as_str(), "toyjson");
 
     let symbols = extractor
-        .extract("example.toyjson", r#"{"title":"hello"}"#)
+        .extract_symbols("example.toyjson", r#"{"title":"hello"}"#)
         .unwrap();
     assert!(symbols.iter().any(|symbol| symbol.name == "title"));
 }
