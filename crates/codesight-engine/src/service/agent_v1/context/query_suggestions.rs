@@ -53,7 +53,7 @@ impl CodeService {
             if added >= 5 {
                 break;
             }
-            if codesight_storage::storage::is_outline_noise(&file_path) {
+            if codesight_language_support::is_outline_noise_basename(&file_path) {
                 continue;
             }
             example_queries.push(json!({
@@ -64,9 +64,11 @@ impl CodeService {
             added += 1;
         }
 
-        let most_imported_files: Vec<Value> = match store.most_imported_files(10) {
+        let most_imported_files: Vec<Value> = match store.most_imported_files(20) {
             Ok(rows) => rows
                 .into_iter()
+                .filter(|(file, _)| !codesight_language_support::is_outline_noise_basename(file))
+                .take(10)
                 .map(|(file, n)| json!({ "file": file, "imported_by": n }))
                 .collect(),
             Err(e) => return self.error_response(timer, index_error(e)),

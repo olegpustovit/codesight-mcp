@@ -54,6 +54,9 @@ impl Language for TypeScript {
     fn pruned_dirs(&self) -> &'static [&'static str] {
         crate::languages::javascript::JS_PRUNED_DIRS
     }
+    fn outline_noise_basenames(&self) -> &'static [&'static str] {
+        &["tsconfig.json"]
+    }
     fn simple_framework_profile(
         &self,
         root: &Path,

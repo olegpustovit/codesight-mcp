@@ -142,6 +142,24 @@ pub fn is_entrypoint_basename(basename: &str) -> bool {
     false
 }
 
+/// Outline-noise predicate: `path` is config / manifest / build-script noise
+/// for some registered language. The basename set is materialised once on
+/// first call (union of every `Language::outline_noise_basenames`) so this
+/// runs in O(1) hash lookup on the hot path.
+pub fn is_outline_noise_basename(path: &str) -> bool {
+    use std::collections::HashSet;
+    use std::sync::OnceLock;
+    static SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    let set = SET.get_or_init(|| {
+        builtin_registry()
+            .all()
+            .flat_map(|lang| lang.outline_noise_basenames().iter().copied())
+            .collect()
+    });
+    let basename = path.rsplit('/').next().unwrap_or(path);
+    set.contains(basename)
+}
+
 /// Conventional-path check: `true` when the owning language tags the path
 /// as conventional, or when any registered language's `conventional_dirs`
 /// prefix matches. Language-specific basenames like `build.rs` /
@@ -166,6 +184,27 @@ pub fn is_conventional_path(path: &str) -> bool {
 /// production gets 1.0×. Relies entirely on per-language `is_test_file`.
 pub fn test_weight_multiplier(path: &str) -> f64 {
     if is_test_file(path) { 0.3 } else { 1.0 }
+}
+
+/// Symbol kinds that distinguish `lang_name` from sibling languages sharing
+/// its grammar (see [`Language::distinctive_symbol_kinds`]). Empty when the
+/// name doesn't resolve or the language doesn't reclassify.
+pub fn distinctive_symbol_kinds_for_language(lang_name: &str) -> &'static [&'static str] {
+    lookup_for_name(lang_name)
+        .map(|lang| lang.distinctive_symbol_kinds())
+        .unwrap_or(&[])
+}
+
+/// Post-ingest file-language override. Asks the language named `lang_name`
+/// whether `path` (which the indexer labeled as `lang_name` and which emits
+/// `has_distinctive_kinds` of its distinctive kinds) should be relabeled.
+pub fn reclassify_file_language(
+    lang_name: &str,
+    path: &str,
+    has_distinctive_kinds: bool,
+) -> Option<&'static str> {
+    lookup_for_name(lang_name)
+        .and_then(|lang| lang.reclassify_file_language(path, has_distinctive_kinds))
 }
 
 fn lookup_for_name(name: &str) -> Option<&'static dyn Language> {

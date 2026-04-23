@@ -25,7 +25,7 @@ pub use batch_reads::SymbolEnriched;
 pub use repo_summary::RepoMetadata;
 pub use schema::EMBEDDING_DIM;
 pub use snapshot_store::QualitySnapshot;
-pub use symbol_reads::is_outline_noise;
+pub use symbol_reads::is_in_skip_dir;
 pub use symbol_record::{SymbolMetadata, SymbolRecord};
 pub use types::{AnalysisSymbol, RetrievedSymbol, SearchSymbol, SymbolSourceRecord};
 

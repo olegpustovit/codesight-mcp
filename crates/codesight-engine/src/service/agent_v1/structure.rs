@@ -117,32 +117,43 @@ impl CodeService {
             rows.truncate(max_files);
         }
         let listed = rows.len();
-        // Precompute the C++-reclassification set in one batched query
-        // (was: per-file `file_has_cpp_symbols` call inside the loop).
-        let h_file_paths: Vec<&str> = rows
-            .iter()
-            .filter(|(p, lang, _, sym_count)| {
-                lang == "cpp" && p.ends_with(".h") && *sym_count > 0
-            })
-            .map(|(p, _, _, _)| p.as_str())
-            .collect();
-        let cpp_file_set = if h_file_paths.is_empty() {
-            std::collections::HashSet::new()
-        } else {
-            store.files_with_cpp_symbols_batch(&h_file_paths)?
-        };
+        // Reclassification (e.g. .h → c): bucket rows by their declared
+        // language, ask each language for its distinctive symbol kinds,
+        // and batch-query storage once per bucket. The language itself
+        // decides whether to override (`Language::reclassify_file_language`).
+        use std::collections::HashMap;
+        let mut buckets: HashMap<&str, (&'static [&'static str], Vec<&str>)> = HashMap::new();
+        for (path, lang, _, sym_count) in &rows {
+            if *sym_count == 0 {
+                continue;
+            }
+            let kinds =
+                codesight_language_support::distinctive_symbol_kinds_for_language(lang.as_str());
+            if kinds.is_empty() {
+                continue;
+            }
+            buckets
+                .entry(lang.as_str())
+                .or_insert_with(|| (kinds, Vec::new()))
+                .1
+                .push(path.as_str());
+        }
+        let mut distinctive_set: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for (_, (kinds, paths)) in &buckets {
+            let hits = store.files_with_symbol_kinds_batch(paths, kinds)?;
+            distinctive_set.extend(hits);
+        }
         let mut root: BTreeMap<String, FileTreeBuildNode> = BTreeMap::new();
         for (path, mut lang, size, sym_count) in rows {
-            // Heuristic: .h files reported as cpp may actually be C. If a .h
-            // file has symbols but none are C++ specific (class, method,
-            // namespace, type), reclassify as "c". Files with no symbols keep
-            // their default "cpp" classification.
-            if lang == "cpp"
-                && path.ends_with(".h")
-                && sym_count > 0
-                && !cpp_file_set.contains(path.as_str())
+            if sym_count > 0
+                && let Some(new_lang) = codesight_language_support::reclassify_file_language(
+                    lang.as_str(),
+                    path.as_str(),
+                    distinctive_set.contains(path.as_str()),
+                )
             {
-                lang = "c".to_string();
+                lang = new_lang.to_string();
             }
             let file_json = json!({
                 "type": "file",
@@ -178,7 +189,16 @@ impl CodeService {
             Ok(pair) => pair,
             Err(resp) => return Ok(resp),
         };
-        let outline = store.repo_outline()?;
+        let outline: Vec<Value> = store
+            .repo_outline()?
+            .into_iter()
+            .filter(|item| {
+                item.get("file")
+                    .and_then(Value::as_str)
+                    .map(|p| !codesight_language_support::is_outline_noise_basename(p))
+                    .unwrap_or(true)
+            })
+            .collect();
         let budget = args.max_tokens.unwrap_or(DEFAULT_REPO_OUTLINE_TOKEN_BUDGET);
         let (outline, truncated) = pack_catalog_items_to_token_budget(outline, budget);
         // Compute most_central_symbols via dependency graph PageRank. Nodes
@@ -195,7 +215,9 @@ impl CodeService {
             let mut ranked: Vec<_> = pr
                 .scores
                 .iter()
-                .filter(|(node, _)| !codesight_storage::storage::is_outline_noise(node.as_str()))
+                .filter(|(node, _)| {
+                    !codesight_language_support::is_outline_noise_basename(node.as_str())
+                })
                 .collect();
             ranked.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
             ranked

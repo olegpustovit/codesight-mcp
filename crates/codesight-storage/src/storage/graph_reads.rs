@@ -154,8 +154,9 @@ impl IndexStore {
     }
 
     /// Language-agnostic "most imported files" ranked by in-degree from the
-    /// stored dependency edge table. Excludes build scripts and tool manifests
-    /// (`is_outline_noise`). Returns `(file_path, importer_count)` pairs.
+    /// stored dependency edge table. Returns raw `(file_path, importer_count)`
+    /// pairs ordered by importer count desc; per-language manifest / build-script
+    /// filtering is the engine layer's job (see `is_outline_noise_basename`).
     pub fn most_imported_files(&self, limit: usize) -> anyhow::Result<Vec<(String, usize)>> {
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare_cached(
@@ -163,24 +164,14 @@ impl IndexStore {
              FROM dependency_edges
              WHERE target_file != source_file
              GROUP BY target_file
-             ORDER BY importers DESC, target_file ASC",
+             ORDER BY importers DESC, target_file ASC
+             LIMIT ?1",
         )?;
-        let rows = stmt.query_map([], |row| {
+        let cap = limit.clamp(1, 100) as i64;
+        let rows = stmt.query_map([cap], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
         })?;
-        let mut out: Vec<(String, usize)> = Vec::new();
-        let cap = limit.clamp(1, 100);
-        for row in rows {
-            let (path, n) = row?;
-            if crate::storage::is_outline_noise(&path) {
-                continue;
-            }
-            out.push((path, n));
-            if out.len() >= cap {
-                break;
-            }
-        }
-        Ok(out)
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     /// Fast stat-based staleness check. Returns true if any indexed file has

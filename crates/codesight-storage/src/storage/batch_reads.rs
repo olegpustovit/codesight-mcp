@@ -167,27 +167,34 @@ impl IndexStore {
         Ok(out)
     }
 
-    /// Batch-variant of [`IndexStore::file_has_cpp_symbols`]. Returns
-    /// the set of paths that have at least one C++-shaped symbol.
-    pub fn files_with_cpp_symbols_batch(
+    /// Returns the subset of `paths` that emit at least one symbol whose
+    /// `kind` is in `kinds`. One `IN (...)` query per BATCH_CHUNK-sized
+    /// slice of paths; `kinds` is splatted into the same parameter list.
+    /// Callers pass language-specific kind lists (see
+    /// [`Language::distinctive_symbol_kinds`]).
+    pub fn files_with_symbol_kinds_batch(
         &self,
         paths: &[&str],
+        kinds: &[&str],
     ) -> anyhow::Result<HashSet<String>> {
         let mut out: HashSet<String> = HashSet::new();
-        if paths.is_empty() {
+        if paths.is_empty() || kinds.is_empty() {
             return Ok(out);
         }
         let conn = self.open_read_only()?;
         for chunk in paths.chunks(BATCH_CHUNK) {
             let sql = format!(
                 "SELECT DISTINCT file_path FROM symbols \
-                 WHERE file_path IN ({}) AND kind IN ('class', 'method', 'namespace', 'type')",
-                placeholders(chunk.len())
+                 WHERE file_path IN ({}) AND kind IN ({})",
+                placeholders(chunk.len()),
+                placeholders(kinds.len())
             );
             let mut stmt = conn.prepare_cached(&sql)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
-                row.get::<_, String>(0)
-            })?;
+            let params = chunk.iter().copied().chain(kinds.iter().copied());
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(params), |row| {
+                    row.get::<_, String>(0)
+                })?;
             for row in rows {
                 out.insert(row?);
             }

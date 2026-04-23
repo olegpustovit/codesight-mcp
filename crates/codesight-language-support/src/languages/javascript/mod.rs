@@ -114,6 +114,9 @@ impl Language for JavaScript {
     fn pruned_dirs(&self) -> &'static [&'static str] {
         JS_PRUNED_DIRS
     }
+    fn outline_noise_basenames(&self) -> &'static [&'static str] {
+        &["package.json", "package-lock.json"]
+    }
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         JS_ENTRYPOINTS
     }

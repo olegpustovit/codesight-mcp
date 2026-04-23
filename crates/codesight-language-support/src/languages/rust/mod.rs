@@ -195,6 +195,10 @@ impl Language for Rust {
         &["target"]
     }
 
+    fn outline_noise_basenames(&self) -> &'static [&'static str] {
+        &["build.rs", ".codesight.toml", ".mcp.json"]
+    }
+
     // ── Liveness ───────────────────────────────────────────────────────
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         &["main.rs", "lib.rs", "build.rs"]

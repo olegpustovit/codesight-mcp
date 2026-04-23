@@ -90,6 +90,20 @@ impl Language for Cpp {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
     }
+    fn distinctive_symbol_kinds(&self) -> &'static [&'static str] {
+        &["class", "method", "namespace", "type"]
+    }
+    fn reclassify_file_language(
+        &self,
+        path: &str,
+        has_distinctive_kinds: bool,
+    ) -> Option<&'static str> {
+        if !has_distinctive_kinds && path.ends_with(".h") {
+            Some("c")
+        } else {
+            None
+        }
+    }
     fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
         &[
             "main",

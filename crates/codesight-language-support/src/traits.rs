@@ -575,6 +575,44 @@ pub trait Language: Send + Sync {
         &[]
     }
 
+    /// Repo-relative basenames whose entries are config / manifest noise in
+    /// a code outline (e.g. `package.json`, `Cargo.toml`, `build.rs`). The
+    /// owning language decides — storage / engine never branch on filename.
+    /// Matched against the full path either as exact equality (`build.rs`)
+    /// or as a `/<basename>` suffix (`crates/foo/build.rs`).
+    ///
+    /// Default: empty.
+    fn outline_noise_basenames(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Symbol kinds that uniquely identify this language vs. its siblings
+    /// that share a grammar (e.g. C++ vs. C share `tree_sitter_cpp`; only
+    /// C++ emits `class` / `namespace`). When non-empty, the engine issues
+    /// one batch query per language asking "which of these paths emit a
+    /// symbol in this set?" and passes the boolean result to
+    /// [`Language::reclassify_file_language`].
+    ///
+    /// Default: empty (no post-ingest reclassification).
+    fn distinctive_symbol_kinds(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Post-ingest override for a file's stored language. Called for every
+    /// file whose ingest-time language is `self`, with `has_distinctive_kinds`
+    /// set to the result of probing [`Language::distinctive_symbol_kinds`].
+    /// Return `Some("c")` etc. to relabel, or `None` to keep the original.
+    ///
+    /// Used today by Cpp to downgrade `.h` headers that contain no C++-only
+    /// constructs to `c`. Default: never override.
+    fn reclassify_file_language(
+        &self,
+        _path: &str,
+        _has_distinctive_kinds: bool,
+    ) -> Option<&'static str> {
+        None
+    }
+
     /// Method / function names whose repetition across files is idiomatic
     /// for the language and should not be scored as a uniqueness collision
     /// by `symbol_uniqueness`. Default: empty — every language opts in

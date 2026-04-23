@@ -47,13 +47,17 @@ fn classify_path(path: &str) -> FileClass {
             || path.starts_with(&format!("{p}/"))
             || path.contains(&format!("/{p}/"))
     };
-    if has_prefix("tests") || path.ends_with("_test.rs") || path.ends_with("_test.py") {
+    if codesight_language_support::is_test_file(path) || has_prefix("tests") {
         return FileClass::Test;
     }
     if has_prefix("benches") {
         return FileClass::Bench;
     }
-    if has_prefix("fixtures") || has_prefix("testdata") || has_prefix("__fixtures__") {
+    if codesight_language_support::is_test_fixture(path)
+        || has_prefix("fixtures")
+        || has_prefix("testdata")
+        || has_prefix("__fixtures__")
+    {
         return FileClass::Fixture;
     }
     if has_prefix("scripts") {

@@ -114,12 +114,7 @@ impl CodeService {
             .iter()
             .filter(|f| {
                 let basename = f.rsplit('/').next().unwrap_or(f.as_str());
-                matches!(
-                    basename,
-                    "main.rs" | "lib.rs" | "build.rs"
-                        | "main.py" | "__init__.py" | "__main__.py"
-                        | "main.go" | "main.js" | "index.js" | "main.ts" | "index.ts"
-                )
+                codesight_language_support::is_entrypoint_basename(basename)
             })
             .count() as u64;
 

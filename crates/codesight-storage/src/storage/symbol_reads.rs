@@ -13,27 +13,14 @@ use crate::storage::{SymbolMetadata, SymbolRecord};
 use super::IndexStore;
 use super::row_utils::symbol_record_from_row;
 
-/// Paths that should never appear in a code outline: codesight's own index
-/// artifacts, tool manifests, build scripts whose "symbols" are data rather
-/// than code, and any directory on the SKIP_DIRS list. Applied at read time
-/// as a belt-and-suspenders layer on top of the walker filter.
-pub fn is_outline_noise(path: &str) -> bool {
-    if let Some(first) = path.split('/').next()
-        && SKIP_DIRS.contains(&first)
-    {
-        return true;
-    }
-    // Top-level tool manifests and lock files: legitimate config, but their
-    // "symbols" are JSON keys, not code. Noise in a repo outline.
-    if matches!(
-        path,
-        ".mcp.json" | "package.json" | "package-lock.json" | "tsconfig.json" | ".codesight.toml"
-    ) {
-        return true;
-    }
-    // Cargo build scripts at any depth: per-crate constants pollute outlines
-    // and centrality scores without representing user-facing behavior.
-    path == "build.rs" || path.ends_with("/build.rs")
+/// Paths under a `SKIP_DIRS` top-level directory (e.g. `target/`, `.git/`).
+/// Storage-only filter: belt-and-suspenders layer on top of the walker.
+/// Per-language manifest / build-script noise (`build.rs`, `package.json`, …)
+/// lives on the `Language` trait and is filtered by the engine layer.
+pub fn is_in_skip_dir(path: &str) -> bool {
+    path.split('/')
+        .next()
+        .is_some_and(|first| SKIP_DIRS.contains(&first))
 }
 
 impl IndexStore {
@@ -220,18 +207,6 @@ impl IndexStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
-    /// Check whether a file has any C++ specific symbol kinds (class, method, namespace).
-    /// Used to distinguish C vs C++ for .h files.
-    pub fn file_has_cpp_symbols(&self, file_path: &str) -> anyhow::Result<bool> {
-        let conn = self.open_read_only()?;
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM symbols WHERE file_path = ?1 AND kind IN ('class', 'method', 'namespace', 'type')",
-            [file_path],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
-    }
-
     pub fn repo_outline(&self) -> anyhow::Result<Vec<Value>> {
         let conn = self.open_read_only()?;
         // `extraction_tier` is implementation detail (curated SCM vs
@@ -257,7 +232,7 @@ impl IndexStore {
         let out: Vec<Value> = rows
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .filter(|(path, _)| !is_outline_noise(path))
+            .filter(|(path, _)| !is_in_skip_dir(path))
             .map(|(_, v)| v)
             .collect();
         Ok(out)

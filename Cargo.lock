@@ -538,8 +538,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
- "tree-sitter",
- "tree-sitter-python",
  "walkdir",
 ]
 

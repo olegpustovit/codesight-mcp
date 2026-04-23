@@ -1,12 +1,8 @@
-//! Analysis-oriented aggregations, reference counts, and Python import heuristics.
+//! Analysis-oriented aggregations and reference counts.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::OptionalExtension;
-
-use crate::indexing::imports::python_top_level_import_stems;
 
 use super::IndexStore;
 use super::types::AnalysisSymbol;
@@ -156,54 +152,6 @@ impl IndexStore {
             |row| row.get(0),
         )?;
         Ok(count as usize)
-    }
-
-    /// Python-only: files most often imported by other indexed `.py` files.
-    /// Uses structural import extraction (`indexing::imports`) plus filename-stem resolution.
-    pub fn python_most_imported_files(&self, limit: usize) -> anyhow::Result<Vec<(String, usize)>> {
-        let root = self.root_path()?;
-        let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare_cached("SELECT file_path FROM files")?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-
-        let mut stem_to_path: HashMap<String, String> = HashMap::new();
-        let mut py_files: Vec<String> = Vec::new();
-        for row in rows {
-            let path = row?;
-            if path.ends_with(".py") {
-                py_files.push(path.clone());
-            }
-            if let Some(stem) = Path::new(&path).file_stem().and_then(|s| s.to_str()) {
-                stem_to_path.insert(stem.to_string(), path);
-            }
-        }
-        py_files.sort();
-        let py_set: HashSet<String> = py_files.iter().cloned().collect();
-        let mut by_target: HashMap<String, HashSet<String>> = HashMap::new();
-
-        for importer in &py_files {
-            let abs = root.join(importer);
-            let Ok(content) = fs::read_to_string(&abs) else {
-                continue;
-            };
-            for target in python_top_level_import_stems(&content, importer) {
-                if let Some(resolved) = stem_to_path.get(&target) {
-                    if resolved == importer || !py_set.contains(resolved) {
-                        continue;
-                    }
-                    by_target
-                        .entry(resolved.clone())
-                        .or_default()
-                        .insert(importer.clone());
-                }
-            }
-        }
-
-        let mut ranked: Vec<(String, usize)> =
-            by_target.into_iter().map(|(k, v)| (k, v.len())).collect();
-        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        ranked.truncate(limit.clamp(1, 50));
-        Ok(ranked)
     }
 
     /// Store package names in the meta table.
