@@ -7,6 +7,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use rayon::prelude::*;
+
 use codesight_core::symbols::FactQuality;
 
 use crate::imports_orchestration::{
@@ -39,33 +41,64 @@ pub fn build_dependency_graph_with_aliases(
 }
 
 /// Resolved file dependency edges with per-source [`FactQuality`] from import extraction.
+///
+/// Extraction and per-edge resolution run in parallel across files — for a
+/// 500-file Rust repo this is the dominant cost if left sequential, because
+/// each file re-parses via tree-sitter to find `use` edges. The shared
+/// `known_files` set is immutable during the par-iter, so no locks are needed.
+///
+/// `files` carries the files whose imports we want to (re)extract — typically
+/// the set of files that changed in this ingest. `known_paths`, when `Some`,
+/// is the full on-disk file set used for import resolution; when `None`, the
+/// set is derived from `files`. Incremental ingests pass `Some` so that edges
+/// from new/changed files can still resolve to unchanged files already in the
+/// index.
 pub fn build_dependency_graph_edges_with_aliases(
     files: &[(String, String)],
     alias_map: Option<&HashMap<String, Vec<String>>>,
     workspace_crates: Option<&HashMap<String, String>>,
 ) -> Vec<(String, String, FactQuality)> {
-    let known_files: HashSet<String> = files.iter().map(|(p, _)| p.clone()).collect();
-    let known_files_vec: Vec<String> = known_files.iter().cloned().collect();
-    let mut out: Vec<(String, String, FactQuality)> = Vec::new();
+    build_dependency_graph_edges_full(files, None, alias_map, workspace_crates)
+}
 
-    for (path, content) in files {
-        let lang = language_for_path(path);
-        let (edges, quality) = extract_imports_with_quality(content, path, lang);
-        for edge in &edges {
-            if let Some(resolved) = resolve_import_edge_for_graph(
-                edge,
-                path,
-                lang,
-                &known_files,
-                &known_files_vec,
-                alias_map,
-                workspace_crates,
-            ) && resolved != *path
-            {
-                out.push((path.clone(), resolved, quality));
+/// Like [`build_dependency_graph_edges_with_aliases`] but accepts an explicit
+/// known-path set. Use this on incremental ingests where `files` only carries
+/// the changed subset but resolution must see every file on disk.
+pub fn build_dependency_graph_edges_full(
+    files: &[(String, String)],
+    known_paths: Option<&[String]>,
+    alias_map: Option<&HashMap<String, Vec<String>>>,
+    workspace_crates: Option<&HashMap<String, String>>,
+) -> Vec<(String, String, FactQuality)> {
+    let known_files: HashSet<String> = match known_paths {
+        Some(paths) => paths.iter().cloned().collect(),
+        None => files.iter().map(|(p, _)| p.clone()).collect(),
+    };
+    let known_files_vec: Vec<String> = known_files.iter().cloned().collect();
+
+    let out: Vec<(String, String, FactQuality)> = files
+        .par_iter()
+        .flat_map(|(path, content)| {
+            let lang = language_for_path(path);
+            let (edges, quality) = extract_imports_with_quality(content, path, lang);
+            let mut resolved: Vec<(String, String, FactQuality)> = Vec::with_capacity(edges.len());
+            for edge in &edges {
+                if let Some(target) = resolve_import_edge_for_graph(
+                    edge,
+                    path,
+                    lang,
+                    &known_files,
+                    &known_files_vec,
+                    alias_map,
+                    workspace_crates,
+                ) && target != *path
+                {
+                    resolved.push((path.clone(), target, quality));
+                }
             }
-        }
-    }
+            resolved
+        })
+        .collect();
 
     dedupe_preserve_quality(out)
 }

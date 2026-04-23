@@ -10,6 +10,7 @@ codesight-core = { path = "../codesight-core" }
 anyhow = "1"
 blake3 = "1"
 ignore = "0.4"
+rayon = "1"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -1,18 +1,22 @@
 //! Thin wrapper over `codesight_language_support::LanguageRegistry` used by
-//! indexing and handler paths. Replaces the former `codesight-backend` crate:
-//! tree-sitter is the only extraction backend and the `CodeBackend` /
-//! `BackendRouter` abstraction was aspirational LSP plumbing that never
-//! landed.
+//! indexing and handler paths.
+//!
+//! The registry is immutable after construction and `Send + Sync`, so we hand
+//! it out as `Arc<LanguageRegistry>` and callers read it lock-free. Parallel
+//! ingest workers each clone the `Arc` once and then hit `for_path` /
+//! `extract_symbols` without touching a mutex.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use codesight_core::StoredSymbol;
 use codesight_language_support::{LanguageRegistry, builtin_extractor_version_stamp};
 
 pub struct Indexer {
-    registry: Mutex<Option<LanguageRegistry>>,
-    workspace_root: Mutex<Option<PathBuf>>,
+    /// Cached `(workspace_root, registry)` pair. The mutex is only touched on
+    /// the cold path — first look-up for a given root. Hot lookups clone the
+    /// `Arc<LanguageRegistry>` and return without holding the lock.
+    cache: Mutex<Option<(PathBuf, Arc<LanguageRegistry>)>>,
 }
 
 impl Default for Indexer {
@@ -24,37 +28,32 @@ impl Default for Indexer {
 impl Indexer {
     pub fn new() -> Self {
         Self {
-            registry: Mutex::new(None),
-            workspace_root: Mutex::new(None),
+            cache: Mutex::new(None),
         }
     }
 
-    fn with_registry<F, R>(&self, project_root: &Path, f: F) -> R
-    where
-        F: FnOnce(&LanguageRegistry) -> R,
-    {
-        let mut cached = self.registry.lock().expect("poisoned");
-        let mut root_slot = self.workspace_root.lock().expect("poisoned");
-        let rebuild = !matches!(
-            (&*cached, &*root_slot),
-            (Some(_), Some(prev)) if prev == project_root
-        );
-        if rebuild {
-            *cached = Some(
-                LanguageRegistry::for_workspace_root(project_root)
-                    .unwrap_or_else(|_| LanguageRegistry::builtin()),
-            );
-            *root_slot = Some(project_root.to_path_buf());
+    /// Return a shareable `Arc<LanguageRegistry>` for `project_root`. Workers
+    /// pass this around freely; the registry itself is read-only and fully
+    /// `Send + Sync`.
+    pub fn registry_for(&self, project_root: &Path) -> Arc<LanguageRegistry> {
+        let mut guard = self.cache.lock().expect("poisoned");
+        if let Some((prev, reg)) = guard.as_ref()
+            && prev == project_root
+        {
+            return Arc::clone(reg);
         }
-        f(cached.as_ref().expect("initialized above"))
+        let reg = Arc::new(
+            LanguageRegistry::for_workspace_root(project_root)
+                .unwrap_or_else(|_| LanguageRegistry::builtin()),
+        );
+        *guard = Some((project_root.to_path_buf(), Arc::clone(&reg)));
+        reg
     }
 
     pub fn detect_language(&self, project_root: &Path, path: &Path) -> Option<String> {
-        self.with_registry(project_root, |registry| {
-            registry
-                .for_path(path)
-                .map(|lang| lang.id().as_str().to_string())
-        })
+        self.registry_for(project_root)
+            .for_path(path)
+            .map(|lang| lang.id().as_str().to_string())
     }
 
     pub fn extract_symbols(
@@ -68,12 +67,11 @@ impl Indexer {
             .unwrap_or(file)
             .to_string_lossy()
             .to_string();
-        self.with_registry(project_root, |registry| {
-            let Some(lang) = registry.for_path(file) else {
-                return Vec::new();
-            };
-            lang.extract_symbols(&relative, source).unwrap_or_default()
-        })
+        let registry = self.registry_for(project_root);
+        let Some(lang) = registry.for_path(file) else {
+            return Vec::new();
+        };
+        lang.extract_symbols(&relative, source).unwrap_or_default()
     }
 
     pub fn version_stamp(&self) -> String {

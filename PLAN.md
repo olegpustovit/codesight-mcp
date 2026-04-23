@@ -1,361 +1,309 @@
 # PLAN.md — codesight-mcp dogfooding remediation
 
-Concrete implementation plan for issues identified in the 2026-04-22 dogfooding
-session. Ordered by priority. Each item: scope, files, approach, verification.
+Concrete fixes for the 13 issues flagged in the 2026-04-22 dogfood (`session_stats`
++ `analysis_health` at commit `18aab4e`). Ordered by priority; every item names
+the real file/line to touch and the smallest change that closes the case.
 
-Session evidence referenced below comes from `manage_indexes session_stats` and
-`manage_indexes analysis_health` run against commit `18aab4e`.
+Design rules for everything below:
+- **Shrink or stay flat.** No new state on `SavingsLedger` / `SessionState`
+  unless the field replaces or collapses an existing one.
+- **No new top-level tool names, no new CLI binaries.** Every fix extends a
+  consolidated tool or an existing hook.
+- **Prefer a one-line predicate to a new abstraction.** The ledger, the
+  reindex-state tracker, and the per-tool map already exist; reuse them.
+
+---
+
+## ✅ P0.2 — Cold-ingest budget (done, 28.6s → 1.55s, 18× on this repo)
+
+Shipped. Retained the change set for history:
+
+- `crates/codesight-engine/src/indexing/code_index.rs` — sequential walk +
+  `rayon::par_iter` worker + `FileOutcome::{Unchanged, Touched, Updated}` so
+  unchanged files skip the SQL `UPDATE files` churn.
+- `crates/codesight-engine/src/indexing/indexer.rs` — `Mutex<Option<…>>` →
+  `Arc<LanguageRegistry>` cached once per workspace root.
+- `crates/codesight-language-support/src/extract_tree_sitter.rs` — thread-local
+  `tree_sitter::Parser` pool keyed by a cheap grammar fingerprint.
+- `crates/codesight-language-support/src/scm_engine/mod.rs` — `Mutex<HashMap>`
+  → `RwLock<HashMap>` for the per-language extractor cache.
+- `crates/codesight-language-support/src/dep_graph.rs` — parallel edge
+  extraction + explicit `known_paths` so incremental ingests resolve edges
+  from new files to unchanged neighbors.
+
+Budget now: <2s on this repo; AGENTS.md §5 gate passes with headroom.
 
 ---
 
 ## P0 — correctness / trust
 
-### P0.1 — Silence `STALE_DATA_WARNING` when nothing is in flight
+### P0.1 — Don't fire `STALE_DATA_WARNING` on unaffected catalog calls
 
-**Problem.** `session_stats.stale_warnings_fired_with_in_flight_paths` shows
-~100 entries where `files_in_flight: []`. The warning fires on the first
-`catalog_sources` of every session even when no reindex is live. Agents learn
-to ignore it, so real staleness gets ignored too.
+**Evidence.** `freshness.rs::annotate_catalog_with_in_flight` (line 82) fires
+whenever *any* source has a reindex in flight — even if the caller asked
+about a completely unrelated source. Result: on a warm server with a
+background reindex running on repo A, every `catalog_sources` call for any
+other repo gets a `STALE_DATA_WARNING`. ~100 entries in
+`session_stats.stale_warnings_fired_with_in_flight_paths` carried empty
+`files_in_flight`.
 
-**Files.**
-- `crates/codesight-engine/src/service/agent_v1/freshness.rs` (emitter)
-- `crates/codesight-engine/src/service/mod.rs` (warning wiring)
-
-**Approach.**
-1. Locate the warning emitter (grep `STALE_DATA_WARNING` in
-   `codesight-engine`).
-2. Make emission conditional on `!files_in_flight.is_empty() ||
-   indexing_started_ago_ms < GRACE_MS` (GRACE_MS = 500).
-3. Collapse consecutive identical warnings inside one session: keep a
-   `last_warning_fingerprint` on the session ledger and skip duplicates.
-4. Add a `reason` discriminator so callers can tell `in_flight_reindex` from
-   `snapshot_age_exceeded` from `pending_migration`.
+**Fix (one file).** `crates/codesight-engine/src/service/agent_v1/freshness.rs`.
+Keep `data.indexing: [...]` (it's the machine-readable signal). Drop the
+`warnings[]` push — `indexing` already tells any client what's going on, and
+the warning is indistinguishable from genuine staleness. The `annotate()`
+per-tool path already guards on *touched-file intersection* and is fine.
 
 **Verification.**
-- Add `tests/stale_warning_suppression.rs`: ingest → call `catalog_sources`
-  twice in a row → assert no `STALE_DATA_WARNING` on the second call.
-- Re-run `session_stats` after 10 tool calls in a quiet repo; assert
-  `stale_warnings_fired_with_in_flight_paths` is empty.
+- `tests/agent_v1_staleness.rs` — extend: when no sources are in flight,
+  assert zero `STALE_DATA_WARNING`. When repo A is mid-reindex and we call
+  `catalog_sources`, assert `data.indexing == ["A"]` and *no* warning.
+- Spot-check `session_stats` after 10 calls in a quiet repo: empty list.
 
-### P0.2 — Restore cold-ingest budget (<5s on this repo)
+### P0.3 — `path_rename` must match grouped `use` imports
 
-**Problem.** `ingest_sources` took 28.6s cold on 544 files; AGENTS.md §5 budget
-is <5s. ~6× regression.
+**Evidence I found in the code.** `impact.rs::collect_path_replacements`
+(line 250) string-matches `from` verbatim, bounded by non-identifier bytes.
+`boundary_before/boundary_after` already accept `)`, `,`, `>`, `\n`, `{`,
+`;` — the plan's earlier hypothesis that those were missing was wrong.
 
-**Files.**
-- `crates/codesight-engine/src/indexing/code_index.rs`
-- `crates/codesight-engine/src/indexing/dep_graph.rs`
-- `crates/codesight-extractors/src/extractors/engine/mod.rs`
+The *real* miss is grouped `use` imports:
 
-**Approach.**
-1. Add tracing spans around the four phases of `code_index::ingest`
-   (walk / parse / extract / persist) with `tracing::info_span!`.
-2. Run once with `RUST_LOG=codesight_engine::indexing=info` to identify the
-   bottleneck phase.
-3. Likely suspects given recent churn:
-   - **Parse.** tree-sitter parser recreation per file — cache
-     `tree_sitter::Parser` in a thread-local or per-worker pool.
-   - **Persist.** per-symbol inserts vs prepared-statement batch — ensure one
-     transaction, `INSERT ... VALUES (...),(...),(...)` up to SQLite's
-     999-param cap.
-   - **Walk.** `ignore` crate config — confirm `.gitignore` walker isn't
-     re-stat'ing files.
-4. Write a criterion bench in
-   `crates/codesight-engine/benches/cold_ingest.rs` that ingests a 500-file
-   fixture and fails if >5s.
+```rust
+use codesight_language_support::traits::{Language, Other};
+//  ^ "codesight_language_support::traits::Language" never appears verbatim
+```
 
-**Verification.**
-- Bench gate: `cargo bench -p codesight-engine --bench cold_ingest` < 5s.
-- Re-run `ingest_sources path=.` on this repo, expect `timing_ms < 5000`.
+For `from = codesight_language_support::traits::Language`, the byte scan
+never finds the string because the `::Language` lives inside the brace
+group, separated from the prefix.
 
-### P0.3 — Fix `evaluate_impact analysis=path_rename` prefix boundary
+**Fix.** `crates/codesight-analysis/src/impact.rs` — add a second pass that,
+inside any `use PREFIX::{ ... }` body, expands each brace item to
+`PREFIX::ITEM` before matching. Only active when `from` starts with a prefix
+that equals the `use` body's `PREFIX::`. Cheap: one line-by-line pass over
+lines starting with `use ` or `pub use `. Do not replace the byte scanner —
+augment it.
 
-**Problem.** Asked to rewrite `codesight_language_support::traits::Language →
-codesight_language_support::Language` returned `changes:0, files_affected:[]`,
-yet the session log shows I did the same rewrite by hand across ~60 sites.
-The byte_scan matcher is missing real hits.
+Separately, keep the byte scanner change from the original plan to also
+guard `:` boundary on one side but allow `$` / `#` to stay rejected.
 
-**Files.**
-- `crates/codesight-analysis/src/impact/path_rename.rs`
-- `tests/path_rename.rs` (new)
-
-**Approach.**
-1. Audit the boundary predicate. The matcher almost certainly requires one of
-   `::`, `{`, `;`, whitespace immediately after `from`. Add checks for
-   `)` (generic bound position), `,` (import group), `>` (turbofish closer),
-   `\n` (line break inside a `use` group).
-2. Handle grouped `use` imports: `use codesight_language_support::traits::{
-   Language, Other };` — the `from` prefix ends mid-group; `handle_partial_
-   group_imports` already has the enum; make it actually work.
-3. Handle re-exports (`pub use`) — same matcher, same result expected.
-4. Add a golden test file with 15 canonical shapes (plain `use`, grouped
-   `use`, `pub use`, `as` alias, fully-qualified call site,
-   `impl Trait for Type` bound, turbofish, etc.) and assert the rewrite
-   count matches.
-
-**Verification.**
-- `cargo nextest run --test path_rename` — all 15 shapes matched.
-- Dry-run against the same prefix that returned 0 on this session; expect
-  non-zero `files_affected`.
+**Verification.** New `tests/path_rename.rs` with 15 canonical Rust shapes
+(plain `use`, grouped `use`, `pub use`, `as` alias, fully qualified call,
+`impl Trait for Type` bound, turbofish, in-doc-comment sanity-no-match). Dry
+run on the original failing prefix must return `changes >= 60`.
 
 ---
 
-## P1 — efficiency / ergonomics
+## P1 — efficiency
 
-### P1.1 — Session-sticky `catalog_sources`
+### P1.1 — `catalog_sources` body-cache keyed by reindex generation
 
-**Problem.** 41 calls this session, ~5s cumulative, `tokens_saved=0`. Policy
-forces start-of-session call but the payload never changes unless an ingest
-fires.
+**Evidence.** `catalog_sources` handler (`service/agent_v1/catalog.rs:30`)
+walks every code source, opens each store via `ensure_repo_store`, snapshots
+through `SourceRegistry`. On a 2-source repo that's ~120 ms; 41 calls
+dominated the session with `tokens_saved=0`.
 
-**Files.**
-- `crates/codesight-engine/src/service/mod.rs` (session state)
-- `crates/codesight-engine/src/service/agent_v1/catalog_sources.rs` (handler)
+**Fix (one file, no ledger touch).**
+`crates/codesight-engine/src/service/mod.rs` — add
 
-**Approach.**
-1. Add `session.catalog_cache: Option<(indexed_at_max, CatalogPayload)>`.
-2. On `catalog_sources`, compare the cached `indexed_at_max` against a cheap
-   `SELECT MAX(indexed_at) FROM sources` (indexed column). If equal, return
-   cached payload with `_meta.cache_hit: true` and `timing_ms < 5`.
-3. Invalidate the cache in `ingest_sources` and `manage_indexes
-   action=invalidate/delete/rebuild`.
+```rust
+catalog_cell: OnceLock<RwLock<Option<(u64 /* generation */, Value /* body */)>>>,
+```
 
-**Verification.**
-- New test: call `catalog_sources` 10× in a row → first call touches SQLite,
-  calls 2..10 return `cache_hit: true`.
-- `session_stats.per_tool.catalog_sources.timing_ms_sum` drops an order of
-  magnitude in the self-dogfood test.
+to `CodeService`. Bump the generation from:
+- `ingest_sources` success,
+- `manage_indexes action ∈ {invalidate, delete, rebuild}`.
 
-### P1.2 — Fuzzy search normalizes case style before trigrams
+`catalog_sources` reads the cell with a read-lock; on hit, returns the
+cached body with `_meta.cache_hit = true` and zero SQLite work. On miss,
+builds the body, stores it under the generation, returns.
 
-**Problem.** `query="resolveImprts"` (typo + camelCase) with `fuzzy=true`
-returned 0 hits against `resolve_imports_to_files`. Trigrams compare raw
-strings; snake↔camel never reconciles.
+Not on the ledger — this is transient per-server-instance memoisation, not
+session telemetry.
 
-**Files.**
-- `crates/codesight-retrieval/src/fuzzy.rs` (likely location)
-- `crates/codesight-retrieval/src/ngram.rs` or wherever trigram tokens are
-  built.
+**Verification.** New `tests/catalog_sources_cache.rs`: 10 consecutive calls
+→ call 1 misses, calls 2..10 return `cache_hit: true` and `timing_ms < 2`.
+After `ingest_sources`, next call misses.
 
-**Approach.**
-1. Introduce `normalize_identifier(&str) -> String`:
-   lowercase, strip non-alphanumeric, no separators. `resolveImprts` →
-   `resolveimprts`, `resolve_imports_to_files` → `resolveimportstofiles`.
-2. Build trigrams over the normalized form on *both* query and indexed
-   symbol names.
-3. Keep the raw form stored for display/return; normalization is only for
-   comparison.
-4. Edit-distance cutoff applies on the normalized form too.
+### P1.2 — Fuzzy search normalises identifier case before trigrams
 
-**Verification.**
-- Add tests in `crates/codesight-retrieval/src/fuzzy.rs`:
-  - `resolveImprts` matches `resolve_imports_to_files` within threshold.
-  - `MyStruct` matches `my_struct` (kebab edge case).
-  - `foo_bar` still matches `foo_bar` with score 1.0.
+**Fix.** `crates/codesight-retrieval/src/fuzzy.rs` + `ngram.rs`. Introduce
+
+```rust
+fn normalize_identifier(s: &str) -> String { /* lowercase, drop non-alnum */ }
+```
+
+applied once to the query side and once when building the trigram set per
+symbol. Raw form stays in the stored row for display. Edit-distance cutoff
+operates on the normalised form.
+
+**Verification.** Unit tests in `fuzzy.rs`:
+- `resolveImprts` ↔ `resolve_imports_to_files` within threshold.
+- `MyStruct` ↔ `my_struct`.
+- `foo_bar` ↔ `foo_bar` score == 1.0.
 
 ---
 
 ## P2 — signal quality
 
-### P2.1 — Down-weight tests/benches/fixtures in `query_mode=natural_language`
+### P2.1 — Retune BM25 so tests/benches don't swamp prod
 
-**Problem.** NL query *"how does import resolution work across languages?"*
-returned top-5 results all from `tests/find_importers.rs`. Test files have
-dense repeated keywords; they swamp real implementation.
+**Smaller alternative to the original "file_class" column.** BM25 already
+has a length prior (`b`, typically 0.75). Keyword-dense test files win
+because repeated identifiers inflate term frequency without an offsetting
+length penalty. Two single-line knobs fix the symptom with no schema
+change:
 
-**Files.**
-- `crates/codesight-retrieval/src/bm25.rs` or the NL ranker
-- `crates/codesight-engine/src/service/agent_v1/catalog_search/mod.rs`
+1. `crates/codesight-retrieval/src/bm25.rs` — raise the default `b` from
+   0.75 to ~0.9 for the natural-language path only. Keyword-mode retrieval
+   is unchanged (exact-ID lookups should stay crisp).
+2. In the same file, add a **directory-prior** multiplier that multiplies
+   the final score by 1.0 for everything under `src/` / `crates/*/src/` and
+   0.5 for `tests/` / `benches/` / `fixtures/` / `testdata/` / `scripts/`.
+   Applied to NL hits only; echo the multiplier in `_meta` under
+   `weighting_applied` for observability.
 
-**Approach.**
-1. Attach a `file_class` tag to indexed files during ingest:
-   - `test` — path starts with `tests/`, or matches `*_test.rs`,
-     `test_*.py`, `*.spec.ts`.
-   - `bench` — `benches/`, `*.bench.*`.
-   - `fixture` — `fixtures/`, `testdata/`, `__fixtures__/`.
-   - `script` — `scripts/`.
-   - `prod` — else.
-2. In NL ranking, multiply the final score by a per-class weight:
-   `prod=1.0, test=0.35, bench=0.35, fixture=0.2, script=0.5`.
-3. Gate behind `include_conventional` (mirror the existing
-   `evaluate_quality` knob) — defaults off, users can opt back in.
-4. Echo the applied weights in `_meta.weighting_applied` for transparency.
+No new column, no new argument, no opt-in flag. If a user genuinely wants
+test files, they already narrow via `scope="tests/"`.
 
-**Verification.**
-- Integration test: NL query on a fixture repo with identical keyword
-  density in `src/` and `tests/` must rank `src/` first.
-- Re-run the original query manually; top 5 should now be from
-  `crates/codesight-*/src/`.
+**Verification.** Fixture repo with identical keyword density in `src/` and
+`tests/`: NL query ranks `src/` first. Re-run the original
+"how does import resolution work across languages?" query: top-5 from
+`crates/codesight-*/src/`.
 
-### P2.2 — Per-variant error counts in `inspect_graph`
+### P2.2 — Per-variant error telemetry via key composition
 
-**Problem.** `session_stats.per_tool.inspect_graph.error_count=3` on 19 calls
-(~16%), no visibility into which `graph=` enum failed.
+**Fact I verified.** `SessionState.per_tool: HashMap<String, ToolSessionStats>`
+already exists. The variant info is already known at dispatch.
 
-**Files.**
-- `crates/codesight-engine/src/service/agent_v1/graph.rs` (dispatcher)
-- `crates/codesight-engine/src/service/savings.rs` (telemetry sink)
+**Fix (one line where the ledger key is built).** Compose the existing key
+as `format!("{tool}:{variant}")` when a variant is available
+(`inspect_graph graph=X`, `inspect_structure view=X`, `evaluate_quality
+analysis=X`, `evaluate_impact analysis=X`). `session_stats` renders the
+dot-prefixed keys verbatim. No new field, no parallel map, no new
+`error_count_by_variant` struct.
 
-**Approach.**
-1. Add `per_tool[tool].error_count_by_variant: HashMap<String, u64>` where
-   the variant key is the `graph=` enum value (`references`, `calls`,
-   `imports`, `importers`, `dependencies`, `dependency_cycles`,
-   `centrality`, `module_coupling`, `layer_violations`, `find_references`,
-   `resolve_fqn`).
-2. Wire the variant tag from dispatcher into the savings sink alongside the
-   existing `tool` label.
-3. Apply the same pattern to `inspect_structure view=`, `evaluate_quality
-   analysis=`, `evaluate_impact analysis=` — all consolidated tools need
-   variant telemetry.
+**Verification.** Integration test: call `inspect_graph graph=calls
+symbol_id=does_not_exist` → `session_stats.per_tool["inspect_graph:calls"]
+.error_count == 1`.
 
-**Verification.**
-- `session_stats` response contains `error_count_by_variant` when any
-  variant errored.
-- Integration test: deliberately call `inspect_graph graph=calls
-  symbol_id=does_not_exist` → assert `error_count_by_variant.calls == 1`.
+### P2.3 — `quality_signal.first_step`: drop when no seed
 
-### P2.3 — `quality_signal.recommendations.first_step` either works or is absent
+**Fix.**
+`crates/codesight-analysis/src/quality_signal/recommendations.rs` — one
+if-let gate per recommendation: if the seed (duplicated name, top-offender
+path) is empty, emit `suggestion` without `first_step`. Don't emit a
+`first_step` whose `args.query` is `""`.
 
-**Problem.** Returned `first_step: { tool: "search_catalog", args: { query: "",
-unit_kinds: ["symbol"] } }`. An empty `query` is a no-op.
-
-**Files.**
-- `crates/codesight-analysis/src/quality_signal/recommendations.rs`
-
-**Approach.**
-1. For each recommendation, require a concrete seed before emitting
-   `first_step`. If no seed is available, emit just `suggestion` and drop
-   `first_step`.
-2. For the `symbol_uniqueness` recommendation (duplicate name disambiguation),
-   seed with the most-duplicated name from the scope's offender list
-   (e.g. `"extract"` or `"visit"`).
-3. For the `change_locality` recommendation, seed `evaluate_quality
-   analysis=refactor_targets` with the top offender's `file_path`.
-
-**Verification.**
-- `tests/quality_signal.rs` — for each recommendation returned, either
-  `first_step` is `None` or `first_step.args` has no empty string / empty
-  array fields.
+**Verification.** `tests/quality_signal.rs` asserts: for every returned
+recommendation, either `first_step` is absent or its args contain no empty
+strings / empty arrays.
 
 ---
 
 ## P3 — polish
 
-### P3.1 — Unify `agent_readiness_score` encoding
+### P3.1 — Uniform float encoding for agent_readiness
 
-**Problem.** Same response emits `agent_readiness_score: 6803` (int
-thousandths) and `agent_dimensions.change_safety: 0.61` (float).
+**Evidence.**
+`crates/codesight-analysis/src/quality_signal/governance.rs:16`
+`pub agent_readiness_score: u32` + `/ 10000.0` noise inside
+`governance.rs:36`. Elsewhere we already emit floats.
 
-**Files.**
-- `crates/codesight-analysis/src/quality_signal/mod.rs`
-- `crates/codesight-analysis/src/agent_readiness.rs`
+**Fix.** Change the field to `f64` in the `[0.0, 1.0]` range and delete the
+`* 10_000` / `/ 10000.0` sites. Keep the JSON key name stable —
+`agent_readiness_score` is not harmful; renaming adds churn for zero
+semantic value. Update `tests/quality_signal.rs` fixtures.
 
-**Approach.** Pick float `[0.0, 1.0]` everywhere. Delete every `* 10_000`
-site. Update `tests/quality_signal.rs` and any snapshot fixtures. Zero
-backwards compatibility — rename the field to `agent_readiness` (no
-`_score`) to force every caller through the type system.
+### P3.2 — `analysis_health.graph.unresolved_use_statements` — surface it
 
-**Verification.** `cargo nextest run` clean; `search_catalog
-query="agent_readiness_score"` returns zero hits after the rename.
+**Fix.** `crates/codesight-engine/src/service/agent_v1/index_admin.rs` —
+compute `COUNT(*) FROM dep_edges WHERE fact_quality = 'Heuristic' AND
+resolved_target IS NULL` at the same time we build `graph`. Add the field
+to the `graph` block. Single SQL, no schema change (column already exists
+on dep edges). AGENTS.md claim is now truthful.
 
-### P3.2 — Reconcile `analysis_health` docs with response shape
+**Verification.** Test that seeds a repo with a known-bad import → assert
+`graph.unresolved_use_statements > 0`.
 
-**Problem.** AGENTS.md §Working rules references
-`unresolved_use_statements` as a red-flag metric; the actual
-`manage_indexes action=analysis_health` response omits it.
+### P3.3 — Nudge on repeated full-file reads (reuse existing set)
 
-**Files.**
-- `crates/codesight-engine/src/service/agent_v1/index_admin.rs`
-- `AGENTS.md` (if we decide the doc was aspirational)
+**Evidence.** `SessionState.codesight_read_paths: BTreeSet<String>` already
+exists. What we lack is a *count* per path for the "3rd read" tier.
 
-**Approach.**
-1. Decide: surface the metric or drop the doc reference.
-2. If surface: compute from the import resolver — count import edges whose
-   `resolution_status = Unresolved`. Add to the `graph` block of the
-   response.
-3. If drop: remove the bullet from AGENTS.md and open a separate ticket for
-   the unresolved-imports feature.
+**Fix.** Replace the `BTreeSet` with `BTreeMap<String, u8>` in
+`session.rs` (bump count on every full-file read; skip for
+range/symbol/section reads). In `content.rs`:
+- 2nd full-file read of a path → attach `SUGGEST_OUTLINE` warning.
+- 3rd+ → include a prebuilt `suggested_call` with the right
+  `inspect_structure view=file_outline` args.
 
-Recommend **surface**, since it's the most useful of the three signals the
-doc promised.
+`edits_after_codesight_read` semantics unchanged — it already uses the
+same set via `contains_key`. Zero-backcompat: field type changes in one
+patch, all readers update in the same diff.
 
-**Verification.** Test that calls `analysis_health` on a repo with a known
-bad import → `graph.unresolved_use_statements > 0`.
+**Verification.** Test: 3 full-file reads on one path → response 2 has
+`SUGGEST_OUTLINE`, response 3 has `suggested_call`.
 
-### P3.3 — Nudge on repeated full-file `read_content`
+### P3.4 — Pre-edit `path_rename` nudge via the existing hook
 
-**Problem.** 121 of 148 reads (82%) were full-file. `read_efficiency` score
-0.59. 33 `TOKEN_HEAVY_READ` warnings fired and were silently ignored.
+**Evidence.** `SessionState.use_prefix_edits: HashMap<String, u64>` already
+tracks hot prefixes. `codesight-mcp hook-pretooluse` already exists. No
+new binary, no new subcommand needed.
 
-**Files.**
-- `crates/codesight-engine/src/service/agent_v1/content.rs`
+**Fix.** In the existing `hook-pretooluse` implementation, read the pending
+Edit/Write's `file_path` and `new_string`. If `new_string` contains a `use `
+line whose prefix matches a hot entry (`use_prefix_edits[prefix] >= 3`
+across `>= 3` distinct files in this session), append an
+`additionalContext` snippet suggesting `evaluate_impact
+analysis=path_rename from="<hot_prefix>::..." to="..."`. Persist the
+counter bump from the existing `PostToolUse` hook — already done.
 
-**Approach.**
-1. Track per-session `full_file_reads_by_path: HashMap<String, u8>`.
-2. On the 2nd full-file read of the same file, attach to the response:
-   ```json
-   {"warnings": [{"code": "SUGGEST_OUTLINE",
-     "message": "read this file twice as full — consider inspect_structure view=file_outline first, then batch symbol refs"}]}
-   ```
-3. On the 3rd+, promote to a harder warning and include a prebuilt
-   `suggested_call` that the agent can copy.
+Zero new files, zero new config surface; hot-prefix detection becomes a
+predicate on state that already exists.
 
-**Verification.** Test: call `read_content` with a full-file ref on the same
-path 3× in one session → response 2 has `SUGGEST_OUTLINE`, response 3 has
-`suggested_call`.
+**Verification.** Manual: three hand use-prefix edits across three files;
+fourth Edit sees a `path_rename` suggestion in `additionalContext`.
 
-### P3.4 — Pre-edit `path_rename` guardrail hook
+---
 
-**Problem.** `session_stats` flagged `HAND_ROLLED_PATH_RENAME` only
-post-hoc — after 60+ hand edits. The anti-pattern detector should fire
-*before* the N+1 edit.
+## Not doing (explicit non-scope)
 
-**Files.**
-- New: `src/cli/hooks/pre_edit_path_rename.rs`
-- `crates/codesight-engine/src/service/savings.rs` (shared rolling counter)
-
-**Approach.**
-1. In the edit-tracking sink, when ≥3 Edit/Write calls within the same
-   session touched the same `use PREFIX::...` prefix across ≥3 distinct
-   files, mark the prefix as "hot."
-2. Expose a hook command (`codesight-mcp hook pre-edit`) that reads the
-   pending edit's target file + new content, detects any hot prefix, and
-   emits `additionalContext` pointing to
-   `evaluate_impact analysis=path_rename from="..." to="..."`.
-3. Ship an example `settings.json` snippet in `README.md` that wires the
-   hook as a `PreToolUse` matcher for `Edit`/`Write`.
-
-**Verification.** Manual session: do 3 hand use-prefix edits across 3 files,
-then on the 4th edit the hook emits a `path_rename` suggestion in
-`additionalContext`.
+- New `SessionSignals` event log / "signals bus" abstraction. Every symptom
+  above has a 1-line fix against existing state. Adding a generic event log
+  would be a new primitive the server has to maintain forever with nothing
+  measurable gained.
+- Renaming `agent_readiness_score` → `agent_readiness`. Semantic fix only;
+  name stays.
+- New `include_conventional` knob for NL search. Handled via BM25 retune +
+  directory prior.
+- Criterion bench gate for cold ingest. Direct timing is authoritative;
+  1.55 s vs 5 s budget leaves enough headroom that CI gating costs more
+  than it protects.
 
 ---
 
 ## Work packaging
 
-Four PRs, each self-contained:
-
-| PR | Scope | Items | Estimated effort |
+| PR | Scope | Items | Est. effort |
 |---|---|---|---|
-| 1 | Trust & noise reduction | P0.1, P1.1 | half day |
-| 2 | Correctness | P0.3, P1.2, P2.3 | one day |
-| 3 | Performance | P0.2 | one day (investigation-heavy) |
-| 4 | Signal & telemetry | P2.1, P2.2, P3.1, P3.2, P3.3, P3.4 | one day |
+| 1 | Trust | P0.1, P1.1 | 2–3 h |
+| 2 | Correctness | P0.3, P1.2, P2.3 | ½ day |
+| 3 | Signal | P2.1, P2.2, P3.2 | ½ day |
+| 4 | Polish | P3.1, P3.3, P3.4 | 2–3 h |
 
-Each PR ends with `manage_indexes action=session_end` and verifies
+Each PR ends with `manage_indexes action=session_end`; gate on
 `quality_delta.verdict != "regressed"`.
 
----
+## Session quality gate
 
-## Session quality gate for this plan
-
-Before merging any PR:
-- `cargo nextest run` full suite green.
-- `evaluate_quality analysis=quality_signal scope="<touched crate>"`
-  before/after — no threshold that was passing may newly fail.
-- `manage_indexes action=session_stats` — no new anti-pattern entries and
+Same as before:
+- `cargo nextest run` green.
+- `evaluate_quality analysis=quality_signal scope="<touched crate>"` shows
+  no previously passing threshold newly failing.
+- `session_stats` — no new anti-pattern entries and
   `read_efficiency.score >= 0.70`.
 
-Net target after all four PRs: a fresh self-dogfood session ends with
-`tokens_saved_total > 100M`, zero `STALE_DATA_WARNING` noise, cold ingest
-`<5s`, and `verdict != "regressed"`.
+Net target after all four PRs: fresh self-dogfood with zero empty-in-flight
+`STALE_DATA_WARNING`s, NL ranking dominated by `src/`, rename safety cover,
+and cold ingest still <2 s.

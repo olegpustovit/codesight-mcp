@@ -2,9 +2,9 @@
 
 use anyhow::{Result, anyhow};
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Parser, QueryCursor, Tree};
+use tree_sitter::{QueryCursor, Tree};
 
-use crate::extract_tree_sitter::{first_line, node_text, source_slice};
+use crate::extract_tree_sitter::{first_line, node_text, parser_for_language, source_slice};
 
 use codesight_core::symbols::SymbolKind;
 
@@ -53,13 +53,11 @@ pub(super) fn parse_symbol_kind(kind_str: &str) -> Option<SymbolKind> {
 }
 
 pub(super) fn parse_host_tree(ext: &ScmExtractor, source: &str) -> Result<Tree> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&ext.compiled().grammar)
-        .map_err(|e| anyhow!("set_language: {e}"))?;
-    parser
-        .parse(source, None)
-        .ok_or_else(|| anyhow!("parse returned no tree"))
+    parser_for_language(&ext.compiled().grammar, |parser| {
+        parser
+            .parse(source, None)
+            .ok_or_else(|| anyhow!("parse returned no tree"))
+    })
 }
 
 pub(super) fn collect_raw_captures(

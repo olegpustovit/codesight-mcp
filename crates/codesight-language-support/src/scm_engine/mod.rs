@@ -117,6 +117,9 @@ impl ScmExtractor {
 
 /// Run a lazily-compiled SCM pack against `source`. Used by the default
 /// `Language::extract_symbols` impl for every curated-SCM language.
+///
+/// The hot path is a single `RwLock::read` + string lookup — no contention
+/// between parallel ingest workers once each language has been seen once.
 pub fn extract_with_spec(
     language_name: &str,
     spec: &'static GrammarSpec,
@@ -124,16 +127,18 @@ pub fn extract_with_spec(
     source: &str,
 ) -> Result<Vec<StoredSymbol>> {
     use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<HashMap<String, &'static ScmExtractor>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    use std::sync::{OnceLock, RwLock};
+    static CACHE: OnceLock<RwLock<HashMap<String, &'static ScmExtractor>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+
     if let Some(&existing) = cache
-        .lock()
+        .read()
         .expect("scm cache poisoned")
         .get(language_name)
     {
         return existing.extract(file_path, source);
     }
+
     let meta = ScmMetadata {
         name: language_name.to_string(),
         grammar: spec.grammar_name.to_string(),
@@ -145,11 +150,16 @@ pub fn extract_with_spec(
         spec.tags_scm.to_string(),
         spec.injections_scm.map(|s| s.to_string()),
     )?;
-    let leaked: &'static ScmExtractor = Box::leak(Box::new(extractor));
-    cache
-        .lock()
-        .expect("scm cache poisoned")
-        .insert(language_name.to_string(), leaked);
+
+    // Two racing callers for the same language both build an extractor here;
+    // the loser's extractor is dropped by inserting only if absent, so every
+    // caller observes the same cached pointer afterwards.
+    let leaked: &'static ScmExtractor = {
+        let mut guard = cache.write().expect("scm cache poisoned");
+        *guard
+            .entry(language_name.to_string())
+            .or_insert_with(|| Box::leak(Box::new(extractor)))
+    };
     leaked.extract(file_path, source)
 }
 
