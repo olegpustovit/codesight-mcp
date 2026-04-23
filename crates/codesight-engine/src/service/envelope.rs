@@ -26,6 +26,37 @@ pub(super) fn extract_read_content_paths(response: &Value) -> Vec<String> {
     out
 }
 
+/// Paths returned via a *full-file* `read_content` ref — everything else
+/// (symbols, sections, bounded ranges) is excluded. Used by the session
+/// ledger to run the repeated-full-file nudge without charging narrower
+/// reads.
+pub(super) fn extract_full_file_read_paths(response: &Value) -> Vec<String> {
+    let Some(items) = response
+        .pointer("/data/items")
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+        let is_full_file = item
+            .get("read_scope")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s == "file" || s == "file_full");
+        if !is_full_file {
+            continue;
+        }
+        if let Some(path) = item
+            .pointer("/ref/path")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            out.push(path.to_string());
+        }
+    }
+    out
+}
+
 pub(super) fn compact_meta(meta: &mut Map<String, Value>) {
     // Keys always kept when present.
     const ALWAYS: &[&str] = &[

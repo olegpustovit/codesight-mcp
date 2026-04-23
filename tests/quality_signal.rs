@@ -111,8 +111,11 @@ fn quality_signal_score_in_range() {
             json!({ "source_id": sid, "analysis": "quality_signal" }),
         )
         .unwrap();
-    let score = r["data"]["score"].as_u64().unwrap();
-    assert!(score <= 10000, "score {score} out of range");
+    let score = r["data"]["score"].as_f64().unwrap();
+    assert!(
+        (0.0..=1.0).contains(&score),
+        "score {score} out of range [0.0, 1.0]"
+    );
 }
 
 #[test]
@@ -206,8 +209,9 @@ fn snapshot_and_regression_round_trip() {
     assert!(data["baseline"].is_object());
     assert!(data["current"].is_object());
     assert!(data["delta"].is_object());
-    // Score delta should be 0 (same data)
-    assert_eq!(data["delta"]["score"].as_i64().unwrap(), 0);
+    // Score delta should be 0.0 (same data)
+    let delta = data["delta"]["score"].as_f64().unwrap();
+    assert!(delta.abs() < 1e-9, "expected zero score delta, got {delta}");
 }
 
 #[test]

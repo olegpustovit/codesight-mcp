@@ -160,7 +160,10 @@ pub fn preview_rust_path_rename(
         let abs_path = root.join(&rel_path);
         let source = fs::read_to_string(&abs_path)
             .with_context(|| format!("read '{}'", abs_path.display()))?;
-        if !source.contains(from) && !looks_like_partial_group_use(&source, from) {
+        if !source.contains(from)
+            && !looks_like_partial_group_use(&source, from)
+            && !looks_like_group_head_match(&source, from)
+        {
             continue;
         }
 
@@ -169,7 +172,15 @@ pub fn preview_rust_path_rename(
             unhandled.extend(file_unhandled);
         }
 
-        let replacements = collect_path_replacements(&source, from);
+        let mut replacements = collect_path_replacements(&source, from);
+        replacements.extend(collect_group_use_replacements(&source, from, to));
+        // Sort by start so `apply_replacements` (which walks in reverse) keeps
+        // byte offsets valid even when the two scanners emit overlapping
+        // regions. Dedupe identical spans as a safety net — the scanners are
+        // disjoint by construction (plain occurrences vs. inside-brace items),
+        // but identical `(start, end)` pairs would double-apply.
+        replacements.sort_by_key(|r| (r.start, r.end));
+        replacements.dedup_by(|a, b| a.start == b.start && a.end == b.end);
         if replacements.is_empty() {
             continue;
         }
@@ -239,11 +250,28 @@ struct Replacement {
     col: u32,
     before: String,
     node_kind: String,
+    /// When set, this is spliced into the source at `start..end` instead of
+    /// the global `to`. Used for grouped `use` items where only a single
+    /// item inside `{ ... }` gets rewritten; the splice value is the tail
+    /// of `to` relative to the group's shared prefix.
+    custom_text: Option<String>,
+    /// When set, the `PathRenameChange.after` field renders this string
+    /// verbatim instead of `before.replacen(from, to, 1)`. Needed for
+    /// grouped edits because the full `from` path doesn't appear on the
+    /// matched line.
+    after_override: Option<String>,
 }
 
 impl Replacement {
     fn after(&self, from: &str, to: &str) -> String {
+        if let Some(ref forced) = self.after_override {
+            return forced.clone();
+        }
         self.before.replacen(from, to, 1)
+    }
+
+    fn replacement_text<'a>(&'a self, to: &'a str) -> &'a str {
+        self.custom_text.as_deref().unwrap_or(to)
     }
 }
 
@@ -346,6 +374,8 @@ fn collect_path_replacements(source: &str, from: &str) -> Vec<Replacement> {
                 col,
                 before: line_text,
                 node_kind,
+                custom_text: None,
+                after_override: None,
             });
             idx += from_bytes.len();
             col += from_bytes.len() as u32;
@@ -367,7 +397,10 @@ fn collect_path_replacements(source: &str, from: &str) -> Vec<Replacement> {
 fn apply_replacements(source: &str, replacements: &[Replacement], to: &str) -> String {
     let mut updated = source.to_string();
     for replacement in replacements.iter().rev() {
-        updated.replace_range(replacement.start..replacement.end, to);
+        updated.replace_range(
+            replacement.start..replacement.end,
+            replacement.replacement_text(to),
+        );
     }
     updated
 }
@@ -392,6 +425,261 @@ fn is_path_ident(byte: u8) -> bool {
 
 fn path_matches_scope(path: &str, scope: &str) -> bool {
     path == scope || path.starts_with(&format!("{scope}/")) || path.ends_with(&format!("/{scope}"))
+}
+
+/// Expand `use PREFIX::{A, B, sub::C};` into per-item edits when `from` lives
+/// inside the brace group. Emits a [`Replacement`] per matching item.
+///
+/// Two shapes are handled:
+///
+/// 1. **In-place item rewrite.** `to` shares the same `PREFIX::` head —
+///    the item text is swapped with `to`'s tail, keeping the group shape.
+///    Example: `use crate::a::{Foo};` with `from=crate::a::Foo`,
+///    `to=crate::a::Bar` → `use crate::a::{Bar};`.
+///
+/// 2. **Extraction into a new `use`.** `to` does *not* share the group's
+///    prefix. We can't rewrite in place, but we leave the handling to the
+///    existing `collect_partial_group_warnings` path so the caller gets a
+///    clear `unhandled` entry instead of a silent miss. That path is
+///    unchanged.
+fn collect_group_use_replacements(source: &str, from: &str, to: &str) -> Vec<Replacement> {
+    let mut out = Vec::new();
+    let bytes = source.as_bytes();
+
+    // Walk the file line by line. `use ...;` spans are almost always on a
+    // single line; multi-line grouped imports are handled by scanning
+    // forward until the closing `}` / `;`.
+    let mut line_start = 0usize;
+    while line_start < bytes.len() {
+        let line_end = bytes[line_start..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|off| line_start + off)
+            .unwrap_or(bytes.len());
+
+        // Advance `line_start` now so every code path below is monotone.
+        let next_line_start = line_end + 1;
+
+        // Identify a `use ...` statement. Supports `use`, `pub use`, and
+        // leading whitespace (indentation). We're not going to find
+        // `use ` inside a comment or string here because those are filtered
+        // later by the brace scanner (which runs only when we see `::{`).
+        let mut cursor = line_start;
+        while cursor < line_end && matches!(bytes[cursor], b' ' | b'\t') {
+            cursor += 1;
+        }
+        let body_start = if bytes.get(cursor..cursor + 4) == Some(b"use ") {
+            Some(cursor + 4)
+        } else if bytes.get(cursor..cursor + 8) == Some(b"pub use ") {
+            Some(cursor + 8)
+        } else {
+            None
+        };
+        let Some(body_start) = body_start else {
+            line_start = next_line_start;
+            continue;
+        };
+
+        // Locate the first `{` on this line, respecting `<...>` depth so
+        // hypothetical turbofish inside wouldn't confuse us (rare in `use`).
+        let mut brace_open: Option<usize> = None;
+        let mut i = body_start;
+        let mut depth_angle: i32 = 0;
+        while i < line_end {
+            match bytes[i] {
+                b'<' => depth_angle += 1,
+                b'>' => depth_angle -= 1,
+                b'{' if depth_angle == 0 => {
+                    brace_open = Some(i);
+                    break;
+                }
+                b';' => break,
+                _ => {}
+            }
+            i += 1;
+        }
+        let Some(brace_open) = brace_open else {
+            line_start = next_line_start;
+            continue;
+        };
+
+        // Require `::{` — rules out the rare `use foo{...}` typo path.
+        if brace_open < 2 || &bytes[brace_open - 2..brace_open] != b"::" {
+            line_start = next_line_start;
+            continue;
+        }
+
+        let head_raw = match std::str::from_utf8(&bytes[body_start..brace_open - 2]) {
+            Ok(s) => s.trim(),
+            Err(_) => {
+                line_start = next_line_start;
+                continue;
+            }
+        };
+        if head_raw.is_empty() {
+            line_start = next_line_start;
+            continue;
+        }
+        let head_prefix = format!("{head_raw}::");
+
+        let wanted_item = match from.strip_prefix(&head_prefix) {
+            Some(s) => s,
+            None => {
+                line_start = next_line_start;
+                continue;
+            }
+        };
+        let to_tail = match to.strip_prefix(&head_prefix) {
+            Some(s) => s,
+            None => {
+                // Shared-prefix case only; the unhandled-warning path
+                // already reports this shape.
+                line_start = next_line_start;
+                continue;
+            }
+        };
+
+        // Match the closing brace (may be on a later line).
+        let Some(brace_close) = match_brace(bytes, brace_open) else {
+            line_start = next_line_start;
+            continue;
+        };
+
+        // Walk items inside the brace, splitting on top-level commas.
+        let inside_start = brace_open + 1;
+        let inside_end = brace_close;
+        let mut cursor = inside_start;
+        while cursor < inside_end {
+            let item_end = next_top_level_comma(bytes, cursor, inside_end).unwrap_or(inside_end);
+            let raw = &source[cursor..item_end];
+            let leading_ws = raw.len() - raw.trim_start().len();
+            let trailing_ws = raw.len() - raw.trim_end().len();
+            let item_start = cursor + leading_ws;
+            let item_stop = item_end - trailing_ws;
+            let item_text = &source[item_start..item_stop];
+            if !item_text.is_empty() {
+                let ident = strip_as_alias(item_text);
+                if ident == wanted_item {
+                    let (line, col) = byte_pos_to_line_col(source, item_start);
+                    let before = source
+                        .lines()
+                        .nth((line - 1) as usize)
+                        .unwrap_or("")
+                        .to_string();
+                    let after = before.replacen(ident, to_tail, 1);
+                    out.push(Replacement {
+                        start: item_start,
+                        end: item_start + ident.len(),
+                        line,
+                        col,
+                        before,
+                        node_kind: "grouped_use_item".to_string(),
+                        custom_text: Some(to_tail.to_string()),
+                        after_override: Some(after),
+                    });
+                }
+            }
+            cursor = if item_end < inside_end {
+                item_end + 1
+            } else {
+                inside_end
+            };
+        }
+
+        // Jump past the closing brace so a multi-line group doesn't get
+        // rescanned line-by-line. We still need to correctly update
+        // `line_no` for the number of newlines we skipped over.
+        let jumped_past = brace_close + 1;
+        while line_start < jumped_past {
+            let ln_end = bytes[line_start..]
+                .iter()
+                .position(|&b| b == b'\n')
+                .map(|off| line_start + off)
+                .unwrap_or(bytes.len());
+            if ln_end >= jumped_past {
+                line_start = jumped_past.max(next_line_start);
+                break;
+            }
+            line_start = ln_end + 1;
+        }
+        // If we never advanced past the current line (single-line group),
+        // move on normally.
+        if line_start <= line_end {
+            line_start = next_line_start;
+        }
+    }
+
+    out
+}
+
+fn match_brace(bytes: &[u8], open: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut i = open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn next_top_level_comma(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut i = start;
+    while i < end {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => depth -= 1,
+            b',' if depth == 0 => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn strip_as_alias(item: &str) -> &str {
+    match item.split_once(" as ") {
+        Some((ident, _)) => ident.trim(),
+        None => item.trim(),
+    }
+}
+
+fn byte_pos_to_line_col(source: &str, pos: usize) -> (u32, u32) {
+    let mut line = 1u32;
+    let mut col = 1u32;
+    for (i, b) in source.bytes().enumerate() {
+        if i >= pos {
+            break;
+        }
+        if b == b'\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
+}
+
+/// Cheap pre-filter: returns true when the file has a `use HEAD::{ ... }`
+/// statement where `HEAD` is a proper prefix of `from`. Without this, files
+/// that only reference `from` via grouped imports would be skipped by the
+/// plain `source.contains(from)` short-circuit.
+fn looks_like_group_head_match(source: &str, from: &str) -> bool {
+    let Some((head, _)) = from.rsplit_once("::") else {
+        return false;
+    };
+    let needle = format!("{head}::{{");
+    source.contains(&needle)
 }
 
 fn looks_like_partial_group_use(source: &str, from: &str) -> bool {

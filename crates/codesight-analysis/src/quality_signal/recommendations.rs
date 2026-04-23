@@ -30,6 +30,35 @@ pub fn suggestion_for_bottleneck(bottleneck: &str, coverage: &SignalCoverage) ->
     }
 }
 
+/// Returns true when `first_step` is a concrete, runnable tool call — i.e.
+/// not `Null`, has a non-empty `tool`, and every `args` value is either a
+/// non-empty string, a non-empty array, or any other non-null JSON scalar.
+/// Recommendations drop `first_step` otherwise rather than emit a no-op
+/// (empty `query`, empty array) — the `suggestion` field alone is more
+/// useful than a call the agent would execute and get nothing back.
+fn first_step_is_actionable(step: &serde_json::Value) -> bool {
+    let Some(obj) = step.as_object() else {
+        return false;
+    };
+    let tool_ok = obj
+        .get("tool")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty());
+    if !tool_ok {
+        return false;
+    }
+    let Some(args) = obj.get("args").and_then(|v| v.as_object()) else {
+        // No args object is fine — some tools run without parameters.
+        return true;
+    };
+    args.values().all(|v| match v {
+        serde_json::Value::String(s) => !s.is_empty(),
+        serde_json::Value::Array(a) => !a.is_empty(),
+        serde_json::Value::Null => false,
+        _ => true,
+    })
+}
+
 /// Build actionable recommendations from a governance signal. Each entry
 /// names the weakest dimension/sub-metric, a severity, and a `first_step`
 /// tool call the agent can run next.
@@ -82,10 +111,10 @@ pub(super) fn build_recommendations(gov: &GovernanceSignal) -> Vec<serde_json::V
             "symbol_uniqueness",
             sm.symbol_uniqueness,
             "Resolve same-name ambiguity to make retrieval deterministic.",
-            serde_json::json!({
-                "tool": "search_catalog",
-                "args": { "query": "", "unit_kinds": ["symbol"] }
-            }),
+            // No reliable seed is available from the governance signal
+            // alone; `first_step` is intentionally `Null` so the filter
+            // below drops it. The `suggestion` still guides the agent.
+            serde_json::Value::Null,
         ),
         (
             "comprehensibility",
@@ -100,14 +129,19 @@ pub(super) fn build_recommendations(gov: &GovernanceSignal) -> Vec<serde_json::V
     ];
     for (dim, sub, val, suggestion, first_step) in rules {
         if *val < 0.6 {
-            out.push(serde_json::json!({
+            let mut entry = serde_json::json!({
                 "dimension": dim,
                 "sub_metric": sub,
                 "severity": severity(*val),
                 "value": val,
                 "suggestion": suggestion,
-                "first_step": first_step,
-            }));
+            });
+            if first_step_is_actionable(first_step)
+                && let serde_json::Value::Object(ref mut map) = entry
+            {
+                map.insert("first_step".to_string(), first_step.clone());
+            }
+            out.push(entry);
         }
     }
     out.sort_by(|a, b| {

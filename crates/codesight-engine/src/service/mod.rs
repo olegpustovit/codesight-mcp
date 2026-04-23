@@ -9,9 +9,57 @@ pub mod savings;
 
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
+use std::sync::{
+    Arc, Mutex, OnceLock, PoisonError, RwLock, Weak,
+    atomic::{AtomicU64, Ordering},
+};
 
-use envelope::{compact_meta, extract_read_content_paths};
+use envelope::{compact_meta, extract_full_file_read_paths, extract_read_content_paths};
+
+/// Attach a `SUGGEST_OUTLINE` warning to a `read_content` response on the
+/// 2nd full-file read of the same path in one session, and escalate to a
+/// `suggested_call` block on the 3rd. Unhandled entries pass through. Keeps
+/// the nudge entirely in-memory — no new persistence beyond the existing
+/// `SessionState.full_file_read_counts` map.
+fn attach_full_file_read_nudges(response: &mut Value, counts: &[(String, u8)]) {
+    if counts.is_empty() {
+        return;
+    }
+    let Value::Object(body) = response else {
+        return;
+    };
+    let warnings = body
+        .entry("warnings".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let Value::Array(arr) = warnings else {
+        return;
+    };
+    for (path, n) in counts {
+        if *n < 2 {
+            continue;
+        }
+        let mut warning = json!({
+            "code": "SUGGEST_OUTLINE",
+            "path": path,
+            "full_file_reads_this_session": n,
+            "message": format!(
+                "read '{path}' in full {n}× this session — prefer `inspect_structure view=file_outline` first, then batch symbol refs via `read_content`."
+            ),
+        });
+        if *n >= 3
+            && let Value::Object(map) = &mut warning
+        {
+            map.insert(
+                "suggested_call".to_string(),
+                json!({
+                    "tool": "inspect_structure",
+                    "args": { "view": "file_outline", "file_path": path },
+                }),
+            );
+        }
+        arr.push(warning);
+    }
+}
 use serde_json::{Value, json};
 use tracing::instrument;
 
@@ -80,6 +128,14 @@ pub struct CodeService {
     /// language detection + symbol extraction. Always present — handlers
     /// never conditionally probe for a backend.
     indexer: Arc<Indexer>,
+    /// Monotonic generation counter bumped every time an ingest commits or
+    /// `manage_indexes action ∈ {invalidate, delete, rebuild}` runs. The
+    /// `catalog_sources` handler uses it to memoise its JSON body.
+    catalog_generation: AtomicU64,
+    /// Per-process `catalog_sources` body cache. Stored as
+    /// `(generation_at_build, body)`. Not persisted — memoisation across the
+    /// lifetime of one server instance only.
+    catalog_cache: RwLock<Option<(u64, Value)>>,
 }
 
 impl CodeService {
@@ -101,7 +157,42 @@ impl CodeService {
                 crate::server_support::source_registry::SourceRegistry::new(),
             ),
             self_weak: OnceLock::new(),
+            catalog_generation: AtomicU64::new(0),
+            catalog_cache: RwLock::new(None),
         })
+    }
+
+    /// Current `catalog_sources` cache generation. Handlers compare this to
+    /// the stored `(generation, body)` pair — on match, they can reuse the
+    /// cached JSON; on mismatch, they rebuild.
+    pub(crate) fn catalog_generation(&self) -> u64 {
+        self.catalog_generation.load(Ordering::Acquire)
+    }
+
+    /// Bump the catalog generation. Called by any path that changes what
+    /// `catalog_sources` would return — ingest success,
+    /// `manage_indexes action ∈ {invalidate, delete, rebuild}`.
+    pub(crate) fn bump_catalog_generation(&self) {
+        self.catalog_generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Read the cached body if it still matches the current generation.
+    pub(crate) fn cached_catalog(&self) -> Option<Value> {
+        let gen_now = self.catalog_generation();
+        let guard = self.catalog_cache.read().ok()?;
+        match guard.as_ref() {
+            Some((g, body)) if *g == gen_now => Some(body.clone()),
+            _ => None,
+        }
+    }
+
+    /// Store a freshly built body under the current generation. Callers pass
+    /// the generation they observed *before* building so that a concurrent
+    /// bump invalidates them automatically on the next read.
+    pub(crate) fn store_catalog(&self, observed_generation: u64, body: Value) {
+        if let Ok(mut guard) = self.catalog_cache.write() {
+            *guard = Some((observed_generation, body));
+        }
     }
 
     /// Process-wide per-source snapshot cache. Accessible so handler modules
@@ -478,6 +569,16 @@ impl CodeService {
         let impact_analysis = (tool_name == "evaluate_impact")
             .then(|| non_empty_str("analysis"))
             .flatten();
+        // Consolidated-tool variant: `inspect_graph graph=…`,
+        // `inspect_structure view=…`, `evaluate_quality analysis=…`,
+        // `evaluate_impact analysis=…`. Per-variant telemetry keys the
+        // ledger at `"tool:variant"` alongside the aggregate tool row.
+        let variant = match tool_name {
+            "inspect_graph" => non_empty_str("graph"),
+            "inspect_structure" => non_empty_str("view"),
+            "evaluate_quality" | "evaluate_impact" => non_empty_str("analysis"),
+            _ => None,
+        };
         let result = catch_unwind(AssertUnwindSafe(|| {
             agent_v1::dispatch(self, tool_name, arguments)
         }));
@@ -502,7 +603,7 @@ impl CodeService {
             }
         };
         match dispatched {
-            Ok(value) => {
+            Ok(mut value) => {
                 let tokens_saved = value
                     .pointer("/_meta/tokens_saved")
                     .and_then(|v| v.as_u64())
@@ -520,6 +621,7 @@ impl CodeService {
                         ok,
                         source_id.as_deref(),
                         impact_analysis.as_deref(),
+                        variant.as_deref(),
                     );
                     // Record read_content-specific detail when present.
                     if tool_name == "read_content"
@@ -546,6 +648,20 @@ impl CodeService {
                         }
                     }
                 });
+                // Repeated full-file read nudge. We bump per-path counters
+                // outside the ledger_locked closure because the closure can
+                // only consume one `&SavingsLedger` at a time and we want
+                // the warning attached to the response before it flows to
+                // the envelope-compacting step.
+                if tool_name == "read_content" {
+                    let full_paths = extract_full_file_read_paths(&value);
+                    if !full_paths.is_empty() {
+                        let counts = self
+                            .with_ledger_locked(|ledger| ledger.record_full_file_reads(&full_paths))
+                            .unwrap_or_default();
+                        attach_full_file_read_nudges(&mut value, &counts);
+                    }
+                }
                 self.maybe_capture_session_start_snapshot(source_id.as_deref());
                 self.attach_session_and_compact_meta(tool_name, value, meta_verbose)
             }

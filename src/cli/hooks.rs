@@ -265,6 +265,22 @@ fn handle_edit_probe(tool_input: &Value) -> i32 {
         return 0;
     }
 
+    // Pre-edit hot-prefix nudge: if this Edit touches a `use foo::bar::…`
+    // prefix we've already seen rewritten ≥3 times across ≥3 distinct
+    // files this session, suggest `evaluate_impact analysis=path_rename`
+    // *before* the N+1 hand edit lands. Reads the rolling counter that
+    // PostToolUse already maintains — no new persistence.
+    if let Some(prefix) = detect_use_prefix_rewrite(tool_input)
+        && hot_prefix_count(&prefix) >= 3
+    {
+        emit_allow(&format!(
+            "PreToolUse: `use {prefix}::…` has already been rewritten by hand 3+ times this session. \
+             Run `evaluate_impact analysis=path_rename from=\"{prefix}::…\" to=\"…\" apply=false` \
+             to see the full impact (and get a scripted rewrite) before editing more files."
+        ));
+        // Intentionally fall through: the nudge is advisory, not a block.
+    }
+
     let Some(entry) = load_agent_readiness_probe(file_path) else {
         return 0;
     };
@@ -278,6 +294,20 @@ fn handle_edit_probe(tool_input: &Value) -> i32 {
     );
     emit_allow(&message);
     0
+}
+
+/// Read-only probe against the session ledger. Returns the current
+/// `use_prefix_edits[prefix]` count (0 if the ledger can't be loaded or the
+/// prefix is cold) — used by [`handle_edit_probe`] to fire a nudge before
+/// the next hand edit lands.
+fn hot_prefix_count(prefix: &str) -> u64 {
+    let ledger_path = index_storage_dir().join("_savings.json");
+    let ledger = SavingsLedger::new(ledger_path);
+    ledger
+        .current_session()
+        .ok()
+        .and_then(|s| s.use_prefix_edits.get(prefix).copied())
+        .unwrap_or(0)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────

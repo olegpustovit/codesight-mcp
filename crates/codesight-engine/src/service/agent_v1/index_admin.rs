@@ -76,6 +76,7 @@ impl CodeService {
         };
         let store = require_store!(repo: self, sid, None, timer);
         let graph = store.dependency_graph()?;
+        let graph_with_quality = store.dependency_graph_with_import_quality()?;
         let all_files = store.all_file_paths()?;
 
         let mut workspace_crate_edges = 0u64;
@@ -94,6 +95,20 @@ impl CodeService {
         }
 
         let total_edges: u64 = graph.values().map(|t| t.len() as u64).sum();
+
+        // Proxy for "unresolved use statements" promised by AGENTS.md:
+        // import edges persisted with `FactQuality::Heuristic` are the ones
+        // where the structural extractor couldn't confirm the target. This
+        // isn't literally the count of unresolved specifiers (those get
+        // dropped before INSERT) but it's the best signal derivable from
+        // persisted state without a schema change, and the dogfood
+        // remediation plan explicitly calls for surfacing this as a
+        // red-flag number.
+        let unresolved_use_statements: u64 = graph_with_quality
+            .values()
+            .flat_map(|targets| targets.iter())
+            .filter(|(_, q)| matches!(q, codesight_core::symbols::FactQuality::Heuristic))
+            .count() as u64;
 
         let roots = all_files
             .iter()
@@ -124,6 +139,7 @@ impl CodeService {
                     "total_edges": total_edges,
                     "workspace_crate_edges": workspace_crate_edges,
                     "reexport_edges": reexport_edges,
+                    "unresolved_use_statements": unresolved_use_statements,
                 },
                 "staleness": {
                     "in_flight": in_flight,
@@ -156,6 +172,7 @@ impl CodeService {
         }
         self.wipe_indexes_for_repo(sid)?;
         self.source_registry().invalidate(sid);
+        self.bump_catalog_generation();
         self.success_response(
             timer,
             json!({

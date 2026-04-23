@@ -32,7 +32,10 @@ pub struct RootCauseScores {
 }
 
 pub struct QualitySignal {
-    pub score: u32,
+    /// Structural quality, `[0.0, 1.0]`. Float everywhere — the historical
+    /// int-thousandths encoding (`7402` = 0.7402) bled into JSON payloads
+    /// and forced callers to remember which shape to expect.
+    pub score: f64,
     pub root_causes: RootCauseScores,
     pub assessment: &'static str,
     pub confidence: &'static str,
@@ -52,13 +55,17 @@ pub struct SignalCoverage {
     pub cycle_count: usize,
 }
 
-pub(crate) fn score_assessment(score: u32) -> &'static str {
-    match score {
-        0..=3000 => "poor",
-        3001..=5000 => "fair",
-        5001..=7000 => "good",
-        7001..=8500 => "very_good",
-        _ => "excellent",
+pub(crate) fn score_assessment(score: f64) -> &'static str {
+    if score <= 0.30 {
+        "poor"
+    } else if score <= 0.50 {
+        "fair"
+    } else if score <= 0.70 {
+        "good"
+    } else if score <= 0.85 {
+        "very_good"
+    } else {
+        "excellent"
     }
 }
 
@@ -134,7 +141,7 @@ pub fn compute_quality_signal_precomputed(
 
     if available.len() < 3 || structural_count < 2 {
         return Ok(QualitySignal {
-            score: 0,
+            score: 0.0,
             root_causes: RootCauseScores {
                 modularity,
                 acyclicity,
@@ -165,7 +172,7 @@ pub fn compute_quality_signal_precomputed(
 
     let product: f64 = available.iter().map(|(v, _)| v.max(0.01)).product();
     let signal = product.powf(1.0 / available.len() as f64);
-    let score = (signal * 10000.0).round() as u32;
+    let score = signal.clamp(0.0, 1.0);
 
     let assessment = score_assessment(score);
 

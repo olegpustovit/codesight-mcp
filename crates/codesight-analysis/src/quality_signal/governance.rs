@@ -10,10 +10,11 @@ use crate::graph::find_cycles;
 
 /// Full triple-layer governance signal combining structural + agent readiness.
 pub struct GovernanceSignal {
-    /// Top-line governance score (geometric mean of structural × agent readiness).
-    pub score: u32,
-    pub structural_score: u32,
-    pub agent_readiness_score: u32,
+    /// Top-line governance score in `[0.0, 1.0]`: geometric mean of
+    /// structural × agent readiness.
+    pub score: f64,
+    pub structural_score: f64,
+    pub agent_readiness_score: f64,
     pub structural: QualitySignal,
     pub agent: AgentReadinessSignal,
     pub assessment: &'static str,
@@ -33,12 +34,9 @@ pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<Governanc
     let agent_readiness_score = agent.score;
     let structural_score = structural.score;
 
-    let score = (((structural_score as f64 / 10000.0) * (agent_readiness_score as f64 / 10000.0))
-        .sqrt()
-        * 10000.0)
-        .round() as u32;
+    let score = (structural_score * agent_readiness_score).sqrt().clamp(0.0, 1.0);
 
-    let assessment = if score == 0
+    let assessment = if score == 0.0
         && (structural.assessment == "insufficient_data" || agent.confidence == "low")
     {
         "insufficient_data"

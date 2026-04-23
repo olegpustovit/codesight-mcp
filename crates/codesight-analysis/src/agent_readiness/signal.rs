@@ -23,7 +23,7 @@ pub(super) fn agent_signal_from_inputs(
 ) -> AgentReadinessSignal {
     if facts.is_empty() {
         return AgentReadinessSignal {
-            score: 0,
+            score: 0.0,
             dimensions: AgentReadinessDimensions {
                 navigability: 0.0,
                 comprehensibility: 0.0,
@@ -93,13 +93,13 @@ pub(super) fn agent_signal_from_inputs(
         ]),
     };
 
-    let score = (geometric_mean(&[
+    let score = geometric_mean(&[
         dimensions.navigability,
         dimensions.comprehensibility,
         dimensions.verifiability,
         dimensions.change_safety,
-    ]) * 10000.0)
-        .round() as u32;
+    ])
+    .clamp(0.0, 1.0);
 
     let fallback_type_count = facts
         .iter()

@@ -28,6 +28,78 @@ use plan::{
 use response::{FormatCtx, format_output};
 use semantic::{run_dense_lane, semantic_fallback_warning};
 
+/// File-class prior applied to natural-language search results. Items are
+/// partitioned into these buckets and concatenated in order, preserving
+/// the ranker's in-bucket sequence. Prod code outranks tests / fixtures
+/// at equal rank without introducing a scoring knob the user has to tune.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum FileClass {
+    Prod = 0,
+    Script = 1,
+    Bench = 2,
+    Test = 3,
+    Fixture = 4,
+}
+
+fn classify_path(path: &str) -> FileClass {
+    let has_prefix = |p: &str| {
+        path == p
+            || path.starts_with(&format!("{p}/"))
+            || path.contains(&format!("/{p}/"))
+    };
+    if has_prefix("tests") || path.ends_with("_test.rs") || path.ends_with("_test.py") {
+        return FileClass::Test;
+    }
+    if has_prefix("benches") {
+        return FileClass::Bench;
+    }
+    if has_prefix("fixtures") || has_prefix("testdata") || has_prefix("__fixtures__") {
+        return FileClass::Fixture;
+    }
+    if has_prefix("scripts") {
+        return FileClass::Script;
+    }
+    FileClass::Prod
+}
+
+fn item_file_class(item: &Value) -> FileClass {
+    let path = item
+        .get("ref")
+        .and_then(|r| r.get("path"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    classify_path(path)
+}
+
+fn apply_directory_prior(items: &mut Vec<Value>) {
+    // Stable, bucketed re-order. We preserve in-bucket ordering so the
+    // underlying RRF fusion still decides *which* test file (if any)
+    // outranks another test file — we only prevent them from occupying
+    // the top slots when equally ranked prod code exists.
+    let taken = std::mem::take(items);
+    let mut buckets: [(FileClass, Vec<Value>); 5] = [
+        (FileClass::Prod, Vec::new()),
+        (FileClass::Script, Vec::new()),
+        (FileClass::Bench, Vec::new()),
+        (FileClass::Test, Vec::new()),
+        (FileClass::Fixture, Vec::new()),
+    ];
+    for item in taken {
+        let class = item_file_class(&item);
+        let slot = match class {
+            FileClass::Prod => 0,
+            FileClass::Script => 1,
+            FileClass::Bench => 2,
+            FileClass::Test => 3,
+            FileClass::Fixture => 4,
+        };
+        buckets[slot].1.push(item);
+    }
+    for (_, bucket) in buckets {
+        items.extend(bucket);
+    }
+}
+
 impl CodeService {
     fn resolve_stores(
         &self,
@@ -254,6 +326,14 @@ impl CodeService {
             Ok(b) => b,
             Err(e) => return self.error_response(&MetaBuilder::new(1), e),
         };
+
+        // NL-only directory prior: partition items by file class so
+        // production `src/` code outranks keyword-dense test / fixture /
+        // bench files with equal RRF rank. Stable within each bucket so
+        // the ranker's ordering wins inside a single class.
+        if plan.query_mode_effective == "natural_language" {
+            apply_directory_prior(&mut items);
+        }
 
         let raw_bytes =
             match estimate_candidate_file_bytes(code_store.as_ref(), doc_store.as_ref(), &items) {

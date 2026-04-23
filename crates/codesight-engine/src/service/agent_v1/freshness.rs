@@ -79,27 +79,22 @@ pub(super) fn touched_files(args: &Value) -> Vec<String> {
     out.into_iter().collect()
 }
 
-/// Attach an `indexing: [...]` list + `STALE_DATA_WARNING` to `catalog_sources`
-/// responses so clients can see which sources are mid-reindex.
+/// Attach an `indexing: [...]` list to `catalog_sources` when any source is
+/// mid-reindex. The list is the machine-readable signal clients need; we
+/// deliberately do *not* push a `STALE_DATA_WARNING` here because the
+/// catalog request is not scoped to a single source, so "something else is
+/// reindexing" is noise for callers of this endpoint. Per-tool handlers go
+/// through [`annotate`] where the touched-file intersection check decides
+/// whether to warn.
 pub(super) fn annotate_catalog_with_in_flight(svc: &CodeService, mut response: Value) -> Value {
     let in_flight = svc.reindex_states().in_flight_repos();
     if in_flight.is_empty() {
         return response;
     }
-    if let Value::Object(ref mut body) = response {
-        if let Some(Value::Object(data)) = body.get_mut("data") {
-            data.insert("indexing".to_string(), json!(in_flight));
-        }
-        let warnings = body
-            .entry("warnings".to_string())
-            .or_insert_with(|| Value::Array(Vec::new()));
-        if let Value::Array(arr) = warnings {
-            arr.push(json!({
-                "code": "STALE_DATA_WARNING",
-                "message": "one or more sources are being reindexed; catalog may omit in-flight changes.",
-                "indexing": in_flight,
-            }));
-        }
+    if let Value::Object(ref mut body) = response
+        && let Some(Value::Object(data)) = body.get_mut("data")
+    {
+        data.insert("indexing".to_string(), json!(in_flight));
     }
     response
 }

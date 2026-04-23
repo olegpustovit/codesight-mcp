@@ -46,7 +46,8 @@ pub struct AgentReadinessSubmetrics {
 
 #[derive(Clone, Copy, Debug)]
 pub struct AgentReadinessSignal {
-    pub score: u32,
+    /// Agent-readiness score in `[0.0, 1.0]`.
+    pub score: f64,
     pub dimensions: AgentReadinessDimensions,
     pub submetrics: AgentReadinessSubmetrics,
     pub confidence: &'static str,
@@ -176,7 +177,7 @@ pub fn compute_agent_readiness_for_scope(
             thresholds_failed.push(format!("{name}<{min:.2}"));
         }
     }
-    let score = signal.score as f64 / 10_000.0;
+    let score = signal.score;
     if score < thresholds.agent_readiness_min {
         thresholds_failed.push(format!(
             "agent_readiness<{:.2}",

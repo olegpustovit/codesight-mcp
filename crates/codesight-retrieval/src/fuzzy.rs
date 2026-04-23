@@ -151,6 +151,37 @@ fn split_camel(part: &str) -> Vec<String> {
     raw_parts
 }
 
+#[cfg(test)]
+mod p1_2_tests {
+    use super::*;
+
+    fn similarity(a: &str, b: &str) -> f64 {
+        score_name_pair(a, b).similarity
+    }
+
+    #[test]
+    fn camel_typo_matches_snake_case_target() {
+        // resolveImprts ↔ resolve_imports_to_files must pass the 0.3
+        // default threshold once both sides are normalised.
+        let score = score_name_pair("resolveImprts", "resolve_imports_to_files");
+        assert!(
+            fuzzy_candidate_passes(&score, 0.3, None),
+            "expected match, got {score:?}"
+        );
+    }
+
+    #[test]
+    fn camel_matches_snake_exact_letters() {
+        // Pure case-style mismatch with no typos should score very high.
+        assert!(similarity("MyStruct", "my_struct") > 0.95);
+    }
+
+    #[test]
+    fn identical_snake_case_scores_one() {
+        assert!((similarity("foo_bar", "foo_bar") - 1.0).abs() < f64::EPSILON);
+    }
+}
+
 pub fn relatedness_score(
     source_name: &str,
     source_file: &str,

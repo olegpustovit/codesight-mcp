@@ -12,7 +12,7 @@ use crate::error::StorageResult;
 use super::schema::{EMBEDDING_DIM, INDEX_STORE_INIT_SQL};
 
 /// Bump when adding a migration; keep in sync with [`apply_code_index_migrations`].
-pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 7;
+pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 8;
 
 type MigrationStep = fn(&Connection) -> StorageResult<()>;
 
@@ -77,6 +77,66 @@ fn migrate_v7_symbol_indexes(conn: &Connection) -> StorageResult<()> {
     Ok(())
 }
 
+/// Uniform `[0.0, 1.0]` float encoding for quality scores. The v5 table
+/// declared `score`, `structural_score`, `agent_readiness_score` as INTEGER
+/// holding thousandths (e.g. `7402` = 0.7402). We now keep those in `[0,1]`
+/// floats everywhere; rebuild the table with REAL columns and rescale any
+/// surviving rows so regression comparisons still work.
+fn migrate_v8_quality_scores_as_float(conn: &Connection) -> StorageResult<()> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='quality_snapshots'",
+        [],
+        |row| row.get(0),
+    )?;
+    if exists == 0 {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "ALTER TABLE quality_snapshots RENAME TO quality_snapshots_v5;
+         CREATE TABLE quality_snapshots (
+             source_id TEXT NOT NULL,
+             name TEXT NOT NULL,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             score REAL NOT NULL,
+             structural_score REAL NOT NULL,
+             agent_readiness_score REAL NOT NULL,
+             modularity REAL,
+             acyclicity REAL,
+             depth REAL,
+             equality REAL,
+             redundancy REAL,
+             navigability REAL,
+             comprehensibility REAL,
+             verifiability REAL,
+             change_safety REAL,
+             cycle_count INTEGER NOT NULL,
+             dead_count INTEGER NOT NULL,
+             dup_count INTEGER NOT NULL,
+             file_count INTEGER NOT NULL,
+             symbol_count INTEGER NOT NULL,
+             confidence TEXT NOT NULL,
+             avg_complexity REAL NOT NULL,
+             PRIMARY KEY (source_id, name)
+         );
+         INSERT INTO quality_snapshots (
+             source_id, name, created_at, score, structural_score, agent_readiness_score,
+             modularity, acyclicity, depth, equality, redundancy,
+             navigability, comprehensibility, verifiability, change_safety,
+             cycle_count, dead_count, dup_count, file_count, symbol_count,
+             confidence, avg_complexity
+         )
+         SELECT source_id, name, created_at,
+                score / 10000.0, structural_score / 10000.0, agent_readiness_score / 10000.0,
+                modularity, acyclicity, depth, equality, redundancy,
+                navigability, comprehensibility, verifiability, change_safety,
+                cycle_count, dead_count, dup_count, file_count, symbol_count,
+                confidence, avg_complexity
+         FROM quality_snapshots_v5;
+         DROP TABLE quality_snapshots_v5;",
+    )?;
+    Ok(())
+}
+
 const CODE_INDEX_MIGRATIONS: &[(i32, MigrationStep)] = &[
     (1, migrate_v1_initial),
     (2, migrate_v2_import_fact_quality),
@@ -85,6 +145,7 @@ const CODE_INDEX_MIGRATIONS: &[(i32, MigrationStep)] = &[
     (5, rebuild_quality_snapshots_v5),
     (6, migrate_v6_vec_symbol_embeddings),
     (7, migrate_v7_symbol_indexes),
+    (8, migrate_v8_quality_scores_as_float),
 ];
 
 /// Apply migrations so `PRAGMA user_version == CODE_INDEX_TARGET_USER_VERSION`.

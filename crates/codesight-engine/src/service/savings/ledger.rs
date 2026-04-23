@@ -74,6 +74,7 @@ impl SavingsLedger {
         ok: bool,
         source_id: Option<&str>,
         impact_analysis: Option<&str>,
+        variant: Option<&str>,
     ) -> io::Result<()> {
         let mut state = self.load()?;
         ensure_active_session(&mut state);
@@ -92,12 +93,30 @@ impl SavingsLedger {
                 .entry(analysis.to_string())
                 .or_default() += 1;
         }
-        let entry = session.per_tool.entry(tool.to_string()).or_default();
-        entry.calls = entry.calls.saturating_add(1);
-        entry.tokens_saved = entry.tokens_saved.saturating_add(tokens_saved);
-        entry.timing_ms_sum += timing_ms;
-        if !ok {
-            entry.error_count = entry.error_count.saturating_add(1);
+        {
+            let entry = session.per_tool.entry(tool.to_string()).or_default();
+            entry.calls = entry.calls.saturating_add(1);
+            entry.tokens_saved = entry.tokens_saved.saturating_add(tokens_saved);
+            entry.timing_ms_sum += timing_ms;
+            if !ok {
+                entry.error_count = entry.error_count.saturating_add(1);
+            }
+        }
+        // Per-variant record for consolidated tools (`inspect_graph graph=X`,
+        // `inspect_structure view=X`, `evaluate_quality analysis=X`,
+        // `evaluate_impact analysis=X`). We emit a second row keyed
+        // `"tool:variant"` so `session_stats` can answer "which enum value
+        // failed?" without a parallel schema. The aggregate row is still
+        // updated above so top-level roll-ups are unchanged.
+        if let Some(variant) = variant.filter(|value| !value.is_empty()) {
+            let key = format!("{tool}:{variant}");
+            let entry = session.per_tool.entry(key).or_default();
+            entry.calls = entry.calls.saturating_add(1);
+            entry.tokens_saved = entry.tokens_saved.saturating_add(tokens_saved);
+            entry.timing_ms_sum += timing_ms;
+            if !ok {
+                entry.error_count = entry.error_count.saturating_add(1);
+            }
         }
         self.store(&state)
     }
@@ -176,6 +195,30 @@ impl SavingsLedger {
             state.current_session.codesight_read_paths.insert(p.clone());
         }
         self.store(&state)
+    }
+
+    /// Record full-file reads and return the post-increment count for each
+    /// path. Callers use the count to attach a `SUGGEST_OUTLINE` warning on
+    /// the 2nd read and a harder `suggested_call` on the 3rd. Paths are
+    /// bumped saturatingly so a single path can't overflow the `u8`.
+    pub fn record_full_file_reads(&self, paths: &[String]) -> io::Result<Vec<(String, u8)>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut state = self.load()?;
+        ensure_active_session(&mut state);
+        let mut out = Vec::with_capacity(paths.len());
+        for p in paths {
+            let entry = state
+                .current_session
+                .full_file_read_counts
+                .entry(p.clone())
+                .or_insert(0);
+            *entry = entry.saturating_add(1);
+            out.push((p.clone(), *entry));
+        }
+        self.store(&state)?;
+        Ok(out)
     }
 
     /// Hook-side probe: returns `true` if the edited `edit_path` had been
@@ -279,6 +322,7 @@ fn ensure_active_session(state: &mut SavingsState) -> bool {
             use_prefix_edits: HashMap::new(),
             codesight_read_paths: std::collections::BTreeSet::new(),
             edits_after_codesight_read: 0,
+            full_file_read_counts: HashMap::new(),
         };
     }
     needs_new

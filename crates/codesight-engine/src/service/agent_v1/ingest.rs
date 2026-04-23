@@ -239,6 +239,8 @@ impl CodeService {
         // the drift on its own, but explicit invalidation skips the extra
         // SELECT on the next hit.
         self.source_registry().invalidate(&source_id);
+        // Any response `catalog_sources` previously memoised is now stale.
+        self.bump_catalog_generation();
 
         self.watchers.ensure_watching(
             &source_id,

@@ -30,6 +30,27 @@ impl CodeService {
     pub(in crate::service) fn catalog_sources(&self, v: Value) -> anyhow::Result<Value> {
         let _args: CatalogSourcesArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let timer = MetaBuilder::new(0);
+
+        // Body cache: same generation ⇒ reuse the memoised payload. The
+        // per-process `catalog_generation` counter is bumped on every
+        // ingest success and on `manage_indexes` mutations, so any event
+        // that could change this response invalidates automatically. The
+        // freshness annotation (who's currently reindexing) is re-applied
+        // downstream in dispatch, so the cached body stays correct even if
+        // a reindex starts between a miss and the next hit.
+        let observed_generation = self.catalog_generation();
+        if let Some(mut body) = self.cached_catalog() {
+            if let Value::Object(ref mut map) = body {
+                let meta = map
+                    .entry("_meta".to_string())
+                    .or_insert_with(|| Value::Object(serde_json::Map::new()));
+                if let Value::Object(meta_map) = meta {
+                    meta_map.insert("cache_hit".to_string(), Value::Bool(true));
+                }
+            }
+            return Ok(body);
+        }
+
         // Route each code source through `ensure_repo_store` first so the
         // same auto-reindex-on-stale path that `manage_indexes status` and
         // `search_catalog` use is also applied here. Without this,
@@ -126,6 +147,8 @@ impl CodeService {
             sa.cmp(sb)
         });
 
-        self.success_response(&timer, json!({ "sources": sources }))
+        let body = self.success_response(&timer, json!({ "sources": sources }))?;
+        self.store_catalog(observed_generation, body.clone());
+        Ok(body)
     }
 }

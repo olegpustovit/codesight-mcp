@@ -66,6 +66,14 @@ pub struct SessionState {
     /// codesight bytes were superseded by the harness's pre-Edit read.
     #[serde(default)]
     pub edits_after_codesight_read: u64,
+    /// Per-path count of full-file `read_content` calls during this session.
+    /// Populated by [`crate::service::CodeService::dispatch`] after every
+    /// successful `read_content` call that returned a whole file. Drives
+    /// the `SUGGEST_OUTLINE` nudge — the 2nd read adds a warning, the 3rd+
+    /// promotes to a suggested_call. Narrow reads (symbol/section/range)
+    /// don't count.
+    #[serde(default)]
+    pub full_file_read_counts: HashMap<String, u8>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
