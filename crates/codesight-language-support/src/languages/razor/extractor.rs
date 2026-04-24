@@ -15,11 +15,11 @@ use std::sync::LazyLock;
 use codesight_core::StoredSymbol;
 use codesight_core::symbols::{ExtractionTier, SymbolKind};
 
+use crate::extract_dedup::sort_symbols_by_span;
 use crate::host_segments::{
     RemapOptions, SegmentOrigin, WrappedSegment, extract_host_segment,
     extract_wrapped_host_segment, find_html_tag_blocks,
 };
-use crate::extract_dedup::sort_symbols_by_span;
 
 pub struct RazorExtractor;
 

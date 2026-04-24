@@ -67,7 +67,9 @@ where
 pub fn parse_tree(lang: impl Into<tree_sitter::Language>, source: &str) -> ExtractResult<Tree> {
     let lang = lang.into();
     parser_for_language(&lang, |parser| {
-        parser.parse(source, None).ok_or(ExtractError::MissingParseTree)
+        parser
+            .parse(source, None)
+            .ok_or(ExtractError::MissingParseTree)
     })
 }
 

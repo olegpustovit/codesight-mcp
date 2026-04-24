@@ -13,7 +13,10 @@ fn build_service() -> (CodeService, tempfile::TempDir) {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("main.py"), "def hello():\n    return 1\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     (svc, ws)
 }
 
@@ -119,7 +122,10 @@ fn session_end_sets_ended_at() {
     let ended = svc
         .dispatch("manage_indexes", json!({ "action": "session_end" }))
         .unwrap();
-    assert!(ended["ok"].as_bool().unwrap(), "session_end failed: {ended:?}");
+    assert!(
+        ended["ok"].as_bool().unwrap(),
+        "session_end failed: {ended:?}"
+    );
     assert!(
         ended["data"]["ended_at"].is_string(),
         "session_end should set ended_at: {ended:?}"
@@ -144,12 +150,18 @@ fn catalog_sources_starts_quality_session_when_source_is_unambiguous() {
         .to_string();
 
     let catalog = svc.dispatch("catalog_sources", json!({})).unwrap();
-    assert!(catalog["ok"].as_bool().unwrap(), "catalog_sources failed: {catalog:?}");
+    assert!(
+        catalog["ok"].as_bool().unwrap(),
+        "catalog_sources failed: {catalog:?}"
+    );
 
     let ended = svc
         .dispatch("manage_indexes", json!({ "action": "session_end" }))
         .unwrap();
-    assert!(ended["ok"].as_bool().unwrap(), "session_end failed: {ended:?}");
+    assert!(
+        ended["ok"].as_bool().unwrap(),
+        "session_end failed: {ended:?}"
+    );
     assert!(
         ended["data"]["quality_delta"].is_object(),
         "catalog_sources should have seeded session_start for the only source: {ended:?}"

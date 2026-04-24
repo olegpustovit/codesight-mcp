@@ -3,13 +3,13 @@
 use std::fs;
 use tempfile::tempdir;
 
+use codesight_engine::config::AppConfig;
+use codesight_engine::service::CodeService;
 use codesight_language_support::packages::{
     RepoEntry, build_package_registry, extract_package_names, extract_root_package_from_specifier,
     find_repos_for_package,
 };
-use codesight_engine::config::AppConfig;
 use codesight_storage::db;
-use codesight_engine::service::CodeService;
 use codesight_storage::storage::IndexStore;
 use serde_json::json;
 
@@ -358,7 +358,10 @@ fn case_package_names_saved_and_loaded() {
     _write(&src, "pyproject.toml", "[project]\nname = \"mylib\"\n");
     _write(&src, "mylib.py", "def hello(): pass\n");
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let _sid = ingest(&svc, &src);
 
     // Re-open the store and check package_names
@@ -388,7 +391,10 @@ fn case_old_index_without_package_names_loads_cleanly() {
     fs::create_dir_all(&src).unwrap();
     _write(&src, "app.py", "def main(): pass\n");
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let _sid = ingest(&svc, &src);
 
     // Find the store and delete package_names from meta
@@ -504,7 +510,10 @@ fn case_find_importers_cross_repo_false_finds_local_importers() {
         "from utils import helper\nresult = helper()\n",
     );
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &src);
 
     // Use inspect_graph importers mode to find importers of utils.py
@@ -540,7 +549,10 @@ fn case_find_importers_cross_repo_false_no_cross_repo_key() {
         "from utils import helper\nresult = helper()\n",
     );
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &src);
 
     let r = svc
@@ -578,7 +590,10 @@ fn case_find_importers_cross_repo_true_finds_cross_repo_importers() {
     _write(&provider, "api.py", "def do_thing(): pass\n");
     _write(&consumer, "app.py", "import mylib\nmylib.do_thing()\n");
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let provider_id = ingest(&svc, &provider);
     let _consumer_id = ingest(&svc, &consumer);
 
@@ -618,7 +633,10 @@ fn case_find_importers_cross_repo_results_have_correct_fields() {
     _write(&provider, "api.py", "def do_thing(): pass\n");
     _write(&consumer, "app.py", "import mylib\nmylib.do_thing()\n");
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let provider_id = ingest(&svc, &provider);
     let _consumer_id = ingest(&svc, &consumer);
 
@@ -661,7 +679,10 @@ fn case_blast_radius_cross_repo_false_no_cross_repo_key() {
         "from utils import helper\nresult = helper()\n",
     );
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &src);
 
     let r = svc
@@ -694,7 +715,10 @@ fn case_blast_radius_cross_repo_true_adds_cross_repo_field() {
         "from utils import helper\nresult = helper()\n",
     );
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &src);
 
     let r = svc
@@ -733,7 +757,10 @@ fn case_dependency_graph_cross_repo_false_no_cross_repo_edges() {
     _write(&src, "utils.py", "def helper(): return 42\n");
     _write(&src, "main.py", "from utils import helper\n");
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &src);
 
     let r = svc
@@ -765,7 +792,10 @@ fn case_dependency_graph_cross_repo_true_returns_dict() {
     _write(&provider, "api.py", "def do_thing(): pass\n");
     _write(&consumer, "app.py", "import mylib\nmylib.do_thing()\n");
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(tmp.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        tmp.path().join("idx"),
+    ))
+    .unwrap();
     let _provider_id = ingest(&svc, &provider);
     let consumer_id = ingest(&svc, &consumer);
 

@@ -6,8 +6,7 @@ use std::path::Path;
 use codesight_language_support::LanguageRegistry;
 
 fn lang_at(reg: &LanguageRegistry, path: &str) -> Option<&'static str> {
-    reg.for_path(Path::new(path))
-        .map(|lang| lang.id().as_str())
+    reg.for_path(Path::new(path)).map(|lang| lang.id().as_str())
 }
 
 #[test]
@@ -46,7 +45,10 @@ fn case_valid_extra_extensions() {
     mappings.insert(".xperl".to_string(), "perl".to_string());
     mappings.insert(".yperl".to_string(), "perl".to_string());
     let warnings = reg.apply_extra_extensions(&mappings);
-    assert!(warnings.is_empty(), "no warnings expected for valid entries");
+    assert!(
+        warnings.is_empty(),
+        "no warnings expected for valid entries"
+    );
     assert_eq!(lang_at(&reg, "app.xperl"), Some("perl"));
     assert_eq!(lang_at(&reg, "app.yperl"), Some("perl"));
 }

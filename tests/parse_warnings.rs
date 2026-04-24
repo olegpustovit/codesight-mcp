@@ -47,7 +47,10 @@ fn case_elixir_produces_languages_without_import_extractor() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = ingest(&svc, ws.path());
 
     // Reference asserts: "languages_without_import_extractor" in r and "elixir" in r["languages_without_import_extractor"]
@@ -76,7 +79,10 @@ fn case_languages_without_import_extractor_not_present_for_python_only() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("utils.py"), "def add(a, b):\n    return a + b\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = ingest(&svc, ws.path());
 
     // Python should not appear in languages_without_import_extractor (field may be absent entirely).
@@ -108,7 +114,10 @@ fn case_languages_without_import_extractor_is_sorted_list() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = ingest(&svc, ws.path());
 
     let missing = &r["data"]["languages_without_import_extractor"];
@@ -155,7 +164,10 @@ fn case_framework_warning_present_when_no_entry_points() {
     // must be present in get_dead_code / evaluate_quality response.
     let ws = tempdir().unwrap();
     build_no_entrypoint_repo(ws.path());
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = ingest(&svc, ws.path());
     let sid = r["data"]["source_id"].as_str().unwrap();
 
@@ -180,7 +192,10 @@ fn case_framework_warning_mentions_entry_points() {
     // framework_warning text should mention "entry point".
     let ws = tempdir().unwrap();
     build_no_entrypoint_repo(ws.path());
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = ingest(&svc, ws.path());
     let sid = r["data"]["source_id"].as_str().unwrap();
 
@@ -220,7 +235,10 @@ fn case_no_framework_warning_when_entry_point_present() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = ingest(&svc, ws.path());
     let sid = r["data"]["source_id"].as_str().unwrap();
 
@@ -254,7 +272,10 @@ fn case_framework_warning_not_present_with_app_py() {
     fs::write(src.join("app.py"), "def run():\n    pass\n").unwrap();
     fs::write(src.join("utils.py"), "def helper():\n    pass\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = ingest(&svc, ws.path());
     let sid = r["data"]["source_id"].as_str().unwrap();
 
@@ -284,7 +305,10 @@ fn case_dead_code_meta_methodology() {
     // and confidence_level="medium".
     let ws = tempdir().unwrap();
     build_no_entrypoint_repo(ws.path());
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = ingest(&svc, ws.path());
     let sid = r["data"]["source_id"].as_str().unwrap();
 

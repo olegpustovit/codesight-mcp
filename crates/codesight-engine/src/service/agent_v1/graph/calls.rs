@@ -55,6 +55,13 @@ impl CodeService {
         // Compact row: drop `id` (reconstructible from `file::name#kind`).
         // Keep `kind` only when non-default; "function" is the dominant kind
         // and omitting it saves ~20 chars per row (PLAN2 §3.5a).
+        //
+        // ROADMAP P3.2: mark each edge as `direct` or `indirect` based on
+        // depth. `depth=1` is the caller/callee reachable in one hop;
+        // anything deeper is transitive. The existing call-graph heuristic
+        // doesn't distinguish `via_trait_obj` / `via_fn_ptr` yet, so
+        // those refined labels are omitted — `kind=direct|indirect` is
+        // still strictly better than the old flat list.
         let to_row = |tuples: &[(String, String, String, u32, String, usize)]| -> Vec<Value> {
             tuples
                 .iter()
@@ -64,6 +71,10 @@ impl CodeService {
                     m.insert("file".to_string(), json!(file));
                     m.insert("line".to_string(), json!(line));
                     m.insert("depth".to_string(), json!(depth));
+                    m.insert(
+                        "edge_kind".to_string(),
+                        json!(if *depth <= 1 { "direct" } else { "indirect" }),
+                    );
                     if kind != "function" {
                         m.insert("kind".to_string(), json!(kind));
                     }
@@ -153,10 +164,6 @@ impl CodeService {
         body.insert("depth_reached".to_string(), json!(max_depth));
         body.insert("truncated".to_string(), json!(truncated));
 
-        self.success_response_with_warnings(
-            &MetaBuilder::new(0),
-            Value::Object(body),
-            warnings,
-        )
+        self.success_response_with_warnings(&MetaBuilder::new(0), Value::Object(body), warnings)
     }
 }

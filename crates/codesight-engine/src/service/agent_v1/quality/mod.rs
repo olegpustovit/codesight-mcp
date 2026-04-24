@@ -1,5 +1,5 @@
-pub mod doc_coverage;
 mod broken_links;
+pub mod doc_coverage;
 mod hotspots;
 mod refactor_targets;
 mod repo_health;
@@ -23,7 +23,15 @@ impl CodeService {
         let args: EvaluateQualityArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let a = args.analysis.to_ascii_lowercase();
         let timer = MetaBuilder::new(0);
-        let mut response = match a.as_str() {
+        // ROADMAP P3.6: wall-clock budget. Wrap the inner dispatch so every
+        // analysis handler plays by the same rules: when `max_wait_ms` is
+        // set and elapsed time exceeds it, either error out
+        // (`DEADLINE_EXCEEDED`) or return the finished payload stamped with
+        // a `BUDGET_EXCEEDED` warning when `partial_ok=true`. Finer-grained
+        // cancellation inside the heavier handlers is follow-up work — this
+        // contract gives callers the bound they can act on now.
+        let start = std::time::Instant::now();
+        let inner = match a.as_str() {
             "complexity" => self.quality_complexity(&args, &timer),
             "repo_health" => self.quality_repo_health(&args, &timer),
             "dead_code" => self.quality_dead_code(&args, &timer),
@@ -44,12 +52,50 @@ impl CodeService {
                     detail: json!({ "analysis": unknown }),
                 },
             ),
-        }?;
+        };
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        let mut response = inner?;
+        if let Some(budget) = args.max_wait_ms
+            && elapsed_ms > budget
+        {
+            if args.partial_ok.unwrap_or(false) {
+                if let Some(body) = response.as_object_mut()
+                    && let Some(Value::Array(warns)) =
+                        body.entry("warnings".to_string())
+                            .or_insert_with(|| Value::Array(Vec::new()))
+                            .as_array_mut()
+                            .map(|a| Value::Array(std::mem::take(a)))
+                            .and_then(|v| {
+                                body.insert("warnings".to_string(), v);
+                                body.get_mut("warnings")
+                            })
+                {
+                    warns.push(json!({
+                        "code": "BUDGET_EXCEEDED",
+                        "message": format!(
+                            "analysis took {elapsed_ms} ms which exceeds max_wait_ms={budget}; \
+                             returning partial result per partial_ok=true.",
+                        ),
+                        "detail": { "elapsed_ms": elapsed_ms, "budget_ms": budget },
+                    }));
+                }
+            } else {
+                return self.error_response(
+                    &timer,
+                    ToolError {
+                        category: ToolErrorCategory::Internal,
+                        code: "DEADLINE_EXCEEDED",
+                        message: format!(
+                            "analysis took {elapsed_ms} ms which exceeds max_wait_ms={budget}; \
+                             pass partial_ok=true to accept partial results.",
+                        ),
+                        detail: json!({ "elapsed_ms": elapsed_ms, "budget_ms": budget }),
+                    },
+                );
+            }
+        }
         if let Some(meta) = response.get_mut("_meta").and_then(Value::as_object_mut) {
-            meta.insert(
-                "thresholds".to_string(),
-                current_thresholds().as_json(),
-            );
+            meta.insert("thresholds".to_string(), current_thresholds().as_json());
         }
         Ok(response)
     }
@@ -70,23 +116,61 @@ impl CodeService {
                 },
             );
         };
-        let Some(id) = r
-            .stable_id
-            .clone()
-            .or(r.id.clone())
-            .filter(|_| r.kind.eq_ignore_ascii_case("symbol"))
-        else {
+        if !r.kind.eq_ignore_ascii_case("symbol") {
             return self.error_response(
                 timer,
                 ToolError {
                     category: ToolErrorCategory::InvalidArgument,
                     code: "INVALID_REQUEST",
                     message: "complexity requires a symbol ref.".to_string(),
-                    detail: json!({}),
+                    detail: json!({ "ref": r }),
                 },
             );
-        };
+        }
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
+        use crate::service::agent_v1::util::{
+            ref_requires_strict_resolution, resolve_symbol_id_strict,
+        };
+        let is_strict = ref_requires_strict_resolution(
+            r.stable_id.as_deref(),
+            r.id.as_deref(),
+            r.path.as_deref(),
+            r.start_line,
+            r.symbol_name.as_deref(),
+        );
+        let resolved = resolve_symbol_id_strict(
+            &store,
+            r.stable_id.as_deref(),
+            r.id.as_deref(),
+            r.path.as_deref(),
+            r.start_line,
+            r.symbol_name.as_deref(),
+        )?;
+        let (id, resolution) = match resolved {
+            Some((id, strategy)) => (id, Some(strategy.as_str())),
+            None if is_strict => {
+                return self.error_response(
+                    timer,
+                    ToolError {
+                        category: ToolErrorCategory::NotFound,
+                        code: "NOT_FOUND",
+                        message: "complexity could not resolve refs[0].".to_string(),
+                        detail: json!({ "unresolved": [r] }),
+                    },
+                );
+            }
+            None => {
+                return self.error_response(
+                    timer,
+                    ToolError {
+                        category: ToolErrorCategory::InvalidArgument,
+                        code: "INVALID_REQUEST",
+                        message: "complexity ref provided no resolvable fields.".to_string(),
+                        detail: json!({ "ref": r }),
+                    },
+                );
+            }
+        };
         let data = match quality::complexity_payload(&store, &id)? {
             Some(data) => data,
             None => {
@@ -101,9 +185,14 @@ impl CodeService {
                 );
             }
         };
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
-        self.success_response(&timer, data)
+        // ROADMAP P1.1: quality analysis — null baseline.
+        let timer = MetaBuilder::new(0);
+        // ROADMAP P0.2 #3: echo which ref shape resolved the target.
+        let mut extras: Vec<(String, Value)> = Vec::new();
+        if let Some(r) = resolution {
+            extras.push(("resolution".to_string(), json!(r)));
+        }
+        self.success_response_with_meta_extra(&timer, data, Vec::new(), extras)
     }
 
     fn quality_dead_code(
@@ -117,8 +206,8 @@ impl CodeService {
         let include_tests = args.include_tests.unwrap_or(true);
         let entry_patterns = args.entry_point_patterns.clone().unwrap_or_default();
         let limit = args.top_n.unwrap_or(25);
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: quality analysis — null baseline.
+        let timer = MetaBuilder::new(0);
         let mut data = dead_code::dead_code_payload(
             &store,
             granularity,
@@ -130,6 +219,33 @@ impl CodeService {
         if let Some(budget) = args.max_tokens {
             dead_code::pack_dead_code_to_budget(&mut data, budget);
         }
+        // ROADMAP P2.8: emit actionable_next hints pointing at the top-3
+        // flagged files so the agent can confirm/reject via find_references
+        // in one round-trip instead of guessing which hit to probe.
+        let hints: Vec<Value> = data
+            .pointer("/items")
+            .and_then(Value::as_array)
+            .map(|rows| {
+                rows.iter()
+                    .take(3)
+                    .filter_map(|row| {
+                        let path = row
+                            .get("file")
+                            .or_else(|| row.get("path"))
+                            .and_then(Value::as_str)?;
+                        Some(json!({
+                            "tool": "inspect_graph",
+                            "args": {
+                                "source_id": args.source_id,
+                                "graph": "importers",
+                                "file_path": path,
+                            },
+                            "reason": format!("Confirm `{path}` is truly unreferenced before deleting."),
+                        }))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         self.success_response_with_meta_extra(
             &timer,
             data,
@@ -137,6 +253,7 @@ impl CodeService {
             [
                 ("methodology".to_string(), json!("multi_signal")),
                 ("confidence_level".to_string(), json!("medium")),
+                ("actionable_next".to_string(), json!(hints)),
             ],
         )
     }
@@ -148,8 +265,8 @@ impl CodeService {
     ) -> anyhow::Result<Value> {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         let min_confidence = args.min_confidence.unwrap_or(0.5);
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: quality analysis — null baseline.
+        let timer = MetaBuilder::new(0);
         let data = dead_code::dead_code_v2_payload(&store, min_confidence)?;
         self.success_response(&timer, data)
     }
@@ -160,8 +277,8 @@ impl CodeService {
         timer: &MetaBuilder,
     ) -> anyhow::Result<Value> {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: quality analysis — null baseline.
+        let timer = MetaBuilder::new(0);
 
         let gov = quality_signal::compute_governance_signal(&store)?;
         let suggestion =
@@ -187,9 +304,14 @@ impl CodeService {
                 scope,
             )
         {
+            // ROADMAP P2.5: the scoped readiness block used to share the
+            // `agent_readiness` key with the global payload block, with
+            // values scaled differently. Renaming here removes that
+            // collision — global readiness stays at the top level, the
+            // scoped sub-signal lives on its own key.
             obj.insert("scope".into(), json!(scope));
             obj.insert(
-                "agent_readiness".into(),
+                "scope_agent_readiness".into(),
                 json!({
                     "score": scoped.signal.score / 10_000.0,
                     "navigability": scoped.signal.dimensions.navigability,
@@ -198,27 +320,23 @@ impl CodeService {
                     "change_safety": scoped.signal.dimensions.change_safety,
                 }),
             );
-            obj.insert(
-                "weakest_dimension".into(),
-                json!(scoped.weakest_dimension),
-            );
+            obj.insert("weakest_dimension".into(), json!(scoped.weakest_dimension));
             obj.insert(
                 "top_offenders".into(),
-                json!(scoped
-                    .top_offenders
-                    .into_iter()
-                    .map(|offender| json!({
-                        "symbol": offender.symbol,
-                        "line": offender.line,
-                        "cyclomatic": offender.cyclomatic,
-                        "nesting_depth": offender.nesting_depth,
-                    }))
-                    .collect::<Vec<_>>()),
+                json!(
+                    scoped
+                        .top_offenders
+                        .into_iter()
+                        .map(|offender| json!({
+                            "symbol": offender.symbol,
+                            "line": offender.line,
+                            "cyclomatic": offender.cyclomatic,
+                            "nesting_depth": offender.nesting_depth,
+                        }))
+                        .collect::<Vec<_>>()
+                ),
             );
-            obj.insert(
-                "thresholds_failed".into(),
-                json!(scoped.thresholds_failed),
-            );
+            obj.insert("thresholds_failed".into(), json!(scoped.thresholds_failed));
             self.record_agent_readiness_probe(
                 scope,
                 scoped.signal.score / 10_000.0,
@@ -253,8 +371,8 @@ impl CodeService {
             }
         };
 
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: quality analysis — null baseline.
+        let timer = MetaBuilder::new(0);
 
         let gov = quality_signal::compute_governance_signal(&store)?;
 

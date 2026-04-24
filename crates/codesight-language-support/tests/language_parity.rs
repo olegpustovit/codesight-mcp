@@ -2,12 +2,12 @@
 //! heuristics exposed by the consolidated `Language` trait still answer
 //! the same questions as the scattered pre-migration implementations.
 
+use codesight_language_support::family::LanguageFamily;
 use codesight_language_support::{
     fallback_type_baseline_for_path, has_restricted_visibility, is_conventional_path,
-    is_entrypoint_basename, is_test_file, language_family_for_path,
-    max_nesting_depth_for_path, measured_type_density_for_path, test_weight_multiplier,
+    is_entrypoint_basename, is_test_file, language_family_for_path, max_nesting_depth_for_path,
+    measured_type_density_for_path, test_weight_multiplier,
 };
-use codesight_language_support::family::LanguageFamily;
 
 // ── §4.4 liveness ───────────────────────────────────────────────────────────
 
@@ -92,7 +92,9 @@ fn conventional_paths_match_scripts_tests_examples_benches() {
 #[test]
 fn conventional_path_lets_production_code_through() {
     assert!(!is_conventional_path("src/main.rs"));
-    assert!(!is_conventional_path("crates/codesight-engine/src/service/mod.rs"));
+    assert!(!is_conventional_path(
+        "crates/codesight-engine/src/service/mod.rs"
+    ));
     assert!(!is_conventional_path("app/views/user.py"));
 }
 
@@ -110,7 +112,11 @@ fn test_weight_multiplier_downweights_tests_and_specs() {
 
 #[test]
 fn rust_non_pub_is_restricted() {
-    assert!(has_restricted_visibility("src/lib.rs", "fn foo() {}", "foo"));
+    assert!(has_restricted_visibility(
+        "src/lib.rs",
+        "fn foo() {}",
+        "foo"
+    ));
     assert!(has_restricted_visibility(
         "src/lib.rs",
         "pub(crate) fn foo() {}",
@@ -126,7 +132,11 @@ fn rust_non_pub_is_restricted() {
 #[test]
 fn go_lowercase_is_restricted() {
     assert!(has_restricted_visibility("main.go", "func foo() {}", "foo"));
-    assert!(!has_restricted_visibility("main.go", "func Foo() {}", "Foo"));
+    assert!(!has_restricted_visibility(
+        "main.go",
+        "func Foo() {}",
+        "Foo"
+    ));
 }
 
 #[test]
@@ -137,11 +147,7 @@ fn python_underscore_is_restricted() {
 
 #[test]
 fn typescript_private_is_restricted() {
-    assert!(has_restricted_visibility(
-        "a.ts",
-        "private foo() {}",
-        "foo"
-    ));
+    assert!(has_restricted_visibility("a.ts", "private foo() {}", "foo"));
     assert!(!has_restricted_visibility(
         "a.ts",
         "export function foo() {}",

@@ -7,10 +7,7 @@ use serde_json::{Map, Value, json};
 /// Collect file paths whose content was returned by a successful
 /// `read_content` call. Walks the `data.items[].ref.path` shape.
 pub(super) fn extract_read_content_paths(response: &Value) -> Vec<String> {
-    let Some(items) = response
-        .pointer("/data/items")
-        .and_then(Value::as_array)
-    else {
+    let Some(items) = response.pointer("/data/items").and_then(Value::as_array) else {
         return Vec::new();
     };
     let mut out: Vec<String> = Vec::new();
@@ -31,10 +28,7 @@ pub(super) fn extract_read_content_paths(response: &Value) -> Vec<String> {
 /// ledger to run the repeated-full-file nudge without charging narrower
 /// reads.
 pub(super) fn extract_full_file_read_paths(response: &Value) -> Vec<String> {
-    let Some(items) = response
-        .pointer("/data/items")
-        .and_then(Value::as_array)
-    else {
+    let Some(items) = response.pointer("/data/items").and_then(Value::as_array) else {
         return Vec::new();
     };
     let mut out: Vec<String> = Vec::new();
@@ -69,6 +63,11 @@ pub(super) fn compact_meta(meta: &mut Map<String, Value>) {
         "confidence_level",
         "suggestion",
         "next_step_hint",
+        // ROADMAP P0.2 #3: echo which ref-shape resolved the target in
+        // strict-ref tools so agents can debug silent ambiguity.
+        "resolution",
+        // ROADMAP P2.8: concrete follow-up tool calls from analyses.
+        "actionable_next",
     ];
     // Boolean flags kept only when true.
     const TRUE_ONLY: &[&str] = &[
@@ -102,9 +101,15 @@ pub(super) fn compact_meta(meta: &mut Map<String, Value>) {
     type KeepFn = fn(&Value) -> bool;
     let nondefault_unit_kinds = |v: &Value| v != &default_unit_kinds;
     let nondefault: [(&str, KeepFn); 3] = [
-        ("query_mode_effective", |v| v != &Value::String(String::from("keyword"))),
-        ("domain_effective", |v| v != &Value::String(String::from("code"))),
-        ("truncated_by", |v| v.as_array().map(|a| !a.is_empty()).unwrap_or(false)),
+        ("query_mode_effective", |v| {
+            v != &Value::String(String::from("keyword"))
+        }),
+        ("domain_effective", |v| {
+            v != &Value::String(String::from("code"))
+        }),
+        ("truncated_by", |v| {
+            v.as_array().map(|a| !a.is_empty()).unwrap_or(false)
+        }),
     ];
     for (key, keep) in nondefault {
         if let Some(value) = meta.get(key).cloned()

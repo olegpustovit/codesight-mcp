@@ -216,6 +216,21 @@ impl Language for Python {
         out
     }
 
+    /// Python-idiomatic `import X` / `from X import a, b` rendering (ROADMAP
+    /// P1.6). Called when edges are synthesised rather than read from source.
+    fn display_import_lines(&self, edges: &[crate::imports_types::ImportEdge]) -> Vec<String> {
+        edges
+            .iter()
+            .map(|e| {
+                if e.names.is_empty() {
+                    format!("import {}", e.specifier)
+                } else {
+                    format!("from {} import {}", e.specifier, e.names.join(", "))
+                }
+            })
+            .collect()
+    }
+
     fn package_name_for_dir(&self, dir: &Path) -> Option<String> {
         let pyproject = dir.join("pyproject.toml");
         if pyproject.is_file()
@@ -298,9 +313,7 @@ impl Language for Python {
                 roots.push(LiveRoot {
                     path: file.clone(),
                     reason: "main_guard",
-                    message: format!(
-                        "file '{file}' contains a __name__ == '__main__' style guard"
-                    ),
+                    message: format!("file '{file}' contains a __name__ == '__main__' style guard"),
                     confidence: LiveRootConfidence::Heuristic,
                     explicit: true,
                 });

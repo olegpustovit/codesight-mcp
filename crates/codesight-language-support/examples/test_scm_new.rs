@@ -6,14 +6,8 @@ fn main() {
             "dart",
             include_str!("../src/languages/dart/queries/tags.scm"),
         ),
-        (
-            "xml",
-            include_str!("../src/languages/xml/queries/tags.scm"),
-        ),
-        (
-            "nix",
-            include_str!("../src/languages/nix/queries/tags.scm"),
-        ),
+        ("xml", include_str!("../src/languages/xml/queries/tags.scm")),
+        ("nix", include_str!("../src/languages/nix/queries/tags.scm")),
     ] {
         let meta = parse_scm_header(src);
         print!("{name}: grammar={} ... ", meta.grammar);

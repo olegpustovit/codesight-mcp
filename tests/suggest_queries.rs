@@ -51,7 +51,10 @@ fn dispatch_suggestions(svc: &CodeService, source_id: &str) -> serde_json::Value
 
 fn case_repo_not_indexed_error() {
     let workspace = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let res = dispatch_suggestions(&svc, "no_such_repo_xyz");
     assert!(!res["ok"].as_bool().unwrap(), "{res:?}");
     assert!(res.get("error").is_some());
@@ -64,7 +67,10 @@ fn case_empty_index_error() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("README.md"), "# Hello\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &root);
     let res = dispatch_suggestions(&svc, &sid);
     assert!(!res["ok"].as_bool().unwrap(), "{res:?}");
@@ -76,7 +82,10 @@ fn case_small_counts_and_distributions() {
     let root = workspace.path().join("repo");
     let src = root.join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &root);
     let res = dispatch_suggestions(&svc, &sid);
     assert!(res["ok"].as_bool().unwrap(), "{res:?}");
@@ -94,7 +103,10 @@ fn case_small_example_queries() {
     let root = workspace.path().join("repo");
     let src = root.join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &root);
     let res = dispatch_suggestions(&svc, &sid);
     assert!(res["ok"].as_bool().unwrap(), "{res:?}");
@@ -112,7 +124,10 @@ fn case_medium_files_repo_meta() {
     let root = workspace.path().join("repo");
     let src = root.join("src");
     test_support::write_medium_repo(&src).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &root);
     let res = dispatch_suggestions(&svc, &sid);
     assert!(res["ok"].as_bool().unwrap(), "{res:?}");
@@ -127,7 +142,10 @@ fn case_medium_kind_distribution() {
     let root = workspace.path().join("repo");
     let src = root.join("src");
     test_support::write_medium_repo(&src).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &root);
     let res = dispatch_suggestions(&svc, &sid);
     assert!(res["ok"].as_bool().unwrap(), "{res:?}");
@@ -141,7 +159,10 @@ fn case_most_imported_structure() {
     let root = workspace.path().join("repo");
     let src = root.join("src");
     test_support::write_medium_repo(&src).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &root);
     let res = dispatch_suggestions(&svc, &sid);
     assert!(res["ok"].as_bool().unwrap(), "{res:?}");

@@ -87,7 +87,10 @@ fn setup_small_fixture() -> RepoFixture {
     let root = workspace.path().join("r");
     let src = root.join("src");
     test_support::write_small_repo(&src).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let source_id = ingest(&svc, &root);
     RepoFixture {
         _workspace: workspace,
@@ -101,7 +104,10 @@ fn setup_medium_fixture() -> RepoFixture {
     let root = workspace.path().join("r");
     let src = root.join("src");
     test_support::write_medium_repo(&src).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let source_id = ingest(&svc, &root);
     RepoFixture {
         _workspace: workspace,
@@ -122,7 +128,10 @@ fn setup_name_token_fixture() -> RepoFixture {
          def delete_order(oid):\n    return True\n",
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let source_id = ingest(&svc, &root);
     RepoFixture {
         _workspace: workspace,

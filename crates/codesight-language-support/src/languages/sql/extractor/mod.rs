@@ -5,10 +5,10 @@ mod fallback;
 
 use std::sync::OnceLock;
 
-use codesight_core::symbols::ExtractionTier;
+use crate::extract_dedup::{dedup_symbols_by_start_byte, sort_symbols_by_span};
 use crate::query_pack_catalog::QueryPackCatalog;
 use crate::scm_engine::ScmExtractor;
-use crate::extract_dedup::{dedup_symbols_by_start_byte, sort_symbols_by_span};
+use codesight_core::symbols::ExtractionTier;
 
 pub struct SqlExtractor;
 

@@ -3,12 +3,12 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
+use codesight_core::SymbolKind;
 use codesight_language_support::LanguageRegistry;
 use codesight_language_support::languages::scss::extractor::{
     LessExtractor, SassExtractor, StylExtractor,
 };
-use codesight_core::SymbolKind;
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
     let source = query_files_slice()

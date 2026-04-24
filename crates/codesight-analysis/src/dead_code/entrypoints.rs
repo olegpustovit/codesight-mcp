@@ -87,6 +87,10 @@ mod language_live_roots_tests {
 
         let all_files: Vec<String> = vec!["tests/it.rs".into()];
         let roots = detect_language_live_roots(Some(root), &all_files);
-        assert!(roots.iter().any(|r| r.path == "tests/it.rs" && r.reason == "cargo_target"));
+        assert!(
+            roots
+                .iter()
+                .any(|r| r.path == "tests/it.rs" && r.reason == "cargo_target")
+        );
     }
 }

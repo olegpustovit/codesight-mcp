@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use codesight_language_support::LanguageRegistry;
 use codesight_core::StoredSymbol;
+use codesight_language_support::LanguageRegistry;
 
 use super::support::code_reference_fixtures_dir;
 

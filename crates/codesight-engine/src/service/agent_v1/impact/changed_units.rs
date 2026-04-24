@@ -170,8 +170,8 @@ impl CodeService {
             }
         }
 
-        let raw_bytes = store.repo_total_bytes().unwrap_or(0);
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: structural analysis — null baseline.
+        let timer = MetaBuilder::new(0);
 
         self.success_response(
             &timer,

@@ -24,8 +24,7 @@ impl ScssExtractor {
         source: &str,
     ) -> anyhow::Result<Vec<codesight_core::StoredSymbol>> {
         let tree = parse_tree(
-            crate::builtin_grammar("scss")
-                .expect("scss grammar registered with language-support"),
+            crate::builtin_grammar("scss").expect("scss grammar registered with language-support"),
             source,
         )?;
         let mut symbols = Vec::new();
@@ -204,11 +203,7 @@ impl SassExtractor {
     pub fn supported_extensions(&self) -> &'static [&'static str] {
         &["sass"]
     }
-    pub fn extract(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> anyhow::Result<Vec<codesight_core::StoredSymbol>> {
+    pub fn extract(&self, _: &str, _: &str) -> anyhow::Result<Vec<codesight_core::StoredSymbol>> {
         Ok(Vec::new())
     }
 }
@@ -222,11 +217,7 @@ impl LessExtractor {
     pub fn supported_extensions(&self) -> &'static [&'static str] {
         &["less"]
     }
-    pub fn extract(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> anyhow::Result<Vec<codesight_core::StoredSymbol>> {
+    pub fn extract(&self, _: &str, _: &str) -> anyhow::Result<Vec<codesight_core::StoredSymbol>> {
         Ok(Vec::new())
     }
 }
@@ -240,11 +231,7 @@ impl StylExtractor {
     pub fn supported_extensions(&self) -> &'static [&'static str] {
         &["styl"]
     }
-    pub fn extract(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> anyhow::Result<Vec<codesight_core::StoredSymbol>> {
+    pub fn extract(&self, _: &str, _: &str) -> anyhow::Result<Vec<codesight_core::StoredSymbol>> {
         Ok(Vec::new())
     }
 }

@@ -2,10 +2,10 @@
 
 use codesight_analysis::quality::complexity_payload;
 use codesight_engine::config::AppConfig;
-use codesight_storage::storage::IndexStore;
 use codesight_mcp::test_support::{
     find_symbol_id, index_code_fixture, open_code_store, write_files,
 };
+use codesight_storage::storage::IndexStore;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -109,7 +109,10 @@ fn sym_complexity_param_count_for_branchy() {
 #[test]
 fn sym_complexity_missing_repo_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",
@@ -138,7 +141,10 @@ fn sym_complexity_timing_present() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     write_files(&src, &[("simple.py", "def simple():\n    return 1\n")]).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let indexed = svc
         .dispatch(
             "ingest_sources",

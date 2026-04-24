@@ -62,7 +62,8 @@ fn setup() -> (tempfile::TempDir, CodeService, String) {
     let ws = tempdir().unwrap();
     let root = build_fixture(ws.path());
     let idx_root = ws.path().join("idx");
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(idx_root)).unwrap();
+    let svc =
+        codesight_mcp::test_support::make_service_from_config(AppConfig::new(idx_root)).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

@@ -57,8 +57,8 @@ impl CodeService {
             partial_mode,
         )?
         else {
-            let raw_bytes = store.repo_total_bytes().unwrap_or(0);
-            let timer = MetaBuilder::new(raw_bytes);
+            // ROADMAP P1.1: structural analysis — null baseline.
+            let timer = MetaBuilder::new(0);
             return self.error_response(
                 &timer,
                 ToolError {
@@ -70,8 +70,8 @@ impl CodeService {
             );
         };
         let (files, changes) = impact::summarize_path_rename(&plan);
-        let raw_bytes = store.repo_total_bytes().unwrap_or(0);
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: structural analysis — null baseline.
+        let timer = MetaBuilder::new(0);
 
         if args.apply.unwrap_or(false) && !plan.collisions.is_empty() {
             return self.error_response(

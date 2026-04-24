@@ -3,9 +3,9 @@
 use std::fs;
 use std::sync::OnceLock;
 
-use codesight_language_support::imports_orchestration::context_bundle_import_lines;
 use codesight_engine::config::AppConfig;
 use codesight_engine::service::CodeService;
+use codesight_language_support::imports_orchestration::context_bundle_import_lines;
 use codesight_mcp::test_support;
 use serde_json::json;
 use tempfile::{TempDir, tempdir};
@@ -29,7 +29,10 @@ fn shared_small_repo() -> (&'static CodeService, &'static str) {
         let src = root.join("src");
         test_support::write_small_repo(&src).unwrap();
         fs::write(src.join("imports_demo.py"), IMPORTS_DEMO_PY).unwrap();
-        let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+        let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+            workspace.path().join("idx"),
+        ))
+        .unwrap();
         let sid = ingest(&svc, &root);
         (workspace, svc, sid)
     });
@@ -199,16 +202,10 @@ fn case_meta_envelope() {
 
 fn case_extract_imports_python() {
     let content = "import os\nfrom sys import argv\n\nx = 1\nfrom pathlib import Path\n";
-    assert_eq!(
-        context_bundle_import_lines(content, "m.py").len(),
-        3
-    );
+    assert_eq!(context_bundle_import_lines(content, "m.py").len(), 3);
 }
 
 fn case_extract_imports_go() {
     let content = "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc main() {}\n";
-    assert_eq!(
-        context_bundle_import_lines(content, "main.go").len(),
-        4
-    );
+    assert_eq!(context_bundle_import_lines(content, "main.go").len(), 4);
 }

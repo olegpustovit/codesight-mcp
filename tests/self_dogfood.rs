@@ -65,10 +65,7 @@ edition = "2024"
             ),
             // A sibling file only reached from inner.rs — verifies transitive
             // reachability: bin → lib.rs → facade.rs → inner.rs → deep.rs
-            (
-                "crates/lib-a/src/deep.rs",
-                "pub fn deep() -> u32 { 42 }\n",
-            ),
+            ("crates/lib-a/src/deep.rs", "pub fn deep() -> u32 { 42 }\n"),
         ],
     )
     .unwrap();
@@ -174,10 +171,7 @@ edition = "2024"
         ws.path(),
         &[
             ("src/lib.rs", "pub fn lib_only() {}\n"),
-            (
-                "src/bin/tool.rs",
-                "fn main() { println!(\"tool\"); }\n",
-            ),
+            ("src/bin/tool.rs", "fn main() { println!(\"tool\"); }\n"),
         ],
     )
     .unwrap();
@@ -209,6 +203,70 @@ fn importers_resolve_cross_crate_use() {
     assert!(
         targets.iter().any(|t| t == "crates/lib-a/src/lib.rs"),
         "regression: bin-a/main.rs has no edge to lib-a/lib.rs — targets={targets:?}",
+    );
+}
+
+#[test]
+fn dead_code_reaches_files_declared_via_mod_only() {
+    // P0.1 regression: a submodule introduced only via `mod foo;` in
+    // the parent's `mod.rs` (no `use` elsewhere) must still be reachable.
+    // Without module-tree edges, every deep submodule appears dead.
+    let ws = tempdir().unwrap();
+    fs::write(
+        ws.path().join("Cargo.toml"),
+        "[package]\nname=\"demo\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    write_files(
+        ws.path(),
+        &[
+            ("src/lib.rs", "pub mod service;\n"),
+            ("src/service/mod.rs", "pub mod inner;\n"),
+            ("src/service/inner.rs", "pub fn deep() -> u32 { 1 }\n"),
+        ],
+    )
+    .unwrap();
+    let (config, sid, _) = index_code_fixture(&ws.path().join("idx"), ws.path()).unwrap();
+    let store = open_code_store(&config, &sid).unwrap();
+    let dead = dead_files(&store);
+    for expected in ["src/service/mod.rs", "src/service/inner.rs"] {
+        assert!(
+            !dead.iter().any(|f| f == expected),
+            "regression: {expected} marked dead — module-tree edges broken; dead={dead:?}",
+        );
+    }
+}
+
+#[test]
+fn importers_see_module_tree_parent() {
+    // P0.1: `graph=importers` on a submodule must include its parent's mod.rs
+    // even when nothing else `use`s it.
+    let ws = tempdir().unwrap();
+    fs::write(
+        ws.path().join("Cargo.toml"),
+        "[package]\nname=\"demo\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    write_files(
+        ws.path(),
+        &[
+            ("src/lib.rs", "pub mod service;\n"),
+            ("src/service/mod.rs", "pub mod inner;\n"),
+            ("src/service/inner.rs", "pub fn deep() {}\n"),
+        ],
+    )
+    .unwrap();
+    let (config, sid, _) = index_code_fixture(&ws.path().join("idx"), ws.path()).unwrap();
+    let store = open_code_store(&config, &sid).unwrap();
+    let graph = store.dependency_graph().unwrap();
+    let importers: Vec<String> = graph
+        .iter()
+        .filter(|(_, targets)| targets.iter().any(|t| t == "src/service/inner.rs"))
+        .map(|(src, _)| src.clone())
+        .collect();
+    assert!(
+        importers.iter().any(|i| i == "src/service/mod.rs"),
+        "regression: src/service/inner.rs has no mod-tree parent — importers={importers:?}",
     );
 }
 
@@ -259,7 +317,12 @@ fn dead_code_payload_has_expected_keys() {
     let store = open_code_store(&config, &sid).unwrap();
 
     let payload: Value = dead_code_payload(&store, "file", 0.5, true, &[], None).unwrap();
-    for key in ["analysis", "dead_files", "dead_file_count", "live_root_count"] {
+    for key in [
+        "analysis",
+        "dead_files",
+        "dead_file_count",
+        "live_root_count",
+    ] {
         assert!(payload.get(key).is_some(), "missing key {key} in {payload}");
     }
     assert_eq!(payload["analysis"], json!("dead_code"));

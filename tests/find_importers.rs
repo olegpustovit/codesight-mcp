@@ -768,9 +768,9 @@ fn resolve_specifier_find_importers_jsonc_tsconfig_nested_layout() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -889,9 +889,9 @@ fn find_importers_python_importers() {
 #[test]
 fn find_importers_not_indexed_repo() {
     let ws = tempfile::tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
 
     let r = svc
@@ -919,9 +919,9 @@ fn find_importers_old_index_graceful_note() {
     let src = ws.path();
     std::fs::write(src.join("app.js"), "function main() {}\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1084,9 +1084,9 @@ fn find_references_named_import_match() {
     .unwrap();
     std::fs::write(src.join("unrelated.js"), "function foo() {}\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1109,14 +1109,14 @@ fn find_references_named_import_match() {
         .unwrap();
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
     let data = &refs["data"];
-    assert!(
-        data["reference_count"].as_u64().unwrap() >= 2,
-        "expected >=2 references: {data:?}"
-    );
-    let ref_files: Vec<&str> = data["references"]
+    let total = data["semantic_reference_count"].as_u64().unwrap()
+        + data["candidate_text_hit_count"].as_u64().unwrap();
+    assert!(total >= 2, "expected >=2 references: {data:?}");
+    let ref_files: Vec<&str> = data["semantic_references"]
         .as_array()
         .unwrap()
         .iter()
+        .chain(data["candidate_text_hits"].as_array().unwrap().iter())
         .map(|r| r["file"].as_str().unwrap())
         .collect();
     assert!(
@@ -1147,9 +1147,9 @@ fn find_references_specifier_stem_match() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1171,11 +1171,15 @@ fn find_references_specifier_stem_match() {
         )
         .unwrap();
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
-    assert!(refs["data"]["reference_count"].as_u64().unwrap() >= 1);
-    let ref_files: Vec<&str> = refs["data"]["references"]
+    let data = &refs["data"];
+    let total = data["semantic_reference_count"].as_u64().unwrap()
+        + data["candidate_text_hit_count"].as_u64().unwrap();
+    assert!(total >= 1);
+    let ref_files: Vec<&str> = data["semantic_references"]
         .as_array()
         .unwrap()
         .iter()
+        .chain(data["candidate_text_hits"].as_array().unwrap().iter())
         .map(|r| r["file"].as_str().unwrap())
         .collect();
     assert!(
@@ -1190,9 +1194,9 @@ fn find_references_case_insensitive_match() {
     std::fs::write(src.join("utils.js"), "export function Helper() {}\n").unwrap();
     std::fs::write(src.join("app.js"), "import { Helper } from './utils';\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1215,10 +1219,12 @@ fn find_references_case_insensitive_match() {
         )
         .unwrap();
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
+    let data = &refs["data"];
+    let total = data["semantic_reference_count"].as_u64().unwrap()
+        + data["candidate_text_hit_count"].as_u64().unwrap();
     assert!(
-        refs["data"]["reference_count"].as_u64().unwrap() >= 1,
-        "case-insensitive search should find references: {:?}",
-        refs["data"]
+        total >= 1,
+        "case-insensitive search should find references: {data:?}"
     );
 }
 #[test]
@@ -1228,9 +1234,9 @@ fn find_references_no_false_positives() {
     std::fs::write(src.join("foo.js"), "export function foo() {}\n").unwrap();
     std::fs::write(src.join("bar.js"), "import { bar } from './something';\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1253,10 +1259,17 @@ fn find_references_no_false_positives() {
         .unwrap();
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
     let empty = vec![];
-    let ref_files: Vec<&str> = refs["data"]["references"]
+    let data = &refs["data"];
+    let ref_files: Vec<&str> = data["semantic_references"]
         .as_array()
         .unwrap_or(&empty)
         .iter()
+        .chain(
+            data["candidate_text_hits"]
+                .as_array()
+                .unwrap_or(&empty)
+                .iter(),
+        )
         .filter_map(|r| r["file"].as_str())
         .collect();
     // bar.js imports 'bar', not 'foo' — should not appear
@@ -1265,12 +1278,74 @@ fn find_references_no_false_positives() {
         "bar.js should not be in refs for 'foo': {ref_files:?}"
     );
 }
+
+#[test]
+fn find_references_does_not_emit_line_zero_text_matches() {
+    let ws = tempfile::tempdir().unwrap();
+    let src = ws.path();
+    std::fs::write(
+        src.join("comment.js"),
+        "export function unrelated() {}\n// hidden_identifier\n",
+    )
+    .unwrap();
+
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
+    .unwrap();
+    let r = svc
+        .dispatch(
+            "ingest_sources",
+            serde_json::json!({"path": src.to_string_lossy(), "domains": "code"}),
+        )
+        .unwrap();
+    assert!(r["ok"].as_bool().unwrap());
+    let sid = r["data"]["source_id"].as_str().unwrap();
+
+    let refs = svc
+        .dispatch(
+            "inspect_graph",
+            serde_json::json!({
+                "source_id": sid,
+                "graph": "find_references",
+                "identifier": "hidden_identifier",
+            }),
+        )
+        .unwrap();
+    assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
+    let empty = vec![];
+    let data = &refs["data"];
+    let references: Vec<&serde_json::Value> = data["semantic_references"]
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
+        .chain(
+            data["candidate_text_hits"]
+                .as_array()
+                .unwrap_or(&empty)
+                .iter(),
+        )
+        .collect();
+    assert!(
+        references
+            .iter()
+            .all(|r| r["line"].as_u64().unwrap_or(0) > 0),
+        "find_references must not return line:0 text matches: {references:?}"
+    );
+    assert!(
+        references
+            .iter()
+            .all(|r| r["kind"].as_str() != Some("text_match")),
+        "find_references must not return opaque text_match rows: {references:?}"
+    );
+}
+
 #[test]
 fn find_references_not_indexed() {
     let ws = tempfile::tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
 
     let refs = svc
@@ -1309,9 +1384,9 @@ fn find_references_dbt_ref_reference() {
     .unwrap();
     std::fs::write(src.join("unrelated.sql"), "SELECT 1\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1333,15 +1408,15 @@ fn find_references_dbt_ref_reference() {
         )
         .unwrap();
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
-    assert!(
-        refs["data"]["reference_count"].as_u64().unwrap() >= 2,
-        "expected >=2 refs: {:?}",
-        refs["data"]
-    );
-    let ref_files: Vec<&str> = refs["data"]["references"]
+    let data = &refs["data"];
+    let total = data["semantic_reference_count"].as_u64().unwrap()
+        + data["candidate_text_hit_count"].as_u64().unwrap();
+    assert!(total >= 2, "expected >=2 refs: {data:?}");
+    let ref_files: Vec<&str> = data["semantic_references"]
         .as_array()
         .unwrap()
         .iter()
+        .chain(data["candidate_text_hits"].as_array().unwrap().iter())
         .map(|r| r["file"].as_str().unwrap())
         .collect();
     assert!(
@@ -1380,9 +1455,9 @@ fn imports_persistence_saved_in_index() {
     std::fs::write(src.join("utils.js"), "export const x = 1;\n").unwrap();
     std::fs::write(src.join("app.js"), "import { x } from './utils';\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1428,9 +1503,9 @@ fn imports_persistence_dbt_refs_saved_in_index() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1474,9 +1549,9 @@ fn imports_persistence_merged_on_incremental() {
     std::fs::write(src.join("utils.js"), "export const x = 1;\n").unwrap();
     std::fs::write(src.join("app.js"), "import { x } from './utils';\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1563,9 +1638,9 @@ fn laravel_blade_imports_in_index() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1625,9 +1700,9 @@ class OrderService
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1682,9 +1757,9 @@ class Post extends Model {}
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1738,9 +1813,9 @@ class UserController extends Controller
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(
@@ -1788,9 +1863,9 @@ import UserTable from './components/UserTable.vue'
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(codesight_engine::config::AppConfig::new(
-        ws.path().join("idx"),
-    ))
+    let svc = codesight_mcp::test_support::make_service_from_config(
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    )
     .unwrap();
     let r = svc
         .dispatch(

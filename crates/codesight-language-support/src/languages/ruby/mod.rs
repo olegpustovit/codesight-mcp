@@ -47,8 +47,7 @@ impl Language for Ruby {
     }
     fn branch_keywords(&self) -> &'static [&'static str] {
         &[
-            "if", "elsif", "unless", "while", "until", "case", "when",
-            "rescue", "and", "or",
+            "if", "elsif", "unless", "while", "until", "case", "when", "rescue", "and", "or",
         ]
     }
     fn idiomatic_symbol_names(&self) -> &'static [&'static str] {

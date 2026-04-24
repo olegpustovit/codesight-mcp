@@ -34,7 +34,9 @@ pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<Governanc
     let agent_readiness_score = agent.score;
     let structural_score = structural.score;
 
-    let score = (structural_score * agent_readiness_score).sqrt().clamp(0.0, 1.0);
+    let score = (structural_score * agent_readiness_score)
+        .sqrt()
+        .clamp(0.0, 1.0);
 
     let assessment = if score == 0.0
         && (structural.assessment == "insufficient_data" || agent.confidence == "low")
@@ -120,8 +122,13 @@ pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<Governanc
 
 pub fn governance_signal_json(gov: &GovernanceSignal, suggestion: &str) -> serde_json::Value {
     let recommendations = build_recommendations(gov);
+    // ROADMAP P2.5: the old payload carried three top-level scores — `score`,
+    // `structural_score`, `agent_readiness_score` — which users couldn't
+    // reconcile (the aggregate `score` blended the other two with hidden
+    // weights). The shape now exposes two named dimensions that an agent
+    // can act on, and a single `agent_readiness` block that holds both the
+    // dimension scores and the submetrics. No composite aggregate.
     serde_json::json!({
-        "score": gov.score,
         "structural_score": gov.structural_score,
         "agent_readiness_score": gov.agent_readiness_score,
         "assessment": gov.assessment,
@@ -132,25 +139,27 @@ pub fn governance_signal_json(gov: &GovernanceSignal, suggestion: &str) -> serde
             "equality": gov.structural.root_causes.equality,
             "redundancy": gov.structural.root_causes.redundancy,
         },
-        "agent_dimensions": {
-            "navigability": gov.agent.dimensions.navigability,
-            "comprehensibility": gov.agent.dimensions.comprehensibility,
-            "verifiability": gov.agent.dimensions.verifiability,
-            "change_safety": gov.agent.dimensions.change_safety,
-        },
-        "agent_submetrics": {
-            "symbol_uniqueness": gov.agent.submetrics.symbol_uniqueness,
-            "structural_localization": gov.agent.submetrics.structural_localization,
-            "nesting_depth_health": gov.agent.submetrics.nesting_depth_health,
-            "function_length_health": gov.agent.submetrics.function_length_health,
-            "type_annotation_density": gov.agent.submetrics.type_annotation_density,
-            "test_oracle_quality": gov.agent.submetrics.test_oracle_quality,
-            "change_locality": gov.agent.submetrics.change_locality,
-            "interface_encapsulation": gov.agent.submetrics.interface_encapsulation,
-            "hotspot_containment": gov.agent.submetrics.hotspot_containment,
+        "agent_readiness": {
+            "dimensions": {
+                "navigability": gov.agent.dimensions.navigability,
+                "comprehensibility": gov.agent.dimensions.comprehensibility,
+                "verifiability": gov.agent.dimensions.verifiability,
+                "change_safety": gov.agent.dimensions.change_safety,
+            },
+            "submetrics": {
+                "symbol_uniqueness": gov.agent.submetrics.symbol_uniqueness,
+                "structural_localization": gov.agent.submetrics.structural_localization,
+                "nesting_depth_health": gov.agent.submetrics.nesting_depth_health,
+                "function_length_health": gov.agent.submetrics.function_length_health,
+                "type_annotation_density": gov.agent.submetrics.type_annotation_density,
+                "test_oracle_quality": gov.agent.submetrics.test_oracle_quality,
+                "change_locality": gov.agent.submetrics.change_locality,
+                "interface_encapsulation": gov.agent.submetrics.interface_encapsulation,
+                "hotspot_containment": gov.agent.submetrics.hotspot_containment,
+            },
+            "type_annotation_method": gov.agent.type_annotation_method,
         },
         "confidence": gov.confidence,
-        "type_annotation_method": gov.agent.type_annotation_method,
         "bottleneck": gov.bottleneck,
         "bottleneck_layer": gov.bottleneck_layer,
         "suggestion": suggestion,

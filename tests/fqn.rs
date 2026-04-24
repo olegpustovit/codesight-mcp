@@ -254,7 +254,10 @@ fn resolve_fqn_indexed_class() {
         "<?php\nnamespace App\\Models;\nclass User {}\n",
     );
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = index_code(&svc, root);
     let r = resolve_fqn_call(&svc, &sid, "App\\Models\\User");
 
@@ -278,7 +281,10 @@ fn resolve_fqn_unresolvable() {
     );
     write_file(root, "app/Foo.php", "<?php\nclass Foo {}\n");
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = index_code(&svc, root);
     let r = resolve_fqn_call(&svc, &sid, "App\\Models\\Missing");
 
@@ -298,7 +304,10 @@ fn resolve_fqn_no_psr4_returns_error() {
     let root = ws.path();
     write_file(root, "main.py", "print('hello')\n");
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = index_code(&svc, root);
     let r = resolve_fqn_call(&svc, &sid, "App\\Models\\User");
 
@@ -315,7 +324,10 @@ fn resolve_fqn_no_psr4_returns_error() {
 #[test]
 fn resolve_fqn_repo_not_found() {
     let ws = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "inspect_graph",

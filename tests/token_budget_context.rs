@@ -122,7 +122,10 @@ fn setup_small_repo_fixture() -> SmallRepoFixture {
     let workspace = tempdir().unwrap();
     let root = workspace.path();
     write_small_repo(root);
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let source_id = ingest(&svc, root);
     let engine_id = engine_class_id(&svc, &source_id);
     let format_date_id = format_date_id(&svc, &source_id);
@@ -449,7 +452,10 @@ fn case_ranked_include_kinds_class(fixture: &SmallRepoFixture) {
 
 fn case_ranked_unknown_repo() {
     let workspace = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
     let out = svc
         .dispatch(
             "assemble_context",

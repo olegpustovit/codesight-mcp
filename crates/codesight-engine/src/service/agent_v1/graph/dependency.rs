@@ -8,9 +8,9 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
-use codesight_storage::storage::{IndexStore, list_repo_summaries};
 use codesight_language_support::imports_orchestration::{extract_imports, language_for_path};
 use codesight_language_support::packages::package_reference_evidence;
+use codesight_storage::storage::{IndexStore, list_repo_summaries};
 
 impl CodeService {
     pub(super) fn graph_dependency_cycles(
@@ -19,8 +19,10 @@ impl CodeService {
         mode: &str,
     ) -> anyhow::Result<Value> {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: dependency / cycle graphs are metadata views with
+        // no native-tool counterfactual, so surface `tokens_saved: null`
+        // rather than charge against `repo_total_bytes`.
+        let timer = MetaBuilder::new(0);
         let adj = store.dependency_graph_strict()?;
         let cycles = codesight_analysis::graph::find_cycles(&adj);
         self.success_response(
@@ -40,8 +42,10 @@ impl CodeService {
         mode: &str,
     ) -> anyhow::Result<Value> {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: dependency / cycle graphs are metadata views with
+        // no native-tool counterfactual, so surface `tokens_saved: null`
+        // rather than charge against `repo_total_bytes`.
+        let timer = MetaBuilder::new(0);
         let adj = store.dependency_graph_with_import_quality()?;
         let all_edges: Vec<Value> = adj
             .iter()

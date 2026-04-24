@@ -129,8 +129,7 @@ impl LanguageRegistry {
 
     /// Curated-language names as a sorted list (string form).
     pub fn curated_language_names(&self) -> Vec<&'static str> {
-        let mut names: Vec<&'static str> =
-            self.curated_languages().map(|id| id.as_str()).collect();
+        let mut names: Vec<&'static str> = self.curated_languages().map(|id| id.as_str()).collect();
         names.sort();
         names.dedup();
         names
@@ -224,9 +223,7 @@ impl LanguageRegistry {
             self.by_compound_ext.insert(ext.to_ascii_lowercase(), id);
         }
         for ext in manifest.extensions {
-            self.by_ext
-                .entry(ext.to_ascii_lowercase())
-                .or_insert(id);
+            self.by_ext.entry(ext.to_ascii_lowercase()).or_insert(id);
         }
         for profile in manifest.profiles {
             for host in profile.applies_to {
@@ -258,10 +255,7 @@ impl LanguageRegistry {
     /// Register extra `(extension, language_name)` mappings. Returns a list
     /// of human-readable warnings for entries the registry could not accept
     /// (empty extension, unknown language, etc.).
-    pub fn apply_extra_extensions(
-        &mut self,
-        mappings: &HashMap<String, String>,
-    ) -> Vec<String> {
+    pub fn apply_extra_extensions(&mut self, mappings: &HashMap<String, String>) -> Vec<String> {
         let mut warnings = Vec::new();
         for (ext_raw, lang_raw) in mappings {
             let ext = ext_raw.trim().to_string();
@@ -541,11 +535,7 @@ mod tests {
         let tmp = std::env::temp_dir().join("codesight-phase-c-bad-config");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
-        fs::write(
-            tmp.join(".codesight.toml"),
-            "[nonsense]\nnope = true\n",
-        )
-        .unwrap();
+        fs::write(tmp.join(".codesight.toml"), "[nonsense]\nnope = true\n").unwrap();
         let cfg = read_project_config(&tmp);
         assert!(cfg.is_some());
         let _ = fs::remove_dir_all(&tmp);
@@ -581,10 +571,7 @@ mod tests {
                     continue;
                 };
                 let rest = &line[idx + "injection.language".len()..];
-                let quote_start = rest
-                    .char_indices()
-                    .find(|(_, c)| *c == '"')
-                    .map(|(i, _)| i);
+                let quote_start = rest.char_indices().find(|(_, c)| *c == '"').map(|(i, _)| i);
                 let Some(start) = quote_start else { continue };
                 let after = &rest[start + 1..];
                 let Some(end) = after.find('"') else { continue };

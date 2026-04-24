@@ -37,6 +37,12 @@ enum Command {
         /// savings recorded in the `_savings.json` ledger.
         #[arg(long)]
         savings: bool,
+        /// Run the premium-release gate. Ingests the workspace, probes every
+        /// P0 trust invariant (module-tree reachability, strict-ref resolution,
+        /// reference provenance, latency budgets) and fails on any regression.
+        /// Required before shipping structural-analysis claims.
+        #[arg(long = "premium-gate")]
+        premium_gate: bool,
     },
     /// Diagnostic: call `ingest_sources` against a local path and print the JSON envelope.
     Ingest {
@@ -61,6 +67,16 @@ enum Command {
         /// Restrict domain: code, docs, or hybrid.
         #[arg(long)]
         domain: Option<String>,
+    },
+    /// Run the full regression test matrix locally (ROADMAP P3.4).
+    /// Today this is the premium-gate path — same probes, clearer name.
+    /// Intended as a pre-release smoke test that surfaces every P0/P1
+    /// trust invariant in a single command.
+    #[command(name = "self-check")]
+    SelfCheck {
+        /// Optional workspace path. Defaults to the current directory.
+        #[arg(long)]
+        workspace: Option<PathBuf>,
     },
     /// Claude Code hook: PreToolUse interceptor for Read/Grep/Glob/Bash.
     #[command(name = "hook-pretooluse")]
@@ -98,11 +114,30 @@ fn main() {
                 1
             }
         },
-        Command::Check { workspace, savings } => match check::run(workspace, savings) {
+        Command::Check {
+            workspace,
+            savings,
+            premium_gate,
+        } => {
+            let result = if premium_gate {
+                check::run_premium_gate(workspace)
+            } else {
+                check::run(workspace, savings)
+            };
+            match result {
+                Ok(true) => 0,
+                Ok(false) => 1,
+                Err(error) => {
+                    eprintln!("codesight-mcp check: {error:#}");
+                    1
+                }
+            }
+        }
+        Command::SelfCheck { workspace } => match check::run_premium_gate(workspace) {
             Ok(true) => 0,
             Ok(false) => 1,
             Err(error) => {
-                eprintln!("codesight-mcp check: {error:#}");
+                eprintln!("codesight-mcp self-check: {error:#}");
                 1
             }
         },

@@ -67,7 +67,10 @@ fn make_doc_fixture() -> (tempfile::TempDir, CodeService, String) {
         "# Installation\n\nHow to install.\n\n## Usage\n\nHow to use.\n\n## API Reference\n\nAPI docs.\n",
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest_docs(&svc, ws.path());
     (ws, svc, sid)
 }
@@ -124,7 +127,10 @@ fn test_symbol_name_from_id_no_colons() {
 
 fn test_not_indexed() {
     let ws = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",

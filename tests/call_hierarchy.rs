@@ -4,9 +4,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use codesight_language_support::text_match::word_match;
 use codesight_engine::config::AppConfig;
 use codesight_engine::service::CodeService;
+use codesight_language_support::text_match::word_match;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -57,7 +57,10 @@ fn build_call_repo() -> (tempfile::TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = index_code(&svc, &src);
     (ws, svc, sid)
 }
@@ -796,15 +799,25 @@ fn find_references_reference_rows_are_flat() {
     let r = find_refs(&svc, &sid, "helper", true);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     assert!(
-        r["data"]["reference_count"].is_number(),
-        "missing reference_count"
+        r["data"]["semantic_reference_count"].is_number(),
+        "missing semantic_reference_count"
     );
-    let refs = r["data"]["references"].as_array().expect("references array");
+    assert!(
+        r["data"]["candidate_text_hit_count"].is_number(),
+        "missing candidate_text_hit_count"
+    );
+    let semantic = r["data"]["semantic_references"]
+        .as_array()
+        .expect("semantic_references array");
+    let candidates = r["data"]["candidate_text_hits"]
+        .as_array()
+        .expect("candidate_text_hits array");
     assert!(r["_meta"].is_object(), "missing envelope _meta");
-    for refentry in refs {
+    for refentry in semantic.iter().chain(candidates.iter()) {
         assert!(refentry["file"].is_string(), "missing file on row");
         assert!(refentry["name"].is_string(), "missing name on row");
         assert!(refentry["line"].is_number(), "missing line on row");
+        assert!(refentry["kind"].is_string(), "missing kind on row");
         assert!(
             refentry.get("matches").is_none(),
             "nested matches[] should not be present after flattening"
@@ -812,6 +825,20 @@ fn find_references_reference_rows_are_flat() {
         assert!(
             refentry.get("symbol_id").is_none(),
             "symbol_id should be dropped from per-row shape"
+        );
+    }
+    for sem in semantic {
+        assert_ne!(
+            sem["kind"].as_str(),
+            Some("file_body_match"),
+            "semantic_references must not contain file_body_match rows"
+        );
+    }
+    for cand in candidates {
+        assert_eq!(
+            cand["kind"].as_str(),
+            Some("file_body_match"),
+            "candidate_text_hits must only contain file_body_match rows"
         );
     }
 }

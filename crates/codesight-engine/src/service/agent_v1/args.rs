@@ -36,6 +36,11 @@ pub struct CatalogSourcesArgs {
     #[allow(dead_code)]
     #[serde(default)]
     pub cursor: Option<String>,
+    /// ROADMAP P2.4: drop `capabilities`, `languages`, and `root_hint` from
+    /// each entry when `true`. Cuts the warmup payload ~50% for sessions
+    /// that only need `{source_id, status, indexed_at, file_count}`.
+    #[serde(default)]
+    pub lightweight: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -96,6 +101,12 @@ pub struct SearchCatalogArgs {
     /// Accept `pattern` as alias for `query` in regex mode.
     #[serde(default)]
     pub pattern: Option<String>,
+    /// For `natural_language` mode: include test files / fixtures / benches in
+    /// the results. Defaults to `false` for NL queries so "how is X done"
+    /// surfaces production code over the test asserting it. `keyword` / `regex`
+    /// modes always include tests (the caller asked for the literal match).
+    #[serde(default)]
+    pub include_tests: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -338,6 +349,16 @@ pub struct EvaluateQualityArgs {
     pub snapshot_name: Option<String>,
     #[serde(default)]
     pub scope: Option<String>,
+    /// ROADMAP P3.6: cap wall-clock time for the analysis. Each handler
+    /// checks the deadline at its natural breakpoints and returns a
+    /// `PARTIAL_RESULT` warning when it runs out. No value = unbounded.
+    #[serde(default)]
+    pub max_wait_ms: Option<u64>,
+    /// ROADMAP P3.6: accept a truncated-but-well-formed envelope on
+    /// deadline expiry. When false (default) the handler prefers to error
+    /// with `DEADLINE_EXCEEDED`.
+    #[serde(default)]
+    pub partial_ok: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -373,6 +394,16 @@ pub struct AssembleContextArgs {
     pub new_name: Option<String>,
     #[serde(default)]
     pub repo_path: Option<String>,
+    /// `context_bundle` depth (ROADMAP P1.5):
+    ///   0 = symbol + imports (today's behaviour),
+    ///   1 = + types referenced in the signature/body,
+    ///   2 = + a representative caller + a representative callee per direct edge.
+    /// Default is 2 when unset.
+    #[serde(default)]
+    pub depth: Option<u32>,
+    /// `context_bundle`: include the nearest test fixture. Default true.
+    #[serde(default)]
+    pub include_tests: Option<bool>,
 }
 
 /// `get_ranked_context` reference oracle caps query length at 500 chars.

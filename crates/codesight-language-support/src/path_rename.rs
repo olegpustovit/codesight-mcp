@@ -80,8 +80,5 @@ pub fn summarize(plan: &PathRenamePlan) -> (usize, usize) {
 
 /// Sorted repo-relative paths touched by `plan`.
 pub fn affected_paths(plan: &PathRenamePlan) -> std::collections::BTreeSet<String> {
-    plan.files_affected
-        .iter()
-        .map(|f| f.path.clone())
-        .collect()
+    plan.files_affected.iter().map(|f| f.path.clone()).collect()
 }

@@ -10,7 +10,9 @@ use super::helpers::{slice_file_lines, *};
 use super::{CodeService, MAX_QUERY_LEN};
 use codesight_language_support::imports_orchestration::language_for_path;
 
-use codesight_storage::storage::{self, IndexStore, RetrievedSymbol, SearchSymbol, doc_index::DocStore};
+use codesight_storage::storage::{
+    self, IndexStore, RetrievedSymbol, SearchSymbol, doc_index::DocStore,
+};
 
 use codesight_core::pipeline::IndexedFileUpdate;
 

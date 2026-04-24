@@ -222,8 +222,11 @@ fn duplicate_function_count(all_symbols: &[AnalysisSymbol]) -> usize {
             None => FALLBACK_LANGUAGE.normalise_body_for_dedup(&sym.source_text),
         };
         let digest = blake3::hash(&normalized);
-        let hash =
-            u64::from_le_bytes(digest.as_bytes()[..8].try_into().expect("blake3 is 32 bytes"));
+        let hash = u64::from_le_bytes(
+            digest.as_bytes()[..8]
+                .try_into()
+                .expect("blake3 is 32 bytes"),
+        );
         *body_hashes.entry(hash).or_default() += 1;
     }
     body_hashes

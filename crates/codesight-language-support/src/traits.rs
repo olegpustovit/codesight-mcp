@@ -131,11 +131,7 @@ pub trait Language: Send + Sync {
     /// when `grammar_spec()` is available. Languages with bespoke extraction
     /// (AL, Blade, Vue, Razor, EJS, YAML/Ansible, SQL/dbt, ASM dialects,
     /// SCSS dialects, Luau dialects, Verse) override.
-    fn extract_symbols(
-        &self,
-        file_path: &str,
-        source: &str,
-    ) -> anyhow::Result<Vec<StoredSymbol>> {
+    fn extract_symbols(&self, file_path: &str, source: &str) -> anyhow::Result<Vec<StoredSymbol>> {
         let Some(spec) = self.grammar_spec() else {
             return Ok(Vec::new());
         };
@@ -150,13 +146,7 @@ pub trait Language: Send + Sync {
     /// `.h` headers to `C`; other languages can hook content-aware rewrites
     /// (TSX/JSX dual-identity, Razor host language, …) here without adding
     /// C++-specific branches to generic code. Default: no-op.
-    fn postprocess_symbols(
-        &self,
-        _symbols: &mut [StoredSymbol],
-        _file_path: &str,
-        _source: &str,
-    ) {
-    }
+    fn postprocess_symbols(&self, _symbols: &mut [StoredSymbol], _file_path: &str, _source: &str) {}
 
     // ── Imports ──────────────────────────────────────────────────────────
     /// Extraction strategy for this language, or `None` when extraction is
@@ -347,19 +337,11 @@ pub trait Language: Send + Sync {
         {
             return true;
         }
-        if self
-            .test_file_suffixes()
-            .iter()
-            .any(|s| lower.ends_with(s))
-        {
+        if self.test_file_suffixes().iter().any(|s| lower.ends_with(s)) {
             return true;
         }
         let anchored = format!("/{lower}");
-        if self
-            .test_file_dirs()
-            .iter()
-            .any(|d| anchored.contains(d))
-        {
+        if self.test_file_dirs().iter().any(|d| anchored.contains(d)) {
             return true;
         }
         false
@@ -429,11 +411,7 @@ pub trait Language: Send + Sync {
     /// should count as an **explicit** entry (suppresses the
     /// "no-entry-points" warning in analysis). Analysis consumers never
     /// need to know which language emitted each root.
-    fn additional_live_roots(
-        &self,
-        _root: Option<&Path>,
-        _all_files: &[String],
-    ) -> Vec<LiveRoot> {
+    fn additional_live_roots(&self, _root: Option<&Path>, _all_files: &[String]) -> Vec<LiveRoot> {
         Vec::new()
     }
 
@@ -599,7 +577,10 @@ pub trait Language: Send + Sync {
     /// Markdown) short-circuit to the base complexity of `1` because they
     /// have no control flow.
     fn cyclomatic_complexity(&self, source: &str) -> usize {
-        if matches!(self.family(), crate::family::LanguageFamily::DeclarativeMarkup) {
+        if matches!(
+            self.family(),
+            crate::family::LanguageFamily::DeclarativeMarkup
+        ) {
             return 1;
         }
         crate::complexity::count_cyclomatic(

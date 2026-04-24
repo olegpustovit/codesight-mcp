@@ -35,6 +35,24 @@ impl Language for CSharp {
         Some(&GRAMMAR)
     }
 
+    /// C#-idiomatic `using Namespace;` (ROADMAP P1.6).
+    fn display_import_lines(
+        &self,
+        edges: &[crate::imports_types::ImportEdge],
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+        for e in edges {
+            if e.names.is_empty() {
+                lines.push(format!("using {};", e.specifier));
+            } else {
+                for n in &e.names {
+                    lines.push(format!("using {}.{};", e.specifier, n));
+                }
+            }
+        }
+        lines
+    }
+
     fn package_name_for_dir(&self, dir: &Path) -> Option<String> {
         let entries = fs::read_dir(dir).ok()?;
         for entry in entries.flatten() {
@@ -123,5 +141,9 @@ fn extract_csproj_tag(content: &str, tag: &str) -> Option<String> {
     let after_open = start + open.len();
     let end = content[after_open..].find(&close)?;
     let value = content[after_open..after_open + end].trim();
-    if value.is_empty() { None } else { Some(value.to_string()) }
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }

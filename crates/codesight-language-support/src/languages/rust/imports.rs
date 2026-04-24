@@ -632,21 +632,14 @@ mod rust_resolve_tests {
             "crates/my-lib/src/inner.rs",
         ]);
         let mut ws = HashMap::new();
-        ws.insert(
-            "my_lib".to_string(),
-            "crates/my-lib/src/lib.rs".to_string(),
-        );
+        ws.insert("my_lib".to_string(), "crates/my-lib/src/lib.rs".to_string());
         let got = resolve_rust_specifier("my_lib::do_thing", "src/main.rs", &known, Some(&ws));
         assert_eq!(got.as_deref(), Some("crates/my-lib/src/lib.rs"));
     }
 
     #[test]
     fn workspace_crate_wins_over_bare_sibling_even_when_sibling_exists() {
-        let known = files(&[
-            "src/main.rs",
-            "src/utils.rs",
-            "crates/utils/src/lib.rs",
-        ]);
+        let known = files(&["src/main.rs", "src/utils.rs", "crates/utils/src/lib.rs"]);
         let mut ws = HashMap::new();
         ws.insert("utils".to_string(), "crates/utils/src/lib.rs".to_string());
         let got = resolve_rust_specifier("utils::helper", "src/main.rs", &known, Some(&ws));
@@ -655,16 +648,10 @@ mod rust_resolve_tests {
 
     #[test]
     fn workspace_crate_does_not_apply_to_anchored_paths() {
-        let known = files(&[
-            "src/main.rs",
-            "src/utils.rs",
-            "crates/utils/src/lib.rs",
-        ]);
+        let known = files(&["src/main.rs", "src/utils.rs", "crates/utils/src/lib.rs"]);
         let mut ws = HashMap::new();
         ws.insert("utils".to_string(), "crates/utils/src/lib.rs".to_string());
         let got = resolve_rust_specifier("self::utils", "src/main.rs", &known, Some(&ws));
         assert_eq!(got.as_deref(), Some("src/utils.rs"));
     }
 }
-
-

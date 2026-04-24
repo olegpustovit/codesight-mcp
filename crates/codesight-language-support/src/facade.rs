@@ -9,8 +9,8 @@
 use std::path::Path;
 
 use crate::builtin_registry;
-use crate::family::{LanguageFamily, NestingMode};
 use crate::fallback::{generic_is_test_file, generic_is_test_fixture};
+use crate::family::{LanguageFamily, NestingMode};
 use crate::manifest::{LanguageId, UNKNOWN_LANGUAGE};
 use crate::traits::{ImportExtractionMode, Language};
 

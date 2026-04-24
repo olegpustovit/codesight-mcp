@@ -243,7 +243,10 @@ where
 /// Walk the workspace once, returning the set of on-disk files that carry a
 /// recognized language plus the sorted language-id set. Runs on the calling
 /// thread — cheap vs the per-file parse work that follows in parallel.
-fn walk_candidates(root: &Path, registry: &LanguageRegistry) -> (Vec<WalkedFile>, BTreeSet<String>) {
+fn walk_candidates(
+    root: &Path,
+    registry: &LanguageRegistry,
+) -> (Vec<WalkedFile>, BTreeSet<String>) {
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -252,7 +255,9 @@ fn walk_candidates(root: &Path, registry: &LanguageRegistry) -> (Vec<WalkedFile>
         .filter_entry(|entry| {
             if entry.file_type().is_some_and(|ft| ft.is_dir()) {
                 let name = entry.file_name().to_string_lossy();
-                return !codesight_storage::db::SKIP_DIRS.iter().any(|skip| *skip == name);
+                return !codesight_storage::db::SKIP_DIRS
+                    .iter()
+                    .any(|skip| *skip == name);
             }
             true
         })
@@ -343,7 +348,10 @@ fn process_file(
     let source = String::from_utf8_lossy(&bytes).into_owned();
     let symbols = registry
         .for_path(&file.abs_path)
-        .map(|lang| lang.extract_symbols(&file.relative_path, &source).unwrap_or_default())
+        .map(|lang| {
+            lang.extract_symbols(&file.relative_path, &source)
+                .unwrap_or_default()
+        })
         .unwrap_or_default();
     let update = IndexedFileUpdate {
         file_path: file.relative_path,
@@ -507,7 +515,9 @@ fn reindex_single(
     };
     let content_hash = blake3::hash(&bytes).to_hex().to_string();
     let source = String::from_utf8_lossy(&bytes).into_owned();
-    let symbols = lang.extract_symbols(&relative_path, &source).unwrap_or_default();
+    let symbols = lang
+        .extract_symbols(&relative_path, &source)
+        .unwrap_or_default();
     Some(ReindexOutcome::Updated {
         update: IndexedFileUpdate {
             file_path: relative_path,

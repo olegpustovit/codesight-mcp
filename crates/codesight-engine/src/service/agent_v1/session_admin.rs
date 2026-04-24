@@ -8,8 +8,8 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::ManageIndexesArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::{QualityHotspotMarker, SessionState};
 use crate::service::savings::MetaBuilder;
+use crate::service::savings::{QualityHotspotMarker, SessionState};
 
 impl CodeService {
     pub(super) fn manage_session_stats(&self, timer: &MetaBuilder) -> anyhow::Result<Value> {
@@ -22,8 +22,7 @@ impl CodeService {
         let session_before_end = self.savings_ledger_current_session()?;
         if let Some(source_id) = session_before_end.primary_source_id.as_deref()
             && let Ok(store) = self.ensure_repo_store(source_id, None)
-            && let Ok(gov) =
-                codesight_analysis::quality_signal::compute_governance_signal(&store)
+            && let Ok(gov) = codesight_analysis::quality_signal::compute_governance_signal(&store)
             && let Ok((snapshot, marker)) =
                 self.build_quality_snapshot(&store, source_id, "session_end", &gov)
             && store.save_snapshot(&snapshot).is_ok()
@@ -216,10 +215,7 @@ impl CodeService {
         Ok((data, warnings))
     }
 
-    fn session_quality_delta(
-        &self,
-        session: &SessionState,
-    ) -> anyhow::Result<Option<Value>> {
+    fn session_quality_delta(&self, session: &SessionState) -> anyhow::Result<Option<Value>> {
         let Some(start) = session.quality_session_start.as_ref() else {
             return Ok(None);
         };
@@ -232,47 +228,53 @@ impl CodeService {
         };
         let baseline_avg_complexity = start.avg_complexity.unwrap_or(baseline.avg_complexity);
         let baseline_hotspots = start.hotspots.clone();
-        let (after_score, after_structural, after_agent, after_dimensions, after_avg_complexity, after_hotspots) =
-            if let Some(end) = session.quality_session_end.as_ref() {
-                match store.load_snapshot(&end.source_id, &end.snapshot_name)? {
-                    Some(snapshot) => (
-                        snapshot.score,
-                        snapshot.structural_score,
-                        snapshot.agent_readiness_score,
-                        json!({
-                            "navigability": snapshot.navigability,
-                            "comprehensibility": snapshot.comprehensibility,
-                            "verifiability": snapshot.verifiability,
-                            "change_safety": snapshot.change_safety,
-                        }),
-                        end.avg_complexity.unwrap_or(snapshot.avg_complexity),
-                        end.hotspots.clone(),
-                    ),
-                    None => return Ok(None),
-                }
-            } else {
-                let gov = match codesight_analysis::quality_signal::compute_governance_signal(&store) {
-                    Ok(gov) => gov,
-                    Err(_) => return Ok(None),
-                };
-                let (avg_complexity, hotspots) = match self.quality_snapshot_metrics(&store) {
-                    Ok(metrics) => metrics,
-                    Err(_) => return Ok(None),
-                };
-                (
-                    gov.score,
-                    gov.structural_score,
-                    gov.agent_readiness_score,
+        let (
+            after_score,
+            after_structural,
+            after_agent,
+            after_dimensions,
+            after_avg_complexity,
+            after_hotspots,
+        ) = if let Some(end) = session.quality_session_end.as_ref() {
+            match store.load_snapshot(&end.source_id, &end.snapshot_name)? {
+                Some(snapshot) => (
+                    snapshot.score,
+                    snapshot.structural_score,
+                    snapshot.agent_readiness_score,
                     json!({
-                        "navigability": gov.agent.dimensions.navigability,
-                        "comprehensibility": gov.agent.dimensions.comprehensibility,
-                        "verifiability": gov.agent.dimensions.verifiability,
-                        "change_safety": gov.agent.dimensions.change_safety,
+                        "navigability": snapshot.navigability,
+                        "comprehensibility": snapshot.comprehensibility,
+                        "verifiability": snapshot.verifiability,
+                        "change_safety": snapshot.change_safety,
                     }),
-                    avg_complexity,
-                    hotspots,
-                )
+                    end.avg_complexity.unwrap_or(snapshot.avg_complexity),
+                    end.hotspots.clone(),
+                ),
+                None => return Ok(None),
+            }
+        } else {
+            let gov = match codesight_analysis::quality_signal::compute_governance_signal(&store) {
+                Ok(gov) => gov,
+                Err(_) => return Ok(None),
             };
+            let (avg_complexity, hotspots) = match self.quality_snapshot_metrics(&store) {
+                Ok(metrics) => metrics,
+                Err(_) => return Ok(None),
+            };
+            (
+                gov.score,
+                gov.structural_score,
+                gov.agent_readiness_score,
+                json!({
+                    "navigability": gov.agent.dimensions.navigability,
+                    "comprehensibility": gov.agent.dimensions.comprehensibility,
+                    "verifiability": gov.agent.dimensions.verifiability,
+                    "change_safety": gov.agent.dimensions.change_safety,
+                }),
+                avg_complexity,
+                hotspots,
+            )
+        };
 
         let per_dimension = json!({
             "navigability": dimension_delta(baseline.navigability, after_dimensions["navigability"].as_f64()),
@@ -293,10 +295,18 @@ impl CodeService {
         let (new_hotspots, resolved_hotspots, largest_regression, largest_improvement) =
             hotspot_deltas(&baseline_hotspots, &after_hotspots);
         let weakest_regression = [
-            per_dimension["navigability"]["delta"].as_f64().unwrap_or(0.0),
-            per_dimension["comprehensibility"]["delta"].as_f64().unwrap_or(0.0),
-            per_dimension["verifiability"]["delta"].as_f64().unwrap_or(0.0),
-            per_dimension["change_safety"]["delta"].as_f64().unwrap_or(0.0),
+            per_dimension["navigability"]["delta"]
+                .as_f64()
+                .unwrap_or(0.0),
+            per_dimension["comprehensibility"]["delta"]
+                .as_f64()
+                .unwrap_or(0.0),
+            per_dimension["verifiability"]["delta"]
+                .as_f64()
+                .unwrap_or(0.0),
+            per_dimension["change_safety"]["delta"]
+                .as_f64()
+                .unwrap_or(0.0),
         ]
         .into_iter()
         .fold(0.0, f64::min);
@@ -363,7 +373,10 @@ fn hotspot_deltas(
     let mut regressions = Vec::new();
     let mut largest_regression = 0_u64;
     for entry in after {
-        let before_cyclomatic = before_by_file.get(entry.file.as_str()).copied().unwrap_or(0);
+        let before_cyclomatic = before_by_file
+            .get(entry.file.as_str())
+            .copied()
+            .unwrap_or(0);
         if entry.cyclomatic > before_cyclomatic {
             let delta = entry.cyclomatic - before_cyclomatic;
             largest_regression = largest_regression.max(delta);
@@ -418,5 +431,10 @@ fn hotspot_deltas(
 
     regressions.truncate(10);
     resolved.truncate(10);
-    (regressions, resolved, largest_regression, largest_improvement)
+    (
+        regressions,
+        resolved,
+        largest_regression,
+        largest_improvement,
+    )
 }

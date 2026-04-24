@@ -10,7 +10,10 @@ use tempfile::tempdir;
 #[test]
 fn unknown_tool_returns_envelope_error() {
     let dir = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().to_path_buf())).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        dir.path().to_path_buf(),
+    ))
+    .unwrap();
     let r = svc.dispatch("nonexistent_tool", json!({})).unwrap();
     assert_eq!(r["ok"], false);
     assert!(r.get("error").is_some());
@@ -23,7 +26,10 @@ fn evaluate_quality_unsupported_is_invalid_argument() {
     // schema validation time with INVALID_ARGUMENT instead of silently
     // falling through to a NOT_IMPLEMENTED warning.
     let dir = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().to_path_buf())).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        dir.path().to_path_buf(),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",
@@ -48,7 +54,8 @@ fn assemble_section_context_returns_primary_and_neighbors() {
     fs::copy(&sample, doc_root.join("docs/sample.md")).unwrap();
 
     let index_root = workspace.path().join("index");
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(index_root)).unwrap();
+    let svc =
+        codesight_mcp::test_support::make_service_from_config(AppConfig::new(index_root)).unwrap();
     let ing = svc
         .dispatch(
             "ingest_sources",

@@ -93,10 +93,7 @@ impl IndexStore {
 
     /// Batch-variant of [`IndexStore::file_language`]. Returns a
     /// `path → language` map; missing paths map to absent keys.
-    pub fn file_languages_batch(
-        &self,
-        paths: &[&str],
-    ) -> anyhow::Result<HashMap<String, String>> {
+    pub fn file_languages_batch(&self, paths: &[&str]) -> anyhow::Result<HashMap<String, String>> {
         let mut out: HashMap<String, String> = HashMap::new();
         if paths.is_empty() {
             return Ok(out);
@@ -191,10 +188,9 @@ impl IndexStore {
             );
             let mut stmt = conn.prepare_cached(&sql)?;
             let params = chunk.iter().copied().chain(kinds.iter().copied());
-            let rows = stmt
-                .query_map(rusqlite::params_from_iter(params), |row| {
-                    row.get::<_, String>(0)
-                })?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                row.get::<_, String>(0)
+            })?;
             for row in rows {
                 out.insert(row?);
             }
@@ -243,12 +239,9 @@ impl IndexStore {
             return Ok(None);
         }
         let conn = self.open_read_only()?;
-        let mut stmt = conn.prepare_cached(
-            "SELECT file_path FROM symbols WHERE name = ?1 LIMIT 1",
-        )?;
-        let row: Option<String> = stmt
-            .query_row([name], |row| row.get(0))
-            .optional()?;
+        let mut stmt =
+            conn.prepare_cached("SELECT file_path FROM symbols WHERE name = ?1 LIMIT 1")?;
+        let row: Option<String> = stmt.query_row([name], |row| row.get(0)).optional()?;
         Ok(row)
     }
 
@@ -295,7 +288,6 @@ impl IndexStore {
         }
         Ok(out)
     }
-
 }
 
 #[cfg(test)]

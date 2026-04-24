@@ -6,8 +6,10 @@ mod neighbors;
 mod scope;
 mod token;
 
+#[allow(unused_imports)]
 pub(in crate::service) use json_shape::{
-    doc_format_to_type_label, err_item, resolve_symbol_id, search_hit_section, search_hit_symbol,
+    RefResolution, doc_format_to_type_label, err_item, ref_requires_strict_resolution,
+    resolve_symbol_id, resolve_symbol_id_strict, search_hit_section, search_hit_symbol,
 };
 pub(in crate::service) use neighbors::{
     direct_child_sections, heading_path_ancestors, outline_neighbors,

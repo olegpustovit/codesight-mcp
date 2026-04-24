@@ -106,11 +106,7 @@ impl IndexStore {
     /// don't have the stable id or its start line. Prefers the outermost
     /// match (smallest depth, largest span) so overloaded / nested symbols
     /// surface the top-level one.
-    pub fn symbol_id_at_name(
-        &self,
-        file_path: &str,
-        name: &str,
-    ) -> anyhow::Result<Option<String>> {
+    pub fn symbol_id_at_name(&self, file_path: &str, name: &str) -> anyhow::Result<Option<String>> {
         let conn = self.open_read_only()?;
         let picked: Option<String> = conn
             .query_row(
@@ -129,8 +125,7 @@ impl IndexStore {
     /// callers can surface an ambiguity error instead of guessing.
     pub fn symbol_id_by_unique_name(&self, name: &str) -> anyhow::Result<Option<String>> {
         let conn = self.open_read_only()?;
-        let mut stmt =
-            conn.prepare_cached("SELECT id FROM symbols WHERE name = ?1 LIMIT 2")?;
+        let mut stmt = conn.prepare_cached("SELECT id FROM symbols WHERE name = ?1 LIMIT 2")?;
         let mut rows = stmt.query([name])?;
         let Some(first) = rows.next()? else {
             return Ok(None);
@@ -386,7 +381,12 @@ mod tests {
     #[test]
     fn symbol_id_at_name_returns_none_when_absent() {
         let (_d, store) = new_store();
-        assert!(store.symbol_id_at_name("missing.rs", "no_such").unwrap().is_none());
+        assert!(
+            store
+                .symbol_id_at_name("missing.rs", "no_such")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

@@ -1,15 +1,16 @@
+use std::collections::BTreeSet;
 use std::fs;
 
 use serde_json::{Value, json};
 
-use codesight_core::symbols::SymbolKind;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::ContentRef;
 use crate::service::agent_v1::util::resolve_symbol_id;
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
 use crate::service::savings::MetaBuilder;
-use codesight_storage::storage::IndexStore;
+use codesight_core::symbols::SymbolKind;
 use codesight_language_support::imports_orchestration::context_bundle_import_lines;
+use codesight_storage::storage::IndexStore;
 
 #[derive(Clone)]
 pub(super) struct BundleRow {
@@ -107,14 +108,11 @@ impl CodeService {
                 )?));
             };
             let meta = enriched.get(&sym_id);
+            // Reuse the shared SymbolIdRef leaf extraction instead of
+            // hand-parsing `::` + `#` at each call site.
             let name = meta.map(|m| m.name.clone()).unwrap_or_else(|| {
-                sym_id
-                    .rsplit("::")
-                    .next()
-                    .unwrap_or(&sym_id)
-                    .split('#')
-                    .next()
-                    .unwrap_or(&sym_id)
+                codesight_core::SymbolIdRef::new(&sym_id)
+                    .leaf_name()
                     .to_string()
             });
             let signature = meta.map(|m| m.signature.clone()).unwrap_or_default();
@@ -157,4 +155,158 @@ impl CodeService {
         }
         Ok(Ok(rows))
     }
+
+    /// Expand a `context_bundle` by `depth` (ROADMAP P1.5).
+    ///
+    /// * depth 0 — returns `base` unchanged.
+    /// * depth ≥ 1 — pulls in type/identifier references found in the
+    ///   signatures and bodies of the base rows, resolved to indexed symbols
+    ///   via globally-unique name lookup. Skips unresolvable identifiers and
+    ///   anything already in the bundle.
+    /// * depth ≥ 2 — adds a representative caller + callee per base row from
+    ///   the text-heuristic call graph (same engine `inspect_graph graph=calls`
+    ///   uses). One each, keeping the bundle small enough for agents.
+    ///
+    /// `include_tests` (default `true`) filters out rows whose `file` path
+    /// looks like a test fixture — controlled by
+    /// `codesight_language_support::is_test_file`.
+    pub(super) fn expand_bundle_by_depth(
+        &self,
+        store: &IndexStore,
+        base: Vec<BundleRow>,
+        depth: u32,
+        include_tests: bool,
+        timer: &MetaBuilder,
+    ) -> anyhow::Result<Result<Vec<BundleRow>, Value>> {
+        if depth == 0 || base.is_empty() {
+            return Ok(Ok(base));
+        }
+        let mut seen: BTreeSet<String> = base.iter().map(|r| r.sym_id.clone()).collect();
+        let mut extras: Vec<BundleRow> = Vec::new();
+
+        // Depth 1: tokens that look like type/symbol names in the sigs & bodies.
+        let type_name_candidates = collect_type_name_candidates(&base);
+        for name in type_name_candidates {
+            let Ok(Some(sid)) = store.symbol_id_by_unique_name(&name) else {
+                continue;
+            };
+            if seen.insert(sid.clone())
+                && let Some(row) = self.row_for_symbol_id(store, &sid)
+            {
+                extras.push(row);
+            }
+        }
+
+        // Depth 2: one caller + one callee per base row.
+        if depth >= 2 {
+            let sym_infos = try_store!(self, timer, store.all_symbols_with_source());
+            let edges = codesight_analysis::graph::build_call_edges(&sym_infos);
+            for row in &base {
+                let callers =
+                    codesight_analysis::graph::find_callers(&row.sym_id, &edges, 1);
+                if let Some((id, _, _, _, _, _)) = callers.first()
+                    && seen.insert(id.clone())
+                    && let Some(extra) = self.row_for_symbol_id(store, id)
+                {
+                    extras.push(extra);
+                }
+                let callees =
+                    codesight_analysis::graph::find_callees(&row.sym_id, &edges, 1);
+                if let Some((id, _, _, _, _, _)) = callees.first()
+                    && seen.insert(id.clone())
+                    && let Some(extra) = self.row_for_symbol_id(store, id)
+                {
+                    extras.push(extra);
+                }
+            }
+        }
+
+        if !include_tests {
+            extras.retain(|r| !codesight_language_support::is_test_file(&r.file));
+        }
+
+        // ROADMAP P1.5 #2: greedy centrality pack. When we have a dependency
+        // graph to rank by, sort the expansion pool by per-file PageRank so
+        // the most-central symbols win the `max_tokens` budget downstream.
+        // Files missing from the graph (new files, leafs) get score 0 and
+        // sort after ranked rows but still land ahead of the `max_tokens`
+        // cut. Empty pagerank → no reorder.
+        if let Ok(adj) = store.dependency_graph() {
+            let pr = codesight_analysis::graph::compute_pagerank(&adj, 0.85, 50, 1e-5);
+            extras.sort_by(|a, b| {
+                let sa = pr.scores.get(&a.file).copied().unwrap_or(0.0);
+                let sb = pr.scores.get(&b.file).copied().unwrap_or(0.0);
+                sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+
+        let mut out = base;
+        out.extend(extras);
+        Ok(Ok(out))
+    }
+
+    /// Build a `BundleRow` from a single resolved stable id. Returns `None`
+    /// when the symbol has no indexed metadata or its file is missing from
+    /// disk — used by the depth-expansion pass where a missing neighbour is
+    /// fine (just skip it).
+    fn row_for_symbol_id(&self, store: &IndexStore, sym_id: &str) -> Option<BundleRow> {
+        let record = store.symbol_record(sym_id).ok().flatten()?;
+        let enriched = store
+            .symbol_enriched_batch(&[sym_id])
+            .ok()
+            .and_then(|mut m| m.remove(sym_id));
+        let name = enriched
+            .as_ref()
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| {
+                codesight_core::SymbolIdRef::new(sym_id)
+                    .leaf_name()
+                    .to_string()
+            });
+        let signature = enriched
+            .as_ref()
+            .map(|m| m.signature.clone())
+            .unwrap_or_default();
+        let root = store.root_path().ok()?;
+        let file_abs = root.join(&record.file_path);
+        let file_content = fs::read_to_string(&file_abs).ok()?;
+        let imports = context_bundle_import_lines(&file_content, &record.file_path);
+        Some(BundleRow {
+            sym_id: record.id.clone(),
+            name,
+            signature,
+            kind: record.kind,
+            file: record.file_path.clone(),
+            imports,
+            source: record.stored_source.clone(),
+        })
+    }
+}
+
+/// Rough heuristic: identifiers in signatures/bodies that *look* like type
+/// names — `PascalCase` tokens. This avoids the cost of re-parsing the
+/// source while still picking up the ~90% case (types constructed or
+/// returned by the bundled symbol). Known-noise / overly-generic words
+/// get filtered so tiny bundles don't balloon on `Option`, `Result`, `Vec`.
+fn collect_type_name_candidates(rows: &[BundleRow]) -> BTreeSet<String> {
+    const IGNORE: &[&str] = &[
+        "Option", "Result", "Vec", "String", "HashMap", "HashSet", "BTreeMap",
+        "BTreeSet", "Box", "Arc", "Rc", "Cell", "RefCell", "Mutex", "Self",
+        "None", "Some", "Ok", "Err",
+    ];
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    for r in rows {
+        for haystack in [r.signature.as_str(), r.source.as_str()] {
+            for token in haystack.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                let head = token.chars().next();
+                let is_camel = head.map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+                    && token.chars().skip(1).any(|c| c.is_ascii_lowercase())
+                    && token.len() >= 3;
+                if is_camel && !IGNORE.contains(&token) {
+                    out.insert(token.to_string());
+                }
+            }
+        }
+    }
+    out
 }

@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
-use crate::service::agent_v1::args::EvaluateImpactArgs;
+use crate::service::agent_v1::args::{ContentRef, EvaluateImpactArgs};
+use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
 use codesight_storage::storage::IndexStore;
@@ -37,6 +38,36 @@ fn resolve_symbol_file(
         return store.file_for_symbol_name(symbol_name);
     }
     Ok(None)
+}
+
+fn looks_like_stable_symbol_id(id: &str) -> bool {
+    id.contains("::") && id.contains('#')
+}
+
+fn ref_requires_strict_resolution(r: &ContentRef) -> bool {
+    r.path.as_deref().map(|s| !s.is_empty()).unwrap_or(false)
+        || r.start_line.is_some()
+        || r.symbol_name
+            .as_deref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+        || r.id
+            .as_deref()
+            .map(looks_like_stable_symbol_id)
+            .unwrap_or(false)
+        || r.stable_id
+            .as_deref()
+            .map(looks_like_stable_symbol_id)
+            .unwrap_or(false)
+}
+
+fn unresolved_ref_error(r: &ContentRef) -> ToolError {
+    ToolError {
+        category: ToolErrorCategory::NotFound,
+        code: "NOT_FOUND",
+        message: "blast_radius could not resolve refs[0].".to_string(),
+        detail: json!({ "unresolved": [r] }),
+    }
 }
 
 struct BfsResult {
@@ -128,7 +159,36 @@ impl CodeService {
         let adj = store.dependency_graph()?;
         let reverse_adj = build_reverse_adj(&adj);
         let all_files = store.all_file_paths()?;
-        let symbol_file = resolve_symbol_file(&store, stable_id, symbol_name)?;
+        let first_ref = args.refs.as_ref().and_then(|r| r.first());
+        let mut resolution: Option<&'static str> = None;
+        let symbol_file = if let Some(r) = first_ref
+            .filter(|r| r.kind.eq_ignore_ascii_case("symbol") && ref_requires_strict_resolution(r))
+        {
+            // ROADMAP P0.2 #3: promote to strict resolution so we can echo
+            // which ref shape actually resolved and emit NOT_FOUND when none
+            // do. Previously used the permissive `resolve_symbol_id`.
+            use crate::service::agent_v1::util::resolve_symbol_id_strict;
+            let resolved = resolve_symbol_id_strict(
+                &store,
+                r.stable_id.as_deref(),
+                r.id.as_deref(),
+                r.path.as_deref(),
+                r.start_line,
+                r.symbol_name.as_deref(),
+            )?;
+            match resolved {
+                Some((id, strategy)) => {
+                    resolution = Some(strategy.as_str());
+                    match store.symbol_record(&id)?.map(|rec| rec.file_path) {
+                        Some(file) => Some(file),
+                        None => return self.error_response(&timer, unresolved_ref_error(r)),
+                    }
+                }
+                None => return self.error_response(&timer, unresolved_ref_error(r)),
+            }
+        } else {
+            resolve_symbol_file(&store, stable_id, symbol_name)?
+        };
 
         let bfs = symbol_file
             .as_deref()
@@ -146,8 +206,9 @@ impl CodeService {
             (total_impacted as f64 / all_files.len().max(1) as f64).min(1.0)
         };
 
-        let raw_bytes = store.repo_total_bytes().unwrap_or(0);
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: impact analysis is structural — no native-tool
+        // counterfactual. Null baseline (`tokens_saved: null`).
+        let timer = MetaBuilder::new(0);
 
         let layer_findings: Vec<Value> = bfs
             .layers
@@ -198,6 +259,35 @@ impl CodeService {
             data["cross_repo_key"] = json!(format!("blast_radius:{}", symbol_name));
         }
 
-        self.success_response(&timer, data)
+        // ROADMAP P2.8: emit actionable_next hints for the top confirmed
+        // dependents so the agent can inspect callers or rename-check each
+        // one without replaying the blast-radius path.
+        let actionable_next: Vec<Value> = bfs
+            .confirmed
+            .iter()
+            .take(3)
+            .filter_map(|f| f.as_str().map(|s| s.to_string()))
+            .map(|path| {
+                json!({
+                    "tool": "inspect_graph",
+                    "args": {
+                        "source_id": args.source_id,
+                        "graph": "references",
+                        "ref": { "path": path },
+                    },
+                    "reason": format!("Enumerate references into `{path}` before editing the target."),
+                })
+            })
+            .collect();
+
+        // ROADMAP P0.2 #3: echo ref-shape resolution + P2.8 actionable_next.
+        let mut extras: Vec<(String, Value)> = vec![(
+            "actionable_next".to_string(),
+            json!(actionable_next),
+        )];
+        if let Some(r) = resolution {
+            extras.push(("resolution".to_string(), json!(r)));
+        }
+        self.success_response_with_meta_extra(&timer, data, Vec::new(), extras)
     }
 }

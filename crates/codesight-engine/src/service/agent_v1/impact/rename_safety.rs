@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
+use crate::service::agent_v1::util::{ref_requires_strict_resolution, resolve_symbol_id_strict};
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
@@ -31,8 +32,6 @@ impl CodeService {
             );
         };
 
-        let sym_id = r.stable_id.as_deref().or(r.id.as_deref()).unwrap_or("");
-
         let new_name = r.new_name.as_deref().unwrap_or("");
 
         if new_name.is_empty() {
@@ -46,7 +45,42 @@ impl CodeService {
                 },
             );
         }
-        let data = match impact::rename_safety_payload(&store, sym_id, new_name)? {
+
+        let is_strict = ref_requires_strict_resolution(
+            r.stable_id.as_deref(),
+            r.id.as_deref(),
+            r.path.as_deref(),
+            r.start_line,
+            r.symbol_name.as_deref(),
+        );
+        let resolved = resolve_symbol_id_strict(
+            &store,
+            r.stable_id.as_deref(),
+            r.id.as_deref(),
+            r.path.as_deref(),
+            r.start_line,
+            r.symbol_name.as_deref(),
+        )?;
+        let (sym_id, resolution) = match resolved {
+            Some((id, strategy)) => (id, Some(strategy.as_str())),
+            None if is_strict => {
+                return self.error_response(
+                    &timer,
+                    ToolError {
+                        category: ToolErrorCategory::NotFound,
+                        code: "NOT_FOUND",
+                        message: "rename_safety could not resolve refs[0].".to_string(),
+                        detail: json!({ "unresolved": [r] }),
+                    },
+                );
+            }
+            None => (
+                r.stable_id.as_deref().or(r.id.as_deref()).unwrap_or("").to_string(),
+                None,
+            ),
+        };
+
+        let data = match impact::rename_safety_payload(&store, &sym_id, new_name)? {
             Some(data) => data,
             None => {
                 return self.error_response(
@@ -60,8 +94,15 @@ impl CodeService {
                 );
             }
         };
-        let raw_bytes = store.repo_total_bytes().unwrap_or(0);
-        let timer = MetaBuilder::new(raw_bytes);
-        self.success_response(&timer, data)
+        // ROADMAP P1.1: structural analysis — null baseline.
+        let timer = MetaBuilder::new(0);
+        // ROADMAP P0.2 #3: echo which ref shape resolved so agents can
+        // debug silent ambiguity. Omitted when resolution fell back to the
+        // permissive opaque-id path.
+        let mut extras: Vec<(String, Value)> = Vec::new();
+        if let Some(r) = resolution {
+            extras.push(("resolution".to_string(), json!(r)));
+        }
+        self.success_response_with_meta_extra(&timer, data, Vec::new(), extras)
     }
 }

@@ -56,11 +56,7 @@ impl WorkspacePackLanguage {
             tags_scm,
             injections_scm,
         }));
-        Self {
-            id,
-            manifest,
-            spec,
-        }
+        Self { id, manifest, spec }
     }
 }
 

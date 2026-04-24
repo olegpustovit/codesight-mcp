@@ -66,7 +66,10 @@ fn query_backed_languages_expose_curated_tiers_for_path_and_name_lookup() {
         .for_path(Path::new("settings.yaml"))
         .expect("yaml path lang");
     assert_eq!(yaml_path.id().as_str(), "yaml");
-    assert_eq!(yaml_path.extraction_tier(), ExtractionTier::CuratedQueryPack);
+    assert_eq!(
+        yaml_path.extraction_tier(),
+        ExtractionTier::CuratedQueryPack
+    );
 
     let yaml_by_name = registry.for_language_name("yaml").expect("yaml name lang");
     assert_eq!(yaml_by_name.id().as_str(), "yaml");

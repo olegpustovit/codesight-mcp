@@ -4,10 +4,10 @@ use std::path::Path;
 
 use codesight_engine::config::AppConfig;
 use codesight_engine::service::agent_v1::quality::doc_coverage::doc_coverage_payload;
-use codesight_storage::storage::doc_index::DocStore;
 use codesight_mcp::test_support::{
     copy_fixture_tree, doc_reference_fixtures_dir, index_doc_fixture, open_doc_store,
 };
+use codesight_storage::storage::doc_index::DocStore;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -100,7 +100,10 @@ fn doc_symbol_name_from_id_no_colons() {
 #[test]
 fn doc_doc_coverage_not_indexed() {
     let ws = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",
@@ -255,7 +258,10 @@ fn doc_doc_coverage_meta_present() {
     let fixture_root = Path::new(&doc_reference_fixtures_dir()).join("docs");
     let doc_root = ws.path().join("docs");
     copy_fixture_tree(&fixture_root, &doc_root).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let indexed = svc
         .dispatch(
             "ingest_sources",

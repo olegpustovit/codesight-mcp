@@ -4,7 +4,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::{AssembleContextArgs, ContentRef};
 use crate::service::agent_v1::util::{resolve_symbol_id, token_estimate_for_context};
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{MetaBuilder, sum_code_file_sizes};
 use codesight_storage::storage::IndexStore;
 
 use super::gather::BundleRow;
@@ -94,7 +94,9 @@ impl CodeService {
             return self.shape_empty_response(sym_refs, store, include_report, budget_report);
         }
 
-        let multi_shape = sym_refs.len() > 1 || include_report;
+        // Multi-row shape when the caller passed multiple refs, asked for a
+        // report, OR when depth expansion (ROADMAP P1.5) added extra rows.
+        let multi_shape = sym_refs.len() > 1 || include_report || rows.len() > 1;
         let body = if !multi_shape {
             let r0 = &rows[0];
             let mut o = json!({
@@ -140,10 +142,16 @@ impl CodeService {
             o
         };
 
-        let raw_bytes = serde_json::to_string(&body)
-            .map(|s| s.len() as u64)
-            .unwrap_or(1)
-            .max(1);
+        // ROADMAP P1.1: baseline = sum of full-file reads for every file
+        // the bundle included. The naive alternative to `context_bundle` is
+        // "open each file and read it end-to-end", which is what we charge
+        // against — not the serialized response size.
+        let paths: Vec<String> = rows
+            .iter()
+            .map(|r| r.file.clone())
+            .filter(|f| !f.is_empty())
+            .collect();
+        let raw_bytes = sum_code_file_sizes(store, paths).unwrap_or(0);
         let timer = MetaBuilder::new(raw_bytes);
         self.success_response(&timer, body)
     }
@@ -155,7 +163,8 @@ impl CodeService {
         include_report: bool,
         budget_report: Option<Value>,
     ) -> anyhow::Result<Value> {
-        let timer = MetaBuilder::new(1);
+        // Empty-bundle path: no files were read → no baseline.
+        let timer = MetaBuilder::new(0);
         if include_report {
             let body = json!({
                 "mode": "context_bundle",

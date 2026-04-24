@@ -49,7 +49,10 @@ fn build_centrality_repo() -> (tempfile::TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = index_code(&svc, &src);
     (ws, svc, sid)
 }
@@ -293,7 +296,10 @@ fn importance_top_n_respected() {
 #[test]
 fn importance_missing_repo() {
     let ws = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "inspect_graph",
@@ -337,7 +343,10 @@ fn build_sort_by_repo() -> (tempfile::TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = index_code(&svc, &src);
     (ws, svc, sid)
 }
@@ -413,8 +422,10 @@ fn search_sort_stable_order() {
 }
 
 // ===========================================================================
-// Integration tests: get_repo_outline most_central_symbols
-//   (TestRepoOutlineMostCentralSymbols, 3 tests)
+// Integration tests: repo_outline orientation shape (ROADMAP P1.3).
+// `repo_outline` is now an orientation view: per-crate rollups,
+// top_modules_by_centrality, top_modules_by_loc, entrypoints, languages.
+// (TestRepoOutlineOrientation, 3 tests)
 // ===========================================================================
 
 fn get_repo_outline(svc: &CodeService, sid: &str) -> Value {
@@ -429,44 +440,60 @@ fn get_repo_outline(svc: &CodeService, sid: &str) -> Value {
 }
 
 #[test]
-fn outline_most_central_symbols_present() {
+fn repo_outline_exposes_orientation_blocks() {
     let (_ws, svc, sid) = build_sort_by_repo();
     let r = get_repo_outline(&svc, &sid);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
+    let d = &r["data"];
     assert!(
-        r["data"]["most_central_symbols"].is_array(),
-        "repo_outline should include most_central_symbols: {r:?}"
+        d["workspace"]["crates"].is_array(),
+        "repo_outline should include workspace.crates: {r:?}"
+    );
+    assert!(
+        d["top_modules_by_centrality"].is_array(),
+        "repo_outline should include top_modules_by_centrality: {r:?}"
+    );
+    assert!(
+        d["top_modules_by_loc"].is_array(),
+        "repo_outline should include top_modules_by_loc: {r:?}"
+    );
+    assert!(
+        d["entrypoints"].is_array(),
+        "repo_outline should include entrypoints: {r:?}"
+    );
+    assert!(
+        d["languages"].is_object(),
+        "repo_outline should include languages: {r:?}"
+    );
+    assert!(
+        d.get("items").is_none(),
+        "alphabetical symbol dump must be gone: {r:?}"
+    );
+    assert!(
+        d.get("most_central_symbols").is_none(),
+        "legacy most_central_symbols field must be removed: {r:?}"
     );
 }
 
 #[test]
-fn outline_most_central_symbols_shape() {
+fn repo_outline_centrality_entries_have_path_and_score() {
     let (_ws, svc, sid) = build_sort_by_repo();
     let r = get_repo_outline(&svc, &sid);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let central = r["data"]["most_central_symbols"].as_array().unwrap();
-    for sym in central {
-        assert!(sym["path"].is_string(), "should have path: {sym:?}");
-        assert!(sym["score"].is_number(), "should have score: {sym:?}");
-        assert_eq!(
-            sym["kind"].as_str(),
-            Some("file"),
-            "centrality nodes are files: {sym:?}"
-        );
-        assert!(
-            sym.get("symbol_id").is_none(),
-            "symbol_id is no longer emitted (was file path, not a symbol): {sym:?}"
-        );
+    let central = r["data"]["top_modules_by_centrality"].as_array().unwrap();
+    for entry in central {
+        assert!(entry["path"].is_string(), "path missing: {entry:?}");
+        assert!(entry["score"].is_number(), "score missing: {entry:?}");
     }
 }
 
 #[test]
-fn outline_most_central_top_is_most_imported_file() {
+fn repo_outline_top_centrality_reflects_most_imported_file() {
     let (_ws, svc, sid) = build_sort_by_repo();
     let r = get_repo_outline(&svc, &sid);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let central = r["data"]["most_central_symbols"].as_array().unwrap();
-    assert!(!central.is_empty(), "should have central symbols");
+    let central = r["data"]["top_modules_by_centrality"].as_array().unwrap();
+    assert!(!central.is_empty(), "top_modules_by_centrality empty: {r:?}");
     let top_path = central[0]["path"].as_str().unwrap();
     assert!(
         top_path.contains("core.py"),

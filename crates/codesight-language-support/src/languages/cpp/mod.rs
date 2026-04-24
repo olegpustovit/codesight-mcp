@@ -61,7 +61,9 @@ impl Language for Cpp {
         &["void*", "auto"]
     }
     fn branch_keywords(&self) -> &'static [&'static str] {
-        &["if", "else if", "for", "while", "do", "switch", "case", "catch"]
+        &[
+            "if", "else if", "for", "while", "do", "switch", "case", "catch",
+        ]
     }
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]

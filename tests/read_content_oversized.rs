@@ -32,7 +32,10 @@ fn oversized_read_stubs_later_refs_with_structured_suggestion() {
     write_files(
         &src,
         &[
-            ("Cargo.toml", "[package]\nname=\"demo\"\nversion=\"0.1.0\"\n"),
+            (
+                "Cargo.toml",
+                "[package]\nname=\"demo\"\nversion=\"0.1.0\"\n",
+            ),
             ("src/a.rs", &big),
             ("src/b.rs", &big),
             ("src/c.rs", &big),
@@ -120,7 +123,10 @@ fn under_budget_reads_all_refs() {
     write_files(
         &src,
         &[
-            ("Cargo.toml", "[package]\nname=\"demo\"\nversion=\"0.1.0\"\n"),
+            (
+                "Cargo.toml",
+                "[package]\nname=\"demo\"\nversion=\"0.1.0\"\n",
+            ),
             ("src/a.rs", "pub fn a() {}\n"),
             ("src/b.rs", "pub fn b() {}\n"),
         ],

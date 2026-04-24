@@ -138,7 +138,9 @@ pub fn expand_context(
     // refers to a range that shrank after reindex — clamp everything to
     // `lines.len()` so an out-of-range slice can never panic the handler.
     let len = lines.len();
-    let raw_start = start_line.saturating_sub(1).saturating_sub(context_lines as u32) as usize;
+    let raw_start = start_line
+        .saturating_sub(1)
+        .saturating_sub(context_lines as u32) as usize;
     let raw_end = (end_line as usize).saturating_add(context_lines);
     let start_index = raw_start.min(len);
     let end_index = raw_end.min(len).max(start_index);

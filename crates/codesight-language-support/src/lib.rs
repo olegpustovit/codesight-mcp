@@ -32,6 +32,10 @@ pub mod visibility;
 pub mod workspace;
 pub mod workspace_pack;
 
+pub use extensions::{
+    DOC_EXTENSIONS, code_extensions, is_code_extension, is_doc_extension,
+    is_non_code_reference_path,
+};
 pub use facade::{
     additional_live_roots, all_entrypoint_basenames, class_hierarchy_note_for_path,
     distinctive_symbol_kinds_for_language, fallback_type_baseline_for_path,
@@ -43,23 +47,19 @@ pub use facade::{
     reclassify_file_language, root_package_from_specifier, supports_import_extraction,
     test_weight_multiplier,
 };
-pub use extensions::{
-    DOC_EXTENSIONS, code_extensions, is_code_extension, is_doc_extension,
-    is_non_code_reference_path,
-};
 pub use fallback::{FALLBACK_LANGUAGE, FallbackLanguage};
 pub use family::{LanguageFamily, NestingMode};
-pub use imports_types::{ImportEdge, source_slice};
 pub use grammars::{
     BuiltinQueryPackRow, builtin_extractor_version_stamp, builtin_grammar, builtin_grammars,
     builtin_query_packs,
 };
+pub use imports_types::{ImportEdge, source_slice};
 pub use manifest::{
     AL, ASM, BASH, BLADE, C, CPP, CSHARP, CSS, DART, EJS, ELIXIR, ERLANG, FORTRAN, GLEAM, GO,
     GrammarSpec, HostProfile, JAVA, JAVASCRIPT, JSON, JSX, KOTLIN, LESS, LUA, LUAU, LanguageId,
-    LanguageManifest, MARKDOWN, NIX, PERL, PHP, PYTHON, ProfileId, RAZOR, RUBY, RUST, SASS, SCSS,
-    SQL, STYL, SWIFT, TOML, TREE_SITTER_QUERY, TSX, TYPESCRIPT, UNKNOWN_LANGUAGE, VERSE, VUE, XML,
-    YAML, ResolvedLanguage,
+    LanguageManifest, MARKDOWN, NIX, PERL, PHP, PYTHON, ProfileId, RAZOR, RUBY, RUST,
+    ResolvedLanguage, SASS, SCSS, SQL, STYL, SWIFT, TOML, TREE_SITTER_QUERY, TSX, TYPESCRIPT,
+    UNKNOWN_LANGUAGE, VERSE, VUE, XML, YAML,
 };
 pub use nesting::{max_nesting_depth_for_path, max_nesting_depth_with_mode};
 pub use registry::LanguageRegistry;

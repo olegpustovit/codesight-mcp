@@ -64,12 +64,7 @@ impl Language for SqlSupport {
         // branching: `CASE WHEN`, `IF`, `IIF`, `ELSEIF`. Override the
         // family short-circuit with a case-insensitive scan.
         let lower = source.to_ascii_lowercase();
-        crate::complexity::count_cyclomatic(
-            &lower,
-            &["if", "when", "elseif", "iif"],
-            &[],
-            &["--"],
-        )
+        crate::complexity::count_cyclomatic(&lower, &["if", "when", "elseif", "iif"], &[], &["--"])
     }
 
     fn normalise_body_for_dedup(&self, source: &str) -> Vec<u8> {

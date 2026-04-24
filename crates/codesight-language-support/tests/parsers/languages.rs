@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
-use codesight_language_support::LanguageRegistry;
 use codesight_core::SymbolKind;
+use codesight_language_support::LanguageRegistry;
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
 
 fn registry_extract(filename: &str, src: &str) -> Vec<codesight_core::StoredSymbol> {
     let reg = LanguageRegistry::default();
@@ -179,11 +179,7 @@ fn case_c_cpp_csharp() {
     );
 }
 
-fn has_kind_name(
-    syms: &[codesight_core::StoredSymbol],
-    name: &str,
-    kind: SymbolKind,
-) -> bool {
+fn has_kind_name(syms: &[codesight_core::StoredSymbol], name: &str, kind: SymbolKind) -> bool {
     syms.iter().any(|s| s.name == name && s.kind == kind)
 }
 
@@ -530,7 +526,12 @@ fn test_parse_cpp_header_stays_cpp() {
     assert!(!symbols.is_empty(), "should produce symbols");
     // All symbols should have language == "cpp"
     for s in &symbols {
-        assert_eq!(s.language.as_str(), "cpp", "symbol {} should be cpp", s.name);
+        assert_eq!(
+            s.language.as_str(),
+            "cpp",
+            "symbol {} should be cpp",
+            s.name
+        );
     }
     // Widget class
     assert!(
@@ -556,7 +557,10 @@ fn test_parse_cpp_header_falls_back_to_c() {
     assert!(
         symbols.iter().all(|s| s.language.as_str() == "c"),
         "all symbols should be c: {:?}",
-        symbols.iter().map(|s| s.language.as_str()).collect::<Vec<_>>()
+        symbols
+            .iter()
+            .map(|s| s.language.as_str())
+            .collect::<Vec<_>>()
     );
     let only_c = symbols.iter().find(|s| s.name == "only_c");
     assert!(only_c.is_some(), "missing only_c function");

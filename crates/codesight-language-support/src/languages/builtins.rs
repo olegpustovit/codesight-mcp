@@ -17,8 +17,8 @@ use super::{
     typescript, verse, vue, xml, yaml,
 };
 use crate::manifest::{
-    BASH, CPP, CSHARP, CSS, DART, ELIXIR, GO, JAVA, JAVASCRIPT, JSON, KOTLIN, LUA, LUAU, PERL,
-    PHP, PYTHON, RUBY, RUST, SCSS, SQL, SWIFT, TSX, TYPESCRIPT, XML, YAML,
+    BASH, CPP, CSHARP, CSS, DART, ELIXIR, GO, JAVA, JAVASCRIPT, JSON, KOTLIN, LUA, LUAU, PERL, PHP,
+    PYTHON, RUBY, RUST, SCSS, SQL, SWIFT, TSX, TYPESCRIPT, XML, YAML,
 };
 
 macro_rules! manifest {
@@ -46,292 +46,587 @@ macro_rules! manifest {
     };
 }
 
-manifest!(RUST_MANIFEST,
-    display = "Rust", aliases = &["rs"], ext = &["rs"],
-    filenames = &[], compound = &[],
+manifest!(
+    RUST_MANIFEST,
+    display = "Rust",
+    aliases = &["rs"],
+    ext = &["rs"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&rust::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(TYPESCRIPT_MANIFEST,
-    display = "TypeScript", aliases = &["ts"],
-    ext = &["ts", "mts", "cts"], filenames = &[], compound = &["d.ts"],
+manifest!(
+    TYPESCRIPT_MANIFEST,
+    display = "TypeScript",
+    aliases = &["ts"],
+    ext = &["ts", "mts", "cts"],
+    filenames = &[],
+    compound = &["d.ts"],
     grammar = Some(&typescript::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(TSX_MANIFEST,
-    display = "TSX", aliases = &[], ext = &["tsx"],
-    filenames = &[], compound = &[],
+manifest!(
+    TSX_MANIFEST,
+    display = "TSX",
+    aliases = &[],
+    ext = &["tsx"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&tsx::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(JAVASCRIPT_MANIFEST,
-    display = "JavaScript", aliases = &["js"],
-    ext = &["js", "mjs", "cjs"], filenames = &[], compound = &[],
+manifest!(
+    JAVASCRIPT_MANIFEST,
+    display = "JavaScript",
+    aliases = &["js"],
+    ext = &["js", "mjs", "cjs"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&javascript::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(JSX_MANIFEST,
-    display = "JSX", aliases = &[], ext = &["jsx"],
-    filenames = &[], compound = &[],
+manifest!(
+    JSX_MANIFEST,
+    display = "JSX",
+    aliases = &[],
+    ext = &["jsx"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&javascript::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(PYTHON_MANIFEST,
-    display = "Python", aliases = &["py"], ext = &["py", "pyi"],
-    filenames = &[], compound = &[],
+manifest!(
+    PYTHON_MANIFEST,
+    display = "Python",
+    aliases = &["py"],
+    ext = &["py", "pyi"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&python::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(GO_MANIFEST,
-    display = "Go", aliases = &["golang"], ext = &["go"],
-    filenames = &[], compound = &[],
+manifest!(
+    GO_MANIFEST,
+    display = "Go",
+    aliases = &["golang"],
+    ext = &["go"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&go::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(JAVA_MANIFEST,
-    display = "Java", aliases = &[], ext = &["java"],
-    filenames = &[], compound = &[],
+manifest!(
+    JAVA_MANIFEST,
+    display = "Java",
+    aliases = &[],
+    ext = &["java"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&java::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(RUBY_MANIFEST,
-    display = "Ruby", aliases = &["rb"], ext = &["rb"],
-    filenames = &[], compound = &[],
+manifest!(
+    RUBY_MANIFEST,
+    display = "Ruby",
+    aliases = &["rb"],
+    ext = &["rb"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&ruby::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(PHP_MANIFEST,
-    display = "PHP", aliases = &[], ext = &["php"],
-    filenames = &[], compound = &[],
+manifest!(
+    PHP_MANIFEST,
+    display = "PHP",
+    aliases = &[],
+    ext = &["php"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&php::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(CSHARP_MANIFEST,
-    display = "C#", aliases = &["c_sharp", "cs"], ext = &["cs"],
-    filenames = &[], compound = &[],
+manifest!(
+    CSHARP_MANIFEST,
+    display = "C#",
+    aliases = &["c_sharp", "cs"],
+    ext = &["cs"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&csharp::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(CPP_MANIFEST,
-    display = "C++", aliases = &[],
+manifest!(
+    CPP_MANIFEST,
+    display = "C++",
+    aliases = &[],
     ext = &["cc", "cpp", "cxx", "hpp", "hh", "hxx", "h"],
-    filenames = &[], compound = &[],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&cpp::GRAMMAR),
     profiles = &[],
-    probe = Some(cpp::cpp_header_content_probe));
+    probe = Some(cpp::cpp_header_content_probe)
+);
 
-manifest!(C_MANIFEST,
-    display = "C", aliases = &[], ext = &["c"],
-    filenames = &[], compound = &[],
+manifest!(
+    C_MANIFEST,
+    display = "C",
+    aliases = &[],
+    ext = &["c"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&cpp::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(SWIFT_MANIFEST,
-    display = "Swift", aliases = &[], ext = &["swift"],
-    filenames = &[], compound = &[],
+manifest!(
+    SWIFT_MANIFEST,
+    display = "Swift",
+    aliases = &[],
+    ext = &["swift"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&swift::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(KOTLIN_MANIFEST,
-    display = "Kotlin", aliases = &[], ext = &["kt", "kts"],
-    filenames = &[], compound = &[],
+manifest!(
+    KOTLIN_MANIFEST,
+    display = "Kotlin",
+    aliases = &[],
+    ext = &["kt", "kts"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&kotlin::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(DART_MANIFEST,
-    display = "Dart", aliases = &[], ext = &["dart"],
-    filenames = &[], compound = &[],
+manifest!(
+    DART_MANIFEST,
+    display = "Dart",
+    aliases = &[],
+    ext = &["dart"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&dart::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(BASH_MANIFEST,
-    display = "Bash", aliases = &["sh"], ext = &["sh", "bash"],
-    filenames = &[], compound = &[],
+manifest!(
+    BASH_MANIFEST,
+    display = "Bash",
+    aliases = &["sh"],
+    ext = &["sh", "bash"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&bash::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(SQL_MANIFEST,
-    display = "SQL", aliases = &[], ext = &["sql"],
-    filenames = &[], compound = &[],
+manifest!(
+    SQL_MANIFEST,
+    display = "SQL",
+    aliases = &[],
+    ext = &["sql"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&sql::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(YAML_MANIFEST,
-    display = "YAML", aliases = &["yml"], ext = &["yaml", "yml"],
-    filenames = &[], compound = &[],
+manifest!(
+    YAML_MANIFEST,
+    display = "YAML",
+    aliases = &["yml"],
+    ext = &["yaml", "yml"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&yaml::GRAMMAR),
-    profiles = yaml::YAML_PROFILES, probe = None);
+    profiles = yaml::YAML_PROFILES,
+    probe = None
+);
 
-manifest!(JSON_MANIFEST,
-    display = "JSON", aliases = &[], ext = &["json"],
-    filenames = &[], compound = &[],
+manifest!(
+    JSON_MANIFEST,
+    display = "JSON",
+    aliases = &[],
+    ext = &["json"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&json::GRAMMAR),
-    profiles = yaml::JSON_PROFILES, probe = None);
+    profiles = yaml::JSON_PROFILES,
+    probe = None
+);
 
-manifest!(XML_MANIFEST,
-    display = "XML", aliases = &[], ext = &["xml", "svg"],
-    filenames = &[], compound = &[],
+manifest!(
+    XML_MANIFEST,
+    display = "XML",
+    aliases = &[],
+    ext = &["xml", "svg"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&xml::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(CSS_MANIFEST,
-    display = "CSS", aliases = &[], ext = &["css"],
-    filenames = &[], compound = &[],
+manifest!(
+    CSS_MANIFEST,
+    display = "CSS",
+    aliases = &[],
+    ext = &["css"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&css::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(SCSS_MANIFEST,
-    display = "SCSS", aliases = &[], ext = &["scss"],
-    filenames = &[], compound = &[],
+manifest!(
+    SCSS_MANIFEST,
+    display = "SCSS",
+    aliases = &[],
+    ext = &["scss"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&scss::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(LESS_MANIFEST,
-    display = "Less", aliases = &[], ext = &["less"],
-    filenames = &[], compound = &[],
+manifest!(
+    LESS_MANIFEST,
+    display = "Less",
+    aliases = &[],
+    ext = &["less"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(SASS_MANIFEST,
-    display = "Sass", aliases = &[], ext = &["sass"],
-    filenames = &[], compound = &[],
+manifest!(
+    SASS_MANIFEST,
+    display = "Sass",
+    aliases = &[],
+    ext = &["sass"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(STYL_MANIFEST,
-    display = "Stylus", aliases = &[], ext = &["styl"],
-    filenames = &[], compound = &[],
+manifest!(
+    STYL_MANIFEST,
+    display = "Stylus",
+    aliases = &[],
+    ext = &["styl"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(LUA_MANIFEST,
-    display = "Lua", aliases = &[], ext = &["lua"],
-    filenames = &[], compound = &[],
+manifest!(
+    LUA_MANIFEST,
+    display = "Lua",
+    aliases = &[],
+    ext = &["lua"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&lua::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(LUAU_MANIFEST,
-    display = "Luau", aliases = &[], ext = &["luau"],
-    filenames = &[], compound = &[],
+manifest!(
+    LUAU_MANIFEST,
+    display = "Luau",
+    aliases = &[],
+    ext = &["luau"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&luau::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(NIX_MANIFEST,
-    display = "Nix", aliases = &[], ext = &["nix"],
-    filenames = &[], compound = &[],
+manifest!(
+    NIX_MANIFEST,
+    display = "Nix",
+    aliases = &[],
+    ext = &["nix"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&nix::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(PERL_MANIFEST,
-    display = "Perl", aliases = &[], ext = &["pl", "pm", "psgi", "cgi"],
-    filenames = &[], compound = &[],
+manifest!(
+    PERL_MANIFEST,
+    display = "Perl",
+    aliases = &[],
+    ext = &["pl", "pm", "psgi", "cgi"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&perl::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(ASM_MANIFEST,
-    display = "Assembly", aliases = &[],
+manifest!(
+    ASM_MANIFEST,
+    display = "Assembly",
+    aliases = &[],
     ext = &["asm", "s", "65816", "inc", "z80", "spc"],
-    filenames = &[], compound = &[],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(BLADE_MANIFEST,
-    display = "Blade", aliases = &[], ext = &[],
-    filenames = &[], compound = &["blade.php"],
+manifest!(
+    BLADE_MANIFEST,
+    display = "Blade",
+    aliases = &[],
+    ext = &[],
+    filenames = &[],
+    compound = &["blade.php"],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(RAZOR_MANIFEST,
-    display = "Razor", aliases = &[], ext = &["cshtml", "razor"],
-    filenames = &[], compound = &[],
+manifest!(
+    RAZOR_MANIFEST,
+    display = "Razor",
+    aliases = &[],
+    ext = &["cshtml", "razor"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(EJS_MANIFEST,
-    display = "EJS", aliases = &["embedded_template"], ext = &["ejs"],
-    filenames = &[], compound = &[],
+manifest!(
+    EJS_MANIFEST,
+    display = "EJS",
+    aliases = &["embedded_template"],
+    ext = &["ejs"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&ejs::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(VERSE_MANIFEST,
-    display = "Verse", aliases = &[], ext = &["verse"],
-    filenames = &[], compound = &[],
+manifest!(
+    VERSE_MANIFEST,
+    display = "Verse",
+    aliases = &[],
+    ext = &["verse"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(ELIXIR_MANIFEST,
-    display = "Elixir", aliases = &[], ext = &["ex", "exs"],
-    filenames = &[], compound = &[],
+manifest!(
+    ELIXIR_MANIFEST,
+    display = "Elixir",
+    aliases = &[],
+    ext = &["ex", "exs"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&elixir::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(ERLANG_MANIFEST,
-    display = "Erlang", aliases = &[], ext = &["erl", "hrl"],
-    filenames = &[], compound = &[],
+manifest!(
+    ERLANG_MANIFEST,
+    display = "Erlang",
+    aliases = &[],
+    ext = &["erl", "hrl"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&erlang::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(FORTRAN_MANIFEST,
-    display = "Fortran", aliases = &[],
+manifest!(
+    FORTRAN_MANIFEST,
+    display = "Fortran",
+    aliases = &[],
     ext = &["f", "f90", "f95", "f03", "f08", "for", "fpp"],
-    filenames = &[], compound = &[],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&fortran::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(GLEAM_MANIFEST,
-    display = "Gleam", aliases = &[], ext = &["gleam"],
-    filenames = &[], compound = &[],
+manifest!(
+    GLEAM_MANIFEST,
+    display = "Gleam",
+    aliases = &[],
+    ext = &["gleam"],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&gleam::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(VUE_MANIFEST,
-    display = "Vue", aliases = &[], ext = &["vue"],
-    filenames = &[], compound = &[],
+manifest!(
+    VUE_MANIFEST,
+    display = "Vue",
+    aliases = &[],
+    ext = &["vue"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(AL_MANIFEST,
-    display = "AL", aliases = &[], ext = &["al"],
-    filenames = &[], compound = &[],
+manifest!(
+    AL_MANIFEST,
+    display = "AL",
+    aliases = &[],
+    ext = &["al"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(MARKDOWN_MANIFEST,
-    display = "Markdown", aliases = &[], ext = &["md", "markdown"],
-    filenames = &[], compound = &[],
+manifest!(
+    MARKDOWN_MANIFEST,
+    display = "Markdown",
+    aliases = &[],
+    ext = &["md", "markdown"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(TOML_MANIFEST,
-    display = "TOML", aliases = &[], ext = &["toml"],
-    filenames = &[], compound = &[],
+manifest!(
+    TOML_MANIFEST,
+    display = "TOML",
+    aliases = &[],
+    ext = &["toml"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(TREE_SITTER_QUERY_MANIFEST,
-    display = "Tree-sitter query", aliases = &[], ext = &["scm"],
-    filenames = &[], compound = &[],
+manifest!(
+    TREE_SITTER_QUERY_MANIFEST,
+    display = "Tree-sitter query",
+    aliases = &[],
+    ext = &["scm"],
+    filenames = &[],
+    compound = &[],
     grammar = None,
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
 // Host-profile languages. Routing is handled by the registry's profile
 // dispatch — these manifests intentionally register no extensions; the
 // host languages (YAML, JSON) still claim them.
-manifest!(OPENAPI_MANIFEST,
-    display = "OpenAPI", aliases = &["swagger"], ext = &[],
-    filenames = &[], compound = &[],
+manifest!(
+    OPENAPI_MANIFEST,
+    display = "OpenAPI",
+    aliases = &["swagger"],
+    ext = &[],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&yaml::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
-manifest!(ANSIBLE_MANIFEST,
-    display = "Ansible", aliases = &[], ext = &[],
-    filenames = &[], compound = &[],
+manifest!(
+    ANSIBLE_MANIFEST,
+    display = "Ansible",
+    aliases = &[],
+    ext = &[],
+    filenames = &[],
+    compound = &[],
     grammar = Some(&yaml::GRAMMAR),
-    profiles = &[], probe = None);
+    profiles = &[],
+    probe = None
+);
 
 const CURATED: &[LanguageId] = &[
-    RUST, TYPESCRIPT, TSX, JAVASCRIPT, PYTHON, GO, JAVA, RUBY, PHP, CSHARP, CPP, SWIFT, KOTLIN,
-    DART, BASH, SQL, YAML, JSON, XML, CSS, SCSS, LUA, LUAU, PERL, ELIXIR,
+    RUST,
+    TYPESCRIPT,
+    TSX,
+    JAVASCRIPT,
+    PYTHON,
+    GO,
+    JAVA,
+    RUBY,
+    PHP,
+    CSHARP,
+    CPP,
+    SWIFT,
+    KOTLIN,
+    DART,
+    BASH,
+    SQL,
+    YAML,
+    JSON,
+    XML,
+    CSS,
+    SCSS,
+    LUA,
+    LUAU,
+    PERL,
+    ELIXIR,
     // Every other grammar-backed language inherits the default SCM pipeline
     // via `Language::extract_symbols`, which qualifies as a curated-query-pack
     // tier.

@@ -133,14 +133,20 @@ mod tests {
     fn gini_uniform_is_zero() {
         let vals = vec![5.0, 5.0, 5.0, 5.0];
         let g = gini_coefficient(&vals);
-        assert!(g < 0.01, "uniform distribution should have Gini ~0, got {g}");
+        assert!(
+            g < 0.01,
+            "uniform distribution should have Gini ~0, got {g}"
+        );
     }
 
     #[test]
     fn gini_skewed_is_high() {
         let vals = vec![0.0, 0.0, 0.0, 100.0];
         let g = gini_coefficient(&vals);
-        assert!(g > 0.5, "skewed distribution should have high Gini, got {g}");
+        assert!(
+            g > 0.5,
+            "skewed distribution should have high Gini, got {g}"
+        );
     }
 
     #[test]

@@ -82,17 +82,11 @@ impl ServerHandler for CodeService {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let tool_name = request.name.to_string();
-        let arguments = request
-            .arguments
-            .map(Value::Object)
-            .unwrap_or(Value::Null);
+        let arguments = request.arguments.map(Value::Object).unwrap_or(Value::Null);
         let payload = dispatch_tool(self, tool_name, arguments).await?;
         let is_error = payload.get("error").is_some();
         let body = serde_json::to_string(&payload).map_err(|err| {
-            ErrorData::internal_error(
-                format!("failed to serialize tool response: {err}"),
-                None,
-            )
+            ErrorData::internal_error(format!("failed to serialize tool response: {err}"), None)
         })?;
         let mut result = CallToolResult::default();
         result.content = vec![Content::text(body)];
@@ -106,11 +100,9 @@ async fn dispatch_tool(
     tool: String,
     arguments: Value,
 ) -> Result<Value, ErrorData> {
-    let permit = DISPATCH_SEM
-        .clone()
-        .acquire_owned()
-        .await
-        .map_err(|err| ErrorData::internal_error(format!("dispatch semaphore closed: {err}"), None))?;
+    let permit = DISPATCH_SEM.clone().acquire_owned().await.map_err(|err| {
+        ErrorData::internal_error(format!("dispatch semaphore closed: {err}"), None)
+    })?;
     let budget_ms = registry::timeout_ms(&tool);
     let svc = service.shared_handle().ok_or_else(|| {
         ErrorData::internal_error(

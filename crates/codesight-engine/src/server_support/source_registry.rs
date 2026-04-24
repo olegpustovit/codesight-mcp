@@ -150,8 +150,7 @@ mod tests {
             content_hash: "deadbeef".to_string(),
             symbols: vec![StoredSymbol {
                 id: "a.rs::a#function".to_string(),
-                extraction_tier:
-                    codesight_storage::core::symbols::ExtractionTier::CuratedQueryPack,
+                extraction_tier: codesight_storage::core::symbols::ExtractionTier::CuratedQueryPack,
                 language: codesight_core::RUST,
                 file_path: "a.rs".to_string(),
                 qualified_name: "a".to_string(),
@@ -187,7 +186,11 @@ mod tests {
     fn snapshot_miss_populates_cache_and_returns_loaded_fields() {
         let ws = tempdir().unwrap();
         let root = ws.path().join("repo");
-        let db = ws.path().join("idx").join("unit_test").join("index.sqlite3");
+        let db = ws
+            .path()
+            .join("idx")
+            .join("unit_test")
+            .join("index.sqlite3");
         std::fs::create_dir_all(db.parent().unwrap()).unwrap();
         let store = seed_store(&root, db);
 
@@ -200,7 +203,10 @@ mod tests {
         // `/private/var/folders/...` from `canonicalize` but `/var/folders/...`
         // from `tempdir()`, and IndexStore stores whichever the ingester saw.
         let expected = root.canonicalize().unwrap_or(root.clone());
-        let got = snap.root_path.canonicalize().unwrap_or(snap.root_path.clone());
+        let got = snap
+            .root_path
+            .canonicalize()
+            .unwrap_or(snap.root_path.clone());
         assert_eq!(got, expected);
     }
 
@@ -208,7 +214,11 @@ mod tests {
     fn snapshot_hit_returns_same_arc_without_reload() {
         let ws = tempdir().unwrap();
         let root = ws.path().join("repo");
-        let db = ws.path().join("idx").join("unit_test").join("index.sqlite3");
+        let db = ws
+            .path()
+            .join("idx")
+            .join("unit_test")
+            .join("index.sqlite3");
         std::fs::create_dir_all(db.parent().unwrap()).unwrap();
         let store = seed_store(&root, db);
 
@@ -222,7 +232,11 @@ mod tests {
     fn fingerprint_drift_forces_reload() {
         let ws = tempdir().unwrap();
         let root = ws.path().join("repo");
-        let db = ws.path().join("idx").join("unit_test").join("index.sqlite3");
+        let db = ws
+            .path()
+            .join("idx")
+            .join("unit_test")
+            .join("index.sqlite3");
         std::fs::create_dir_all(db.parent().unwrap()).unwrap();
         let store = seed_store(&root, db.clone());
 
@@ -257,7 +271,11 @@ mod tests {
     fn invalidate_removes_entry() {
         let ws = tempdir().unwrap();
         let root = ws.path().join("repo");
-        let db = ws.path().join("idx").join("unit_test").join("index.sqlite3");
+        let db = ws
+            .path()
+            .join("idx")
+            .join("unit_test")
+            .join("index.sqlite3");
         std::fs::create_dir_all(db.parent().unwrap()).unwrap();
         let store = seed_store(&root, db);
 

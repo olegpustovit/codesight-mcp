@@ -17,12 +17,27 @@ fn build_importer_fixture(ws: &std::path::Path) -> String {
     write_files(
         ws,
         &[
-            ("Cargo.toml", "[package]\nname=\"demo\"\nversion=\"0.1.0\"\n"),
-            ("src/lib.rs", "pub mod target;\npub mod a;\npub mod b;\npub mod c;\n"),
+            (
+                "Cargo.toml",
+                "[package]\nname=\"demo\"\nversion=\"0.1.0\"\n",
+            ),
+            (
+                "src/lib.rs",
+                "pub mod target;\npub mod a;\npub mod b;\npub mod c;\n",
+            ),
             ("src/target.rs", "pub fn api() {}\n"),
-            ("src/a.rs", "use crate::target;\npub fn use_a() { target::api(); }\n"),
-            ("src/b.rs", "use crate::target;\npub fn use_b() { target::api(); }\n"),
-            ("src/c.rs", "use crate::target;\npub fn use_c() { target::api(); }\n"),
+            (
+                "src/a.rs",
+                "use crate::target;\npub fn use_a() { target::api(); }\n",
+            ),
+            (
+                "src/b.rs",
+                "use crate::target;\npub fn use_b() { target::api(); }\n",
+            ),
+            (
+                "src/c.rs",
+                "use crate::target;\npub fn use_c() { target::api(); }\n",
+            ),
         ],
     )
     .unwrap();
@@ -62,10 +77,7 @@ fn importers_scope_narrows_to_matching_files() {
         )
         .unwrap();
     assert_eq!(scoped["data"]["importer_count"].as_u64().unwrap(), 1);
-    assert_eq!(
-        scoped["data"]["importers"][0].as_str().unwrap(),
-        "src/a.rs",
-    );
+    assert_eq!(scoped["data"]["importers"][0].as_str().unwrap(), "src/a.rs",);
 }
 
 #[test]
@@ -86,10 +98,7 @@ fn importers_file_pattern_accepts_glob() {
         )
         .unwrap();
     assert_eq!(resp["data"]["importer_count"].as_u64().unwrap(), 1);
-    assert_eq!(
-        resp["data"]["importers"][0].as_str().unwrap(),
-        "src/b.rs",
-    );
+    assert_eq!(resp["data"]["importers"][0].as_str().unwrap(), "src/b.rs",);
 }
 
 #[test]
@@ -110,8 +119,5 @@ fn importers_exclude_drops_matching_files() {
         )
         .unwrap();
     assert_eq!(resp["data"]["importer_count"].as_u64().unwrap(), 1);
-    assert_eq!(
-        resp["data"]["importers"][0].as_str().unwrap(),
-        "src/b.rs",
-    );
+    assert_eq!(resp["data"]["importers"][0].as_str().unwrap(), "src/b.rs",);
 }

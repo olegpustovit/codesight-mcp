@@ -2,8 +2,8 @@
 
 use codesight_analysis::dead_code::dead_code_v2_payload;
 use codesight_engine::config::AppConfig;
-use codesight_storage::storage::IndexStore;
 use codesight_mcp::test_support::{index_code_fixture, open_code_store, write_files};
+use codesight_storage::storage::IndexStore;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -78,7 +78,10 @@ fn v2_total_analysed_present() {
 #[test]
 fn v2_missing_repo_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",
@@ -103,7 +106,10 @@ fn v2_timing_present() {
         ],
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let indexed = svc
         .dispatch(
             "ingest_sources",

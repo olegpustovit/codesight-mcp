@@ -157,7 +157,7 @@ fn remap_does_not_match_across_directory_boundary() {
 #[test]
 fn list_repos_source_root_remapped() {
     use codesight_engine::config::AppConfig;
-    
+
     use serde_json::json;
 
     let workspace = tempfile::tempdir().expect("tempdir");
@@ -173,7 +173,8 @@ fn list_repos_source_root_remapped() {
     let index_root = workspace_canon.join(".index");
     let mut config = AppConfig::new(index_root.clone());
     // No path_map during indexing.
-    let service = codesight_mcp::test_support::make_service_from_config(config.clone()).expect("service");
+    let service =
+        codesight_mcp::test_support::make_service_from_config(config.clone()).expect("service");
 
     let indexed = service
         .dispatch(

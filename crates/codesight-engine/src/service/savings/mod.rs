@@ -1,10 +1,12 @@
 //! Savings ledger, response envelope builder, and per-session counters.
 
+mod baseline;
 mod ledger;
 mod meta_builder;
 mod pricing;
 mod session;
 
+pub(in crate::service) use baseline::{search_rg_equivalent_bytes, sum_code_file_sizes};
 pub use ledger::{SavingsLedger, ToolCallRecord};
 pub use meta_builder::{Meta, MetaBuilder, RetrievalClass};
 pub use session::{
@@ -23,10 +25,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let ledger = SavingsLedger::new(dir.path().join("_savings.json"));
         ledger
-            .record_codesight_read_paths(&[
-                "src/foo.rs".to_string(),
-                "src/bar.rs".to_string(),
-            ])
+            .record_codesight_read_paths(&["src/foo.rs".to_string(), "src/bar.rs".to_string()])
             .unwrap();
         // Absolute path from the hook side should match on suffix.
         let was_read = ledger
@@ -84,7 +83,10 @@ mod tests {
             .unwrap();
         assert_eq!(meta.retrieval_class, Some(RetrievalClass::WholeFileRead));
         let encoded = serde_json::to_value(&meta).unwrap();
-        assert_eq!(encoded["retrieval_class"], serde_json::json!("whole_file_read"));
+        assert_eq!(
+            encoded["retrieval_class"],
+            serde_json::json!("whole_file_read")
+        );
     }
 
     #[test]

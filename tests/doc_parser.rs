@@ -256,7 +256,10 @@ fn doc_parser_txt_paragraphs_no_headings() {
     let text_dir = ws.path().join("text");
     fs::create_dir_all(&text_dir).unwrap();
     fs::write(text_dir.join("sample.txt"), &content).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest_docs(&svc, ws.path());
     let items = get_outline(&svc, &sid, "text/sample.txt");
     assert!(
@@ -345,7 +348,10 @@ fn setup_single_doc(doc_name: &str, content: &str) -> (tempfile::TempDir, CodeSe
     let doc_dir = ws.path().join("docs");
     fs::create_dir_all(&doc_dir).unwrap();
     fs::write(doc_dir.join(doc_name), content).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     (ws, svc)
 }
 
@@ -376,7 +382,10 @@ fn setup_fixture_doc(fixture_subpath: &str) -> (tempfile::TempDir, CodeService, 
         }
     }
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest_docs(&svc, ws.path());
     (ws, svc, sid)
 }
@@ -513,7 +522,10 @@ fn run_multi_format_ingest() {
     fs::write(doc_dir.join("manual.adoc"), "# Manual\n\nAdoc with ATX.\n").unwrap();
     fs::write(doc_dir.join("plain.txt"), "# Plain\n\nText.\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest_docs(&svc, ws.path());
     let toc = get_toc(&svc, &sid);
     let t = titles(&toc);

@@ -141,10 +141,15 @@ impl CodeService {
             "children": children,
             "neighbors": neighbors,
         });
-        let raw_bytes = serde_json::to_string(&body)
-            .map(|s| s.len() as u64)
-            .unwrap_or(1)
-            .max(1);
+        // ROADMAP P1.1: baseline = full-file read of the doc containing the
+        // target section (naive alternative is "open the markdown and read
+        // end-to-end"). Falls back to 0 (→ `tokens_saved: null`) when the
+        // section has no resolvable file.
+        let raw_bytes = if file.is_empty() {
+            0
+        } else {
+            store.sum_file_sizes_for_paths(&[file.to_string()]).unwrap_or(0)
+        };
         let timer = MetaBuilder::new(raw_bytes);
         let mut response = self.success_response_with_warnings(&timer, body, warnings)?;
         if let Value::Object(ref mut top) = response {

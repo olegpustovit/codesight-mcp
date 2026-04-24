@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::pricing::{cost_for_tokens, round_cost, round_cost_map};
-use super::session::{
-    QualitySnapshotMarker, ReadContentStats, SessionState, StaleWarningRecord,
-};
+use super::session::{QualitySnapshotMarker, ReadContentStats, SessionState, StaleWarningRecord};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct SavingsState {
@@ -87,9 +85,7 @@ impl SavingsLedger {
         {
             session.primary_source_id = Some(source_id.to_string());
         }
-        session.tokens_saved_total = session
-            .tokens_saved_total
-            .saturating_add(call.tokens_saved);
+        session.tokens_saved_total = session.tokens_saved_total.saturating_add(call.tokens_saved);
         if call.tool == "evaluate_impact"
             && let Some(analysis) = call.impact_analysis.filter(|value| !value.is_empty())
         {

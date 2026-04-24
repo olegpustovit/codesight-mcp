@@ -16,9 +16,7 @@ use crate::imports_orchestration::{
 };
 
 /// Build a file-level dependency adjacency list from source files.
-pub fn build_dependency_graph(
-    files: &[(String, String)],
-) -> HashMap<String, Vec<String>> {
+pub fn build_dependency_graph(files: &[(String, String)]) -> HashMap<String, Vec<String>> {
     build_dependency_graph_with_aliases(files, None, None)
 }
 

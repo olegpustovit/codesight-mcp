@@ -315,4 +315,3 @@ fn overlap(query_tokens: &[String], candidate_tokens: &[String]) -> f64 {
         .count();
     matched as f64 / query_tokens.len() as f64
 }
-

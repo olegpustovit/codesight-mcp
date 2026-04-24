@@ -40,8 +40,9 @@ impl CodeService {
                 },
             );
         }
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: structural analysis — no native-tool counterfactual
+        // that maps to `repo_total_bytes`. Null baseline is the honest signal.
+        let timer = MetaBuilder::new(0);
         let adj = store.dependency_graph_strict()?;
         let metrics = codesight_analysis::graph::compute_coupling(&module_path, &adj);
         self.success_response(
@@ -81,8 +82,9 @@ impl CodeService {
             );
         }
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: structural analysis — no native-tool counterfactual
+        // that maps to `repo_total_bytes`. Null baseline is the honest signal.
+        let timer = MetaBuilder::new(0);
         let adj = store.dependency_graph_strict()?;
         let violations = codesight_analysis::graph::find_layer_violations(&adj, &rules);
         self.success_response(

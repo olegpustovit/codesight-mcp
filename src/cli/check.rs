@@ -153,9 +153,7 @@ fn check_schema_version(config: &AppConfig) -> CheckOutcome {
 fn check_query_packs(workspace: Option<&Path>) -> CheckOutcome {
     let result = match workspace {
         Some(ws) => {
-            codesight_language_support::query_pack_catalog::QueryPackCatalog::for_workspace_root(
-                ws,
-            )
+            codesight_language_support::query_pack_catalog::QueryPackCatalog::for_workspace_root(ws)
         }
         None => Ok(codesight_language_support::query_pack_catalog::QueryPackCatalog::builtin()),
     };
@@ -209,4 +207,241 @@ fn check_project_config(workspace: &Path) -> CheckOutcome {
             format!("{} is malformed: {error}", path.display()),
         ),
     }
+}
+
+// ── Premium release gate ─────────────────────────────────────────────────
+//
+// `codesight-mcp check --premium-gate [--workspace PATH]` runs an end-to-end
+// probe of every P0 trust invariant from ROADMAP.md. Any failure here blocks
+// the release. Thresholds are centralised here so "premium" is a measurable
+// contract, not a marketing word.
+
+const PREMIUM_GATE_MAX_DEAD_PCT: f64 = 2.0;
+const PREMIUM_GATE_MAX_TOOL_LATENCY_MS: f64 = 2_500.0;
+const PREMIUM_GATE_MAX_LINE_ZERO_REFS: usize = 0;
+const PREMIUM_GATE_MIN_AGENT_READINESS: f64 = 0.65;
+
+/// Run the premium-release gate: ingest the workspace, fire the probes, and
+/// return `Ok(true)` only when every invariant holds.
+pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
+    use codesight_engine::service::CodeService;
+    use serde_json::json;
+
+    let ws = workspace.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    println!("codesight-mcp premium-gate");
+    println!("===========================");
+    println!("  workspace            {}", ws.display());
+
+    let config = AppConfig::load();
+    let svc = CodeService::new(config)?;
+
+    // Fresh full reindex so the gate measures the code on disk, not a
+    // stale snapshot.
+    let ingest = svc.dispatch(
+        "ingest_sources",
+        json!({
+            "path": ws.to_string_lossy(),
+            "domains": "code",
+            "incremental": false,
+        }),
+    )?;
+    if ingest.get("ok").and_then(|b| b.as_bool()) != Some(true) {
+        println!("  FAIL  ingest                {ingest}");
+        return Ok(false);
+    }
+    let source_id = ingest["data"]["source_id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("ingest_sources missing source_id"))?
+        .to_string();
+
+    let mut outcomes: Vec<CheckOutcome> = Vec::new();
+
+    // Probe 1 — module-tree reachability. The on-disk repo must not report a
+    // dead_code_pct above PREMIUM_GATE_MAX_DEAD_PCT, because this repo's own
+    // crates are all reachable via `pub mod` declarations from their `lib.rs`.
+    let health = svc.dispatch(
+        "evaluate_quality",
+        json!({ "source_id": source_id, "analysis": "repo_health" }),
+    )?;
+    let dead_pct = health["data"]["dead_code_pct"].as_f64().unwrap_or(100.0);
+    let dead_count = health["data"]["dead_count"].as_u64().unwrap_or(u64::MAX);
+    outcomes.push(if dead_pct <= PREMIUM_GATE_MAX_DEAD_PCT {
+        CheckOutcome::ok(
+            "module_tree_reachability",
+            format!("dead_code_pct={dead_pct:.2} count={dead_count} (cap {PREMIUM_GATE_MAX_DEAD_PCT:.2})"),
+        )
+    } else {
+        CheckOutcome::fail(
+            "module_tree_reachability",
+            format!("dead_code_pct={dead_pct:.2} count={dead_count} exceeds cap {PREMIUM_GATE_MAX_DEAD_PCT:.2} — module-tree edges regressed"),
+        )
+    });
+
+    // Probe 2 — analysis_health. No unresolved `use` statements, non-zero
+    // reachability roots in a multi-crate repo.
+    let ah = svc.dispatch(
+        "manage_indexes",
+        json!({ "action": "analysis_health", "source_id": source_id }),
+    )?;
+    let unresolved = ah["data"]["graph"]["unresolved_use_statements"]
+        .as_u64()
+        .unwrap_or(u64::MAX);
+    let roots = ah["data"]["reachability"]["roots"].as_u64().unwrap_or(0);
+    outcomes.push(if unresolved == 0 && roots > 0 {
+        CheckOutcome::ok(
+            "analysis_health",
+            format!("unresolved_use=0 roots={roots}"),
+        )
+    } else {
+        CheckOutcome::fail(
+            "analysis_health",
+            format!("unresolved_use={unresolved} roots={roots}"),
+        )
+    });
+
+    // Probe 3 — reference provenance. `find_references` on a well-known
+    // identifier must expose `semantic_references` + `candidate_text_hits`
+    // and refuse to emit `text_match` / `line:0` rows.
+    let refs = svc.dispatch(
+        "inspect_graph",
+        json!({
+            "source_id": source_id,
+            "graph": "find_references",
+            "identifier": "CodeService",
+        }),
+    )?;
+    let data = &refs["data"];
+    let mut bad_rows: usize = 0;
+    let mut has_split = data.get("semantic_references").is_some()
+        && data.get("candidate_text_hits").is_some();
+    for key in ["semantic_references", "candidate_text_hits"] {
+        let Some(rows) = data[key].as_array() else {
+            has_split = false;
+            continue;
+        };
+        for r in rows {
+            if r["line"].as_u64().unwrap_or(0) == 0 {
+                bad_rows += 1;
+            }
+            if r["kind"].as_str() == Some("text_match") {
+                bad_rows += 1;
+            }
+        }
+    }
+    outcomes.push(if has_split && bad_rows <= PREMIUM_GATE_MAX_LINE_ZERO_REFS {
+        CheckOutcome::ok(
+            "reference_provenance",
+            format!(
+                "split fields present; 0 line:0 or text_match rows across {} results",
+                data["semantic_references"].as_array().map(Vec::len).unwrap_or(0)
+                    + data["candidate_text_hits"].as_array().map(Vec::len).unwrap_or(0),
+            ),
+        )
+    } else {
+        CheckOutcome::fail(
+            "reference_provenance",
+            format!("split={has_split} bad_rows={bad_rows} — reference contract regressed"),
+        )
+    });
+
+    // Probe 4 — strict refs refuse to silently succeed. Send a blast_radius
+    // request with a structured ref that cannot resolve; expect NOT_FOUND.
+    let unresolved_blast = svc.dispatch(
+        "evaluate_impact",
+        json!({
+            "source_id": source_id,
+            "analysis": "blast_radius",
+            "refs": [{
+                "kind": "symbol",
+                "path": "this/path/does/not/exist.rs",
+                "symbol_name": "definitely_not_a_real_symbol_xyz",
+                "start_line": 42,
+            }],
+        }),
+    )?;
+    let rejected = unresolved_blast.get("ok").and_then(|b| b.as_bool()) == Some(false)
+        && unresolved_blast["error"]["code"].as_str() == Some("NOT_FOUND");
+    outcomes.push(if rejected {
+        CheckOutcome::ok(
+            "strict_ref_not_found",
+            "unresolved structured ref → NOT_FOUND (as required)",
+        )
+    } else {
+        CheckOutcome::fail(
+            "strict_ref_not_found",
+            format!(
+                "expected NOT_FOUND for unresolved structured ref; got {}",
+                serde_json::to_string(&unresolved_blast).unwrap_or_default()
+            ),
+        )
+    });
+
+    // Probe 5 — dispatch latency budget. The health + refs calls already
+    // recorded _meta.timing_ms; take the worst case across the probes.
+    let worst_latency = [&health, &ah, &refs, &unresolved_blast]
+        .iter()
+        .filter_map(|r| r["_meta"]["timing_ms"].as_f64())
+        .fold(0.0_f64, f64::max);
+    outcomes.push(if worst_latency <= PREMIUM_GATE_MAX_TOOL_LATENCY_MS {
+        CheckOutcome::ok(
+            "tool_latency",
+            format!("worst_timing_ms={worst_latency:.1} (cap {PREMIUM_GATE_MAX_TOOL_LATENCY_MS:.0})"),
+        )
+    } else {
+        CheckOutcome::fail(
+            "tool_latency",
+            format!(
+                "worst_timing_ms={worst_latency:.1} exceeds cap {PREMIUM_GATE_MAX_TOOL_LATENCY_MS:.0}",
+            ),
+        )
+    });
+
+    // Probe 6 — agent-readiness floor. `repo_health.quality_signal` reports
+    // `agent_readiness_score`; below the floor the retrieval layer is not
+    // premium-grade.
+    let readiness = health["data"]["findings"]
+        .as_array()
+        .and_then(|arr| {
+            arr.iter()
+                .find(|f| f["finding_id"] == "repo_health:quality_signal")
+        })
+        .and_then(|f| f["evidence"]["agent_readiness_score"].as_f64())
+        .unwrap_or(0.0);
+    outcomes.push(if readiness >= PREMIUM_GATE_MIN_AGENT_READINESS {
+        CheckOutcome::ok(
+            "agent_readiness",
+            format!(
+                "agent_readiness={readiness:.3} (floor {PREMIUM_GATE_MIN_AGENT_READINESS:.2})"
+            ),
+        )
+    } else {
+        CheckOutcome::fail(
+            "agent_readiness",
+            format!(
+                "agent_readiness={readiness:.3} below floor {PREMIUM_GATE_MIN_AGENT_READINESS:.2}",
+            ),
+        )
+    });
+
+    // Report.
+    let mut all_ok = true;
+    for o in &outcomes {
+        match &o.status {
+            Ok(detail) => println!("  ok    {:<28} {}", o.name, detail),
+            Err(detail) => {
+                all_ok = false;
+                println!("  FAIL  {:<28} {}", o.name, detail);
+            }
+        }
+    }
+    println!("---------------------------");
+    println!(
+        "{}",
+        if all_ok {
+            "premium gate passed — ship candidate is trustworthy"
+        } else {
+            "premium gate FAILED — do not ship structural-analysis claims"
+        }
+    );
+    Ok(all_ok)
 }

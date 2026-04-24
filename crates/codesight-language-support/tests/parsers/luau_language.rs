@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
-use codesight_language_support::LanguageRegistry;
 use codesight_core::SymbolKind;
+use codesight_language_support::LanguageRegistry;
+use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
 
 const LUAU_SERVICE: &str = "\
 -- RaidService handles raid mechanics between players

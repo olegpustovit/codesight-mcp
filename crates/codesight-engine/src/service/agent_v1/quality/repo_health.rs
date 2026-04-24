@@ -20,8 +20,8 @@ impl CodeService {
                 .is_stale(&root, |p| indexer.detect_language(&root, p).is_some())
                 .ok();
         }
-        let raw_bytes = meta.estimated_naive_tokens.saturating_mul(4);
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: repo_health is a structural overview — null baseline.
+        let timer = MetaBuilder::new(0);
         let fn_method = store.fn_method_symbol_count().unwrap_or(0);
         let avg_complexity = store.avg_line_span_fn_methods().unwrap_or(0.0);
         let index_stale = meta.is_stale.unwrap_or(false);

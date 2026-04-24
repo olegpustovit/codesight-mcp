@@ -48,7 +48,9 @@ fn make_git_repo(files: &[(&str, &str)]) -> (tempfile::TempDir, CodeService, Str
     git(&["add", "-A"], root);
     git(&["commit", "-m", "initial"], root);
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(root.join("idx"))).unwrap();
+    let svc =
+        codesight_mcp::test_support::make_service_from_config(AppConfig::new(root.join("idx")))
+            .unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",
@@ -90,7 +92,10 @@ fn commit_changes(root: &std::path::Path, changes: &[(&str, Option<&str>)]) -> S
 fn test_changed_symbols_error_cases() {
     // Unknown repo
     let ws = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "evaluate_impact",

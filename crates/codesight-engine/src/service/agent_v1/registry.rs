@@ -36,16 +36,56 @@ impl TimeoutClass {
 }
 
 static AGENT_V1_HANDLERS: &[(&str, AgentV1Handler, TimeoutClass)] = &[
-    ("ingest_sources", CodeService::ingest_sources, TimeoutClass::Ingest),
-    ("catalog_sources", CodeService::catalog_sources, TimeoutClass::FastRead),
-    ("search_catalog", CodeService::search_catalog, TimeoutClass::Default),
-    ("read_content", CodeService::read_content, TimeoutClass::FastRead),
-    ("inspect_structure", CodeService::inspect_structure, TimeoutClass::FastRead),
-    ("inspect_graph", CodeService::inspect_graph, TimeoutClass::Default),
-    ("evaluate_impact", CodeService::evaluate_impact, TimeoutClass::Heavy),
-    ("evaluate_quality", CodeService::evaluate_quality, TimeoutClass::Heavy),
-    ("assemble_context", CodeService::assemble_context, TimeoutClass::Heavy),
-    ("manage_indexes", CodeService::manage_indexes, TimeoutClass::Ingest),
+    (
+        "ingest_sources",
+        CodeService::ingest_sources,
+        TimeoutClass::Ingest,
+    ),
+    (
+        "catalog_sources",
+        CodeService::catalog_sources,
+        TimeoutClass::FastRead,
+    ),
+    (
+        "search_catalog",
+        CodeService::search_catalog,
+        TimeoutClass::Default,
+    ),
+    (
+        "read_content",
+        CodeService::read_content,
+        TimeoutClass::FastRead,
+    ),
+    (
+        "inspect_structure",
+        CodeService::inspect_structure,
+        TimeoutClass::FastRead,
+    ),
+    (
+        "inspect_graph",
+        CodeService::inspect_graph,
+        TimeoutClass::Default,
+    ),
+    (
+        "evaluate_impact",
+        CodeService::evaluate_impact,
+        TimeoutClass::Heavy,
+    ),
+    (
+        "evaluate_quality",
+        CodeService::evaluate_quality,
+        TimeoutClass::Heavy,
+    ),
+    (
+        "assemble_context",
+        CodeService::assemble_context,
+        TimeoutClass::Heavy,
+    ),
+    (
+        "manage_indexes",
+        CodeService::manage_indexes,
+        TimeoutClass::Ingest,
+    ),
 ];
 
 pub(in crate::service) fn dispatch_tool(

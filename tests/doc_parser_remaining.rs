@@ -60,7 +60,10 @@ fn setup_single_doc(doc_name: &str, content: &str) -> (tempfile::TempDir, CodeSe
     let doc_dir = ws.path().join("docs");
     fs::create_dir_all(&doc_dir).unwrap();
     fs::write(doc_dir.join(doc_name), content).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     (ws, svc)
 }
 

@@ -46,7 +46,8 @@ fn doc_index_catalog_toc_search_read_outline_delete() {
     .unwrap();
 
     let index_root = workspace.path().join("idx");
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(index_root)).unwrap();
+    let svc =
+        codesight_mcp::test_support::make_service_from_config(AppConfig::new(index_root)).unwrap();
 
     let empty_cat = svc.dispatch("catalog_sources", json!({})).unwrap();
     assert!(empty_cat["ok"].as_bool().unwrap());
@@ -345,7 +346,10 @@ fn doc_section_context_batch_and_meta() {
         doc_root.join("docs/sample.md"),
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(workspace.path().join("i"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("i"),
+    ))
+    .unwrap();
     let ing = svc
         .dispatch(
             "ingest_sources",

@@ -17,7 +17,10 @@ fn build_repo() -> (CodeService, tempfile::TempDir, String) {
         )
         .unwrap();
     }
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

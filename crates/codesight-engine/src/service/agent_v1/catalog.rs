@@ -28,18 +28,21 @@ fn index_metadata_staleness_warning(indexed_at: &str) -> Option<String> {
 
 impl CodeService {
     pub(in crate::service) fn catalog_sources(&self, v: Value) -> anyhow::Result<Value> {
-        let _args: CatalogSourcesArgs = ValidatedArgs::from_validated(v)?.into_inner();
+        let args: CatalogSourcesArgs = ValidatedArgs::from_validated(v)?.into_inner();
+        let lightweight = args.lightweight.unwrap_or(false);
         let timer = MetaBuilder::new(0);
 
         // Body cache: same generation ⇒ reuse the memoised payload. The
         // per-process `catalog_generation` counter is bumped on every
         // ingest success and on `manage_indexes` mutations, so any event
         // that could change this response invalidates automatically. The
-        // freshness annotation (who's currently reindexing) is re-applied
-        // downstream in dispatch, so the cached body stays correct even if
-        // a reindex starts between a miss and the next hit.
+        // lightweight variant shares the cache but projects a narrower
+        // shape on the way out (ROADMAP P2.4).
         let observed_generation = self.catalog_generation();
         if let Some(mut body) = self.cached_catalog() {
+            if lightweight {
+                project_lightweight(&mut body);
+            }
             if let Value::Object(ref mut map) = body {
                 let meta = map
                     .entry("_meta".to_string())
@@ -66,16 +69,14 @@ impl CodeService {
         let registry = self.source_registry();
         let initial_code_rows = list_repo_summaries(&self.config.repos_dir())?;
         let mut code_rows: Vec<_> = Vec::with_capacity(initial_code_rows.len());
-        let mut root_paths: HashMap<String, String> = HashMap::with_capacity(initial_code_rows.len());
+        let mut root_paths: HashMap<String, String> =
+            HashMap::with_capacity(initial_code_rows.len());
         for m in initial_code_rows {
             if let Ok(store) = self.ensure_repo_store(&m.repo, None)
                 && let Ok(snap) = registry.snapshot(&m.repo, &store)
             {
                 code_rows.push(snap.repo_summary.clone());
-                root_paths.insert(
-                    m.repo.clone(),
-                    snap.root_path.to_string_lossy().to_string(),
-                );
+                root_paths.insert(m.repo.clone(), snap.root_path.to_string_lossy().to_string());
             } else {
                 code_rows.push(m);
             }
@@ -149,6 +150,38 @@ impl CodeService {
 
         let body = self.success_response(&timer, json!({ "sources": sources }))?;
         self.store_catalog(observed_generation, body.clone());
-        Ok(body)
+        let mut out = body;
+        if lightweight {
+            project_lightweight(&mut out);
+        }
+        Ok(out)
+    }
+}
+
+/// ROADMAP P2.4: strip heavy fields from each `sources[]` entry so warmup
+/// calls cost a fraction of the default payload. Keeps the cache compatible
+/// with both shapes by projecting at the response boundary.
+fn project_lightweight(body: &mut Value) {
+    let Some(sources) = body
+        .get_mut("data")
+        .and_then(|d| d.get_mut("sources"))
+        .and_then(|s| s.as_array_mut())
+    else {
+        return;
+    };
+    for entry in sources {
+        if let Value::Object(map) = entry {
+            for key in [
+                "capabilities",
+                "languages",
+                "root_hint",
+                "domains",
+                "display_name",
+                "stable_key",
+                "staleness_warning",
+            ] {
+                map.remove(key);
+            }
+        }
     }
 }

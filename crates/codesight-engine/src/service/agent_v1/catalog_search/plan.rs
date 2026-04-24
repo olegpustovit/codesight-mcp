@@ -1,13 +1,9 @@
 //! Argument coercion, validation, and the resolved `SearchPlan`.
 
-use std::collections::BTreeSet;
-
 use serde_json::{Value, json};
 
 use crate::service::agent_v1::args::SearchCatalogArgs;
-use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
-use codesight_storage::storage::IndexStore;
-use codesight_storage::storage::doc_index::DocStore;
+use crate::service::helpers::{ToolError, ToolErrorCategory};
 
 pub(super) struct KindFlags {
     pub(super) want_symbol: bool,
@@ -26,18 +22,24 @@ impl KindFlags {
             };
         }
         let kinds = args.unit_kinds.as_ref();
+        // ROADMAP P3.3: `doc_section` is a first-class alias for `section`.
+        // Agents searching docs can pass `unit_kinds=["doc_section"]`
+        // without needing to remember `domain=hybrid` implies sections.
+        let matches = |want: &str| -> bool {
+            kinds
+                .map(|k| {
+                    k.iter().any(|x| {
+                        x == want || (want == "section" && x == "doc_section")
+                    })
+                })
+                .unwrap_or(false)
+        };
         let want_symbol = kinds
             .map(|k| k.iter().any(|x| x == "symbol"))
             .unwrap_or(true)
             && domain != "docs";
-        let want_section = kinds
-            .map(|k| k.iter().any(|x| x == "section"))
-            .unwrap_or(false)
-            || domain == "docs"
-            || domain == "hybrid";
-        let want_file = kinds
-            .map(|k| k.iter().any(|x| x == "file"))
-            .unwrap_or(false);
+        let want_section = matches("section") || domain == "docs" || domain == "hybrid";
+        let want_file = matches("file");
         Self {
             want_symbol,
             want_section,
@@ -202,13 +204,17 @@ pub(super) fn build_meta_extras(
             json!(plan.query_mode_effective),
         ),
         ("domain_explicit".to_string(), json!(plan.domain_explicit)),
+        // ROADMAP P1.1: baseline is now `rg -n`-equivalent output
+        // (path:line:snippet per hit), capped at the caller's `limit`. This
+        // is what an agent would have paid without codesight, not a
+        // fabricated "read every matched file" number.
         (
             "estimate_method".to_string(),
-            json!("byte_approx_candidate_files"),
+            json!("rg_equivalent_output_bytes"),
         ),
         (
             "baseline_scope".to_string(),
-            json!("candidate_files_materialized_pre_output"),
+            json!("path_line_snippet_per_returned_hit"),
         ),
         (
             "unit_kinds_effective".to_string(),
@@ -223,52 +229,3 @@ pub(super) fn build_meta_extras(
     ]
 }
 
-pub(super) fn estimate_candidate_file_bytes(
-    code_store: Option<&IndexStore>,
-    doc_store: Option<&DocStore>,
-    items: &[Value],
-) -> Result<u64, ToolError> {
-    let mut code_paths = BTreeSet::new();
-    let mut doc_paths = BTreeSet::new();
-
-    for item in items {
-        let Some(path) = item.pointer("/ref/path").and_then(|value| value.as_str()) else {
-            continue;
-        };
-        if path.is_empty() {
-            continue;
-        }
-        match item.pointer("/ref/domain").and_then(|value| value.as_str()) {
-            Some("docs") => {
-                doc_paths.insert(path.to_string());
-            }
-            _ => {
-                code_paths.insert(path.to_string());
-            }
-        }
-    }
-
-    let mut total = 0u64;
-    if let Some(store) = code_store
-        && !code_paths.is_empty()
-    {
-        let paths = code_paths.into_iter().collect::<Vec<_>>();
-        total = total.saturating_add(
-            store
-                .sum_file_sizes_for_paths(&paths)
-                .map_err(index_error)?,
-        );
-    }
-    if let Some(store) = doc_store
-        && !doc_paths.is_empty()
-    {
-        let paths = doc_paths.into_iter().collect::<Vec<_>>();
-        total = total.saturating_add(
-            store
-                .sum_file_sizes_for_paths(&paths)
-                .map_err(index_error)?,
-        );
-    }
-
-    Ok(total)
-}

@@ -20,17 +20,23 @@ fn ingest_code(svc: &CodeService, root: &std::path::Path) -> String {
     response["data"]["source_id"].as_str().unwrap().to_string()
 }
 
+// ROADMAP P1.1: `search_catalog` charges against an `rg -n` equivalent output
+// (path:line:snippet per returned hit) — not the sum of file sizes of every
+// matched file. The huge unrelated blob in the same repo must not inflate the
+// baseline, and a single-hit response must fit within a loose rg-row budget.
 #[test]
-fn search_catalog_savings_use_candidate_files_not_repo_bytes() {
+fn search_catalog_savings_use_rg_equivalent_not_repo_bytes() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
 
-    let matching = "def hello():\n    return 1\n";
-    fs::write(src.join("main.py"), matching).unwrap();
+    fs::write(src.join("main.py"), "def hello():\n    return 1\n").unwrap();
     fs::write(src.join("huge_blob.py"), "x".repeat(400_000)).unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let response = svc
@@ -48,25 +54,32 @@ fn search_catalog_savings_use_candidate_files_not_repo_bytes() {
         .unwrap();
     assert!(response["ok"].as_bool().unwrap(), "{response:?}");
 
+    // A single `def hello():` hit should cost at most a few rg rows' worth of
+    // bytes. The 400KB unrelated blob must not show up in the baseline.
     let naive_tokens = response["_meta"]["naive_tokens"].as_u64().unwrap();
-    assert_eq!(
-        naive_tokens,
-        (matching.len() as u64) / 4,
-        "search_catalog should estimate against the matched candidate file, not the whole repo: {response:?}"
+    assert!(
+        naive_tokens < 30,
+        "single-hit rg-equivalent baseline should be bounded (~path:line:snippet), got {naive_tokens}: {response:?}"
     );
+    let estimate_method = response["_meta"]["estimate_method"].as_str().unwrap_or("");
+    assert_eq!(estimate_method, "rg_equivalent_output_bytes", "{response:?}");
 }
 
+// `output_mode=count` doesn't return items, so the rg-equivalent baseline is
+// zero by construction; savings are undefined for a metadata-only response.
 #[test]
-fn search_catalog_count_mode_uses_the_same_candidate_file_baseline() {
+fn search_catalog_count_mode_emits_no_inflated_baseline() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
 
-    let matching = "def hello():\n    return 1\n";
-    fs::write(src.join("main.py"), matching).unwrap();
+    fs::write(src.join("main.py"), "def hello():\n    return 1\n").unwrap();
     fs::write(src.join("huge_blob.py"), "y".repeat(400_000)).unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let response = svc
@@ -86,9 +99,8 @@ fn search_catalog_count_mode_uses_the_same_candidate_file_baseline() {
     assert!(response["ok"].as_bool().unwrap(), "{response:?}");
 
     let naive_tokens = response["_meta"]["naive_tokens"].as_u64().unwrap();
-    assert_eq!(
-        naive_tokens,
-        (matching.len() as u64) / 4,
-        "count mode should use the same candidate-file savings baseline: {response:?}"
+    assert!(
+        naive_tokens < 30,
+        "count mode must not charge against the whole-repo / huge-blob file; got {naive_tokens}: {response:?}"
     );
 }

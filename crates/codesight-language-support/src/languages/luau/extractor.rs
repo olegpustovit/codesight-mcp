@@ -24,8 +24,7 @@ impl LuauExtractor {
         source: &str,
     ) -> anyhow::Result<Vec<codesight_core::StoredSymbol>> {
         let tree = parse_tree(
-            crate::builtin_grammar("luau")
-                .expect("luau grammar registered with language-support"),
+            crate::builtin_grammar("luau").expect("luau grammar registered with language-support"),
             source,
         )?;
         let mut symbols = Vec::new();

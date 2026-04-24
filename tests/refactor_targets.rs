@@ -80,7 +80,10 @@ fn build_repo() -> (TempDir, CodeService, String) {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let sid = ingest(&svc, &src);
     (ws, svc, sid)
 }
@@ -197,7 +200,10 @@ fn extraction_results_sorted_by_score() {
 #[test]
 fn extraction_missing_repo_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",

@@ -24,13 +24,10 @@ impl CodeService {
         let min_callers = args.min_callers.unwrap_or(0);
         let top_n = args.top_n.unwrap_or(50);
         let include_conventional = args.include_conventional.unwrap_or(false);
-        let top_caller_files = args
-            .top_caller_files
-            .unwrap_or(10)
-            .clamp(1, 50);
+        let top_caller_files = args.top_caller_files.unwrap_or(10).clamp(1, 50);
 
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: quality analysis — null baseline.
+        let timer = MetaBuilder::new(0);
 
         let all_symbols = store.all_symbols_cached()?;
 
@@ -150,8 +147,7 @@ impl CodeService {
                 continue;
             }
             let caller_files_total = files[ci].len();
-            let mut sorted_callers: Vec<&str> =
-                files[ci].iter().copied().collect();
+            let mut sorted_callers: Vec<&str> = files[ci].iter().copied().collect();
             sorted_callers.sort_by(|a, b| {
                 let depth_a = a.matches('/').count();
                 let depth_b = b.matches('/').count();
@@ -174,13 +170,8 @@ impl CodeService {
                 "caller_files": sorted_callers,
                 "score": score,
             });
-            if truncated
-                && let Value::Object(map) = &mut entry
-            {
-                map.insert(
-                    "caller_files_total".to_string(),
-                    json!(caller_files_total),
-                );
+            if truncated && let Value::Object(map) = &mut entry {
+                map.insert("caller_files_total".to_string(), json!(caller_files_total));
             }
             candidates.push(entry);
         }

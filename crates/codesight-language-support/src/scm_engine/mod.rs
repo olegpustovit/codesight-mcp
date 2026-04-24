@@ -131,11 +131,7 @@ pub fn extract_with_spec(
     static CACHE: OnceLock<RwLock<HashMap<String, &'static ScmExtractor>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
 
-    if let Some(&existing) = cache
-        .read()
-        .expect("scm cache poisoned")
-        .get(language_name)
-    {
+    if let Some(&existing) = cache.read().expect("scm cache poisoned").get(language_name) {
         return existing.extract(file_path, source);
     }
 

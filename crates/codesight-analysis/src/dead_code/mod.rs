@@ -160,13 +160,8 @@ pub fn dead_code_v2_payload(store: &IndexStore, min_confidence: f64) -> anyhow::
     let root_path = store.root_path().ok();
     let all_file_contents = store.all_file_contents().unwrap_or_default();
 
-    let reachability = build_repo_reachability(
-        &all_files,
-        &dep_graph,
-        root_path.as_deref(),
-        false,
-        &[],
-    );
+    let reachability =
+        build_repo_reachability(&all_files, &dep_graph, root_path.as_deref(), false, &[]);
 
     let mut dead_symbols: Vec<Value> = Vec::new();
     for symbol in &all_symbols {
@@ -248,8 +243,7 @@ fn is_barrel_exported(symbol: &AnalysisSymbol, all_file_contents: &[(String, Str
             return false;
         }
         let basename = file.rsplit('/').next().unwrap_or(file);
-        is_barrel_basename(basename)
-            && mentions_identifier_in_file(file, content, &symbol.name)
+        is_barrel_basename(basename) && mentions_identifier_in_file(file, content, &symbol.name)
     })
 }
 

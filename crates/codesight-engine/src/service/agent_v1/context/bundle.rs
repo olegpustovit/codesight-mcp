@@ -64,7 +64,24 @@ impl CodeService {
 
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
 
-        let rows = match self.gather_bundle_rows(&store, &sym_refs, timer)? {
+        let base_rows = match self.gather_bundle_rows(&store, &sym_refs, timer)? {
+            Ok(rows) => rows,
+            Err(early) => return Ok(early),
+        };
+
+        // ROADMAP P1.5: depth=2 by default — pull in a representative caller
+        // + callee per user-provided symbol, plus type-name references from
+        // sig/body. Callers can cap with `max_tokens`; `include_tests=false`
+        // drops fixture / test-path rows from the expansion.
+        let depth = args.depth.unwrap_or(2);
+        let include_tests = args.include_tests.unwrap_or(true);
+        let rows = match self.expand_bundle_by_depth(
+            &store,
+            base_rows,
+            depth,
+            include_tests,
+            timer,
+        )? {
             Ok(rows) => rows,
             Err(early) => return Ok(early),
         };

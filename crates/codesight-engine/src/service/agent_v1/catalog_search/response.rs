@@ -24,6 +24,10 @@ pub(super) struct FormatCtx<'a> {
     pub(super) max_tokens: Option<u32>,
     pub(super) more_file_hits_exist: bool,
     pub(super) counts: SearchCounts,
+    /// ROADMAP P1.4 — second lane of hits when `fuzzy=true` was explicit.
+    /// Empty when the caller did not ask for fuzzy or the fuzzy lane has
+    /// nothing to report.
+    pub(super) fuzzy_items: Vec<Value>,
 }
 
 /// Format collected items for count / files_with_matches / items modes.
@@ -109,8 +113,7 @@ pub(super) fn format_output(
 
             let mut byte_budgeted = false;
             while items.len() > 1
-                && serde_json::to_vec(&items).map(|v| v.len()).unwrap_or(0)
-                    > MAX_RESPONSE_BYTES
+                && serde_json::to_vec(&items).map(|v| v.len()).unwrap_or(0) > MAX_RESPONSE_BYTES
             {
                 items.pop();
                 byte_budgeted = true;
@@ -131,6 +134,14 @@ pub(super) fn format_output(
                 "total_matches": total_matches,
                 "total_files_with_matches": total_files_with_matches,
             });
+            if !ctx.fuzzy_items.is_empty()
+                && let Value::Object(ref mut map) = data
+            {
+                // ROADMAP P1.4: two-lane response — exact BM25 hits live in
+                // `items`, fuzzy candidates live in `fuzzy` so the agent can
+                // pick without string-matching `match_type`.
+                map.insert("fuzzy".to_string(), json!(ctx.fuzzy_items.clone()));
+            }
             if meta_truncated && let Value::Object(ref mut map) = data {
                 map.insert("truncated".to_string(), json!(true));
                 map.insert("truncated_by".to_string(), json!(truncated_by));

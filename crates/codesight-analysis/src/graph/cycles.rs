@@ -66,10 +66,7 @@ pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
         .into_iter()
         .filter(|scc| scc.len() > 1)
         .map(|scc| {
-            let mut names: Vec<String> = scc
-                .into_iter()
-                .map(|ix| graph[ix].to_string())
-                .collect();
+            let mut names: Vec<String> = scc.into_iter().map(|ix| graph[ix].to_string()).collect();
             names.sort();
             names
         })

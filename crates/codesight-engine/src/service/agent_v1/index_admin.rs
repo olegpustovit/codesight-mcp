@@ -83,9 +83,7 @@ impl CodeService {
         let mut reexport_edges = 0u64;
         for targets in graph.values() {
             for target in targets {
-                if target.ends_with("/src/lib.rs")
-                    && target.starts_with("crates/")
-                {
+                if target.ends_with("/src/lib.rs") && target.starts_with("crates/") {
                     workspace_crate_edges += 1;
                 }
                 if target.ends_with("/mod.rs") || target.ends_with("/lib.rs") {
@@ -229,7 +227,8 @@ impl CodeService {
         };
         if let Ok(store) = self.ensure_repo_store(sid, None) {
             let meta = store.repo_metadata()?;
-            let timer_b = MetaBuilder::new(meta.estimated_naive_tokens.saturating_mul(4));
+            // ROADMAP P1.1: manage_indexes is metadata — null baseline.
+            let timer_b = MetaBuilder::new(0);
             return self.success_response(
                 &timer_b,
                 json!({
@@ -240,8 +239,7 @@ impl CodeService {
             );
         }
         if let Ok(dstore) = self.ensure_doc_store(sid, None) {
-            let b = dstore.repo_total_bytes()?;
-            let timer_b = MetaBuilder::new(b);
+            let timer_b = MetaBuilder::new(0);
             let toc = dstore.toc().map(|t| t.len()).unwrap_or(0);
             return self.success_response(
                 &timer_b,

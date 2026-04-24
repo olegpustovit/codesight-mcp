@@ -41,7 +41,9 @@ impl ComplexityAssessment {
 pub fn cyclomatic_complexity_for_path(source: &str, file_path: &str) -> usize {
     match builtin_registry().for_path(Path::new(file_path)) {
         Some(lang) => lang.cyclomatic_complexity(source),
-        None => codesight_language_support::fallback::FALLBACK_LANGUAGE.cyclomatic_complexity(source),
+        None => {
+            codesight_language_support::fallback::FALLBACK_LANGUAGE.cyclomatic_complexity(source)
+        }
     }
 }
 
@@ -76,8 +78,14 @@ mod tests {
     #[test]
     fn complexity_assessment_buckets() {
         assert_eq!(ComplexityAssessment::classify(3), ComplexityAssessment::Low);
-        assert_eq!(ComplexityAssessment::classify(8), ComplexityAssessment::Medium);
-        assert_eq!(ComplexityAssessment::classify(20), ComplexityAssessment::High);
+        assert_eq!(
+            ComplexityAssessment::classify(8),
+            ComplexityAssessment::Medium
+        );
+        assert_eq!(
+            ComplexityAssessment::classify(20),
+            ComplexityAssessment::High
+        );
     }
 
     /// Dispatch budget guard: storage-time indexing calls

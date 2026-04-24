@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
+use codesight_core::SymbolKind;
 use codesight_language_support::LanguageRegistry;
 use codesight_language_support::languages::sql::extractor::SqlExtractor;
-use codesight_core::SymbolKind;
 
 // ── Inline fixtures (matching reference Python) ─────────────────────────────
 

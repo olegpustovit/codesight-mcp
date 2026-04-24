@@ -38,8 +38,7 @@ const SNAPSHOT_COLUMNS: &str = "source_id, name, score, structural_score, agent_
      cycle_count, dead_count, dup_count, file_count, symbol_count, \
      confidence, avg_complexity";
 
-const SNAPSHOT_SELECT: &str =
-    "source_id, name, created_at, score, structural_score, agent_readiness_score, \
+const SNAPSHOT_SELECT: &str = "source_id, name, created_at, score, structural_score, agent_readiness_score, \
      modularity, acyclicity, depth, equality, redundancy, \
      navigability, comprehensibility, verifiability, change_safety, \
      cycle_count, dead_count, dup_count, file_count, symbol_count, \

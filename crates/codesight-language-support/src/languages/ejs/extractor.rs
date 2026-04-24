@@ -22,10 +22,10 @@ use std::sync::{LazyLock, OnceLock};
 use anyhow::Result;
 use regex::Regex;
 
-use codesight_core::StoredSymbol;
-use codesight_core::symbols::{ExtractionTier, SymbolKind};
 use crate::query_pack_catalog::QueryPackCatalog;
 use crate::scm_engine::ScmExtractor;
+use codesight_core::StoredSymbol;
+use codesight_core::symbols::{ExtractionTier, SymbolKind};
 
 pub struct EjsExtractor;
 

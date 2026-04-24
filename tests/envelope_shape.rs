@@ -13,7 +13,10 @@ fn build_service() -> (CodeService, tempfile::TempDir) {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("main.py"), "def hello():\n    return 1\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     (svc, ws)
 }
 
@@ -53,12 +56,21 @@ fn catalog_sources_default_meta_is_minimal_and_session_carries_constants() {
         !keys.contains("tokens_saved"),
         "catalog_sources should omit tokens_saved: {keys:?}"
     );
-    assert!(!keys.contains("build_sha"), "default meta should be slim: {keys:?}");
+    assert!(
+        !keys.contains("build_sha"),
+        "default meta should be slim: {keys:?}"
+    );
 
     let session = &r["session"];
     assert!(session["id"].is_string(), "session id missing: {r:?}");
-    assert!(session["started_at"].is_string(), "session start missing: {r:?}");
-    assert!(session["build_sha"].is_string(), "session build_sha missing: {r:?}");
+    assert!(
+        session["started_at"].is_string(),
+        "session start missing: {r:?}"
+    );
+    assert!(
+        session["build_sha"].is_string(),
+        "session build_sha missing: {r:?}"
+    );
     assert!(
         session["retrieval_version"].is_string(),
         "session retrieval_version missing: {r:?}"
@@ -92,11 +104,19 @@ fn search_catalog_verbose_meta_restores_full_build_fields() {
 #[test]
 fn error_envelope_keeps_error_category_but_not_full_build_meta_by_default() {
     let (svc, _ws) = build_service();
-    let r = svc.dispatch("search_catalog", json!({ "source_id": "missing" })).unwrap();
-    assert!(!r["ok"].as_bool().unwrap_or(true), "expected failure: {r:?}");
+    let r = svc
+        .dispatch("search_catalog", json!({ "source_id": "missing" }))
+        .unwrap();
+    assert!(
+        !r["ok"].as_bool().unwrap_or(true),
+        "expected failure: {r:?}"
+    );
 
     let keys = meta_keys(&r);
     assert!(keys.contains("error_category"));
-    assert!(!keys.contains("build_sha"), "default error meta should be slim: {keys:?}");
+    assert!(
+        !keys.contains("build_sha"),
+        "default error meta should be slim: {keys:?}"
+    );
     assert_eq!(r["error"]["category"], r["_meta"]["error_category"]);
 }

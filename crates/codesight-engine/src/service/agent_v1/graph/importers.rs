@@ -10,9 +10,9 @@ use crate::service::agent_v1::util::path_matches_filter;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
-use codesight_storage::storage::{IndexStore, list_repo_summaries};
 use codesight_language_support::imports_orchestration::{extract_imports, language_for_path};
 use codesight_language_support::packages::package_reference_evidence;
+use codesight_storage::storage::{IndexStore, list_repo_summaries};
 
 impl CodeService {
     /// `graph=imports` — outgoing dependencies: what does this file import FROM?

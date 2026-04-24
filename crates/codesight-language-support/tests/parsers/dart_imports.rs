@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use codesight_language_support::imports_orchestration::extract_imports;
 use codesight_language_support::LanguageRegistry;
+use codesight_language_support::imports_orchestration::extract_imports;
 
 // ---------------------------------------------------------------------------
 // Dart source fixture (inline, matching reference)
@@ -27,10 +27,7 @@ export 'src/api.dart';
 fn test_dart_in_language_extractors() {
     let reg = LanguageRegistry::default();
     let ext = reg.extractor_for_path(Path::new("main.dart"));
-    assert!(
-        ext.is_some(),
-        "Dart must be registered in LanguageRegistry"
-    );
+    assert!(ext.is_some(), "Dart must be registered in LanguageRegistry");
     assert_eq!(ext.unwrap().id().as_str(), "dart");
 }
 

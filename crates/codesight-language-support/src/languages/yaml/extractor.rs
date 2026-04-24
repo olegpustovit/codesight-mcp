@@ -33,18 +33,14 @@ impl YamlExtractor {
         file_path: &str,
         source: &str,
     ) -> anyhow::Result<Vec<codesight_core::StoredSymbol>> {
-        let resolved = crate::builtin_registry()
-            .classify_path(Path::new(file_path));
-        let is_ansible = resolved
-            .profile
-            .is_some_and(|p| p.as_str() == "ansible");
+        let resolved = crate::builtin_registry().classify_path(Path::new(file_path));
+        let is_ansible = resolved.profile.is_some_and(|p| p.as_str() == "ansible");
         if !is_ansible {
             return yaml_pack()?.extract(file_path, source);
         }
 
         let tree = parse_tree(
-            crate::builtin_grammar("yaml")
-                .expect("yaml grammar registered with language-support"),
+            crate::builtin_grammar("yaml").expect("yaml grammar registered with language-support"),
             source,
         )?;
         let mut symbols = Vec::new();

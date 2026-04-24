@@ -1,6 +1,7 @@
 [
   {
     "name": "ingest_sources",
+    "capabilities_version": "v1",
     "description": "Create or refresh indexes for a local path. Use domains code, docs, or auto.",
     "inputSchema": {
       "type": "object",
@@ -29,7 +30,8 @@
   },
   {
     "name": "catalog_sources",
-    "description": "List indexed sources (code and docs) with capabilities and hints. Code and docs for the same workspace share one `source_id`, distinguished by the `domains` field on each entry. On downstream calls, pass `source_id` together with the `domain` you want to query (where supported).",
+    "capabilities_version": "v2",
+    "description": "List indexed sources (code and docs) with capabilities and hints. Code and docs for the same workspace share one `source_id`, distinguished by the `domains` field on each entry. On downstream calls, pass `source_id` together with the `domain` you want to query (where supported). v2 adds `lightweight=true` for warmup-cost trims.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -39,7 +41,8 @@
   },
   {
     "name": "search_catalog",
-    "description": "Unified search over symbols, sections, and file text. Preferred over native Grep for all code exploration — returns structured results with token savings. Use query_mode=keyword for identifiers (fastest), regex for patterns, natural_language for questions. When `domain` is omitted, defaults to `code` for `keyword`/`regex` and `hybrid` for `natural_language`. Effective values are echoed in `_meta`.",
+    "capabilities_version": "v2",
+    "description": "Unified search over symbols, sections, and file text. Preferred over native Grep for all code exploration — returns structured results with token savings. Use query_mode=keyword for identifiers (fastest), regex for patterns, natural_language for questions. When `domain` is omitted, defaults to `code` for `keyword`/`regex` and `hybrid` for `natural_language`. Effective values are echoed in `_meta`. v2 adds `rg -n`-equivalent honest baseline, `fuzzy=true` two-lane response, `unit_kinds=[\"doc_section\"]`, SYMBOL_NOT_FOUND_IN_CODE hint.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "query"],
@@ -117,7 +120,8 @@
   },
   {
     "name": "read_content",
-    "description": "Batch read symbols, sections, or bounded file ranges. Whole-file reads work but are a last resort — prefer inspect_structure view=file_outline first, then symbol/section reads or bounded ranges. Each `refs` entry may be an object (see properties) OR a shorthand string: \"path:N-M\" for a file range, \"path:N\" for a single line, or \"path::Name#kind\" for a symbol. May emit TOKEN_HEAVY_READ warning when a full-file read exceeds the configured threshold.",
+    "capabilities_version": "v2",
+    "description": "Batch read symbols, sections, or bounded file ranges. Whole-file reads work but are a last resort — prefer inspect_structure view=file_outline first, then symbol/section reads or bounded ranges. Each `refs` entry may be an object (see properties) OR a shorthand string: \"path:N-M\" for a file range, \"path:N\" for a single line, or \"path::Name#kind\" for a symbol. May emit TOKEN_HEAVY_READ warning when a full-file read exceeds the configured threshold. v2 adds honest full-file baseline for range reads and OUTLINE_FIRST_HINT warning carrying the outline inline.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "refs"],
@@ -164,7 +168,8 @@
   },
   {
     "name": "inspect_structure",
-    "description": "Tree, outline, TOC, and document structure views. Use view=file_outline before reading a whole file — decide which symbols you need, then read those with read_content. Use view=file_tree instead of native Glob for project structure.",
+    "capabilities_version": "v2",
+    "description": "Tree, outline, TOC, and document structure views. Use view=file_outline before reading a whole file — decide which symbols you need, then read those with read_content. Use view=file_tree instead of native Glob for project structure. v2 reshapes `repo_outline` to workspace/crates/top_modules/entrypoints and caps `file_tree` default depth at 2.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "view"],
@@ -214,7 +219,8 @@
   },
   {
     "name": "inspect_graph",
-    "description": "Reference, import, and dependency graph queries. Prefer over manual Grep-based reference tracking — returns structured graph data with cross-file resolution.",
+    "capabilities_version": "v2",
+    "description": "Reference, import, and dependency graph queries. Prefer over manual Grep-based reference tracking — returns structured graph data with cross-file resolution. v2 splits `find_references` into `semantic_references` + `candidate_text_hits` (drops `line:0` noise) and tags `calls` edges with `edge_kind: direct|indirect`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "graph"],
@@ -303,7 +309,8 @@
   },
   {
     "name": "evaluate_impact",
-    "description": "Change-oriented analysis: blast radius, rename safety, module-path rewrites, diffs, and since-commit change reports.",
+    "capabilities_version": "v2",
+    "description": "Change-oriented analysis: blast radius, rename safety, module-path rewrites, diffs, and since-commit change reports. v2: strict refs (NOT_FOUND on unresolved structured refs), trait-dispatch awareness in rename_safety, cross-file diff, and `_meta.actionable_next` hints on blast_radius/hotspots/dead_code.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
@@ -369,7 +376,8 @@
   },
   {
     "name": "evaluate_quality",
-    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links, quality_signal, regression_check, test_gaps. `quality_signal` returns structural root causes plus 4 agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) and their sub-metrics; when `scope` is provided it reports the targeted file or directory slice, weakest dimension, threshold failures, and top offenders. With `_meta_verbose=true`, `_meta.thresholds` echoes the active defaults from `crates/codesight-analysis/src/thresholds.rs` plus any `CODESIGHT_THRESHOLD_*` overrides. `regression_check` compares the same snapshot dimensions.",
+    "capabilities_version": "v2",
+    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links, quality_signal, regression_check, test_gaps. `quality_signal` returns structural root causes plus 4 agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) and their sub-metrics; when `scope` is provided it reports the targeted file or directory slice, weakest dimension, threshold failures, and top offenders. With `_meta_verbose=true`, `_meta.thresholds` echoes the active defaults from `crates/codesight-analysis/src/thresholds.rs` plus any `CODESIGHT_THRESHOLD_*` overrides. `regression_check` compares the same snapshot dimensions. v2: unified `agent_readiness` block (dimensions + submetrics), `max_wait_ms`/`partial_ok` budget knobs, `_meta.actionable_next` on dead_code/hotspots.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
@@ -460,7 +468,8 @@
   },
   {
     "name": "assemble_context",
-    "description": "Bundle search+read, section neighbor context, or suggestions.",
+    "capabilities_version": "v2",
+    "description": "Bundle search+read, section neighbor context, or suggestions. v2 adds `depth` knob (default 2) on `context_bundle` (pulls in type refs + representative caller/callee), `include_tests` filter, language-native import rendering (Rust `use`, Python `from/import`, …), and honest full-file baseline for `tokens_saved`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "mode"],
@@ -514,6 +523,7 @@
   },
   {
     "name": "manage_indexes",
+    "capabilities_version": "v1",
     "description": "Invalidate, delete, rebuild, status, snapshot_quality, session_stats, session_end, or analysis_health. Most actions target a single source and require `source_id`; `session_stats` is global and does not. `session_end` captures the end-of-session quality snapshot, closes the active session ledger, and returns the same rollup as `session_stats` plus `quality_delta` warnings when quality regressed. `rebuild` additionally requires `root_hint`. `analysis_health` surfaces graph/reachability/staleness counters (FEEDBACK.md §7) — `unresolved_use_statements > 0` and zero `workspace_crate_edges` in a multi-crate repo are red flags.",
     "inputSchema": {
       "type": "object",

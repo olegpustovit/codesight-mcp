@@ -1,8 +1,8 @@
 //! Integration tests: asm language.
 
+use codesight_core::{StoredSymbol, SymbolKind};
 use codesight_language_support::LanguageRegistry;
 use codesight_language_support::languages::asm::extractor::AsmExtractor;
-use codesight_core::{StoredSymbol, SymbolKind};
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -377,7 +377,12 @@ fn test_parse_wla_dx_language_field() {
     let symbols = extract_wla_dx();
     assert!(!symbols.is_empty(), "should extract at least one symbol");
     for s in &symbols {
-        assert_eq!(s.language.as_str(), "asm", "symbol {} has wrong language", s.name);
+        assert_eq!(
+            s.language.as_str(),
+            "asm",
+            "symbol {} has wrong language",
+            s.name
+        );
     }
 }
 

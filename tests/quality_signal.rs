@@ -131,7 +131,10 @@ fn quality_signal_scope_returns_file_level_agent_readiness() {
             }),
         )
         .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "quality_signal(scope) failed: {r:?}");
+    assert!(
+        r["ok"].as_bool().unwrap(),
+        "quality_signal(scope) failed: {r:?}"
+    );
     let data = &r["data"];
     assert_eq!(data["scope"], "src_a/core.py");
     assert!(data["agent_readiness"].is_object());
@@ -244,7 +247,10 @@ fn session_end_reports_quality_regression() {
             }),
         )
         .unwrap();
-    assert!(baseline["ok"].as_bool().unwrap(), "baseline probe failed: {baseline:?}");
+    assert!(
+        baseline["ok"].as_bool().unwrap(),
+        "baseline probe failed: {baseline:?}"
+    );
 
     fs::write(
         ws.path().join("src_a").join("core.py"),
@@ -282,12 +288,18 @@ def simple_func():
             }),
         )
         .unwrap();
-    assert!(reingest["ok"].as_bool().unwrap(), "reingest failed: {reingest:?}");
+    assert!(
+        reingest["ok"].as_bool().unwrap(),
+        "reingest failed: {reingest:?}"
+    );
 
     let ended = svc
         .dispatch("manage_indexes", json!({ "action": "session_end" }))
         .unwrap();
-    assert!(ended["ok"].as_bool().unwrap(), "session_end failed: {ended:?}");
+    assert!(
+        ended["ok"].as_bool().unwrap(),
+        "session_end failed: {ended:?}"
+    );
     assert_eq!(
         ended["data"]["quality_delta"]["verdict"].as_str(),
         Some("regressed"),

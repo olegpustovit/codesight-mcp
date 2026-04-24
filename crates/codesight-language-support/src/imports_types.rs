@@ -49,7 +49,11 @@ pub fn extract_quoted_string(s: &str) -> Option<&str> {
     let start_double = s.find('"');
     let (start, quote) = match (start_single, start_double) {
         (Some(a), Some(b)) => {
-            if a < b { (a, '\'') } else { (b, '"') }
+            if a < b {
+                (a, '\'')
+            } else {
+                (b, '"')
+            }
         }
         (Some(a), None) => (a, '\''),
         (None, Some(b)) => (b, '"'),
@@ -89,7 +93,11 @@ pub fn extract_quoted_string_with_rest(s: &str) -> Option<(&str, &str)> {
     let start_double = s.find('"');
     let (start, quote) = match (start_single, start_double) {
         (Some(a), Some(b)) => {
-            if a < b { (a, '\'') } else { (b, '"') }
+            if a < b {
+                (a, '\'')
+            } else {
+                (b, '"')
+            }
         }
         (Some(a), None) => (a, '\''),
         (None, Some(b)) => (b, '"'),

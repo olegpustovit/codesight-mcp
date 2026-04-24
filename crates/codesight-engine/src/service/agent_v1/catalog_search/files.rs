@@ -78,7 +78,9 @@ fn build_walker(root: &Path) -> ignore::Walk {
         .filter_entry(|entry| {
             if entry.file_type().is_some_and(|ft| ft.is_dir()) {
                 let name = entry.file_name().to_string_lossy();
-                return !codesight_storage::db::SKIP_DIRS.iter().any(|skip| *skip == name);
+                return !codesight_storage::db::SKIP_DIRS
+                    .iter()
+                    .any(|skip| *skip == name);
             }
             true
         })

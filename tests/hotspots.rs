@@ -4,8 +4,8 @@ use std::process::Command;
 
 use codesight_analysis::quality::hotspots_payload;
 use codesight_engine::config::AppConfig;
-use codesight_storage::storage::IndexStore;
 use codesight_mcp::test_support::{index_code_fixture, open_code_store, write_files};
+use codesight_storage::storage::IndexStore;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -91,7 +91,10 @@ fn hotspots_hotspot_fields() {
     let r = get_hotspots(&store, 1, 50);
     for hotspot in r["hotspots"].as_array().unwrap() {
         // PLAN2 §3.3a dropped `symbol_id` — reconstructible from file+name.
-        assert!(hotspot.get("symbol_id").is_none(), "symbol_id should be dropped");
+        assert!(
+            hotspot.get("symbol_id").is_none(),
+            "symbol_id should be dropped"
+        );
         assert!(hotspot["name"].is_string(), "missing name");
         assert!(hotspot["file"].is_string(), "missing file");
         assert!(hotspot["line"].is_number(), "missing line");
@@ -139,7 +142,10 @@ fn hotspots_min_complexity_filter() {
 #[test]
 fn hotspots_missing_repo_returns_error() {
     let ws = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "evaluate_quality",
@@ -157,7 +163,10 @@ fn hotspots_timing_present() {
     let ws = tempdir().unwrap();
     let src = ws.path().join("src");
     write_files(&src, &[("a.py", "def sample():\n    return 1\n")]).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let indexed = svc
         .dispatch(
             "ingest_sources",

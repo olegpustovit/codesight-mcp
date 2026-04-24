@@ -40,7 +40,6 @@ impl HotspotAssessment {
     }
 }
 
-
 pub fn complexity_payload(store: &IndexStore, symbol_id: &str) -> anyhow::Result<Option<Value>> {
     let Some(rec) = store.symbol_record(symbol_id)? else {
         return Ok(None);
@@ -301,7 +300,9 @@ mod tests {
     #[test]
     fn conventional_path_lets_production_code_through() {
         assert!(!is_conventional_path("src/main.rs"));
-        assert!(!is_conventional_path("crates/codesight-engine/src/service/mod.rs"));
+        assert!(!is_conventional_path(
+            "crates/codesight-engine/src/service/mod.rs"
+        ));
         assert!(!is_conventional_path("app/views/user.py"));
     }
 

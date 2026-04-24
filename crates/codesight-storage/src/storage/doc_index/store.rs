@@ -33,10 +33,7 @@ impl DocStore {
         Ok(())
     }
 
-    fn delete_removed_docs(
-        tx: &Transaction<'_>,
-        removed_files: &[String],
-    ) -> anyhow::Result<()> {
+    fn delete_removed_docs(tx: &Transaction<'_>, removed_files: &[String]) -> anyhow::Result<()> {
         if removed_files.is_empty() {
             return Ok(());
         }
@@ -50,10 +47,7 @@ impl DocStore {
         Ok(())
     }
 
-    fn replace_updated_doc_file(
-        tx: &Transaction<'_>,
-        file: &DocFileUpdate,
-    ) -> anyhow::Result<()> {
+    fn replace_updated_doc_file(tx: &Transaction<'_>, file: &DocFileUpdate) -> anyhow::Result<()> {
         Self::delete_section_vectors_for_file(tx, &file.file_path)?;
         tx.prepare_cached("DELETE FROM sections WHERE file_path = ?1")?
             .execute([&file.file_path])?;
@@ -82,7 +76,10 @@ impl DocStore {
         if section_vectors.is_empty() {
             return Ok(());
         }
-        let rows: Vec<_> = section_vectors.iter().map(OwnedVectorRow::borrowed).collect();
+        let rows: Vec<_> = section_vectors
+            .iter()
+            .map(OwnedVectorRow::borrowed)
+            .collect();
         vector_index::upsert_vectors(tx, Domain::Section, &rows)?;
         Ok(())
     }

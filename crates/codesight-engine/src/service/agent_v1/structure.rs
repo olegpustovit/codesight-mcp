@@ -12,21 +12,16 @@ use serde_json::{Value, json};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::{DEFAULT_FILE_TREE_MAX_FILES, InspectStructureArgs};
 use crate::service::agent_v1::file_tree::{
-    FileTreeBuildNode, file_tree_hint, file_tree_insert, file_tree_to_json,
+    FileTreeBuildNode, file_tree_hint, file_tree_insert, file_tree_to_json_depth,
     normalize_file_tree_path_prefix,
 };
-use crate::service::agent_v1::util::pack_catalog_items_to_token_budget;
 use crate::service::agent_v1::util::graph::build_toc_tree;
+use crate::service::agent_v1::util::pack_catalog_items_to_token_budget;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::savings::MetaBuilder;
 use codesight_storage::storage::IndexStore;
 use codesight_storage::storage::doc_index::DocStore;
-
-/// Default token budget applied to `inspect_structure view=repo_outline`
-/// when the caller does not pass `max_tokens`. Sized to stay well under
-/// typical harness response limits on repos that index hundreds of files.
-const DEFAULT_REPO_OUTLINE_TOKEN_BUDGET: u32 = 8000;
 
 /// Default budget for `view=toc`, `view=toc_tree`, and `view=document_outline`.
 /// Large documents (e.g. REFACTOR_PLAN.md) can produce 30k+ token TOCs if
@@ -64,30 +59,32 @@ impl CodeService {
     /// Open the code index for this call and prepare a timer. Returns a
     /// pre-formed error envelope on failure so callers can early-return
     /// with no further ceremony.
+    ///
+    /// ROADMAP P1.1: `inspect_structure` overview views (file_tree,
+    /// repo_outline, repository_rollup, toc*) have no sensible per-call
+    /// counterfactual — there's no native-tool workflow that would have
+    /// returned the same shape. Pass `raw_bytes: 0` so the envelope carries
+    /// `tokens_saved: null` (omitted) instead of a fabricated "would have
+    /// read the whole repo" number. `file_outline` rebuilds a timer with
+    /// the real per-file baseline after the path resolves.
     fn setup_repo_call(
         &self,
         args: &InspectStructureArgs,
     ) -> anyhow::Result<StoreOrError<IndexStore>> {
         match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(store) => {
-                let raw_bytes = store.repo_total_bytes()?;
-                Ok(Ok((store, MetaBuilder::new(raw_bytes))))
-            }
+            Ok(store) => Ok(Ok((store, MetaBuilder::new(0)))),
             Err(e) => Ok(Err(self.error_response(&MetaBuilder::new(0), e)?)),
         }
     }
 
     /// Open the doc index for this call and prepare a timer. Same shape as
-    /// `setup_repo_call`.
+    /// `setup_repo_call`; same null-baseline rule.
     fn setup_doc_call(
         &self,
         args: &InspectStructureArgs,
     ) -> anyhow::Result<StoreOrError<DocStore>> {
         match self.ensure_doc_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(store) => {
-                let raw_bytes = store.repo_total_bytes()?;
-                Ok(Ok((store, MetaBuilder::new(raw_bytes))))
-            }
+            Ok(store) => Ok(Ok((store, MetaBuilder::new(0)))),
             Err(e) => Ok(Err(self.error_response(&MetaBuilder::new(0), e)?)),
         }
     }
@@ -164,7 +161,16 @@ impl CodeService {
             });
             file_tree_insert(&mut root, &path, file_json);
         }
-        let items = file_tree_to_json(&root, "");
+        // ROADMAP P2.7: when the caller gives no `path` prefix, this is an
+        // orientation call — cap depth at 2 so the output is crate + top
+        // modules, not a deeply-nested wall. Drilling requires an explicit
+        // `path=` on the next call.
+        let max_depth = if prefix.is_some() {
+            usize::MAX
+        } else {
+            2
+        };
+        let items = file_tree_to_json_depth(&root, "", max_depth);
         let mut body = serde_json::Map::new();
         body.insert("view".to_string(), json!("file_tree"));
         body.insert("items".to_string(), Value::Array(items));
@@ -185,54 +191,53 @@ impl CodeService {
     }
 
     fn structure_repo_outline(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {
+        let _ = args.max_tokens; // token budget is enforced by per-section caps below
         let (store, timer) = match self.setup_repo_call(args)? {
             Ok(pair) => pair,
             Err(resp) => return Ok(resp),
         };
-        let outline: Vec<Value> = store
-            .repo_outline()?
-            .into_iter()
-            .filter(|item| {
-                item.get("file")
-                    .and_then(Value::as_str)
-                    .map(|p| !codesight_language_support::is_outline_noise_basename(p))
-                    .unwrap_or(true)
+        // ROADMAP P1.3: `repo_outline` is an *orientation* view, not a
+        // symbol dump. A cold agent running one call must be able to name
+        // the crates, their roles, and the first few files to read. The
+        // shape is deliberately small — per-crate rollups, top-N modules
+        // by centrality + size, detected entrypoints, language mix.
+        // Symbols belong in `file_outline` / `search_catalog`.
+        let rows = store.file_tree_rows()?;
+        let filtered_rows: Vec<&(String, String, i64, u64)> = rows
+            .iter()
+            .filter(|(path, _, _, _)| {
+                !codesight_language_support::is_outline_noise_basename(path)
             })
             .collect();
-        let budget = args.max_tokens.unwrap_or(DEFAULT_REPO_OUTLINE_TOKEN_BUDGET);
-        let (outline, truncated) = pack_catalog_items_to_token_budget(outline, budget);
-        // Compute most_central_symbols via dependency graph PageRank. Nodes
-        // in this graph are file paths, so emit file-shaped entries (no
-        // synthetic `symbol_id` — clients that want to round-trip into
-        // `read_content` should pass `kind: "file"` with `path`). Noise
-        // files (build.rs, .mcp.json, …) are filtered so config artifacts
-        // don't dominate the ranking.
+
         let adj = store.dependency_graph().unwrap_or_default();
-        let most_central = if adj.is_empty() {
-            Vec::new()
+        let pagerank = if adj.is_empty() {
+            None
         } else {
-            let pr = codesight_analysis::graph::compute_pagerank(&adj, 0.85, 100, 1e-6);
-            let mut ranked: Vec<_> = pr
-                .scores
-                .iter()
-                .filter(|(node, _)| {
-                    !codesight_language_support::is_outline_noise_basename(node.as_str())
-                })
-                .collect();
-            ranked.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-            ranked
-                .iter()
-                .take(5)
-                .map(|(node, score)| json!({ "kind": "file", "path": node, "score": score }))
-                .collect()
+            Some(codesight_analysis::graph::compute_pagerank(
+                &adj, 0.85, 100, 1e-6,
+            ))
         };
+
+        let crates = build_workspace_crates(&filtered_rows, pagerank.as_ref());
+        let top_by_centrality = top_modules_by_centrality(pagerank.as_ref(), 10);
+        let top_by_loc = top_modules_by_size(&filtered_rows, 10);
+        let entrypoints = detect_entrypoints(&filtered_rows);
+        let languages: BTreeMap<String, usize> =
+            filtered_rows.iter().fold(BTreeMap::new(), |mut acc, r| {
+                *acc.entry(r.1.clone()).or_insert(0) += 1;
+                acc
+            });
+
         self.success_response(
             &timer,
             json!({
                 "view": "repo_outline",
-                "items": outline,
-                "most_central_symbols": most_central,
-                "truncated": truncated,
+                "workspace": { "crates": crates },
+                "top_modules_by_centrality": top_by_centrality,
+                "top_modules_by_loc": top_by_loc,
+                "entrypoints": entrypoints,
+                "languages": languages,
             }),
         )
     }
@@ -277,10 +282,7 @@ impl CodeService {
             let mut results = Vec::with_capacity(paths.len());
             for p in paths {
                 let symbols = outlines.remove(p.as_str()).unwrap_or_default();
-                let lang = languages
-                    .get(p.as_str())
-                    .cloned()
-                    .unwrap_or_default();
+                let lang = languages.get(p.as_str()).cloned().unwrap_or_default();
                 let count = symbols.len();
                 results.push(json!({
                     "file": p,
@@ -469,4 +471,138 @@ impl CodeService {
         }
         self.success_response(&timer, body)
     }
+}
+
+/// Per-crate rollup used by `repo_outline`'s workspace block. Each entry
+/// summarises one Cargo crate (or the repo root) with file count, symbol
+/// count, size footprint, and the top-3 PageRank files inside the crate.
+fn build_workspace_crates(
+    rows: &[&(String, String, i64, u64)],
+    pagerank: Option<&codesight_analysis::graph::PageRankResult>,
+) -> Vec<Value> {
+    // Group by the first two path segments — `crates/<name>/...` or just
+    // `<name>/...` for root-level directories. Files without a directory
+    // component land in a synthetic "." crate so orientation stays complete.
+    #[derive(Default)]
+    struct CrateAcc {
+        name: String,
+        files: usize,
+        symbols: u64,
+        size: u64,
+        paths: Vec<String>,
+    }
+    let mut by_crate: BTreeMap<String, CrateAcc> = BTreeMap::new();
+    for (path, _lang, size, sym_count) in rows {
+        let name = crate_name_for_path(path).to_string();
+        let entry = by_crate.entry(name.clone()).or_insert_with(|| CrateAcc {
+            name: name.clone(),
+            ..CrateAcc::default()
+        });
+        entry.files += 1;
+        entry.symbols = entry.symbols.saturating_add(*sym_count);
+        entry.size = entry.size.saturating_add((*size).max(0) as u64);
+        entry.paths.push(path.clone());
+    }
+    let mut crates: Vec<_> = by_crate.into_values().collect();
+    // Sort biggest crate (by file count) first — gives the reader an
+    // immediate sense of weight before scanning alphabetically.
+    crates.sort_by(|a, b| b.files.cmp(&a.files).then_with(|| a.name.cmp(&b.name)));
+    crates
+        .into_iter()
+        .map(|c| {
+            let central = if let Some(pr) = pagerank {
+                let mut ranked: Vec<(&String, f64)> = c
+                    .paths
+                    .iter()
+                    .filter_map(|p| pr.scores.get(p).map(|s| (p, *s)))
+                    .collect();
+                ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                ranked.iter().take(3).map(|(p, _)| json!(p)).collect()
+            } else {
+                Vec::new()
+            };
+            json!({
+                "name": c.name,
+                "files": c.files,
+                "symbols": c.symbols,
+                "size_bytes": c.size,
+                "central_files": central,
+            })
+        })
+        .collect()
+}
+
+/// Splits `crates/<x>/...` into `<x>`, keeps root-level single-segment
+/// directories as-is, and falls back to `"."` for top-level files.
+fn crate_name_for_path(path: &str) -> &str {
+    let mut segs = path.split('/');
+    match (segs.next(), segs.next()) {
+        (Some("crates"), Some(name)) => name,
+        (Some(first), Some(_)) => first,
+        (Some(_), None) | (None, _) => ".",
+    }
+}
+
+fn top_modules_by_centrality(
+    pagerank: Option<&codesight_analysis::graph::PageRankResult>,
+    limit: usize,
+) -> Vec<Value> {
+    let Some(pr) = pagerank else {
+        return Vec::new();
+    };
+    let mut ranked: Vec<(&String, f64)> = pr
+        .scores
+        .iter()
+        .filter(|(p, _)| !codesight_language_support::is_outline_noise_basename(p.as_str()))
+        .map(|(p, s)| (p, *s))
+        .collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|(p, s)| json!({ "path": p, "score": s }))
+        .collect()
+}
+
+fn top_modules_by_size(
+    rows: &[&(String, String, i64, u64)],
+    limit: usize,
+) -> Vec<Value> {
+    let mut sorted: Vec<&&(String, String, i64, u64)> = rows.iter().collect();
+    sorted.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+    sorted
+        .into_iter()
+        .take(limit)
+        .map(|(path, lang, size, symbol_count)| {
+            json!({
+                "path": path,
+                "language": lang,
+                "size_bytes": size,
+                "symbol_count": symbol_count,
+            })
+        })
+        .collect()
+}
+
+/// Language-agnostic entrypoint detection. Looks for conventional top-of-
+/// crate entry files (`lib.rs`, `main.rs`, `mod.rs` under a crate src root,
+/// `__init__.py`, `__main__.py`, `index.ts`, `index.js`). Returned paths
+/// are repo-relative and deduplicated.
+fn detect_entrypoints(rows: &[&(String, String, i64, u64)]) -> Vec<Value> {
+    let mut entries: Vec<Value> = Vec::new();
+    for (path, lang, _, _) in rows {
+        let role = match path.as_str() {
+            _ if path.ends_with("/src/lib.rs") || path == "src/lib.rs" => Some("lib"),
+            _ if path.ends_with("/src/main.rs") || path == "src/main.rs" => Some("bin"),
+            _ if path.ends_with("/__init__.py") => Some("package_init"),
+            _ if path.ends_with("/__main__.py") => Some("package_main"),
+            _ if path.ends_with("/index.ts") || path.ends_with("/index.tsx") => Some("ts_index"),
+            _ if path.ends_with("/index.js") || path.ends_with("/index.jsx") => Some("js_index"),
+            _ => None,
+        };
+        if let Some(role) = role {
+            entries.push(json!({ "path": path, "role": role, "language": lang }));
+        }
+    }
+    entries
 }

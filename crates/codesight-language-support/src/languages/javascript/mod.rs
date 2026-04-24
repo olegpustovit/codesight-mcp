@@ -59,12 +59,7 @@ pub(super) fn js_package_name_for_dir(dir: &Path) -> Option<String> {
     v.get("name")?.as_str().map(str::to_string)
 }
 
-pub(crate) const JS_TEST_FILE_DIRS: &[&str] = &[
-    "/__tests__/",
-    "/tests/",
-    "/test/",
-    "/spec/",
-];
+pub(crate) const JS_TEST_FILE_DIRS: &[&str] = &["/__tests__/", "/tests/", "/test/", "/spec/"];
 
 pub(crate) const JS_TEST_FILE_SUFFIXES: &[&str] = &[
     ".test.ts",
@@ -80,7 +75,14 @@ pub(crate) const JS_TEST_FILE_SUFFIXES: &[&str] = &[
 pub(crate) const JS_TEST_FIXTURE_DIRS: &[&str] = &["/__snapshots__/"];
 
 pub(super) const JS_ENTRYPOINTS: &[&str] = &[
-    "main.js", "index.js", "app.js", "server.js", "main.ts", "index.ts", "app.ts", "server.ts",
+    "main.js",
+    "index.js",
+    "app.js",
+    "server.js",
+    "main.ts",
+    "index.ts",
+    "app.ts",
+    "server.ts",
 ];
 
 pub(crate) const JS_PRUNED_DIRS: &[&str] = &["node_modules", "dist", "build", "out"];

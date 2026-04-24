@@ -154,6 +154,19 @@ impl CodeService {
             end_line: pref.end_line,
             repo_path: opts.repo_path.map(|s| s.to_string()),
         };
+        // ROADMAP P1.1: baseline for any file read (full or range) is the
+        // full containing file size — the counterfactual is "the agent would
+        // have `cat`-ed the whole file". For whole-file reads the response
+        // equals the baseline → tokens_saved ≈ 0 (honest). For ranges, the
+        // savings reflect the bytes the agent didn't have to page through.
+        if let Some(store) = self
+            .ensure_repo_store(opts.sid, opts.repo_path)
+            .ok()
+            .as_ref()
+            && let Ok(Some(bytes)) = store.file_bytes(file_path)
+        {
+            *raw_bytes = raw_bytes.saturating_add(bytes);
+        }
         match self.get_file_content(fc) {
             Ok(v) => {
                 if v.get("ok").and_then(|b| b.as_bool()) != Some(true) {
@@ -163,9 +176,6 @@ impl CodeService {
                     ));
                 }
                 let mut data = v["data"].clone();
-                if let Some(content_str) = data.get("content").and_then(|v| v.as_str()) {
-                    *raw_bytes = raw_bytes.saturating_add(content_str.len() as u64);
-                }
                 if let Some(obj) = data.as_object_mut() {
                     if !opts.want_body {
                         obj.remove("content");
@@ -253,6 +263,20 @@ impl CodeService {
                     if scope == "file_full" && item_bytes > TOKEN_HEAVY_READ_BYTES {
                         warnings.push(token_heavy_read_warning(pref, item_bytes));
                         warned_full_file_reads += 1;
+                        // ROADMAP P2.3: pair the heavy-read warning with the
+                        // file's outline inline so the agent can retry with
+                        // symbol refs in one round-trip. Only emit when the
+                        // outline resolves — otherwise the warning above is
+                        // the most we can say.
+                        if let Some(path) = pref.path.as_deref()
+                            && let Some(store) = repo_store_for_ref.as_ref()
+                            && let Ok(outline) = store.file_outline(path)
+                            && !outline.is_empty()
+                            && let Ok(outline_json) = serde_json::to_value(&outline)
+                            && let Some(arr) = outline_json.as_array()
+                        {
+                            warnings.push(outline_first_hint(path, arr.clone()));
+                        }
                     }
                     items.push(item);
                     if let Some(budget) = bytes_budget
@@ -272,7 +296,12 @@ impl CodeService {
         } else {
             RetrievalClass::WholeFileRead
         };
-        let timer = MetaBuilder::new(raw_bytes_total.max(1)).with_class(class);
+        // ROADMAP P1.1: baseline is the honest sum of full-file sizes
+        // the agent would have read without codesight; a whole-file read
+        // yields savings=0 (response≈baseline), a symbol/range read yields
+        // positive savings. No `.max(1)` floor — when `raw_bytes_total` is
+        // legitimately 0 we want `tokens_saved: null`, not a fabricated 1.
+        let timer = MetaBuilder::new(raw_bytes_total).with_class(class);
         let extra = build_read_meta_extras(
             &scopes,
             returned_bytes,
@@ -356,10 +385,7 @@ struct ReadScopeCounters {
 }
 
 enum RefReadResult {
-    Ok {
-        item: Value,
-        scope: &'static str,
-    },
+    Ok { item: Value, scope: &'static str },
     Err(Value),
 }
 
@@ -446,6 +472,26 @@ fn token_heavy_read_warning(pref: &ContentRef, item_bytes: u64) -> Value {
             "returned_bytes": item_bytes,
             "threshold_bytes": TOKEN_HEAVY_READ_BYTES
         }
+    })
+}
+
+/// ROADMAP P2.3: when a caller asks for a whole-file read we can usually
+/// suggest a narrower follow-up right now, rather than just hinting. The
+/// warning carries the file outline inline so the agent can re-issue
+/// `read_content` with specific symbol refs in one round-trip.
+fn outline_first_hint(path: &str, outline: Vec<Value>) -> Value {
+    json!({
+        "code": "OUTLINE_FIRST_HINT",
+        "message": format!(
+            "Whole-file read of `{path}` — the file's outline is inline below. \
+             Retry with `read_content refs=[{{kind:\"symbol\",path:\"{path}\",symbol_name:\"<pick one>\"}}]` \
+             or a specific `start_line`/`end_line` range."
+        ),
+        "detail": {
+            "path": path,
+            "symbol_count": outline.len(),
+            "outline": outline,
+        },
     })
 }
 

@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
+use codesight_core::{StoredSymbol, SymbolKind};
 use codesight_language_support::LanguageRegistry;
 use codesight_language_support::languages::razor::extractor::RazorExtractor;
-use codesight_core::{StoredSymbol, SymbolKind};
 
 use super::support::code_reference_fixtures_dir;
 
@@ -134,7 +134,9 @@ fn test_parse_razor_code_block_handles_nested_braces_and_strings() {
     let ext = reg
         .extractor_for_path(Path::new("Views/Shared/Editor.cshtml"))
         .expect("razor extractor");
-    let symbols = ext.extract_symbols("Views/Shared/Editor.cshtml", source).unwrap();
+    let symbols = ext
+        .extract_symbols("Views/Shared/Editor.cshtml", source)
+        .unwrap();
 
     let view = symbols
         .iter()

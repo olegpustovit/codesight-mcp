@@ -66,16 +66,15 @@ pub fn extract_imports_with_quality(
 
     let edges = lang.extract_imports(content);
     let edges = deduplicate_edges(edges);
-    let ts_used = matches!(lang.extraction_mode(), Some(ImportExtractionMode::TreeSitterFirst))
-        && !edges.is_empty();
+    let ts_used = matches!(
+        lang.extraction_mode(),
+        Some(ImportExtractionMode::TreeSitterFirst)
+    ) && !edges.is_empty();
     let quality = import_fact_quality_for(lang.extraction_mode(), ts_used);
     (edges, quality)
 }
 
-fn lookup_by_name<'a>(
-    registry: &'a LanguageRegistry,
-    name: &str,
-) -> Option<&'a dyn Language> {
+fn lookup_by_name<'a>(registry: &'a LanguageRegistry, name: &str) -> Option<&'a dyn Language> {
     if name.is_empty() || name.eq_ignore_ascii_case("unknown") {
         return None;
     }
@@ -102,7 +101,6 @@ pub fn language_for_path(file_path: &str) -> &'static str {
 pub fn extract_imports(content: &str, file_path: &str, language: &str) -> Vec<ImportEdge> {
     extract_imports_with_quality(content, file_path, language).0
 }
-
 
 // ── Generic specifier → file resolution ───────────────────────────────────
 
@@ -212,8 +210,8 @@ pub fn resolve_import_edge_for_graph(
     workspace_crates: Option<&HashMap<String, String>>,
 ) -> Option<String> {
     let registry = builtin_registry();
-    let resolved_lang = lookup_by_name(registry, lang)
-        .or_else(|| registry.for_path(Path::new(from_file)))?;
+    let resolved_lang =
+        lookup_by_name(registry, lang).or_else(|| registry.for_path(Path::new(from_file)))?;
     resolved_lang.resolve_import_edge(
         edge,
         from_file,

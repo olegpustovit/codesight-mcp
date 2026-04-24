@@ -74,6 +74,26 @@ impl Language for Rust {
         imports::extract(source)
     }
 
+    /// Rust-idiomatic `use` rendering (ROADMAP P1.6). Single name →
+    /// `use spec::name;`, multiple → `use spec::{a, b};`, empty names →
+    /// `use spec;`. Overrides the trait's default ES-module shape.
+    fn display_import_lines(&self, edges: &[ImportEdge]) -> Vec<String> {
+        let mut lines = Vec::new();
+        for e in edges {
+            let spec = e.specifier.trim_matches(':');
+            let line = match e.names.as_slice() {
+                [] if spec.is_empty() => continue,
+                [] => format!("use {spec};"),
+                [n] if spec.is_empty() => format!("use {n};"),
+                [n] => format!("use {spec}::{n};"),
+                many if spec.is_empty() => format!("use {{{}}};", many.join(", ")),
+                many => format!("use {spec}::{{{}}};", many.join(", ")),
+            };
+            lines.push(line);
+        }
+        lines
+    }
+
     fn resolve_import_edge(
         &self,
         edge: &ImportEdge,
@@ -229,9 +249,10 @@ impl Language for Rust {
     }
 
     fn is_conventional_path(&self, path: &str) -> bool {
-        CONVENTIONAL_RUST_DIRS.iter().any(|dir| {
-            path.starts_with(dir) || path.contains(&format!("/{dir}"))
-        }) || path.rsplit('/').next().unwrap_or(path) == "build.rs"
+        CONVENTIONAL_RUST_DIRS
+            .iter()
+            .any(|dir| path.starts_with(dir) || path.contains(&format!("/{dir}")))
+            || path.rsplit('/').next().unwrap_or(path) == "build.rs"
     }
 
     fn conventional_dirs(&self) -> &'static [&'static str] {
@@ -250,9 +271,8 @@ impl Language for Rust {
         use crate::traits::{LiveRoot, LiveRootConfidence};
         let mut roots = Vec::new();
         for path in detect_cargo_target_files(root, all_files) {
-            let message = format!(
-                "file '{path}' is a Cargo [[test]]/[[example]]/[[bench]]/[[bin]] target"
-            );
+            let message =
+                format!("file '{path}' is a Cargo [[test]]/[[example]]/[[bench]]/[[bin]] target");
             roots.push(LiveRoot {
                 path,
                 reason: "cargo_target",
@@ -475,10 +495,7 @@ fn detect_foreign_trait_impl_files(
     hits
 }
 
-fn detect_cargo_target_files(
-    root_path: Option<&Path>,
-    all_files: &[String],
-) -> HashSet<String> {
+fn detect_cargo_target_files(root_path: Option<&Path>, all_files: &[String]) -> HashSet<String> {
     let mut targets = HashSet::new();
     let Some(root) = root_path else {
         return targets;
@@ -629,6 +646,9 @@ mod tests {
             "[package]\nname = \"my-crate\"\nversion = \"0.1.0\"\n",
         )
         .unwrap();
-        assert_eq!(Rust.package_name_for_dir(tmp.path()), Some("my-crate".into()));
+        assert_eq!(
+            Rust.package_name_for_dir(tmp.path()),
+            Some("my-crate".into())
+        );
     }
 }

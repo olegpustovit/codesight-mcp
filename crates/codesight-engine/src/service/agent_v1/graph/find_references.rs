@@ -61,6 +61,46 @@ pub(crate) struct RefMatch {
     pub preview: String,
 }
 
+/// Return true when `c` is part of a Rust-shaped identifier token. Used for
+/// word-boundary checks on case-insensitive substring searches.
+fn is_ident_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
+}
+
+/// Locate the first case-insensitive, word-boundary-delimited occurrence of
+/// `identifier` in `source`. Returns `(line, column)` with 1-based indexing.
+fn locate_identifier_ci(source: &str, identifier: &str) -> Option<(u32, u32)> {
+    if identifier.is_empty() {
+        return None;
+    }
+    let id_lower = identifier.to_ascii_lowercase();
+    let id_len = id_lower.len();
+    for (line_idx, line) in source.lines().enumerate() {
+        let bytes = line.as_bytes();
+        let line_lower = line.to_ascii_lowercase();
+        let lower_bytes = line_lower.as_bytes();
+        let mut search_from = 0usize;
+        while let Some(pos) = line_lower[search_from..].find(&id_lower) {
+            let abs = search_from + pos;
+            let before_ok = abs == 0 || !is_ident_char(bytes[abs - 1]);
+            let end = abs + id_len;
+            let after_ok = end >= lower_bytes.len() || !is_ident_char(bytes[end]);
+            if before_ok && after_ok {
+                return Some((line_idx as u32 + 1, abs as u32 + 1));
+            }
+            search_from = abs + id_len;
+        }
+    }
+    None
+}
+
+fn first_identifier_line(file: &str, content: &str, identifier: &str) -> Option<(u32, String)> {
+    content.lines().enumerate().find_map(|(idx, line)| {
+        mentions_identifier_ci_in_file(file, line, identifier)
+            .then(|| (idx as u32 + 1, line.trim().to_string()))
+    })
+}
+
 /// Collect whole-word references to `name` in the indexed workspace.
 /// `definition_id` (optional) is excluded from symbol-body matches.
 pub(crate) fn collect_references(
@@ -101,16 +141,177 @@ pub(crate) fn collect_references(
         if seen_files.contains(file) || !filter.admits(file) {
             continue;
         }
-        if mentions_identifier_ci_in_file(file, content, name) {
+        if let Some((line, preview)) = first_identifier_line(file, content, name) {
             out.push(RefMatch {
                 file: file.clone(),
-                line: 0,
-                kind: "text_match",
-                preview: String::new(),
+                line,
+                kind: "file_body_match",
+                preview,
             });
         }
     }
     Ok(out)
+}
+
+/// Fully-populated reference row. `definition` and `symbol_body_match` are
+/// semantic (definition site or a match inside a symbol body). `file_body_match`
+/// is a candidate text hit — the identifier appears somewhere in file text that
+/// isn't covered by an indexed symbol span.
+#[derive(Debug, Clone)]
+struct ReferenceRow {
+    file: String,
+    line: u32,
+    column: Option<u32>,
+    name: String,
+    kind: &'static str,
+    enclosing_symbol: Option<String>,
+    enclosing_kind: Option<String>,
+    /// ROADMAP P0.4 #4: chain of enclosing scope names walking up from the
+    /// enclosing symbol toward the file root. Empty when the reference is
+    /// top-level or comes from a `file_body_match` candidate row.
+    call_chain: Vec<String>,
+}
+
+impl ReferenceRow {
+    fn to_json(&self) -> Value {
+        let mut m = serde_json::Map::new();
+        m.insert("file".into(), json!(self.file));
+        m.insert("line".into(), json!(self.line));
+        if let Some(col) = self.column {
+            m.insert("column".into(), json!(col));
+        }
+        m.insert("name".into(), json!(self.name));
+        m.insert("kind".into(), json!(self.kind));
+        if let Some(sym) = &self.enclosing_symbol {
+            m.insert("enclosing_symbol".into(), json!(sym));
+        }
+        if let Some(k) = &self.enclosing_kind {
+            m.insert("enclosing_kind".into(), json!(k));
+        }
+        if !self.call_chain.is_empty() {
+            m.insert("call_chain".into(), json!(self.call_chain));
+        }
+        Value::Object(m)
+    }
+
+    fn is_semantic(&self) -> bool {
+        !matches!(self.kind, "file_body_match")
+    }
+}
+
+/// Derive the scope chain (ancestor names) from a symbol's stable id using
+/// the shared `SymbolIdRef` parser. The chain is the symbol path minus its
+/// leaf; empty for top-level symbols.
+fn call_chain_from_stable_id(id: &str) -> Vec<String> {
+    codesight_core::SymbolIdRef::new(id)
+        .scopes()
+        .map(str::to_string)
+        .collect()
+}
+
+fn collect_rows(
+    sym_infos: &[codesight_storage::storage::SymbolSourceRecord],
+    all_contents: &[(String, String)],
+    identifier: &str,
+    filter: &RefFilter<'_>,
+    skip_definition: bool,
+) -> Vec<ReferenceRow> {
+    let mut rows: Vec<ReferenceRow> = Vec::new();
+    let mut seen_files: HashSet<String> = HashSet::new();
+
+    for sym in sym_infos {
+        if !filter.admits(&sym.file) {
+            continue;
+        }
+        if sym.name.eq_ignore_ascii_case(identifier) {
+            if skip_definition {
+                continue;
+            }
+            let (line, column) = locate_identifier_ci(&sym.source, identifier)
+                .map(|(rel_line, col)| (sym.line + rel_line - 1, Some(col)))
+                .unwrap_or((sym.line, None));
+            rows.push(ReferenceRow {
+                file: sym.file.clone(),
+                line,
+                column,
+                name: sym.name.clone(),
+                kind: "definition",
+                enclosing_symbol: None,
+                enclosing_kind: None,
+                call_chain: call_chain_from_stable_id(&sym.id),
+            });
+            seen_files.insert(sym.file.clone());
+            continue;
+        }
+        if mentions_identifier_ci_in_file(&sym.file, &sym.source, identifier) {
+            let (line, column) = locate_identifier_ci(&sym.source, identifier)
+                .map(|(rel_line, col)| (sym.line + rel_line - 1, Some(col)))
+                .unwrap_or((sym.line, None));
+            let mut chain = call_chain_from_stable_id(&sym.id);
+            chain.push(sym.name.clone());
+            rows.push(ReferenceRow {
+                file: sym.file.clone(),
+                line,
+                column,
+                name: sym.name.clone(),
+                kind: "symbol_body_match",
+                enclosing_symbol: Some(sym.name.clone()),
+                enclosing_kind: Some(sym.kind.clone()),
+                call_chain: chain,
+            });
+            seen_files.insert(sym.file.clone());
+        }
+    }
+
+    for (file, content) in all_contents {
+        if seen_files.contains(file) || !filter.admits(file) {
+            continue;
+        }
+        let Some((line, col)) = locate_identifier_ci(content, identifier) else {
+            continue;
+        };
+        rows.push(ReferenceRow {
+            file: file.clone(),
+            line,
+            column: Some(col),
+            name: identifier.to_string(),
+            kind: "file_body_match",
+            enclosing_symbol: None,
+            enclosing_kind: None,
+            call_chain: Vec::new(),
+        });
+        seen_files.insert(file.clone());
+    }
+
+    rows
+}
+
+fn split_semantic_and_candidate(rows: Vec<ReferenceRow>) -> (Vec<Value>, Vec<Value>) {
+    let mut semantic = Vec::new();
+    let mut candidate = Vec::new();
+    for row in rows {
+        let json = row.to_json();
+        if row.is_semantic() {
+            semantic.push(json);
+        } else {
+            candidate.push(json);
+        }
+    }
+    (semantic, candidate)
+}
+
+fn partial_references_warning(candidate_count: usize) -> Vec<Value> {
+    if candidate_count == 0 {
+        return Vec::new();
+    }
+    vec![json!({
+        "code": "PARTIAL_REFERENCES",
+        "message": format!(
+            "{candidate_count} candidate text hit(s) returned alongside semantic references. \
+             Candidate hits live in `candidate_text_hits` — they are substring matches in file text \
+             not covered by any indexed symbol span, and are weaker than semantic references."
+        ),
+    })]
 }
 
 impl CodeService {
@@ -146,51 +347,32 @@ impl CodeService {
         let all_contents = store.all_file_contents().unwrap_or_default();
         let filter = RefFilter::from_args(args);
         let mut results: Vec<Value> = Vec::new();
+        let mut total_candidate: usize = 0;
         for ident in identifiers {
-            let mut file_refs: Vec<Value> = Vec::new();
-            let mut seen_files: HashSet<String> = HashSet::new();
-            // Flat row per match: {file, line, name} + kind only when
-            // non-default. `symbol_id` is reconstructible from file + name.
-            for sym in &sym_infos {
-                if !filter.admits(&sym.file) {
-                    continue;
-                }
-                if sym.name.eq_ignore_ascii_case(ident) {
-                    continue;
-                }
-                if mentions_identifier_ci_in_file(&sym.file, &sym.source, ident)
-                    && seen_files.insert(sym.file.clone())
-                {
-                    file_refs.push(compact_match_row(&sym.file, sym.line, &sym.name, &sym.kind));
-                }
-            }
-            for (file, content) in &all_contents {
-                if seen_files.contains(file) || !filter.admits(file) {
-                    continue;
-                }
-                if mentions_identifier_ci_in_file(file, content, ident) {
-                    seen_files.insert(file.clone());
-                    file_refs.push(compact_match_row(file, 0, ident, "text_match"));
-                }
-            }
+            let rows = collect_rows(&sym_infos, &all_contents, ident, &filter, true);
+            let (semantic, candidate) = split_semantic_and_candidate(rows);
+            total_candidate += candidate.len();
             results.push(json!({
                 "identifier": ident,
-                "reference_count": file_refs.len(),
-                "references": file_refs,
+                "semantic_reference_count": semantic.len(),
+                "candidate_text_hit_count": candidate.len(),
+                "semantic_references": semantic,
+                "candidate_text_hits": candidate,
             }));
         }
-        let total_references: usize = results
+        let total_semantic: usize = results
             .iter()
-            .filter_map(|r| r.get("reference_count")?.as_u64())
+            .filter_map(|r| r.get("semantic_reference_count")?.as_u64())
             .sum::<u64>() as usize;
         self.success_response_with_warnings(
             &MetaBuilder::new(0),
             json!({
                 "graph": "find_references",
-                "total_references": total_references,
+                "total_semantic_references": total_semantic,
+                "total_candidate_text_hits": total_candidate,
                 "results": results,
             }),
-            Vec::new(),
+            partial_references_warning(total_candidate),
         )
     }
 
@@ -205,40 +387,25 @@ impl CodeService {
         let include_call_chain = args.include_call_chain.unwrap_or(false);
         let filter = RefFilter::from_args(args);
 
-        // Flat row per match. Replaces the {file, matches:[…]} nesting: when
-        // most files have 1–2 matches the nested shape paid a key-per-row
-        // tax for no real compression (PLAN2 §3.4b).
-        let mut refs: Vec<Value> = Vec::new();
-        let mut seen_files: HashSet<String> = HashSet::new();
-
-        for sym in &sym_infos {
-            if !filter.admits(&sym.file) {
-                continue;
-            }
-            if sym.name.eq_ignore_ascii_case(identifier) {
-                continue;
-            }
-            if mentions_identifier_ci_in_file(&sym.file, &sym.source, identifier) {
-                seen_files.insert(sym.file.clone());
-                refs.push(compact_match_row(&sym.file, sym.line, &sym.name, &sym.kind));
-            }
-        }
-
-        for (file, content) in &all_contents {
-            if seen_files.contains(file) || !filter.admits(file) {
-                continue;
-            }
-            if mentions_identifier_ci_in_file(file, content, identifier) {
-                seen_files.insert(file.clone());
-                refs.push(compact_match_row(file, 0, identifier, "text_match"));
-            }
-        }
+        let rows = collect_rows(&sym_infos, &all_contents, identifier, &filter, false);
+        let (semantic, candidate) = split_semantic_and_candidate(rows);
+        let semantic_count = semantic.len();
+        let candidate_count = candidate.len();
 
         let _call_edges = if include_call_chain {
             Some(codesight_analysis::graph::build_call_edges(&sym_infos))
         } else {
             None
         };
+
+        let mut data = json!({
+            "graph": "find_references",
+            "identifier": identifier,
+            "semantic_reference_count": semantic_count,
+            "candidate_text_hit_count": candidate_count,
+            "semantic_references": semantic,
+            "candidate_text_hits": candidate,
+        });
 
         if include_call_chain {
             // `calling_symbols` is diagnostic context only — attach per-file
@@ -265,45 +432,15 @@ impl CodeService {
                 .into_iter()
                 .map(|(file, callers)| json!({ "file": file, "calling_symbols": callers }))
                 .collect();
-            let total_count = refs.len();
-            return self.success_response_with_warnings(
-                &MetaBuilder::new(0),
-                json!({
-                    "graph": "find_references",
-                    "identifier": identifier,
-                    "reference_count": total_count,
-                    "references": refs,
-                    "call_chain": chain,
-                }),
-                Vec::new(),
-            );
+            data["call_chain"] = Value::Array(chain);
         }
 
-        let total_count = refs.len();
         self.success_response_with_warnings(
             &MetaBuilder::new(0),
-            json!({
-                "graph": "find_references",
-                "identifier": identifier,
-                "reference_count": total_count,
-                "references": refs,
-            }),
-            Vec::new(),
+            data,
+            partial_references_warning(candidate_count),
         )
     }
-}
-
-/// Compact per-match row: `{file, line, name}` + `kind` only when
-/// non-default. "function" is the dominant kind and is assumed when absent.
-fn compact_match_row(file: &str, line: u32, name: &str, kind: &str) -> Value {
-    let mut m = serde_json::Map::new();
-    m.insert("file".to_string(), json!(file));
-    m.insert("line".to_string(), json!(line));
-    m.insert("name".to_string(), json!(name));
-    if kind != "function" {
-        m.insert("kind".to_string(), json!(kind));
-    }
-    Value::Object(m)
 }
 
 #[cfg(test)]
@@ -414,5 +551,21 @@ mod tests {
         };
         let f = RefFilter::from_args(&args);
         assert!(f.admits("scripts/stress/x.json"));
+    }
+
+    #[test]
+    fn locate_identifier_ci_finds_word_boundary() {
+        // Matches the whole word, not a substring.
+        assert_eq!(locate_identifier_ci("let foo = 1;", "foo"), Some((1, 5)));
+        assert_eq!(
+            locate_identifier_ci("let foobar = 1;\nlet foo = 2;", "foo"),
+            Some((2, 5))
+        );
+        assert!(locate_identifier_ci("let foobar = 1;", "foo").is_none());
+    }
+
+    #[test]
+    fn locate_identifier_ci_is_case_insensitive() {
+        assert_eq!(locate_identifier_ci("let Foo = 1;", "foo"), Some((1, 5)));
     }
 }

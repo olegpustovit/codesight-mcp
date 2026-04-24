@@ -6,7 +6,10 @@ use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
-use crate::service::agent_v1::util::graph::{build_caller_parents, reconstruct_caller_chain};
+use crate::service::agent_v1::util::{
+    graph::{build_caller_parents, reconstruct_caller_chain},
+    ref_requires_strict_resolution, resolve_symbol_id_strict,
+};
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
@@ -20,13 +23,11 @@ impl CodeService {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
 
         let sym_name_from_id = args.symbol_id.as_deref().unwrap_or("");
-        let sym_id_from_refs = args
-            .refs
-            .as_ref()
-            .and_then(|r| r.first())
-            .and_then(|r| r.stable_id.as_deref().or(r.id.as_deref()));
+        let first_ref = args.refs.as_ref().and_then(|r| r.first());
 
+        let resolution: Option<&'static str>;
         let (sym_id, sym_name) = if !sym_name_from_id.is_empty() {
+            resolution = Some("symbol_id_arg");
             let sym_infos = store.all_symbols_with_source()?;
             let found = sym_infos.iter().find(|s| s.name == sym_name_from_id);
             match found {
@@ -43,10 +44,53 @@ impl CodeService {
                     );
                 }
             }
-        } else if let Some(sid) = sym_id_from_refs {
-            let names = store.symbol_names_by_id(sid)?;
-            match names {
-                Some((n, _)) => (sid.to_string(), n),
+        } else if let Some(r) = first_ref {
+            let is_strict = ref_requires_strict_resolution(
+                r.stable_id.as_deref(),
+                r.id.as_deref(),
+                r.path.as_deref(),
+                r.start_line,
+                r.symbol_name.as_deref(),
+            );
+            let resolved = resolve_symbol_id_strict(
+                &store,
+                r.stable_id.as_deref(),
+                r.id.as_deref(),
+                r.path.as_deref(),
+                r.start_line,
+                r.symbol_name.as_deref(),
+            )?;
+            let sid = match resolved {
+                Some((id, strategy)) => {
+                    resolution = Some(strategy.as_str());
+                    id
+                }
+                None if is_strict => {
+                    return self.error_response(
+                        &timer,
+                        ToolError {
+                            category: ToolErrorCategory::NotFound,
+                            code: "NOT_FOUND",
+                            message: "impact_preview could not resolve refs[0].".to_string(),
+                            detail: json!({ "unresolved": [r] }),
+                        },
+                    );
+                }
+                None => {
+                    return self.error_response(
+                        &timer,
+                        ToolError {
+                            category: ToolErrorCategory::InvalidArgument,
+                            code: "INVALID_REQUEST",
+                            message: "impact_preview refs[0] provided no resolvable fields."
+                                .to_string(),
+                            detail: json!({ "ref": r }),
+                        },
+                    );
+                }
+            };
+            match store.symbol_names_by_id(&sid)? {
+                Some((n, _)) => (sid, n),
                 None => {
                     return self.error_response(
                         &timer,
@@ -124,8 +168,8 @@ impl CodeService {
             json!({ "id": sym_id, "name": sym_name })
         };
 
-        let raw_bytes = store.repo_total_bytes().unwrap_or(0);
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: structural analysis — null baseline.
+        let timer = MetaBuilder::new(0);
 
         self.success_response_with_meta_extra(
             &timer,
@@ -155,7 +199,17 @@ impl CodeService {
                 }).collect::<Vec<_>>(),
             }),
             Vec::new(),
-            [("source".to_string(), json!("text_heuristic"))],
+            {
+                let mut extras: Vec<(String, Value)> = vec![(
+                    "source".to_string(),
+                    json!("text_heuristic"),
+                )];
+                // ROADMAP P0.2 #3: echo which ref shape resolved the target.
+                if let Some(r) = resolution {
+                    extras.push(("resolution".to_string(), json!(r)));
+                }
+                extras
+            },
         )
     }
 }

@@ -182,10 +182,7 @@ pub fn remap_symbols(
         .collect()
 }
 
-pub fn find_html_tag_blocks<'a>(
-    source: &'a str,
-    tag_name: &str,
-) -> Result<Vec<HtmlTagBlock<'a>>> {
+pub fn find_html_tag_blocks<'a>(source: &'a str, tag_name: &str) -> Result<Vec<HtmlTagBlock<'a>>> {
     let escaped = regex::escape(tag_name);
     let pattern = format!(r"(?is)<{escaped}\b([^>]*)>(.*?)</{escaped}\s*>");
     let regex = Regex::new(&pattern)?;

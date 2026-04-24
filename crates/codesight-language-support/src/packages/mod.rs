@@ -14,8 +14,7 @@ pub mod walker;
 
 pub use crate::languages::rust::{workspace_bin_targets_from_root, workspace_crates_from_root};
 pub use cross_repo::{
-    PackageMatchKind, PackageReferenceEvidence, PackageReferenceMatcher,
-    package_reference_evidence,
+    PackageMatchKind, PackageReferenceEvidence, PackageReferenceMatcher, package_reference_evidence,
 };
 pub use registry::{
     CrossRepoEdge, PackageRegistry, RepoEntry, build_cross_repo_edges, build_package_registry,

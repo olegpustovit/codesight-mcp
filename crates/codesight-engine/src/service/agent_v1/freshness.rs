@@ -162,7 +162,17 @@ fn annotate_status(
         return response;
     };
     let files_in_flight: Vec<String> = status.files_in_flight.into_iter().take(5).collect();
-    if intersects {
+    // ROADMAP P2.6: only escalate to a full warning when the reindex has
+    // been in flight long enough to actually diverge (>500 ms) and the
+    // query scope overlaps. Short-lived incremental reindexes from
+    // Edit/Write hooks usually drain before the next query completes, so
+    // warning on every one of them floods the agent with noise.
+    const STALE_WARNING_THRESHOLD_MS: u64 = 500;
+    let stale_enough = status
+        .stale_since_ms
+        .map(|ms| ms >= STALE_WARNING_THRESHOLD_MS)
+        .unwrap_or(false);
+    if intersects && stale_enough {
         let warnings = body
             .entry("warnings".to_string())
             .or_insert_with(|| Value::Array(Vec::new()));
@@ -190,25 +200,48 @@ fn annotate_status(
 mod tests {
     use super::*;
 
+    fn fake_stale_status(files: &[&str], stale_since_ms: u64) -> ReindexStatus {
+        ReindexStatus {
+            reindex_in_progress: true,
+            index_stale: true,
+            stale_since_ms: Some(stale_since_ms),
+            files_in_flight: files.iter().map(|s| s.to_string()).collect(),
+            reindex_error: None,
+            reindex_failures: None,
+        }
+    }
+
     #[test]
     fn warning_when_query_intersects_in_flight() {
-        let states = ReindexStateManager::new();
-        states.mark_reindex_start("repo-x", &["src/lib.rs".to_string()]);
+        // ROADMAP P2.6: a ≥500 ms in-flight reindex that overlaps the query
+        // escalates to a full STALE_DATA_WARNING.
+        let status = fake_stale_status(&["src/lib.rs"], 1_000);
         let body = json!({ "ok": true, "data": {}, "warnings": [] });
-        let annotated =
-            annotate_with(&states, "repo-x", &["src/lib.rs".to_string()], body);
+        let annotated = annotate_status("repo-x", status, &["src/lib.rs".to_string()], body);
         let warnings = annotated["warnings"].as_array().unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0]["code"], "STALE_DATA_WARNING");
     }
 
     #[test]
-    fn hint_not_warning_when_query_does_not_touch_in_flight() {
-        let states = ReindexStateManager::new();
-        states.mark_reindex_start("repo-x", &["src/lib.rs".to_string()]);
+    fn no_warning_when_reindex_just_started() {
+        // ROADMAP P2.6: a <500 ms reindex is expected to drain fast, so the
+        // warning is demoted to a quiet `_meta.indexing` hint.
+        let status = fake_stale_status(&["src/lib.rs"], 50);
         let body = json!({ "ok": true, "data": {}, "warnings": [], "_meta": {} });
-        let annotated =
-            annotate_with(&states, "repo-x", &["tests/foo.rs".to_string()], body);
+        let annotated = annotate_status("repo-x", status, &["src/lib.rs".to_string()], body);
+        assert!(annotated["warnings"].as_array().unwrap().is_empty());
+        assert_eq!(
+            annotated["_meta"]["indexing"].as_array().unwrap()[0],
+            "src/lib.rs"
+        );
+    }
+
+    #[test]
+    fn hint_not_warning_when_query_does_not_touch_in_flight() {
+        let status = fake_stale_status(&["src/lib.rs"], 1_000);
+        let body = json!({ "ok": true, "data": {}, "warnings": [], "_meta": {} });
+        let annotated = annotate_status("repo-x", status, &["tests/foo.rs".to_string()], body);
         assert!(annotated["warnings"].as_array().unwrap().is_empty());
         let indexing = annotated["_meta"]["indexing"].as_array().unwrap();
         assert_eq!(indexing[0], "src/lib.rs");
@@ -224,21 +257,19 @@ mod tests {
 
     #[test]
     fn empty_touched_falls_back_to_warning() {
-        let states = ReindexStateManager::new();
-        states.mark_reindex_start("repo-x", &["src/lib.rs".to_string()]);
+        let status = fake_stale_status(&["src/lib.rs"], 1_000);
         let body = json!({ "ok": true, "data": {}, "warnings": [] });
-        let annotated = annotate_with(&states, "repo-x", &[], body);
+        let annotated = annotate_status("repo-x", status, &[], body);
         assert_eq!(annotated["warnings"].as_array().unwrap().len(), 1);
     }
 
     #[test]
     fn scope_prefix_intersects() {
-        let states = ReindexStateManager::new();
-        states.mark_reindex_start("repo-x", &["src/service/mod.rs".to_string()]);
+        let status = fake_stale_status(&["src/service/mod.rs"], 1_000);
         let body = json!({ "ok": true, "data": {}, "warnings": [] });
-        let annotated = annotate_with(
-            &states,
+        let annotated = annotate_status(
             "repo-x",
+            status,
             &["__scope__:src/service/".to_string()],
             body,
         );

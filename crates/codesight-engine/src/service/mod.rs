@@ -74,8 +74,7 @@ use crate::{
     },
     reindex_state::ReindexStateManager,
     service::savings::{
-        Meta, MetaBuilder, QualityHotspotMarker, QualitySnapshotMarker, SavingsLedger,
-        SessionState,
+        Meta, MetaBuilder, QualityHotspotMarker, QualitySnapshotMarker, SavingsLedger, SessionState,
     },
 };
 use helpers::{ToolError, ToolErrorCategory, attach_meta};
@@ -153,9 +152,7 @@ impl CodeService {
             reindex_states,
             watchers: file_watcher::WatcherManager::new(),
             embedder: codesight_retrieval::embedder::EmbedderSlot::new(),
-            source_registry: Arc::new(
-                crate::server_support::source_registry::SourceRegistry::new(),
-            ),
+            source_registry: Arc::new(crate::server_support::source_registry::SourceRegistry::new()),
             self_weak: OnceLock::new(),
             catalog_generation: AtomicU64::new(0),
             catalog_cache: RwLock::new(None),
@@ -256,19 +253,13 @@ impl CodeService {
         });
     }
 
-    pub(crate) fn savings_ledger_set_quality_session_start(
-        &self,
-        marker: QualitySnapshotMarker,
-    ) {
+    pub(crate) fn savings_ledger_set_quality_session_start(&self, marker: QualitySnapshotMarker) {
         self.with_ledger_locked(|ledger| {
             let _ = ledger.set_quality_session_start(marker);
         });
     }
 
-    pub(crate) fn savings_ledger_set_quality_session_end(
-        &self,
-        marker: QualitySnapshotMarker,
-    ) {
+    pub(crate) fn savings_ledger_set_quality_session_end(&self, marker: QualitySnapshotMarker) {
         self.with_ledger_locked(|ledger| {
             let _ = ledger.set_quality_session_end(marker);
         });
@@ -404,11 +395,7 @@ impl CodeService {
         }
     }
 
-    fn maybe_capture_session_start_from_catalog(
-        &self,
-        response: &Value,
-        session: &SessionState,
-    ) {
+    fn maybe_capture_session_start_from_catalog(&self, response: &Value, session: &SessionState) {
         if session.quality_session_start.is_some() {
             return;
         }

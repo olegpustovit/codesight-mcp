@@ -14,7 +14,10 @@ fn ingest_rust_repo(files: &[(&str, &str)]) -> (CodeService, tempfile::TempDir, 
         }
         fs::write(path, content).unwrap();
     }
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",
@@ -32,7 +35,10 @@ fn ingest_rust_repo(files: &[(&str, &str)]) -> (CodeService, tempfile::TempDir, 
 #[test]
 fn path_rename_dry_run_and_apply_rewrites_paths() {
     let (svc, _ws, sid) = ingest_rust_repo(&[
-        ("src/storage/mod.rs", "#[derive(Clone)]\npub struct DocStore;\n"),
+        (
+            "src/storage/mod.rs",
+            "#[derive(Clone)]\npub struct DocStore;\n",
+        ),
         (
             "src/lib.rs",
             "pub mod storage;\npub fn consume(store: crate::storage::DocStore) -> crate::storage::DocStore { store }\n",
@@ -59,7 +65,10 @@ fn path_rename_dry_run_and_apply_rewrites_paths() {
             }),
         )
         .unwrap();
-    assert!(preview["ok"].as_bool().unwrap(), "preview failed: {preview:?}");
+    assert!(
+        preview["ok"].as_bool().unwrap(),
+        "preview failed: {preview:?}"
+    );
     assert!(preview["data"]["summary"]["files"].as_u64().unwrap() >= 2);
     assert!(preview["data"]["summary"]["changes"].as_u64().unwrap() >= 2);
     assert!(
@@ -83,7 +92,10 @@ fn path_rename_dry_run_and_apply_rewrites_paths() {
             }),
         )
         .unwrap();
-    assert!(applied["ok"].as_bool().unwrap(), "apply failed: {applied:?}");
+    assert!(
+        applied["ok"].as_bool().unwrap(),
+        "apply failed: {applied:?}"
+    );
     assert!(applied["data"]["applied"].as_u64().unwrap() >= 2);
     assert_eq!(
         applied["data"]["complexity_budget"]["verdict"].as_str(),

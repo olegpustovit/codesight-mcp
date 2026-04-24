@@ -20,7 +20,10 @@ fn build_svc_with_sources() -> (CodeService, tempfile::TempDir, String) {
     .unwrap();
     // Text-only reference file
     fs::write(src.join("b.py"), "# calls foo here\nprint('foo')\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx"))).unwrap();
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        ws.path().join("idx"),
+    ))
+    .unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

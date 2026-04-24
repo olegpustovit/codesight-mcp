@@ -13,7 +13,7 @@ use crate::service::agent_v1::args::SearchCatalogArgs;
 use crate::service::agent_v1::util::{search_hit_section, search_hit_symbol};
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{MetaBuilder, search_rg_equivalent_bytes};
 use crate::service::{CodeService, MAX_QUERY_LEN};
 use codesight_storage::storage::IndexStore;
 use codesight_storage::storage::doc_index::DocStore;
@@ -23,7 +23,6 @@ use dense::{
 };
 use plan::{
     CodeSideStats, KindFlags, LexicalStats, SearchCounts, SearchPlan, build_meta_extras,
-    estimate_candidate_file_bytes,
 };
 use response::{FormatCtx, format_output};
 use semantic::{run_dense_lane, semantic_fallback_warning};
@@ -43,9 +42,7 @@ enum FileClass {
 
 fn classify_path(path: &str) -> FileClass {
     let has_prefix = |p: &str| {
-        path == p
-            || path.starts_with(&format!("{p}/"))
-            || path.contains(&format!("/{p}/"))
+        path == p || path.starts_with(&format!("{p}/")) || path.contains(&format!("/{p}/"))
     };
     if codesight_language_support::is_test_file(path) || has_prefix("tests") {
         return FileClass::Test;
@@ -73,6 +70,55 @@ fn item_file_class(item: &Value) -> FileClass {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     classify_path(path)
+}
+
+/// Merge items that refer to the same symbol / section / file into one row,
+/// keeping the max score. Without this, hybrid retrieval can emit duplicate
+/// rows for the same `stable_id` — once from the symbol layer and once from
+/// the section layer (ROADMAP P1.2).
+fn dedupe_by_stable_id(items: &mut Vec<Value>) {
+    use std::collections::HashMap;
+    let taken = std::mem::take(items);
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<Value> = Vec::with_capacity(taken.len());
+    for item in taken {
+        let key = item
+            .get("ref")
+            .and_then(|r| r.get("id").or_else(|| r.get("stable_id")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let Some(key) = key else {
+            out.push(item);
+            continue;
+        };
+        if let Some(&idx) = seen.get(&key) {
+            let existing_score = out[idx]
+                .get("score")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let new_score = item.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            if new_score > existing_score {
+                out[idx] = item;
+            }
+        } else {
+            seen.insert(key, out.len());
+            out.push(item);
+        }
+    }
+    *items = out;
+}
+
+/// Drop items classified as tests / fixtures. Used for NL queries when the
+/// caller has not explicitly opted in to `include_tests: true` (ROADMAP P1.2
+/// — NL queries asking "how does X work" should surface the production code,
+/// not the test asserting it).
+fn drop_tests(items: &mut Vec<Value>) {
+    items.retain(|item| {
+        !matches!(
+            item_file_class(item),
+            FileClass::Test | FileClass::Fixture | FileClass::Bench
+        )
+    });
 }
 
 fn apply_directory_prior(items: &mut Vec<Value>) {
@@ -135,10 +181,27 @@ impl CodeService {
         let doc_store = if need_doc {
             match self.ensure_doc_store(&args.source_id, args.repo_path.as_deref()) {
                 Ok(s) => Some(s),
+                // ROADMAP P2.2: replace the bare DOC_INDEX_MISSING noise
+                // with a concrete PROMOTE_TO_HYBRID hint carrying the next
+                // tool call (`ingest_sources domains=docs`). Agents act on
+                // hints; they ignore generic warnings.
                 Err(e) if domain == "hybrid" && code_store.is_some() => {
                     warnings.push(json!({
-                        "code": "DOC_INDEX_MISSING",
-                        "message": e.message,
+                        "code": "PROMOTE_TO_HYBRID",
+                        "message": format!(
+                            "Doc index not present; NL queries run code-only. \
+                             Run `ingest_sources path=<repo> domains=docs` once, \
+                             then retry with domain=hybrid for hybrid ranking."
+                        ),
+                        "detail": {
+                            "missing": "docs",
+                            "source_id": args.source_id,
+                            "reason": e.message,
+                        },
+                        "suggested_tool": {
+                            "tool": "ingest_sources",
+                            "args": { "source_id": args.source_id, "domains": "docs" },
+                        },
                     }));
                     None
                 }
@@ -172,6 +235,7 @@ impl CodeService {
         flags: &KindFlags,
         per_kind_cap: usize,
         items: &mut Vec<Value>,
+        fuzzy_items: &mut Vec<Value>,
         counts: &mut SearchCounts,
     ) -> Result<CodeSideStats, ToolError> {
         let ctx_lines = args.context_lines.unwrap_or(0).min(50);
@@ -214,7 +278,33 @@ impl CodeService {
                     s.match_type = Some("exact".to_string());
                 }
             }
-            if fuzzy_explicit || auto_fuzzy {
+            if fuzzy_explicit && !symbols.is_empty() {
+                // ROADMAP P1.4: two-lane response. Exact BM25 hits stay in
+                // `items`, the fuzzy lane lives in `fuzzy_items` and is
+                // computed independently against trigram+Levenshtein.
+                let lane = fuzzy::compute_fuzzy_lane(
+                    store,
+                    args,
+                    scope.map(String::as_str),
+                    exclude,
+                    per_kind_cap,
+                    &symbols,
+                );
+                fuzzy_applied = !lane.is_empty();
+                for s in lane {
+                    let body = if want_body {
+                        self.symbol_body_with_context(store, &s.id, ctx_lines)
+                            .ok()
+                            .flatten()
+                    } else {
+                        None
+                    };
+                    fuzzy_items.push(search_hit_symbol(&args.source_id, &s, body.as_deref()));
+                }
+            } else if auto_fuzzy {
+                // Zero BM25 hits + explicit threshold → promote fuzzy rows
+                // into the primary `items` lane (there is no exact lane to
+                // displace). Matches today's "fuzzy augmentation" behaviour.
                 fuzzy_applied = fuzzy::augment_with_fuzzy(
                     store,
                     args,
@@ -298,6 +388,9 @@ impl CodeService {
             };
 
         let mut items: Vec<Value> = Vec::new();
+        // ROADMAP P1.4: when `fuzzy=true` is explicit, the fuzzy lane is
+        // populated alongside (not inside) the exact `items` lane.
+        let mut fuzzy_items: Vec<Value> = Vec::new();
         let mut counts = SearchCounts::default();
         self.run_count_pass(
             &args,
@@ -313,6 +406,7 @@ impl CodeService {
             code_store.as_ref(),
             doc_store.as_ref(),
             &mut items,
+            &mut fuzzy_items,
             &mut counts,
         ) {
             Ok(s) => s,
@@ -334,17 +428,53 @@ impl CodeService {
         // NL-only directory prior: partition items by file class so
         // production `src/` code outranks keyword-dense test / fixture /
         // bench files with equal RRF rank. Stable within each bucket so
-        // the ranker's ordering wins inside a single class.
+        // the ranker's ordering wins inside a single class. Also drop
+        // duplicate rows produced by the hybrid fusion when the symbol and
+        // section layers both find the same stable_id.
+        dedupe_by_stable_id(&mut items);
         if plan.query_mode_effective == "natural_language" {
+            if !args.include_tests.unwrap_or(false) {
+                drop_tests(&mut items);
+            }
             apply_directory_prior(&mut items);
         }
 
-        let raw_bytes =
-            match estimate_candidate_file_bytes(code_store.as_ref(), doc_store.as_ref(), &items) {
-                Ok(bytes) => bytes,
-                Err(e) => return self.error_response(&MetaBuilder::new(1), e),
+        // ROADMAP P2.1: when a hybrid search returns only doc-section hits
+        // (no code symbols or code file-body matches), flag that the symbol
+        // probably doesn't exist in the codebase. Section hits have ids
+        // shaped `<file>::<heading>#h<level>`; code hits either carry a
+        // non-doc file extension or a `#<symbol-kind>` suffix.
+        if plan.domain == "hybrid" && !items.is_empty() {
+            let is_doc_section = |item: &Value| -> bool {
+                let id = item
+                    .pointer("/ref/id")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.pointer("/ref/stable_id").and_then(Value::as_str))
+                    .unwrap_or("");
+                // Doc sections embed `#h<N>` anchor kind in the id. Symbol
+                // ids end in `#function`, `#class`, … or `#file`.
+                let kind = id.rsplit('#').next().unwrap_or("");
+                kind.starts_with('h') && kind.len() >= 2 && kind[1..].chars().all(|c| c.is_ascii_digit())
             };
-        let timer = MetaBuilder::new(raw_bytes.max(1))
+            let has_code = items.iter().any(|item| !is_doc_section(item));
+            let has_docs = items.iter().any(is_doc_section);
+            if has_docs && !has_code {
+                warnings.push(json!({
+                    "code": "SYMBOL_NOT_FOUND_IN_CODE",
+                    "message": format!(
+                        "all {} hits for '{}' are in documentation; the symbol may have been refactored away or never existed in code.",
+                        items.len(),
+                        args.query,
+                    ),
+                }));
+            }
+        }
+
+        // ROADMAP P1.1: baseline = `rg -n` output size for the returned
+        // hit set (path:line:snippet per row), capped intrinsically at the
+        // caller's `limit`. Not the sum of file sizes of every matched file.
+        let raw_bytes = search_rg_equivalent_bytes(&items);
+        let timer = MetaBuilder::new(raw_bytes)
             .with_class(crate::service::savings::RetrievalClass::Search);
         let extra = build_meta_extras(&plan, stats.fuzzy_applied, semantic_requested);
 
@@ -357,6 +487,7 @@ impl CodeService {
             max_tokens: args.max_tokens,
             more_file_hits_exist: stats.more_file_hits_exist,
             counts,
+            fuzzy_items,
         };
         format_output(self, &fmt_ctx, items, &timer, warnings, extra)
     }
@@ -371,8 +502,7 @@ impl CodeService {
     ) {
         let exclude = args.exclude.as_deref().unwrap_or(&[]);
         if let Some(store) = code_store
-            && (plan.flags.want_symbol
-                || (!plan.flags.want_file && !plan.flags.want_section))
+            && (plan.flags.want_symbol || (!plan.flags.want_file && !plan.flags.want_section))
             && let Ok((m, f)) = store.count_symbols(
                 &args.query,
                 args.kind.as_deref(),
@@ -397,6 +527,7 @@ impl CodeService {
         code_store: Option<&IndexStore>,
         doc_store: Option<&DocStore>,
         items: &mut Vec<Value>,
+        fuzzy_items: &mut Vec<Value>,
         counts: &mut SearchCounts,
     ) -> Result<LexicalStats, ToolError> {
         let mut more_file_hits_exist = false;
@@ -409,6 +540,7 @@ impl CodeService {
                 &plan.flags,
                 plan.per_kind_cap,
                 items,
+                fuzzy_items,
                 counts,
             )?;
             more_file_hits_exist = stats.more_file_hits;

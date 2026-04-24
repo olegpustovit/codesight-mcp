@@ -42,8 +42,7 @@ mod tests {
 
     #[test]
     fn reads_supported_set_properties_from_query_pattern() {
-        let language =
-            crate::builtin_grammar("python").expect("python grammar");
+        let language = crate::builtin_grammar("python").expect("python grammar");
         let query = Query::new(
             &language,
             r#"

@@ -173,7 +173,9 @@ fn analysis_and_engine_have_no_per_language_branches() {
     ];
 
     fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
-        let Ok(entries) = fs::read_dir(dir) else { return };
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -185,19 +187,25 @@ fn analysis_and_engine_have_no_per_language_branches() {
     }
 
     let mut offenders: Vec<String> = Vec::new();
-    for root in ["crates/codesight-analysis/src", "crates/codesight-engine/src"] {
+    for root in [
+        "crates/codesight-analysis/src",
+        "crates/codesight-engine/src",
+    ] {
         let mut files = Vec::new();
         walk(Path::new(root), &mut files);
         for file in files {
-            let Ok(content) = fs::read_to_string(&file) else { continue };
+            let Ok(content) = fs::read_to_string(&file) else {
+                continue;
+            };
             for pat in BANNED {
                 if let Some(pos) = content.find(pat) {
                     // Skip comment lines to reduce false positives on docs.
                     let line_start = content[..pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
-                    let line = &content[line_start..content[line_start..]
-                        .find('\n')
-                        .map(|e| line_start + e)
-                        .unwrap_or(content.len())];
+                    let line = &content[line_start
+                        ..content[line_start..]
+                            .find('\n')
+                            .map(|e| line_start + e)
+                            .unwrap_or(content.len())];
                     if line.trim_start().starts_with("//") {
                         continue;
                     }

@@ -34,6 +34,24 @@ impl Language for Java {
     fn is_restricted(&self, src: &str, _name: &str) -> bool {
         cfamily_is_restricted(src)
     }
+    /// Java-idiomatic `import pkg.Class;` (ROADMAP P1.6). Overrides the
+    /// default ES-module shape so Java contexts show real Java imports.
+    fn display_import_lines(
+        &self,
+        edges: &[crate::imports_types::ImportEdge],
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+        for e in edges {
+            if e.names.is_empty() {
+                lines.push(format!("import {};", e.specifier));
+            } else {
+                for n in &e.names {
+                    lines.push(format!("import {}.{};", e.specifier, n));
+                }
+            }
+        }
+        lines
+    }
     fn family(&self) -> LanguageFamily {
         LanguageFamily::BracedStatic
     }
@@ -47,7 +65,9 @@ impl Language for Java {
         &["object"]
     }
     fn branch_keywords(&self) -> &'static [&'static str] {
-        &["if", "else if", "for", "while", "do", "switch", "case", "catch"]
+        &[
+            "if", "else if", "for", "while", "do", "switch", "case", "catch",
+        ]
     }
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]

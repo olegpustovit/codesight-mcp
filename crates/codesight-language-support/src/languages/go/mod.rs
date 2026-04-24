@@ -229,7 +229,10 @@ impl Language for Go {
     }
 
     fn is_restricted(&self, _source_text: &str, name: &str) -> bool {
-        name.chars().next().map(|ch| !ch.is_uppercase()).unwrap_or(true)
+        name.chars()
+            .next()
+            .map(|ch| !ch.is_uppercase())
+            .unwrap_or(true)
     }
 
     fn family(&self) -> LanguageFamily {

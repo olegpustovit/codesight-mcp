@@ -34,6 +34,17 @@ impl Language for Swift {
     fn is_restricted(&self, src: &str, _name: &str) -> bool {
         cfamily_is_restricted(src)
     }
+    /// Swift-idiomatic `import Module` (ROADMAP P1.6). Swift imports never
+    /// carry named bindings, so `names` is intentionally ignored.
+    fn display_import_lines(
+        &self,
+        edges: &[crate::imports_types::ImportEdge],
+    ) -> Vec<String> {
+        edges
+            .iter()
+            .map(|e| format!("import {}", e.specifier))
+            .collect()
+    }
     fn family(&self) -> LanguageFamily {
         LanguageFamily::BracedStatic
     }

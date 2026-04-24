@@ -6,9 +6,9 @@ use std::collections::{HashMap, HashSet};
 
 use codesight_language_support::family::LanguageFamily;
 use codesight_language_support::{
-    fallback_type_baseline_for_path, has_restricted_visibility,
-    idiomatic_symbol_names_for_path, is_test_file, language_family_for_path,
-    max_nesting_depth_for_path, measured_type_density_for_path,
+    fallback_type_baseline_for_path, has_restricted_visibility, idiomatic_symbol_names_for_path,
+    is_test_file, language_family_for_path, max_nesting_depth_for_path,
+    measured_type_density_for_path,
 };
 use codesight_storage::storage::AnalysisSymbol;
 

@@ -10,8 +10,8 @@ use anyhow::Context;
 use ignore::WalkBuilder;
 
 use crate::path_rename::{
-    PathRenameChange, PathRenameCollision, PathRenameFilePlan, PathRenamePlan, PathRenameUnhandled,
-    PathRenameEngine,
+    PathRenameChange, PathRenameCollision, PathRenameEngine, PathRenameFilePlan, PathRenamePlan,
+    PathRenameUnhandled,
 };
 
 pub struct RustPathRenameEngine;

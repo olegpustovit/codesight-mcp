@@ -33,10 +33,11 @@ impl CodeService {
                 );
             }
         };
-        let store =
-            require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
+        // ROADMAP P1.1: reference/related graphs are structural analysis.
+        // Null baseline — there's no native-tool counterfactual sized like
+        // a whole-repo read.
+        let timer = MetaBuilder::new(0);
         let needle = match store.symbol_names_by_id(&sym_id)? {
             Some((name, qn)) => {
                 if name.len() >= 3 {
@@ -106,8 +107,7 @@ impl CodeService {
                 );
             }
         };
-        let store =
-            require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
+        let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
         let Some((sym_name, _qn)) = store.symbol_names_by_id(&sym_id)? else {
             return self.error_response(
                 &MetaBuilder::new(0),
@@ -133,8 +133,10 @@ impl CodeService {
                 );
             }
         };
-        let raw_bytes = store.repo_total_bytes()?;
-        let timer = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: reference/related graphs are structural analysis.
+        // Null baseline — there's no native-tool counterfactual sized like
+        // a whole-repo read.
+        let timer = MetaBuilder::new(0);
         let scan_cap = limit.saturating_mul(400).clamp(2_000, 12_000);
         let candidates = match store.symbols_light_scan(None, None, scan_cap) {
             Ok(c) => c,

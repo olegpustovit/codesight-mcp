@@ -62,4 +62,3 @@ pub fn generic_is_test_fixture(path: &str) -> bool {
         || path.contains("/testdata/")
         || path.starts_with("testdata/")
 }
-

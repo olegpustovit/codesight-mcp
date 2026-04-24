@@ -17,7 +17,7 @@ use crate::service::agent_v1::args::{
 use crate::service::agent_v1::util::*;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{MetaBuilder, sum_code_file_sizes};
 
 /// Build a minimal `SearchCatalogArgs` with only the essential fields set.
 fn search_args(source_id: &str, query: &str, repo_path: Option<&str>) -> SearchCatalogArgs {
@@ -44,6 +44,7 @@ fn search_args(source_id: &str, query: &str, repo_path: Option<&str>) -> SearchC
         output_mode: None,
         pattern: None,
         offset: 0,
+        include_tests: None,
     }
 }
 
@@ -140,15 +141,23 @@ impl CodeService {
                 packed.push(json!({ "hit": item, "read": read_res["data"] }));
             }
         }
-        let raw_bytes = packed
+        // ROADMAP P1.1: baseline = sum of full-file reads for every
+        // included ref. The naive alternative to `assemble_context bundle`
+        // is "open each file and read it end-to-end"; that's what we
+        // charge against.
+        let bundle_paths: Vec<String> = packed
             .iter()
-            .map(|p| {
-                serde_json::to_string(p)
-                    .map(|s| s.len() as u64)
-                    .unwrap_or(0)
+            .filter_map(|p| {
+                p.pointer("/hit/ref/path")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
             })
-            .sum::<u64>()
-            .max(1);
+            .collect();
+        let raw_bytes = self
+            .ensure_repo_store(&args.source_id, repo_path)
+            .ok()
+            .and_then(|store| sum_code_file_sizes(&store, bundle_paths).ok())
+            .unwrap_or(0);
         self.success_response(
             &MetaBuilder::new(raw_bytes),
             json!({ "mode": "bundle", "items": packed }),
@@ -221,6 +230,7 @@ impl CodeService {
         let repo_path = args.repo_path.as_deref();
 
         let mut context_items: Vec<Value> = Vec::new();
+        let mut included_paths: Vec<String> = Vec::new();
         let mut total_tokens: u64 = 0;
 
         for item in items {
@@ -252,6 +262,9 @@ impl CodeService {
                 break;
             }
             total_tokens = total_tokens.saturating_add(tks as u64);
+            if let Some(p) = ref_obj.get("path").and_then(|v| v.as_str()) {
+                included_paths.push(p.to_string());
+            }
             context_items.push(json!({
                 "symbol_id": sid,
                 "source": source,
@@ -263,12 +276,13 @@ impl CodeService {
             }
         }
 
+        // ROADMAP P1.1: baseline = sum of full-file reads for the symbol
+        // files the agent asked us to rank, not the entire repo.
         let raw_bytes = self
             .ensure_repo_store(&args.source_id, repo_path)
             .ok()
-            .and_then(|store| store.repo_total_bytes().ok())
-            .unwrap_or(1)
-            .max(1);
+            .and_then(|store| sum_code_file_sizes(&store, included_paths).ok())
+            .unwrap_or(0);
         self.success_response_with_warnings(
             &MetaBuilder::new(raw_bytes),
             json!({ "mode": "ranked", "context_items": context_items, "total_tokens": total_tokens, "strategy": strategy_label }),

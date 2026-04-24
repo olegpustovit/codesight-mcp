@@ -13,8 +13,10 @@ impl CodeService {
         timer: &MetaBuilder,
     ) -> anyhow::Result<Value> {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
-        let raw_bytes = store.repo_total_bytes().unwrap_or(0).max(1);
-        let timer_overall = MetaBuilder::new(raw_bytes);
+        // ROADMAP P1.1: query_suggestions is a metadata-only view (repo
+        // summary + sample queries). No sensible per-call counterfactual —
+        // surface `tokens_saved: null` by passing a 0 baseline.
+        let timer_overall = MetaBuilder::new(0);
         let summary = match store.repo_summary() {
             Ok(s) => s,
             Err(e) => return self.error_response(timer, index_error(e)),

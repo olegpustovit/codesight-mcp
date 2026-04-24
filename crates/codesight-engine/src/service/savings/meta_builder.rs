@@ -5,7 +5,9 @@ use std::{collections::HashMap, time::Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{BUILD_SHA, BUILD_TIME, BUILD_VERSION, BYTES_PER_TOKEN, RETRIEVAL_ENGINE, RETRIEVAL_VERSION};
+use crate::config::{
+    BUILD_SHA, BUILD_TIME, BUILD_VERSION, BYTES_PER_TOKEN, RETRIEVAL_ENGINE, RETRIEVAL_VERSION,
+};
 
 use super::ledger::SavingsLedger;
 use super::pricing::{cost_for_tokens, round_cost_map};
