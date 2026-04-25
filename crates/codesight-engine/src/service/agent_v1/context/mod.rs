@@ -36,8 +36,6 @@ fn search_args(source_id: &str, query: &str, repo_path: Option<&str>) -> SearchC
         include_body: None,
         max_tokens: None,
         fuzzy: None,
-        fuzzy_threshold: None,
-        max_edit_distance: None,
         repo_path: repo_path.map(|s| s.to_string()),
         semantic: None,
         sort_by: None,
@@ -45,6 +43,8 @@ fn search_args(source_id: &str, query: &str, repo_path: Option<&str>) -> SearchC
         pattern: None,
         offset: 0,
         include_tests: None,
+        name_only: None,
+        include_vendored: None,
     }
 }
 

@@ -1,122 +1,110 @@
-//! Fuzzy symbol-name helpers for catalog search (trigram Jaccard + Levenshtein).
-//! Used by `search_catalog` for trigram Jaccard + Levenshtein augmentation.
+//! Fuzzy symbol-name matching backed by `nucleo-matcher` (Helix editor's
+//! fuzzy lib). Replaces the prior trigram + Damerau-Levenshtein gate,
+//! which mis-ranked typos like `SavingLedger` → `savings_file`.
+//!
+//! Also hosts `tokenize_name` / `relatedness_score`, which the `related`
+//! graph mode needs and which are unrelated to name-vs-query fuzzy ranking.
 
 use std::collections::HashSet;
 
-/// Reference `_trigrams`: lowercase, length&lt;3 returns the whole string as one token set member.
-pub fn trigrams(s: &str) -> HashSet<String> {
-    let s = s.to_ascii_lowercase();
-    if s.is_empty() {
-        return HashSet::new();
-    }
-    if s.len() < 3 {
-        return HashSet::from([s]);
-    }
-    let mut out = HashSet::new();
-    for w in s.as_bytes().windows(3) {
-        out.insert(String::from_utf8_lossy(w).into_owned());
-    }
-    out
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Config, Matcher, Utf32Str};
+
+/// Score a single candidate against a query. Returns `None` when the query
+/// isn't a fuzzy subsequence of the candidate. When it matches, the score
+/// is normalized to `[0.0, 1.0]`: 1.0 is the best possible raw score for
+/// this `(query, candidate)` length pair.
+pub fn fuzzy_score(query: &str, candidate: &str) -> Option<f32> {
+    let mut matcher = new_matcher();
+    let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+    let mut buf = Vec::new();
+    let raw = pattern.score(Utf32Str::new(candidate, &mut buf), &mut matcher)?;
+    // Normalize against a self-score so "query == candidate" -> 1.0.
+    let mut self_buf = Vec::new();
+    let best = pattern
+        .score(Utf32Str::new(query, &mut self_buf), &mut matcher)
+        .unwrap_or(raw)
+        .max(1);
+    Some((raw as f32 / best as f32).clamp(0.0, 1.0))
 }
 
-pub fn trigram_jaccard(a: &str, b: &str) -> f64 {
-    let ta = trigrams(a);
-    let tb = trigrams(b);
-    if ta.is_empty() && tb.is_empty() {
-        return 1.0;
-    }
-    if ta.is_empty() || tb.is_empty() {
-        return 0.0;
-    }
-    let inter = ta.intersection(&tb).count();
-    let union = ta.union(&tb).count();
-    if union == 0 {
-        1.0
-    } else {
-        inter as f64 / union as f64
-    }
+/// Candidate input for [`fuzzy_rank`]. `kind_priority` is a caller-supplied
+/// tie-breaker (higher wins) used only when two candidates produce identical
+/// nucleo scores. Keep it small: the caller owns the mapping table.
+pub struct FuzzyCandidate<'a> {
+    pub name: &'a str,
+    pub kind_priority: u8,
 }
 
-/// Reference `_edit_distance` (Levenshtein on Unicode scalar values).
-pub fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let n = a.len();
-    let m = b.len();
-    if n == 0 {
-        return m;
-    }
-    if m == 0 {
-        return n;
-    }
-    let mut prev: Vec<usize> = (0..=m).collect();
-    let mut cur = vec![0usize; m + 1];
-    for i in 1..=n {
-        cur[0] = i;
-        for j in 1..=m {
-            let cost = usize::from(a[i - 1] != b[j - 1]);
-            cur[j] = (cur[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
+impl<'a> From<&'a str> for FuzzyCandidate<'a> {
+    fn from(name: &'a str) -> Self {
+        Self {
+            name,
+            kind_priority: 0,
         }
-        std::mem::swap(&mut prev, &mut cur);
-    }
-    prev[m]
-}
-
-pub fn normalize_fuzzy_compare(s: &str) -> String {
-    s.chars()
-        .filter(|c| *c != '_')
-        .collect::<String>()
-        .to_ascii_lowercase()
-}
-
-#[derive(Debug, Clone)]
-pub struct FuzzyPairScore {
-    pub jaccard: f64,
-    pub edit_distance: u32,
-    /// Combined score in (0,1] suitable for `fuzzy_similarity`.
-    pub similarity: f64,
-}
-
-pub fn score_name_pair(query: &str, symbol_name: &str) -> FuzzyPairScore {
-    let q = normalize_fuzzy_compare(query);
-    let n = normalize_fuzzy_compare(symbol_name);
-    let jaccard = trigram_jaccard(&q, &n);
-    let ed = edit_distance(&q, &n) as u32;
-    let denom = q.len().max(n.len()).max(1);
-    let edit_sim = 1.0f64 - (f64::from(ed) / denom as f64);
-    let similarity = jaccard.max(edit_sim).clamp(0.0, 1.0);
-    FuzzyPairScore {
-        jaccard,
-        edit_distance: ed,
-        similarity,
     }
 }
 
-pub fn fuzzy_candidate_passes(
-    score: &FuzzyPairScore,
-    threshold: f64,
-    max_edit_distance: Option<u32>,
-) -> bool {
-    if score.jaccard >= threshold {
-        return true;
+/// Rank a batch of candidates. Returns `(index, normalized_score)` pairs,
+/// sorted by score descending. Ties on score break on shorter name first
+/// (intent: typo closer to shorter symbol), then on higher `kind_priority`,
+/// then on original index ascending. Normalized against the best raw score
+/// in the batch. Candidates scoring below 20% of the best are dropped so
+/// long-range subsequence matches don't pollute the lane.
+pub fn fuzzy_rank<'a, I>(query: &str, candidates: I) -> Vec<(usize, f32)>
+where
+    I: IntoIterator,
+    I::Item: Into<FuzzyCandidate<'a>>,
+{
+    const FLOOR_FRAC: f32 = 0.2;
+    let mut matcher = new_matcher();
+    let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+    // Carry name length + kind priority through the sort without re-reading
+    // candidates after the nucleo pass.
+    let mut raw: Vec<(usize, u32, usize, u8)> = Vec::new();
+    let mut buf: Vec<char> = Vec::new();
+    for (i, cand) in candidates.into_iter().enumerate() {
+        let c: FuzzyCandidate<'a> = cand.into();
+        if let Some(score) = pattern.score(Utf32Str::new(c.name, &mut buf), &mut matcher) {
+            raw.push((i, score, c.name.len(), c.kind_priority));
+        }
     }
-    if let Some(limit) = max_edit_distance
-        && score.edit_distance <= limit
-    {
-        return true;
-    }
-    false
+    let Some(&(_, best, _, _)) = raw.iter().max_by_key(|(_, s, _, _)| *s) else {
+        return Vec::new();
+    };
+    let best_f = best.max(1) as f32;
+    let floor = best_f * FLOOR_FRAC;
+    let mut kept: Vec<(usize, u32, usize, u8)> = raw
+        .into_iter()
+        .filter(|(_, s, _, _)| (*s as f32) >= floor)
+        .collect();
+    kept.sort_by(|a, b| {
+        // Primary: higher raw nucleo score wins.
+        b.1.cmp(&a.1)
+            // Tie #1: shorter candidate name wins.
+            .then_with(|| a.2.cmp(&b.2))
+            // Tie #2: higher kind_priority wins.
+            .then_with(|| b.3.cmp(&a.3))
+            // Final: stable by original index.
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    kept.into_iter()
+        .map(|(i, s, _, _)| (i, (s as f32 / best_f).clamp(0.0, 1.0)))
+        .collect()
 }
 
-/// Tokenize a symbol name for fuzzy matching (underscore + camel segments).
+fn new_matcher() -> Matcher {
+    Matcher::new(Config::DEFAULT)
+}
+
+/// Tokenize a symbol name for relatedness scoring (underscore + camel segments).
 pub fn tokenize_name(name: &str) -> HashSet<String> {
     let mut out = HashSet::new();
     for segment in name.split('_') {
         if segment.is_empty() {
             continue;
         }
-        let parts = split_camel(segment);
-        for mut p in parts {
+        for mut p in split_camel(segment) {
             p.make_ascii_lowercase();
             if p.len() >= 2 {
                 out.insert(p);
@@ -126,62 +114,29 @@ pub fn tokenize_name(name: &str) -> HashSet<String> {
     out
 }
 
-fn flush(buf: &mut String, out: &mut Vec<String>) {
-    if !buf.is_empty() {
-        out.push(std::mem::take(buf));
-    }
-}
-
 fn split_camel(part: &str) -> Vec<String> {
-    let mut raw_parts: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
     let mut cur = String::new();
     for c in part.chars() {
         if c.is_uppercase()
             && !cur.is_empty()
             && cur.chars().last().is_some_and(|lc| lc.is_lowercase())
         {
-            flush(&mut cur, &mut raw_parts);
+            parts.push(std::mem::take(&mut cur));
         }
         cur.push(c);
     }
-    flush(&mut cur, &mut raw_parts);
-    if raw_parts.is_empty() && !part.is_empty() {
-        raw_parts.push(part.to_string());
+    if !cur.is_empty() {
+        parts.push(cur);
     }
-    raw_parts
+    if parts.is_empty() && !part.is_empty() {
+        parts.push(part.to_string());
+    }
+    parts
 }
 
-#[cfg(test)]
-mod p1_2_tests {
-    use super::*;
-
-    fn similarity(a: &str, b: &str) -> f64 {
-        score_name_pair(a, b).similarity
-    }
-
-    #[test]
-    fn camel_typo_matches_snake_case_target() {
-        // resolveImprts ↔ resolve_imports_to_files must pass the 0.3
-        // default threshold once both sides are normalised.
-        let score = score_name_pair("resolveImprts", "resolve_imports_to_files");
-        assert!(
-            fuzzy_candidate_passes(&score, 0.3, None),
-            "expected match, got {score:?}"
-        );
-    }
-
-    #[test]
-    fn camel_matches_snake_exact_letters() {
-        // Pure case-style mismatch with no typos should score very high.
-        assert!(similarity("MyStruct", "my_struct") > 0.95);
-    }
-
-    #[test]
-    fn identical_snake_case_scores_one() {
-        assert!((similarity("foo_bar", "foo_bar") - 1.0).abs() < f64::EPSILON);
-    }
-}
-
+/// Relatedness score for the `related` graph mode — token-set Jaccard with
+/// a same-file bonus. Independent of the nucleo-backed fuzzy ranker.
 pub fn relatedness_score(
     source_name: &str,
     source_file: &str,
@@ -198,4 +153,57 @@ pub fn relatedness_score(
     let union = a.union(&b).count().max(1) as f64;
     let j = inter / union;
     if same_file { 0.5 + j * 0.75 } else { j }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typo_ranks_nearest_name_first() {
+        // The regression that motivated the nucleo swap.
+        let names = ["savings_file", "savings_entry", "SavingsLedger", "unrelated"];
+        let ranked = fuzzy_rank("SavingLedger", names.iter().copied());
+        let first = ranked.first().expect("at least one match");
+        assert_eq!(names[first.0], "SavingsLedger");
+    }
+
+    #[test]
+    fn tie_break_shorter_name_wins() {
+        // Both candidates are exact subsequence matches of the query and
+        // score identically. The shorter name should rank first — a
+        // 13-char typo is closer to `SavingsLedger` than to a 40-char
+        // method sharing the same subsequence.
+        let names = [
+            "savings_ledger_set_quality_session_start",
+            "SavingsLedger",
+        ];
+        let ranked = fuzzy_rank("SavingLedger", names.iter().copied());
+        assert!(ranked.len() >= 2, "expected both to rank, got {ranked:?}");
+        // Equal scores → shorter wins.
+        assert!((ranked[0].1 - ranked[1].1).abs() < f32::EPSILON);
+        assert_eq!(names[ranked[0].0], "SavingsLedger");
+    }
+
+    #[test]
+    fn tie_break_kind_priority_wins_on_equal_length() {
+        // Equal query match and equal name length → higher kind_priority wins.
+        let cands = [
+            FuzzyCandidate { name: "aB", kind_priority: 1 },
+            FuzzyCandidate { name: "aC", kind_priority: 9 },
+        ];
+        let ranked = fuzzy_rank("a", cands);
+        assert!(ranked.len() >= 2, "{ranked:?}");
+        assert_eq!(ranked[0].0, 1, "expected higher kind_priority first; {ranked:?}");
+    }
+
+    #[test]
+    fn exact_match_scores_one() {
+        assert_eq!(fuzzy_score("foo_bar", "foo_bar"), Some(1.0));
+    }
+
+    #[test]
+    fn non_match_returns_none() {
+        assert!(fuzzy_score("xyz", "abc").is_none());
+    }
 }

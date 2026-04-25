@@ -192,6 +192,12 @@ where
         workspace_ref,
     );
 
+    // Reachability edges: per-language structural extraction at ingest
+    // time. Replaces the file-scan augmentation passes that used to live
+    // in `codesight_analysis::dead_code::reachability`.
+    let reachability_edges =
+        compute_reachability_edges_for_sources(&graph_sources, &registry);
+
     let indexed_at = chrono::Utc::now().to_rfc3339();
     let symbol_vectors = build_symbol_vectors(&repo, &updated_files)?;
     store.apply_index_with_deps(
@@ -204,6 +210,7 @@ where
         &removed_files,
         &symbol_vectors,
         &dep_edges,
+        &reachability_edges,
         &extractor_version,
     )?;
 
@@ -364,6 +371,26 @@ fn process_file(
     Some(FileOutcome::Updated { update, source })
 }
 
+/// Run [`Language::reachability_edges`] over each `(path, source)` pair
+/// using the workspace registry; returns one entry per source file even
+/// when the language returned an empty edge set (so the storage write
+/// will clear stale rows for that file).
+fn compute_reachability_edges_for_sources(
+    sources: &[(String, String)],
+    registry: &LanguageRegistry,
+) -> Vec<(String, Vec<codesight_core::StructuralEdge>)> {
+    sources
+        .par_iter()
+        .map(|(path, content)| {
+            let edges = registry
+                .for_path(std::path::Path::new(path))
+                .map(|lang| lang.reachability_edges(content, path))
+                .unwrap_or_default();
+            (path.clone(), edges)
+        })
+        .collect()
+}
+
 fn modified_ns(time: &SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos() as u64)
@@ -456,6 +483,9 @@ pub fn reindex_files(
         workspace_ref,
     );
 
+    let reachability_edges =
+        compute_reachability_edges_for_sources(&buckets.graph_sources, &registry);
+
     let indexed_at = chrono::Utc::now().to_rfc3339();
     store.apply_index_with_deps(
         repo,
@@ -467,6 +497,7 @@ pub fn reindex_files(
         &buckets.removed,
         &[],
         &dep_edges,
+        &reachability_edges,
         &extractor_version,
     )?;
 

@@ -35,4 +35,7 @@ impl Language for VueSupport {
     fn extract_symbols(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
         extractor::VueExtractor.extract(file_path, source)
     }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        crate::languages::javascript::JS_VENDOR_SEGMENTS
+    }
 }

@@ -67,12 +67,6 @@ fn code_extension(path: &str) -> Option<&str> {
     Some(ext)
 }
 
-const CODE_EXTENSIONS: &[&str] = &[
-    "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "hxx", "cs", "go", "java", "js", "jsx", "cjs",
-    "mjs", "kt", "kts", "php", "py", "rb", "rs", "scala", "swift", "ts", "tsx", "vue", "svelte",
-    "erl", "hrl", "nix", "pl", "pm", "dart", "xml", "svg", "xsl", "xslt", "xsd",
-];
-
 /// Whether a blob path is treated as an indexable source file in sparse GitHub trees (`test_discover_source_files`).
 pub fn is_github_tree_source_blob(path: &str) -> bool {
     if should_skip_file_path(path) {
@@ -84,8 +78,7 @@ pub fn is_github_tree_source_blob(path: &str) -> bool {
     let Some(ext) = code_extension(path) else {
         return false;
     };
-    let ext_lc = ext.to_ascii_lowercase();
-    CODE_EXTENSIONS.contains(&ext_lc.as_str())
+    codesight_language_support::is_code_extension(ext)
 }
 
 /// How [`discover_github_tree_source_files`] applies file caps (explicit overrides config when both are set).

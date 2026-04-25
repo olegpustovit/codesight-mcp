@@ -179,7 +179,8 @@ impl CodeService {
         )
     }
 
-    pub(super) fn run_search(
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn run_search_ex(
         &self,
         store: &IndexStore,
         query: String,
@@ -187,6 +188,7 @@ impl CodeService {
         exclude: &[String],
         kind: Option<String>,
         max_results: usize,
+        name_only: bool,
     ) -> Result<Vec<SearchSymbol>, ToolError> {
         let trimmed = query.trim();
         if trimmed.is_empty() {
@@ -198,12 +200,13 @@ impl CodeService {
             trimmed
         };
         store
-            .search_symbols(
+            .search_symbols_ex(
                 effective_query,
                 kind.as_deref(),
                 scope.as_deref(),
                 exclude,
                 max_results,
+                name_only,
             )
             .map_err(index_error)
     }

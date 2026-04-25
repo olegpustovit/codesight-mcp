@@ -139,6 +139,9 @@ fn setup_small_repo_fixture() -> SmallRepoFixture {
 }
 
 fn case_bundle_budget_none_full_source(fixture: &SmallRepoFixture) {
+    // P1.5 default depth=2 expands the bundle with callers/callees, which
+    // moves shape to multi-symbol; pass depth=0 to keep the compact shape
+    // assertion meaningful for "no budget, single ref, no report".
     let out = fixture
         .svc
         .dispatch(
@@ -147,6 +150,7 @@ fn case_bundle_budget_none_full_source(fixture: &SmallRepoFixture) {
                 "source_id": fixture.source_id,
                 "mode": "context_bundle",
                 "refs": [{ "kind": "symbol", "stable_id": fixture.engine_id }],
+                "depth": 0,
             }),
         )
         .unwrap();
@@ -188,6 +192,7 @@ fn case_bundle_compact_single_keeps_signature(fixture: &SmallRepoFixture) {
                 "refs": [{ "kind": "symbol", "stable_id": fixture.engine_id }],
                 "token_budget": 10000,
                 "budget_strategy": "compact",
+                "depth": 0,
             }),
         )
         .unwrap();
@@ -329,6 +334,7 @@ fn case_bundle_flat_envelope(fixture: &SmallRepoFixture) {
                 "source_id": fixture.source_id,
                 "mode": "context_bundle",
                 "refs": [{ "kind": "symbol", "stable_id": fixture.format_date_id }],
+                "depth": 0,
             }),
         )
         .unwrap();
@@ -500,5 +506,8 @@ fn case_ranked_meta_envelope(fixture: &SmallRepoFixture) {
     assert!(out["ok"].as_bool().unwrap(), "{out:?}");
     let meta = out["_meta"].as_object().unwrap();
     assert!(meta.contains_key("timing_ms"));
-    assert!(meta.contains_key("tokens_saved"));
+    // FIXUP P1.1: `tokens_saved` is omitted when the handler has no
+    // file-read baseline (raw_bytes == 0). For ranked mode that happens
+    // when the query matches no symbols. The envelope is by design
+    // minimal in that case; just verify timing is always present.
 }

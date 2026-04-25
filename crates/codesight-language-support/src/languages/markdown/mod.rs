@@ -13,4 +13,7 @@ impl Language for MarkdownSupport {
     fn manifest(&self) -> &'static LanguageManifest {
         &MARKDOWN_MANIFEST
     }
+    fn is_reference_target(&self) -> bool {
+        false
+    }
 }

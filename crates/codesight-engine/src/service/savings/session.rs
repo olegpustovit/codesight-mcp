@@ -37,11 +37,11 @@ pub struct SessionState {
     #[serde(default)]
     pub per_tool: HashMap<String, ToolSessionStats>,
     #[serde(default)]
-    pub fallbacks_to_grep_or_bash: u64,
+    pub blocked_grep_bash_attempts: u64,
     #[serde(default)]
     pub evaluate_impact_usage: HashMap<String, u64>,
     #[serde(default)]
-    pub stale_warnings_fired_with_in_flight_paths: Vec<StaleWarningRecord>,
+    pub stale_warnings_in_flight: Vec<StaleWarningRecord>,
     #[serde(default)]
     pub primary_source_id: Option<String>,
     #[serde(default)]

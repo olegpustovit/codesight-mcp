@@ -206,6 +206,12 @@ impl CodeService {
         let include_tests = args.include_tests.unwrap_or(true);
         let entry_patterns = args.entry_point_patterns.clone().unwrap_or_default();
         let limit = args.top_n.unwrap_or(25);
+        let include_vendored = args.include_vendored.unwrap_or(false)
+            || args
+                .scope
+                .as_deref()
+                .map(codesight_language_support::scope_opts_in)
+                .unwrap_or(false);
         // ROADMAP P1.1: quality analysis — null baseline.
         let timer = MetaBuilder::new(0);
         let mut data = dead_code::dead_code_payload(
@@ -215,6 +221,7 @@ impl CodeService {
             include_tests,
             &entry_patterns,
             Some(limit),
+            include_vendored,
         )?;
         if let Some(budget) = args.max_tokens {
             dead_code::pack_dead_code_to_budget(&mut data, budget);
@@ -310,10 +317,13 @@ impl CodeService {
             // collision — global readiness stays at the top level, the
             // scoped sub-signal lives on its own key.
             obj.insert("scope".into(), json!(scope));
+            // FIXUP T2.2: scoped.signal.score is f64 in [0.0, 1.0], same
+            // range as its dimension siblings. Divided by 10_000.0 the
+            // result became ~0.00008; remove the bogus conversion.
             obj.insert(
                 "scope_agent_readiness".into(),
                 json!({
-                    "score": scoped.signal.score / 10_000.0,
+                    "score": scoped.signal.score,
                     "navigability": scoped.signal.dimensions.navigability,
                     "comprehensibility": scoped.signal.dimensions.comprehensibility,
                     "verifiability": scoped.signal.dimensions.verifiability,
@@ -339,7 +349,7 @@ impl CodeService {
             obj.insert("thresholds_failed".into(), json!(scoped.thresholds_failed));
             self.record_agent_readiness_probe(
                 scope,
-                scoped.signal.score / 10_000.0,
+                scoped.signal.score,
                 scoped.weakest_dimension,
                 current_thresholds().agent_readiness_min,
             );

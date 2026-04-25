@@ -85,20 +85,20 @@ fn blast_radius_with_depth_scores(svc: &CodeService, sid: &str, symbol: &str, de
 #[test]
 fn bfs_depth1_returns_direct_only() {
     // a → b → c → d (linear chain); depth=1 should yield only b.
+    // FIXUP T2.4: file lists moved out of `findings[]` into the top-level
+    // `direct_importers` / `transitive_importers` arrays.
     let (_ws, svc, sid) = build_chain_repo();
     let r = blast_radius(&svc, &sid, "helper", 1);
     assert!(r["ok"].as_bool().unwrap_or(false), "{r:?}");
-    let findings = r["data"]["findings"].as_array().unwrap();
-    // depth-1 layer should contain only the direct importer
-    let depth1_files: Vec<&str> = findings
+    let direct: Vec<&str> = r["data"]["direct_importers"]
+        .as_array()
+        .unwrap()
         .iter()
-        .filter(|f| f["depth"].as_u64() == Some(1))
-        .flat_map(|f| f["files"].as_array().unwrap().iter())
         .filter_map(|v| v.as_str())
         .collect();
     assert!(
-        depth1_files.iter().any(|f| f.contains("main.py")),
-        "expected main.py as direct importer"
+        direct.iter().any(|f| f.contains("main.py")),
+        "expected main.py as direct importer: {direct:?}"
     );
 }
 
@@ -175,7 +175,8 @@ fn risk_direct_dependents_count_always_present() {
     let (_ws, svc, sid) = build_chain_repo();
     let r = blast_radius(&svc, &sid, "helper", 1);
     assert!(r["ok"].as_bool().unwrap_or(false), "{r:?}");
-    assert!(r["data"]["direct_dependents_count"].is_number());
+    // FIXUP T2.4: renamed `direct_dependents_count` → `direct_count`.
+    assert!(r["data"]["direct_count"].is_number());
 }
 
 #[test]
@@ -299,13 +300,15 @@ fn unresolved_structured_ref_returns_not_found() {
 
 #[test]
 fn risk_flat_impacted_symbols_list_unchanged() {
-    // Backward compat: confirmed + potential lists still present
+    // FIXUP T2.4: the shape renamed `confirmed/potential` to
+    // `direct_importers/transitive_importers` and the counts to
+    // `direct_count/transitive_count`.
     let (_ws, svc, sid) = build_chain_repo();
     let r = blast_radius_with_depth_scores(&svc, &sid, "helper", 1);
     assert!(r["ok"].as_bool().unwrap_or(false), "{r:?}");
     let data = &r["data"];
-    assert!(data["confirmed"].is_array());
-    assert!(data["potential"].is_array());
-    assert!(data["confirmed_count"].is_number());
-    assert!(data["potential_count"].is_number());
+    assert!(data["direct_importers"].is_array());
+    assert!(data["transitive_importers"].is_array());
+    assert!(data["direct_count"].is_number());
+    assert!(data["transitive_count"].is_number());
 }

@@ -54,26 +54,66 @@ pub fn is_doc_extension(ext: &str) -> bool {
     DOC_EXTENSIONS.contains(&lower)
 }
 
-/// File extensions treated as data/docs for reference-search purposes. Hits
-/// in these almost never mean "who references fn X" — `find_references`
-/// filters them unless `include_non_code=true`.
+/// True when hits in `path` are weak reference targets — data files, prose
+/// files, or lockfiles where a mention of `fn foo` is config data, not a
+/// code reference. `find_references` filters these unless
+/// `include_non_code=true`.
 ///
-/// Distinct from [`DOC_EXTENSIONS`]: a few of these (`json`, `yaml`, `toml`)
-/// are claimed by their own `Language` impls for outline indexing, but
-/// still shouldn't participate in identifier-usage search.
-const NON_CODE_REFERENCE_EXTENSIONS: &[&str] = &[
-    "json", "yaml", "yml", "toml", "xml", "md", "mdx", "csv", "tsv", "lock",
-];
-
-/// True when `path` ends in one of the non-code reference extensions above.
-/// Pure function — callers decide the policy (`include_non_code` flag etc.).
+/// Resolution: look up the language for the path's extension and consult
+/// [`crate::Language::is_reference_target`]. Extensions not claimed by any
+/// registered language fall back to the residual set (`lock`, `csv`, `tsv`)
+/// — files whose contents are tabular or VCS metadata.
 #[must_use]
 pub fn is_non_code_reference_path(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     let Some(dot) = lower.rfind('.') else {
         return false;
     };
-    NON_CODE_REFERENCE_EXTENSIONS
-        .iter()
-        .any(|ext| &lower[dot + 1..] == *ext)
+    let ext = &lower[dot + 1..];
+
+    // Registry first: a language that owns this extension and explicitly
+    // marks itself as a non-reference-target wins.
+    for lang in crate::builtin_registry().all() {
+        if lang.manifest().extensions.contains(&ext) && !lang.is_reference_target() {
+            return true;
+        }
+    }
+    // Residual non-code extensions that no language owns.
+    matches!(ext, "lock" | "csv" | "tsv")
+}
+
+/// True for paths that should be excluded by default from repo-wide
+/// structural scans (rename_safety, dead_code, reference scans). Matches
+/// vendored/asset/fixture directories and non-code data files.
+///
+/// `path` is expected to be repo-relative with forward slashes.
+#[must_use]
+pub fn is_vendored_or_fixture_path(path: &str) -> bool {
+    is_non_code_reference_path(path) || crate::is_vendored_path(path)
+}
+
+#[cfg(test)]
+mod tests_path_exclusion {
+    use super::*;
+
+    #[test]
+    fn vendored_or_fixture_hits() {
+        assert!(is_vendored_or_fixture_path(
+            "crates/codesight-language-support/tests/fixtures/code_reference/csharp/sample.cs"
+        ));
+        assert!(is_vendored_or_fixture_path("node_modules/lodash/index.js"));
+        assert!(is_vendored_or_fixture_path("target/debug/build/x.rs"));
+        assert!(is_vendored_or_fixture_path("assets/tokenizer.json"));
+        assert!(is_vendored_or_fixture_path("fixtures/sample.rs"));
+        assert!(is_vendored_or_fixture_path("testdata/x.go"));
+    }
+
+    #[test]
+    fn real_source_is_not_excluded() {
+        assert!(!is_vendored_or_fixture_path(
+            "crates/codesight-analysis/src/impact.rs"
+        ));
+        assert!(!is_vendored_or_fixture_path("src/main.rs"));
+        assert!(!is_vendored_or_fixture_path("tests/rename_plan.rs"));
+    }
 }

@@ -38,8 +38,8 @@ ToolSearch query="select:catalog_sources,search_catalog,inspect_structure,read_c
 3. If dry-run is clean, re-run with `apply=true`. Apply refuses on collisions;
    the response carries a `complexity_budget` (before/after `total_cyclomatic`
    and `max_per_fn`) so you see mechanical drift instantly.
-4. Trust the PostToolUse hook to reindex. Verify the rewrite landed with a
-   `search_catalog` call whose results should reflect the new paths.
+4. Trust the in-process file watcher to reindex. Verify the rewrite landed
+   with a `search_catalog` call whose results should reflect the new paths.
 
 Skipping `blast_radius` before `path_rename` shows up as an
 `anti_patterns[REFACTOR_WITHOUT_BLAST_RADIUS]` entry on `session_stats`.
@@ -69,6 +69,12 @@ After a ≥3-file change:
 
 ### After edits — staleness trust rule
 
+After editing, the in-process file watcher (notify-based, 500ms debounce)
+auto-reindexes touched files. PostToolUse only updates session-level
+metadata (savings ledger, refactor hints). The watcher activates after the
+first `ingest_sources` call for a workspace and runs for the lifetime of
+the MCP server.
+
 Within ~1 s after Edit/Write, `search_catalog` / `inspect_structure` /
 `read_content` may reflect the previous index. Top-level `warnings`
 includes a `STALE_DATA_WARNING` with `indexing_repo`,
@@ -82,7 +88,7 @@ Options:
 
 `manage_indexes action=session_end` captures the `session_end` quality snapshot,
 closes the ledger, and returns the rollup (per-tool counters, token totals,
-`stale_warnings_fired_with_in_flight_paths`, `evaluate_impact_usage`,
+`stale_warnings_in_flight`, `evaluate_impact_usage`,
 `anti_patterns[]`, and `quality_delta`).
 
 A regressed verdict emits a top-level `QUALITY_REGRESSION` warning —

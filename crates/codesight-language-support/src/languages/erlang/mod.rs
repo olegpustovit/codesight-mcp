@@ -43,4 +43,7 @@ impl Language for Erlang {
     fn fallback_type_baseline(&self) -> Option<f64> {
         Some(0.3)
     }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &["_build", "deps"]
+    }
 }

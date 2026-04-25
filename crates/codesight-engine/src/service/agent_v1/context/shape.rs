@@ -116,6 +116,25 @@ impl CodeService {
             }
             o
         } else {
+            // FIXUP T4.2: in multi-symbol mode, move imports to a
+            // file-level map. Previously each symbol carried the full
+            // import list of its file, so N symbols from the same file
+            // duplicated imports N times.
+            use std::collections::BTreeMap;
+            let mut files_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for r in rows {
+                if r.file.is_empty() {
+                    continue;
+                }
+                files_map
+                    .entry(r.file.clone())
+                    .or_insert_with(|| r.imports.clone());
+            }
+            let files_json: serde_json::Map<String, Value> = files_map
+                .into_iter()
+                .map(|(path, imports)| (path, json!({ "imports": imports })))
+                .collect();
+
             let symbols: Vec<Value> = rows
                 .iter()
                 .map(|r| {
@@ -125,13 +144,13 @@ impl CodeService {
                         "signature": r.signature,
                         "kind": r.kind,
                         "source": r.source,
-                        "imports": r.imports,
                         "file": r.file,
                     })
                 })
                 .collect();
             let mut o = json!({
                 "mode": "context_bundle",
+                "files": files_json,
                 "symbols": symbols,
             });
             if let Some(br) = budget_report

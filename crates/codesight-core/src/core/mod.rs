@@ -3,5 +3,7 @@
 
 pub mod language_id;
 pub mod pipeline;
+pub mod reachability;
 pub mod symbol_id;
 pub mod symbols;
+pub mod vendor;

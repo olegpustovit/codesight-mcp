@@ -115,8 +115,9 @@ impl CodeService {
             let defs: Vec<&codesight_analysis::graph::SymbolInfo> =
                 all.iter().filter(|s| s.name == old_name).collect();
             if let [sym] = defs.as_slice()
-                && let Ok(Some(payload)) =
-                    codesight_analysis::impact::rename_safety_payload(&store, &sym.id, new_name)
+                && let Ok(Some(payload)) = codesight_analysis::impact::rename_safety_payload(
+                    &store, &sym.id, new_name, false,
+                )
                 && let Some(conflicts) = payload.get("conflicts").and_then(|v| v.as_array())
                 && !conflicts.is_empty()
             {

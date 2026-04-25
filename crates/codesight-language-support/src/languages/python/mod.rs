@@ -252,6 +252,29 @@ impl Language for Python {
         &["__pycache__", "venv", ".venv", ".tox"]
     }
 
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &[
+            "__pycache__",
+            "venv",
+            ".venv",
+            ".tox",
+            "site-packages",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            ".eggs",
+        ]
+    }
+
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        &[
+            "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
+            "continue", "def", "del", "elif", "else", "except", "finally", "for", "from",
+            "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass",
+            "raise", "return", "try", "while", "with", "yield", "match", "case",
+        ]
+    }
+
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         &[
             "main.py",

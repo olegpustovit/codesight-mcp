@@ -31,6 +31,9 @@ use semantic::{run_dense_lane, semantic_fallback_warning};
 /// partitioned into these buckets and concatenated in order, preserving
 /// the ranker's in-bucket sequence. Prod code outranks tests / fixtures
 /// at equal rank without introducing a scoring knob the user has to tune.
+///
+/// `Vendored` sits last — tokenizer dumps, vendored assets, and oversized
+/// JSON blobs get pushed past every legitimate test/fixture hit.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum FileClass {
     Prod = 0,
@@ -38,12 +41,16 @@ enum FileClass {
     Bench = 2,
     Test = 3,
     Fixture = 4,
+    Vendored = 5,
 }
 
 fn classify_path(path: &str) -> FileClass {
     let has_prefix = |p: &str| {
         path == p || path.starts_with(&format!("{p}/")) || path.contains(&format!("/{p}/"))
     };
+    if codesight_language_support::is_vendored_path(path) {
+        return FileClass::Vendored;
+    }
     if codesight_language_support::is_test_file(path) || has_prefix("tests") {
         return FileClass::Test;
     }
@@ -127,12 +134,13 @@ fn apply_directory_prior(items: &mut Vec<Value>) {
     // outranks another test file — we only prevent them from occupying
     // the top slots when equally ranked prod code exists.
     let taken = std::mem::take(items);
-    let mut buckets: [(FileClass, Vec<Value>); 5] = [
+    let mut buckets: [(FileClass, Vec<Value>); 6] = [
         (FileClass::Prod, Vec::new()),
         (FileClass::Script, Vec::new()),
         (FileClass::Bench, Vec::new()),
         (FileClass::Test, Vec::new()),
         (FileClass::Fixture, Vec::new()),
+        (FileClass::Vendored, Vec::new()),
     ];
     for item in taken {
         let class = item_file_class(&item);
@@ -142,12 +150,78 @@ fn apply_directory_prior(items: &mut Vec<Value>) {
             FileClass::Bench => 2,
             FileClass::Test => 3,
             FileClass::Fixture => 4,
+            FileClass::Vendored => 5,
         };
         buckets[slot].1.push(item);
     }
     for (_, bucket) in buckets {
         items.extend(bucket);
     }
+}
+
+/// Apply the shared vendor/asset deprioritization to a results list.
+///
+/// Returns an optional `SCOPE_UNREACHABLE_VENDORED`-style warning plus a
+/// re-ordered items list where vendored hits are pushed to the tail with a
+/// heavy score penalty. Respects the caller's opt-in: when `include_vendored`
+/// is true, or when `scope=` explicitly targets an excluded segment, no
+/// penalty is applied.
+///
+/// Oversized JSON blobs are detected via `file_bytes_lookup` — a callback
+/// that maps `path -> size_bytes` so we only hit storage once per ranked
+/// result set.
+fn apply_vendor_penalty<F>(
+    items: &mut Vec<Value>,
+    include_vendored: bool,
+    scope: Option<&str>,
+    mut file_bytes_lookup: F,
+) where
+    F: FnMut(&str) -> Option<u64>,
+{
+    if include_vendored {
+        return;
+    }
+    if let Some(sc) = scope
+        && codesight_language_support::scope_opts_in(sc)
+    {
+        return;
+    }
+    // Two-pass: partition non-vendored vs vendored; apply score penalty to
+    // vendored rows; append vendored at the tail so a caller asking for
+    // limit=25 gets real code in the top slots before the tokenizer vocab.
+    let taken = std::mem::take(items);
+    let mut keep: Vec<Value> = Vec::with_capacity(taken.len());
+    let mut penalized: Vec<Value> = Vec::new();
+    for mut item in taken {
+        let path = item
+            .get("ref")
+            .and_then(|r| r.get("path"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let size = if path.is_empty() {
+            None
+        } else {
+            file_bytes_lookup(&path)
+        };
+        if codesight_language_support::is_default_excluded(&path, size) {
+            // Heavy score penalty plus tail ordering — a vendored 0.9
+            // hit collapses to 0.18, below any legitimate 0.20 prod hit
+            // even before the bucketed re-order runs.
+            if let Some(obj) = item.as_object_mut() {
+                let old = obj
+                    .get("score")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                obj.insert("score".to_string(), json!((old * 0.2).max(0.0)));
+            }
+            penalized.push(item);
+        } else {
+            keep.push(item);
+        }
+    }
+    keep.extend(penalized);
+    *items = keep;
 }
 
 impl CodeService {
@@ -261,27 +335,38 @@ impl CodeService {
             more_file_hits = result.more_file_hits;
             items.extend(result.items);
         }
+        let mut fuzzy_explicit_no_exact = false;
+        let mut name_only_applied = false;
         if flags.want_symbol || (!flags.want_file && !flags.want_section) {
-            let mut symbols = self.run_search(
+            // FIXUP T1.3: `name_only=true` only makes sense in keyword mode
+            // (regex routes to file text; NL uses a different lane). Silently
+            // ignored otherwise rather than erroring — the meta extra echoes
+            // whether the flag actually applied.
+            let name_only = args.name_only.unwrap_or(false)
+                && args.query_mode.as_deref().unwrap_or("keyword") == "keyword";
+            name_only_applied = name_only;
+            let mut symbols = self.run_search_ex(
                 store,
                 args.query.clone(),
                 scope.cloned(),
                 exclude,
                 args.kind.clone(),
                 per_kind_cap,
+                name_only,
             )?;
             let fuzzy_explicit = args.fuzzy == Some(true);
-            let auto_fuzzy =
-                !fuzzy_explicit && symbols.is_empty() && args.fuzzy_threshold.is_some();
+            // Auto-fuzzy: BM25 produced nothing → try the fuzzy lane so
+            // typo'd identifier searches still surface the nearest name.
+            let auto_fuzzy = !fuzzy_explicit && symbols.is_empty();
             if fuzzy_explicit && !symbols.is_empty() {
                 for s in &mut symbols {
                     s.match_type = Some("exact".to_string());
                 }
             }
-            if fuzzy_explicit && !symbols.is_empty() {
-                // ROADMAP P1.4: two-lane response. Exact BM25 hits stay in
-                // `items`, the fuzzy lane lives in `fuzzy_items` and is
-                // computed independently against trigram+Levenshtein.
+            if fuzzy_explicit {
+                // FIXUP T1.5: always compute the fuzzy lane when the caller
+                // explicitly requested `fuzzy=true` — even if BM25 returned
+                // zero exact hits.
                 let lane = fuzzy::compute_fuzzy_lane(
                     store,
                     args,
@@ -291,6 +376,9 @@ impl CodeService {
                     &symbols,
                 );
                 fuzzy_applied = !lane.is_empty();
+                if symbols.is_empty() && !lane.is_empty() {
+                    fuzzy_explicit_no_exact = true;
+                }
                 for s in lane {
                     let body = if want_body {
                         self.symbol_body_with_context(store, &s.id, ctx_lines)
@@ -329,6 +417,8 @@ impl CodeService {
         Ok(CodeSideStats {
             more_file_hits,
             fuzzy_applied,
+            fuzzy_explicit_no_exact,
+            name_only_applied,
         })
     }
 
@@ -432,6 +522,26 @@ impl CodeService {
         // duplicate rows produced by the hybrid fusion when the symbol and
         // section layers both find the same stable_id.
         dedupe_by_stable_id(&mut items);
+        // Vendor deprioritization runs for every query_mode — tokenizer
+        // dumps and asset payloads shouldn't outrank real code whether
+        // the caller typed `keyword`, `regex`, or `natural_language`.
+        // The bucketed directory prior still only runs for NL because it
+        // is more aggressive about demoting test files.
+        apply_vendor_penalty(
+            &mut items,
+            args.include_vendored.unwrap_or(false),
+            plan.scope.as_deref(),
+            |path| code_store.as_ref().and_then(|s| s.file_bytes(path).ok().flatten()),
+        );
+        // The fuzzy lane needs the same vendor deprioritization — otherwise a
+        // typo match in `assets/embedder/tokenizer.json` could outrank the
+        // real symbol in `src/`.
+        apply_vendor_penalty(
+            &mut fuzzy_items,
+            args.include_vendored.unwrap_or(false),
+            plan.scope.as_deref(),
+            |path| code_store.as_ref().and_then(|s| s.file_bytes(path).ok().flatten()),
+        );
         if plan.query_mode_effective == "natural_language" {
             if !args.include_tests.unwrap_or(false) {
                 drop_tests(&mut items);
@@ -476,7 +586,12 @@ impl CodeService {
         let raw_bytes = search_rg_equivalent_bytes(&items);
         let timer = MetaBuilder::new(raw_bytes)
             .with_class(crate::service::savings::RetrievalClass::Search);
-        let extra = build_meta_extras(&plan, stats.fuzzy_applied, semantic_requested);
+        let extra = build_meta_extras(
+            &plan,
+            stats.fuzzy_applied,
+            semantic_requested,
+            stats.name_only_applied,
+        );
 
         let fmt_ctx = FormatCtx {
             output_mode: &plan.output_mode,
@@ -532,6 +647,8 @@ impl CodeService {
     ) -> Result<LexicalStats, ToolError> {
         let mut more_file_hits_exist = false;
         let mut fuzzy_applied = false;
+        let mut fuzzy_explicit_no_exact = false;
+        let mut name_only_applied = false;
         if let Some(store) = code_store {
             let stats = self.search_code_side(
                 store,
@@ -545,6 +662,8 @@ impl CodeService {
             )?;
             more_file_hits_exist = stats.more_file_hits;
             fuzzy_applied = stats.fuzzy_applied;
+            fuzzy_explicit_no_exact = stats.fuzzy_explicit_no_exact;
+            name_only_applied = stats.name_only_applied;
         }
         if let Some(dstore) = doc_store
             && (plan.flags.want_section || plan.domain == "docs" || plan.domain == "hybrid")
@@ -554,6 +673,8 @@ impl CodeService {
         Ok(LexicalStats {
             more_file_hits_exist,
             fuzzy_applied,
+            fuzzy_explicit_no_exact,
+            name_only_applied,
         })
     }
 
@@ -630,6 +751,88 @@ mod tests {
             "ref": { "path": path, "kind": "file" },
             "snippet": "body",
         })
+    }
+
+    fn scored(path: &str, score: f64) -> Value {
+        json!({
+            "ref": { "path": path, "kind": "file" },
+            "snippet": "body",
+            "score": score,
+        })
+    }
+
+    #[test]
+    fn apply_vendor_penalty_pushes_vendored_to_tail_and_scales_score() {
+        let mut items = vec![
+            scored("crates/codesight-retrieval/assets/embedder/tokenizer.json", 0.9),
+            scored("src/main.rs", 0.4),
+            scored("tests/fixtures/sample.cs", 0.85),
+            scored("src/lib.rs", 0.3),
+        ];
+        apply_vendor_penalty(&mut items, false, None, |_| None);
+        let order: Vec<(&str, f64)> = items
+            .iter()
+            .map(|i| {
+                (
+                    i.pointer("/ref/path").and_then(Value::as_str).unwrap(),
+                    i.get("score").and_then(Value::as_f64).unwrap(),
+                )
+            })
+            .collect();
+        // Non-vendored retained original order.
+        assert_eq!(order[0].0, "src/main.rs");
+        assert_eq!(order[1].0, "src/lib.rs");
+        // Vendored pushed to the tail, scores scaled down.
+        assert!(order[2].0.ends_with("tokenizer.json"));
+        assert!(order[3].0.ends_with("sample.cs"));
+        assert!(order[2].1 < 0.2);
+        assert!(order[3].1 < 0.2);
+    }
+
+    #[test]
+    fn apply_vendor_penalty_noop_when_include_vendored_true() {
+        let mut items = vec![
+            scored("tests/fixtures/x.rs", 0.9),
+            scored("src/main.rs", 0.4),
+        ];
+        apply_vendor_penalty(&mut items, true, None, |_| None);
+        assert_eq!(
+            items[0].pointer("/ref/path").and_then(Value::as_str),
+            Some("tests/fixtures/x.rs")
+        );
+    }
+
+    #[test]
+    fn apply_vendor_penalty_noop_when_scope_opts_in() {
+        let mut items = vec![
+            scored("tests/fixtures/x.rs", 0.9),
+            scored("src/main.rs", 0.4),
+        ];
+        apply_vendor_penalty(&mut items, false, Some("tests/fixtures/"), |_| None);
+        assert_eq!(
+            items[0].pointer("/ref/path").and_then(Value::as_str),
+            Some("tests/fixtures/x.rs")
+        );
+    }
+
+    #[test]
+    fn apply_vendor_penalty_detects_large_json_via_size_lookup() {
+        let mut items = vec![
+            scored("big.json", 0.9),
+            scored("small.json", 0.5),
+            scored("src/main.rs", 0.4),
+        ];
+        apply_vendor_penalty(&mut items, false, None, |path| match path {
+            "big.json" => Some(200_000),
+            "small.json" => Some(4_096),
+            _ => None,
+        });
+        let paths: Vec<&str> = items
+            .iter()
+            .map(|i| i.pointer("/ref/path").and_then(Value::as_str).unwrap())
+            .collect();
+        // big.json is deprioritized, small.json and source stay.
+        assert_eq!(paths, vec!["small.json", "src/main.rs", "big.json"]);
     }
 
     #[test]

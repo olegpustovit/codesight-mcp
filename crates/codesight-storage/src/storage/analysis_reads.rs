@@ -4,6 +4,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::OptionalExtension;
 
+use codesight_core::reachability::{EdgeKind, StructuralEdge};
+
 use super::IndexStore;
 use super::types::AnalysisSymbol;
 
@@ -154,6 +156,87 @@ impl IndexStore {
         Ok(count as usize)
     }
 
+    /// Bulk version of [`symbol_reference_count`] that scans every symbol's
+    /// `source_text` exactly once and returns the set of candidate names that
+    /// were mentioned in some other symbol's body. Designed for the
+    /// dead-code symbol pass, which previously ran one `instr()` query per
+    /// candidate — quadratic in symbol count and pathologically slow on a
+    /// few-thousand-symbol repo. Caller passes the candidates as a slice of
+    /// `(symbol_id, name)`; the returned set contains every `name` for which
+    /// at least one symbol with a different `id` mentions `name` in its
+    /// `source_text`.
+    ///
+    /// Implementation: tokenizes each body once into the set of identifier
+    /// tokens it contains, then intersects against the candidate-name set.
+    /// O(total_body_bytes + candidates) instead of O(bodies × candidates).
+    pub fn names_mentioned_outside_self(
+        &self,
+        candidates: &[(String, String)],
+    ) -> anyhow::Result<std::collections::HashSet<String>> {
+        use std::collections::{HashMap, HashSet};
+        let mut by_name: HashMap<String, HashSet<String>> = HashMap::new();
+        for (id, name) in candidates {
+            if name.len() < 2 {
+                continue;
+            }
+            by_name
+                .entry(name.clone())
+                .or_default()
+                .insert(id.clone());
+        }
+        if by_name.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let conn = self.open_read_only()?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, source_text FROM symbols WHERE source_text IS NOT NULL AND source_text != ''",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut found: HashSet<String> = HashSet::new();
+        for row in rows {
+            let (sid, body) = row?;
+            if body.is_empty() {
+                continue;
+            }
+            // Identifier-token scan: yields each maximal `[A-Za-z_][A-Za-z0-9_]*`
+            // run once per body, dedup'd via a per-body set so repeated calls
+            // to the same name don't pay extra HashMap lookups.
+            let mut seen_tokens: HashSet<&str> = HashSet::new();
+            let bytes = body.as_bytes();
+            let mut i = 0usize;
+            while i < bytes.len() {
+                let b = bytes[i];
+                if !(b.is_ascii_alphabetic() || b == b'_') {
+                    i += 1;
+                    continue;
+                }
+                let start = i;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
+                {
+                    i += 1;
+                }
+                let tok = &body[start..i];
+                if tok.len() >= 2 {
+                    seen_tokens.insert(tok);
+                }
+            }
+            for tok in seen_tokens {
+                if found.contains(tok) {
+                    continue;
+                }
+                if let Some(owners) = by_name.get(tok) {
+                    if !owners.contains(sid.as_str()) {
+                        found.insert(tok.to_string());
+                    }
+                }
+            }
+        }
+        Ok(found)
+    }
+
     /// Store package names in the meta table.
     pub fn set_package_names(&self, names: &[String]) -> anyhow::Result<()> {
         let conn = self.open_connection()?;
@@ -213,6 +296,13 @@ impl IndexStore {
             }
         }
         Ok(results)
+    }
+
+    /// Read every reachability edge whose kind is in `kinds`. Empty
+    /// `kinds` returns the whole table.
+    pub fn reachability_edges(&self, kinds: &[EdgeKind]) -> anyhow::Result<Vec<StructuralEdge>> {
+        let conn = self.open_read_only()?;
+        super::reachability_edges::all_edges_for_kinds(&conn, kinds).map_err(Into::into)
     }
 
     pub fn file_max_end_lines(&self) -> anyhow::Result<HashMap<String, u64>> {

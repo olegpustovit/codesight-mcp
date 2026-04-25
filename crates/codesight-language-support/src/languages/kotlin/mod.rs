@@ -89,4 +89,20 @@ impl Language for Kotlin {
     fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
         id.leaf_name().starts_with("test")
     }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &[".gradle", ".idea"]
+    }
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        &[
+            "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in",
+            "interface", "is", "null", "object", "package", "return", "super", "this", "throw",
+            "true", "try", "typealias", "typeof", "val", "var", "when", "while", "by", "catch",
+            "constructor", "delegate", "dynamic", "field", "file", "finally", "get", "import",
+            "init", "param", "property", "receiver", "set", "setparam", "where", "actual",
+            "abstract", "annotation", "companion", "const", "crossinline", "data", "enum",
+            "expect", "external", "final", "infix", "inline", "inner", "internal", "lateinit",
+            "noinline", "open", "operator", "out", "override", "private", "protected", "public",
+            "reified", "sealed", "suspend", "tailrec", "vararg",
+        ]
+    }
 }

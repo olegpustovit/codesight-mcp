@@ -243,12 +243,11 @@ def build_cases(source_id: str) -> list[Case]:
         Case(
             "code_fuzzy_typo", "search_catalog",
             {"source_id": S, "domain": "code", "query": "dispach_with_timeot", "fuzzy": True,
-             "fuzzy_threshold": 0.3, "limit": 10},
+             "limit": 10},
         ),
         Case(
             "code_fuzzy_autotrigger", "search_catalog",
-            {"source_id": S, "domain": "code", "query": "xxxyyyNoSuchSymbolZZZ",
-             "fuzzy_threshold": 0.3, "limit": 10},
+            {"source_id": S, "domain": "code", "query": "xxxyyyNoSuchSymbolZZZ", "limit": 10},
             note="Nothing matches → auto-fuzzy kicks in; shouldn't hang on empty lexical.",
         ),
         # -------------------- regex path (files) --------------------------

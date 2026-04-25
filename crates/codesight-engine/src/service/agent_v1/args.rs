@@ -75,16 +75,9 @@ pub struct SearchCatalogArgs {
     /// Cap total serialized size of returned `items` (~bytes / BYTES_PER_TOKEN). Alias: `token_budget`.
     #[serde(default, alias = "token_budget")]
     pub max_tokens: Option<u32>,
-    /// Augment FTS hits with case-insensitive name substring matches (deduped).
+    /// Augment hits with a nucleo-matcher fuzzy lane over symbol names.
     #[serde(default)]
     pub fuzzy: Option<bool>,
-    /// Trigram Jaccard threshold for fuzzy augmentation (default 0.3). When set while BM25
-    /// returns no symbol hits, fuzzy augmentation runs even if `fuzzy` is false.
-    #[serde(default)]
-    pub fuzzy_threshold: Option<f64>,
-    /// When set, symbols within this Levenshtein distance (on a normalized compare key) qualify.
-    #[serde(default)]
-    pub max_edit_distance: Option<u32>,
     #[serde(default)]
     pub repo_path: Option<String>,
     /// Enable dense-embedding retrieval as an RRF-fused augmentation to BM25.
@@ -107,6 +100,21 @@ pub struct SearchCatalogArgs {
     /// modes always include tests (the caller asked for the literal match).
     #[serde(default)]
     pub include_tests: Option<bool>,
+    /// FIXUP T1.3: when true in `keyword` mode, match only against symbol
+    /// `name` / `qualified_name`, ignoring body, signature, summary, and
+    /// docstring features. Identifier searches become focused instead of
+    /// drowning in body matches.
+    #[serde(default)]
+    pub name_only: Option<bool>,
+    /// When true, include matches under vendored / asset / fixture paths
+    /// (the union of every registered language's
+    /// [`codesight_language_support::Language::vendor_segments`] plus the
+    /// universal segments) and oversized JSON dumps. Default `false`:
+    /// those paths are deprioritized to the tail of the ranking so real
+    /// source outranks tokenizer vocab and fixture files. An explicit
+    /// `scope=` that starts with an excluded prefix also opts in.
+    #[serde(default)]
+    pub include_vendored: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -254,6 +262,12 @@ pub struct InspectGraphArgs {
     /// are almost never the right answer for "who references fn X".
     #[serde(default)]
     pub include_non_code: Option<bool>,
+    /// When true, include references found under vendored / asset /
+    /// fixture paths and oversized JSON dumps. Default false — those
+    /// paths are excluded from reference scans so tokenizer vocab and
+    /// fixture files don't drown the real call sites.
+    #[serde(default)]
+    pub include_vendored: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -296,6 +310,12 @@ pub struct EvaluateImpactArgs {
     /// `path_rename`: optional path/file prefix scope.
     #[serde(default)]
     pub scope: Option<String>,
+    /// When true, include matches / impacted files under vendored / asset
+    /// / fixture paths and oversized JSON dumps. Default false — those
+    /// paths are skipped in rename_safety scans and blast_radius importer
+    /// lists so fixture chains don't pollute the impact set.
+    #[serde(default)]
+    pub include_vendored: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -359,6 +379,13 @@ pub struct EvaluateQualityArgs {
     /// with `DEADLINE_EXCEEDED`.
     #[serde(default)]
     pub partial_ok: Option<bool>,
+    /// When true, include vendored / asset / fixture files and oversized
+    /// JSON dumps in the analysis. Default false — those paths are
+    /// excluded from `dead_code` scans so fixture files don't show up as
+    /// dead by default. A `scope=` that starts with an excluded prefix
+    /// also opts in.
+    #[serde(default)]
+    pub include_vendored: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

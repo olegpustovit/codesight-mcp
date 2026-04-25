@@ -71,21 +71,28 @@ fn unresolved_ref_error(r: &ContentRef) -> ToolError {
 }
 
 struct BfsResult {
-    confirmed: Vec<Value>,
-    potential: Vec<Value>,
+    /// FIXUP T2.4: flat file lists, no per-row objects — callers don't need
+    /// `relation` (implied by bucket) or `depth` (implied by bucket / 1-vs-N).
+    direct_importers: Vec<String>,
+    transitive_importers: Vec<(String, u64)>,
     layers: Vec<(u64, Vec<String>)>,
 }
 
 /// BFS over reverse-import edges from `start_file`, up to `depth` layers.
+/// When `include_vendored` is false, importer nodes whose paths match the
+/// default vendor exclusions are dropped from `direct` / `transitive` /
+/// `layers` (they're still traversed internally so the BFS doesn't stall
+/// on a legitimate importer sitting behind a vendored edge).
 fn bfs_importers(
     start_file: &str,
     reverse_adj: &HashMap<String, Vec<String>>,
     depth: u64,
+    include_vendored: bool,
 ) -> BfsResult {
     let mut layers = Vec::new();
     let mut visited = HashSet::new();
-    let mut confirmed = Vec::new();
-    let mut potential = Vec::new();
+    let mut direct_importers = Vec::new();
+    let mut transitive_importers: Vec<(String, u64)> = Vec::new();
 
     visited.insert(start_file.to_string());
     let mut frontier = vec![start_file.to_string()];
@@ -98,18 +105,17 @@ fn bfs_importers(
                 for imp in importers {
                     if visited.insert(imp.clone()) {
                         next_frontier.push(imp.clone());
-                        layer_files.push(imp.clone());
-                        let entry = json!({
-                            "file": imp,
-                            "relation": if d == 1 { "direct_importer" } else { "transitive_importer" },
-                            "depth": d,
-                        });
-                        if d == 1 {
-                            &mut confirmed
-                        } else {
-                            &mut potential
+                        let excluded = !include_vendored
+                            && codesight_language_support::is_vendored_path(imp);
+                        if excluded {
+                            continue;
                         }
-                        .push(entry);
+                        layer_files.push(imp.clone());
+                        if d == 1 {
+                            direct_importers.push(imp.clone());
+                        } else {
+                            transitive_importers.push((imp.clone(), d));
+                        }
                     }
                 }
             }
@@ -123,8 +129,8 @@ fn bfs_importers(
         }
     }
     BfsResult {
-        confirmed,
-        potential,
+        direct_importers,
+        transitive_importers,
         layers,
     }
 }
@@ -156,7 +162,11 @@ impl CodeService {
                 .unwrap_or("")
         });
 
-        let adj = store.dependency_graph()?;
+        // Explicit-import edges alone miss intra-crate / same-package
+        // references (Rust `mod x; x::Y`, Python sibling access, Go
+        // same-package). Union with symbol-usage edges so the BFS
+        // frontier matches what `find_references` would see.
+        let adj = codesight_analysis::graph::adjacency_with_usage_edges(&store)?;
         let reverse_adj = build_reverse_adj(&adj);
         let all_files = store.all_file_paths()?;
         let first_ref = args.refs.as_ref().and_then(|r| r.first());
@@ -190,16 +200,24 @@ impl CodeService {
             resolve_symbol_file(&store, stable_id, symbol_name)?
         };
 
+        let include_vendored = args.include_vendored.unwrap_or(false)
+            || args
+                .scope
+                .as_deref()
+                .map(codesight_language_support::scope_opts_in)
+                .unwrap_or(false);
         let bfs = symbol_file
             .as_deref()
-            .map(|f| bfs_importers(f, &reverse_adj, depth))
+            .map(|f| bfs_importers(f, &reverse_adj, depth, include_vendored))
             .unwrap_or_else(|| BfsResult {
-                confirmed: Vec::new(),
-                potential: Vec::new(),
+                direct_importers: Vec::new(),
+                transitive_importers: Vec::new(),
                 layers: Vec::new(),
             });
 
-        let total_impacted = bfs.confirmed.len() + bfs.potential.len();
+        let direct_count = bfs.direct_importers.len();
+        let transitive_count = bfs.transitive_importers.len();
+        let total_impacted = direct_count + transitive_count;
         let overall_risk = if total_impacted == 0 {
             0.0
         } else {
@@ -210,28 +228,56 @@ impl CodeService {
         // counterfactual. Null baseline (`tokens_saved: null`).
         let timer = MetaBuilder::new(0);
 
+        // FIXUP T2.4: `findings` is a depth-histogram; the file list is
+        // already surfaced via `direct_importers` / `transitive_importers`.
+        // Dropping `files` from `findings` eliminates the ~3× payload
+        // duplication the plan flagged.
         let layer_findings: Vec<Value> = bfs
             .layers
             .iter()
-            .map(
-                |(d, files)| json!({ "depth": d, "files": files, "risk_score": 1.0 / (*d as f64) }),
-            )
+            .map(|(d, files)| {
+                json!({
+                    "depth": d,
+                    "count": files.len(),
+                    "risk_score": 1.0 / (*d as f64),
+                })
+            })
+            .collect();
+
+        // Keep the detailed per-depth view (with file lists) available
+        // under the opt-in `impact_by_depth` field so callers who need it
+        // aren't forced to re-derive it.
+        let impact_by_depth: Vec<Value> = bfs
+            .layers
+            .iter()
+            .map(|(d, files)| {
+                json!({
+                    "depth": d,
+                    "files": files,
+                    "risk_score": 1.0 / (*d as f64),
+                })
+            })
+            .collect();
+
+        let transitive_json: Vec<Value> = bfs
+            .transitive_importers
+            .iter()
+            .map(|(file, depth)| json!({ "file": file, "depth": depth }))
             .collect();
 
         let mut data = json!({
             "analysis": "blast_radius",
             "overall_risk_score": overall_risk,
-            "direct_dependents_count": bfs.confirmed.len(),
             "importer_count": total_impacted,
-            "confirmed": bfs.confirmed,
-            "potential": bfs.potential,
-            "confirmed_count": bfs.confirmed.len(),
-            "potential_count": bfs.potential.len(),
+            "direct_importers": bfs.direct_importers,
+            "transitive_importers": transitive_json,
+            "direct_count": direct_count,
+            "transitive_count": transitive_count,
             "findings": layer_findings,
         });
 
         if args.include_depth_scores.unwrap_or(false) {
-            data["impact_by_depth"] = json!(layer_findings);
+            data["impact_by_depth"] = json!(impact_by_depth);
         }
 
         let call_depth = args.call_depth.unwrap_or(0).min(3);
@@ -259,14 +305,16 @@ impl CodeService {
             data["cross_repo_key"] = json!(format!("blast_radius:{}", symbol_name));
         }
 
-        // ROADMAP P2.8: emit actionable_next hints for the top confirmed
-        // dependents so the agent can inspect callers or rename-check each
+        // ROADMAP P2.8: emit actionable_next hints for the top direct
+        // importers so the agent can inspect callers or rename-check each
         // one without replaying the blast-radius path.
+        // FIXUP T2.4: iterate over the flat Vec<String> direct_importers —
+        // previously this ran `.as_str()` on {file, relation, depth}
+        // objects (always None), so actionable_next was silently empty.
         let actionable_next: Vec<Value> = bfs
-            .confirmed
+            .direct_importers
             .iter()
             .take(3)
-            .filter_map(|f| f.as_str().map(|s| s.to_string()))
             .map(|path| {
                 json!({
                     "tool": "inspect_graph",

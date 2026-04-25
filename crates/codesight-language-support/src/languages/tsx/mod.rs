@@ -8,8 +8,9 @@ use tree_sitter::Language as TsLanguage;
 use crate::family::{LanguageFamily, NestingMode};
 use crate::languages::builtins::TSX_MANIFEST;
 use crate::languages::javascript::{
-    JS_CONVENTIONAL_DIRS, JS_ENTRYPOINTS, JS_TEST_FILE_DIRS, JS_TEST_FILE_SUFFIXES,
-    JS_TEST_FIXTURE_DIRS, js_package_name_for_dir, js_resolve_relative, js_root_package,
+    JS_CONVENTIONAL_DIRS, JS_ENTRYPOINTS, JS_RESERVED_IDENTIFIERS, JS_TEST_FILE_DIRS,
+    JS_TEST_FILE_SUFFIXES, JS_TEST_FIXTURE_DIRS, JS_VENDOR_SEGMENTS, js_package_name_for_dir,
+    js_resolve_relative, js_root_package,
 };
 use crate::languages::typescript::ts_type_token_score;
 use crate::manifest::{GrammarSpec, LanguageId, LanguageManifest, TSX};
@@ -53,6 +54,12 @@ impl Language for Tsx {
     }
     fn entrypoint_basenames(&self) -> &'static [&'static str] {
         JS_ENTRYPOINTS
+    }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        JS_VENDOR_SEGMENTS
+    }
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        JS_RESERVED_IDENTIFIERS
     }
     fn test_file_dirs(&self) -> &'static [&'static str] {
         JS_TEST_FILE_DIRS

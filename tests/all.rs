@@ -1,0 +1,97 @@
+// Single integration-test binary. Each sibling tests/*.rs is pulled in as a
+// module rather than compiled as its own binary — see the `autotests = false`
+// + `[[test]] name = "integration"` block in the root Cargo.toml.
+//
+// Adding a new integration test:
+//   1. Create tests/my_feature.rs with your `#[test]` / `#[tokio::test]` fns.
+//   2. Add one line here:  #[path = "my_feature.rs"] mod my_feature;
+//
+// Nextest output still addresses each test individually, e.g.
+//   integration::blast_radius::it_computes_fan_out
+
+#[path = "agent_v1_dense.rs"]             mod agent_v1_dense;
+#[path = "agent_v1_envelope.rs"]          mod agent_v1_envelope;
+#[path = "agent_v1_framework_core.rs"]    mod agent_v1_framework_core;
+#[path = "agent_v1_framework_dbt.rs"]     mod agent_v1_framework_dbt;
+#[path = "agent_v1_framework_laravel.rs"] mod agent_v1_framework_laravel;
+#[path = "agent_v1_framework_nextjs.rs"]  mod agent_v1_framework_nextjs;
+#[path = "agent_v1_framework_nuxt.rs"]    mod agent_v1_framework_nuxt;
+#[path = "agent_v1_input_validation.rs"]  mod agent_v1_input_validation;
+#[path = "agent_v1_staleness.rs"]         mod agent_v1_staleness;
+#[path = "analysis_health.rs"]            mod analysis_health;
+#[path = "architecture_tools.rs"]         mod architecture_tools;
+#[path = "blast_radius.rs"]               mod blast_radius;
+#[path = "bm25_correctness.rs"]           mod bm25_correctness;
+#[path = "call_hierarchy.rs"]             mod call_hierarchy;
+#[path = "catalog_search_defaults.rs"]    mod catalog_search_defaults;
+#[path = "change_velocity.rs"]            mod change_velocity;
+#[path = "check_rename_safe.rs"]          mod check_rename_safe;
+#[path = "class_hierarchy.rs"]            mod class_hierarchy;
+#[path = "complexity.rs"]                 mod complexity;
+#[path = "complexity_params_nesting.rs"]  mod complexity_params_nesting;
+#[path = "context_bundle_depth.rs"]       mod context_bundle_depth;
+#[path = "crate_graph.rs"]                mod crate_graph;
+#[path = "cross_repo.rs"]                 mod cross_repo;
+#[path = "dead_code_v2.rs"]               mod dead_code_v2;
+#[path = "doc_broken_links.rs"]           mod doc_broken_links;
+#[path = "doc_fixtures_present.rs"]       mod doc_fixtures_present;
+#[path = "doc_parser.rs"]                 mod doc_parser;
+#[path = "doc_parser_html.rs"]            mod doc_parser_html;
+#[path = "doc_parser_jupyter.rs"]         mod doc_parser_jupyter;
+#[path = "doc_parser_remaining.rs"]       mod doc_parser_remaining;
+#[path = "doc_tools.rs"]                  mod doc_tools;
+#[path = "document_coverage.rs"]          mod document_coverage;
+#[path = "envelope_shape.rs"]             mod envelope_shape;
+#[path = "extra_extensions.rs"]           mod extra_extensions;
+#[path = "extraction_tiers.rs"]           mod extraction_tiers;
+#[path = "extractor_registry.rs"]         mod extractor_registry;
+#[path = "file_summaries.rs"]             mod file_summaries;
+#[path = "find_dead_code.rs"]             mod find_dead_code;
+#[path = "find_importers.rs"]             mod find_importers;
+#[path = "fqn.rs"]                        mod fqn;
+#[path = "fuzzy_search.rs"]               mod fuzzy_search;
+#[path = "fuzzy_two_lane.rs"]             mod fuzzy_two_lane;
+#[path = "get_changed_symbols.rs"]        mod get_changed_symbols;
+#[path = "get_context_bundle.rs"]         mod get_context_bundle;
+#[path = "get_doc_coverage.rs"]           mod get_doc_coverage;
+#[path = "get_file_tree.rs"]              mod get_file_tree;
+#[path = "hooks_cli.rs"]                  mod hooks_cli;
+#[path = "hotspots.rs"]                   mod hotspots;
+#[path = "import_rendering.rs"]           mod import_rendering;
+#[path = "incremental.rs"]                mod incremental;
+#[path = "index_file.rs"]                 mod index_file;
+#[path = "inspect_graph_scope.rs"]        mod inspect_graph_scope;
+#[path = "meta_disclosure.rs"]            mod meta_disclosure;
+#[path = "packages_walker.rs"]            mod packages_walker;
+#[path = "pagerank.rs"]                   mod pagerank;
+#[path = "parse_warnings.rs"]             mod parse_warnings;
+#[path = "path_map.rs"]                   mod path_map;
+#[path = "path_rename.rs"]                mod path_rename;
+#[path = "path_rename_shapes.rs"]         mod path_rename_shapes;
+#[path = "quality_signal.rs"]             mod quality_signal;
+#[path = "query_pack_catalog.rs"]         mod query_pack_catalog;
+#[path = "read_content_mitigation.rs"]    mod read_content_mitigation;
+#[path = "read_content_next_step_hint.rs"] mod read_content_next_step_hint;
+#[path = "read_content_oversized.rs"]     mod read_content_oversized;
+#[path = "refactor_targets.rs"]           mod refactor_targets;
+#[path = "related_symbols.rs"]            mod related_symbols;
+#[path = "rename_plan.rs"]                mod rename_plan;
+#[path = "repo_health.rs"]                mod repo_health;
+#[path = "retrieval_tools.rs"]            mod retrieval_tools;
+#[path = "search_catalog_offset.rs"]      mod search_catalog_offset;
+#[path = "search_catalog_savings.rs"]     mod search_catalog_savings;
+#[path = "search_perf.rs"]                mod search_perf;
+#[path = "search_scope_exclusion.rs"]     mod search_scope_exclusion;
+#[path = "self_dogfood.rs"]               mod self_dogfood;
+#[path = "session_stats.rs"]              mod session_stats;
+#[path = "suggest_queries.rs"]            mod suggest_queries;
+#[path = "symbol_body_in_search.rs"]      mod symbol_body_in_search;
+#[path = "symbol_complexity.rs"]          mod symbol_complexity;
+#[path = "symbol_diff.rs"]                mod symbol_diff;
+#[path = "symbol_not_found_in_code.rs"]   mod symbol_not_found_in_code;
+#[path = "test_tools_index.rs"]           mod test_tools_index;
+#[path = "token_budget_context.rs"]       mod token_budget_context;
+#[path = "tokens_saved_audit.rs"]         mod tokens_saved_audit;
+#[path = "tool_latency_budgets.rs"]       mod tool_latency_budgets;
+#[path = "tools_trusted_folders.rs"]      mod tools_trusted_folders;
+#[path = "truncated_flag.rs"]             mod truncated_flag;

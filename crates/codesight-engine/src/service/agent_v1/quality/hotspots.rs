@@ -23,8 +23,10 @@ impl CodeService {
         let timer = MetaBuilder::new(0);
         let data = quality::hotspots_payload(&store, min_complexity, top_n, include_conventional)?;
 
-        // ROADMAP P2.8: point the agent at concrete follow-up calls for the
-        // top hotspots so they don't have to invent the next step.
+        // FIXUP T1.2: point the agent at a split-planning follow-up.
+        // Previously this emitted `rename_safety` with `new_name == name`
+        // (a semantic no-op); `refactor_targets` actually helps identify
+        // what inside the hotspot file to split.
         let top = data.pointer("/hotspots").and_then(Value::as_array);
         let actionable_next = top
             .map(|rows| {
@@ -34,13 +36,14 @@ impl CodeService {
                         let name = row.get("name").and_then(Value::as_str)?;
                         let file = row.get("file").and_then(Value::as_str)?;
                         Some(json!({
-                            "tool": "evaluate_impact",
+                            "tool": "evaluate_quality",
                             "args": {
                                 "source_id": args.source_id,
-                                "analysis": "rename_safety",
-                                "refs": [{ "kind": "symbol", "path": file, "symbol_name": name, "new_name": name }],
+                                "analysis": "refactor_targets",
+                                "file_path": file,
+                                "top_caller_files": 5,
                             },
-                            "reason": format!("Check rename safety on hotspot `{name}` ({file}) before splitting it."),
+                            "reason": format!("Identify split candidates inside `{name}` ({file}) before refactoring."),
                         }))
                     })
                     .collect::<Vec<_>>()

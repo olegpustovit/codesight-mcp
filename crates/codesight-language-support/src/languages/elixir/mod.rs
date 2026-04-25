@@ -43,6 +43,9 @@ impl Language for Elixir {
     fn fallback_type_baseline(&self) -> Option<f64> {
         Some(0.3)
     }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &["_build", "deps"]
+    }
     fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
         // OTP-pattern callbacks and protocol implementations repeat
         // across every GenServer / GenStateMachine / Supervisor in a

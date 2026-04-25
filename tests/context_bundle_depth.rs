@@ -128,7 +128,7 @@ fn depth_two_expands_with_callers_and_callees() {
         .filter_map(|s| s["name"].as_str())
         .collect();
     assert!(
-        names.iter().any(|n| *n == "make_widget"),
+        names.contains(&"make_widget"),
         "base symbol must remain: {names:?}"
     );
 }

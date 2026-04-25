@@ -55,6 +55,12 @@ impl Language for TypeScript {
     fn pruned_dirs(&self) -> &'static [&'static str] {
         crate::languages::javascript::JS_PRUNED_DIRS
     }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        crate::languages::javascript::JS_VENDOR_SEGMENTS
+    }
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        crate::languages::javascript::JS_RESERVED_IDENTIFIERS
+    }
     fn outline_noise_basenames(&self) -> &'static [&'static str] {
         &["tsconfig.json"]
     }

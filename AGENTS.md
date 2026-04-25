@@ -140,15 +140,13 @@ roll back the same session.
 |---|---|
 | [`src/`](src/) | Binary crate: CLI subcommands + stdio MCP entry point. Thin wiring only — all engine logic lives in `crates/codesight-engine`. |
 | [`src/cli/`](src/cli/) | Operator subcommands (`check`, `init`, hooks). |
-| [`crates/codesight-engine/`](crates/codesight-engine) | **L1 engine.** MCP tool dispatch, indexing orchestration, `AppConfig`, security, server support, `tools.json` contract. Backend-agnostic. |
+| [`crates/codesight-engine/`](crates/codesight-engine) | **L1 engine.** MCP tool dispatch, indexing orchestration, `AppConfig`, security, server support, `tools.json` contract, stdio JSON-RPC framing (`rpc.rs`). |
 | [`crates/codesight-engine/src/tools.json`](crates/codesight-engine/src/tools.json) | **Frozen MCP contract.** Schema + handler ship together. |
-| [`crates/codesight-backend/`](crates/codesight-backend) | **L0.5.** `CodeBackend` + `BackendRouter`; tree-sitter + LSP impls are Cargo features (`treesitter`, `lsp`) in the same crate. Engine uses `default-features = false`. |
 | [`crates/codesight-core/`](crates/codesight-core) | L0 primitives: `Symbol`, `FactQuality`, pipeline types, `LanguageId` constants. |
 | [`crates/codesight-language-support/`](crates/codesight-language-support) | **L0.75.** One folder per language under `src/languages/<lang>/` — owns identity, grammar + SCM (embedded via `include_str!` from `queries/`), symbol extraction, import extraction + resolution, package discovery, entrypoints, tests, visibility, complexity, and framework providers. Single `Language` trait with default bodies; overrides are opt-in. Host profiles (openapi, ansible) are sibling `Language` impls that share the host grammar. |
 | [`crates/codesight-analysis/`](crates/codesight-analysis) | Quality, impact, graph analysis (cycles, coupling, call graph, layer checks). |
 | [`crates/codesight-retrieval/`](crates/codesight-retrieval) | BM25, fuzzy, embedder, section builders. |
 | [`crates/codesight-storage/`](crates/codesight-storage) | WAL SQLite + forward-only migrations. |
-| [`crates/mcp-rpc/`](crates/mcp-rpc) | L2: stdio JSON-RPC framing. `Dispatcher` trait (server) + `McpClient` (client). No `codesight_*` deps. |
 | [`tests/`](tests) | Integration tests. `tests/crate_graph.rs` enforces layering. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Crate split, data flow, FactQuality, SQLite config. |
 
@@ -158,15 +156,10 @@ Layer invariants (enforced by `tests/crate_graph.rs`):
   `-storage`. No upward deps.
 - **L0.75** (language support): `codesight-language-support` owns every
   per-language heuristic. May depend only on `codesight-core`. Never reaches
-  upward into backend, engine, analysis, retrieval, or storage.
-- **L0.5** (backend): `codesight-backend` holds the trait and optional impls.
-  Depends on `-core` + `-language-support`. Concrete backend code never
-  depends on the engine.
-- **L1** (engine): `codesight-engine` depends on the trait + L0 +
-  language-support. **Does not depend on any concrete backend** — `cargo
-  check -p codesight-engine` pulls no tree-sitter / LSP types through its
-  lib.
-- **L2** (protocol): `mcp-rpc` has zero `codesight_*` deps.
+  upward into engine, analysis, retrieval, or storage.
+- **L1** (engine): `codesight-engine` depends on L0 + language-support +
+  analysis + retrieval + storage. Dispatch, indexing, security, and
+  stdio JSON-RPC framing all live here.
 
 ## Working rules
 

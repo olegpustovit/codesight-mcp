@@ -2,7 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
@@ -17,20 +16,14 @@ struct WatchHandle {
 }
 
 pub(crate) struct WatcherManager {
-    enabled: AtomicBool,
     active: Mutex<HashMap<String, WatchHandle>>,
 }
 
 impl WatcherManager {
     pub fn new() -> Self {
         Self {
-            enabled: AtomicBool::new(false),
             active: Mutex::new(HashMap::new()),
         }
-    }
-
-    pub fn enable(&self) {
-        self.enabled.store(true, Ordering::Relaxed);
     }
 
     pub fn ensure_watching(
@@ -40,10 +33,6 @@ impl WatcherManager {
         config: AppConfig,
         indexer: Arc<Indexer>,
     ) {
-        if !self.enabled.load(Ordering::Relaxed) {
-            return;
-        }
-
         let mut map = self.active.lock().unwrap();
         if map.contains_key(repo_id) {
             return;

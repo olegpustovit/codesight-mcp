@@ -8,6 +8,7 @@ pub mod doc_schema;
 mod graph_reads;
 mod index_store;
 pub mod migrations;
+pub mod reachability_edges;
 mod repo_summary;
 mod row_utils;
 mod schema;

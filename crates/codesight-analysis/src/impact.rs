@@ -21,6 +21,10 @@ pub use codesight_language_support::path_rename::{
     PathRenameChange, PathRenameCollision, PathRenameFilePlan, PathRenamePlan, PathRenameUnhandled,
     affected_paths, summarize as summarize_path_rename,
 };
+use codesight_language_support::is_vendored_or_fixture_path;
+use codesight_language_support::language_id_for_path;
+use codesight_language_support::manifest::UNKNOWN_LANGUAGE;
+use codesight_language_support::text_match::{classify_body_match, locate_identifier_ci};
 use codesight_storage::storage::IndexStore;
 
 // -----------------------------------------------------------------------------
@@ -31,6 +35,7 @@ pub fn rename_safety_payload(
     store: &IndexStore,
     symbol_id: &str,
     new_name: &str,
+    include_vendored: bool,
 ) -> anyhow::Result<Option<Value>> {
     let Some(record) = store.symbol_record(symbol_id)? else {
         return Ok(None);
@@ -121,19 +126,70 @@ pub fn rename_safety_payload(
     let trait_method_detected = trait_owner.is_some();
     let impl_count = required_edits.len();
 
-    let safe = conflicts.is_empty() && !trait_method_detected;
+    // FIXUP T1.1: rename safety must also know about references living
+    // outside the defining site. A pure collision check can say "safe"
+    // while callers across the repo still point at the old name.
+    //
+    // The incoming `symbol_name` may be `Struct.method` — when present, the
+    // receiver prefix tells us the rename is a method-rename so we can
+    // require a receiver shape (`ledger.record(` / `Type::record(`) at the
+    // call site rather than a bare identifier.
+    let is_method_like = matches!(
+        record.kind,
+        codesight_core::SymbolKind::Method
+    ) || symbol_name.contains('.');
+    let scan = scan_symbol_references(
+        store,
+        symbol_id,
+        symbol_leaf,
+        file_path,
+        is_method_like,
+        include_vendored,
+        REFERENCE_SCAN_LIMIT,
+    )?;
+    let unrewritten_references: Vec<Value> = scan
+        .references
+        .iter()
+        .map(|row| {
+            json!({
+                "file": row.file,
+                "line": row.line,
+                "kind": row.kind,
+                "enclosing_symbol": row.enclosing_symbol,
+                "body_match_kind": row.body_match_kind,
+            })
+        })
+        .collect();
+
+    let collision_free = conflicts.is_empty();
+    let safe = collision_free
+        && !trait_method_detected
+        && unrewritten_references.is_empty();
 
     let mut payload = json!({
         "analysis": "rename_safety",
         "safe": safe,
+        "collision_free": collision_free,
         "conflicts": conflicts,
         "checked_files": checked_files.len(),
         "symbol": {
             "name": symbol_name,
             "id": symbol_id,
             "file": file_path,
+            "is_method_like": is_method_like,
         },
         "new_name": new_name,
+        "unrewritten_references": unrewritten_references,
+        "reference_scan": {
+            "method": "identifier_bounded_with_body_classifier",
+            "complete": scan.complete,
+            "scanned_files": scan.scanned_files,
+            "excluded_vendored_or_fixture": scan.excluded_vendored_or_fixture,
+            "rejected_comment_or_string": scan.rejected_comment_or_string,
+            "rejected_missing_receiver": scan.rejected_missing_receiver,
+            "partial_language_coverage": scan.partial_language_coverage,
+            "confidence": scan.confidence,
+        },
         "trait_dispatch": {
             "detected_trait_owner": trait_owner,
             "required_edits": required_edits_rendered,
@@ -141,29 +197,234 @@ pub fn rename_safety_payload(
         },
     });
 
+    let mut warnings: Vec<Value> = Vec::new();
     if trait_method_detected {
-        payload["warnings"] = json!([{
+        warnings.push(json!({
             "code": "TRAIT_METHOD_RENAME",
             "message": format!(
                 "'{symbol_name}' appears to be a trait method on '{}'. Every `impl <Trait> for X` site in `required_edits` must rename this method in the same patch.",
                 trait_owner.as_deref().unwrap_or("(unknown trait)"),
             ),
-        }]);
+        }));
+    }
+    if scan.partial_language_coverage {
+        warnings.push(json!({
+            "code": "PARTIAL_LANGUAGE_COVERAGE",
+            "message": "reference scan hit symbol bodies in languages without registered identifier heuristics — those hits were downgraded to `partial_language_match` rather than reported as unrewritten references.",
+        }));
+    }
+    if !warnings.is_empty() {
+        payload["warnings"] = json!(warnings);
     }
 
     Ok(Some(payload))
 }
 
-/// Heuristic trait-method detection. Returns `(Some(trait_name), impl_files)`
-/// when:
-/// - `file_path` is Rust and declares a `trait <Trait> { fn <symbol_name>(…) }`
-///   block that contains `symbol_name`.
-/// - Any other indexed Rust file contains `impl <Trait> for X { fn <symbol_name>`.
+// -----------------------------------------------------------------------------
+// FIXUP T1.1 — reference-scan helper for rename_safety
+// -----------------------------------------------------------------------------
+
+/// Soft cap on how many indexed symbols we scan for references. The scan
+/// is a linear substring check, so bound it to keep the handler under the
+/// 200ms cold-dispatch budget on large repos.
+const REFERENCE_SCAN_LIMIT: usize = 4000;
+
+struct ReferenceScanRow {
+    file: String,
+    line: u32,
+    kind: &'static str,
+    enclosing_symbol: Option<String>,
+    body_match_kind: &'static str,
+}
+
+struct ReferenceScan {
+    references: Vec<ReferenceScanRow>,
+    complete: bool,
+    scanned_files: usize,
+    /// Hits silently dropped because the enclosing symbol's file lived in
+    /// `/fixtures/`, `/node_modules/`, `/target/`, etc.
+    excluded_vendored_or_fixture: usize,
+    /// Hits that landed inside a line `classify_body_match` tagged as
+    /// `comment_or_string`.
+    rejected_comment_or_string: usize,
+    /// Hits for method-like symbols that lacked a receiver prefix
+    /// (`obj.name(` or `Type::name(`) — treated as unrelated identifiers.
+    rejected_missing_receiver: usize,
+    /// True when at least one hit came from a file whose language isn't
+    /// registered. Those hits are downgraded (kind=`partial_language_match`)
+    /// and surfaced via `PARTIAL_LANGUAGE_COVERAGE`.
+    partial_language_coverage: bool,
+    /// Overall confidence tier: `high` | `partial` | `none_after_filters`.
+    confidence: &'static str,
+}
+
+/// Scan indexed symbols for references to `symbol_name` outside the
+/// defining file. Returns typed rows — the MCP handler shapes the JSON.
+/// Uses `store.all_symbols_with_source()` so we don't re-read files from
+/// disk. Filters:
 ///
-/// Returns `(None, [])` for non-Rust files or when no trait declaration
-/// contains the symbol. This intentionally over-triggers on Rust-only because
-/// a false positive costs one extra confirmation while a false negative ships
-/// a broken rename.
+/// 1. Vendored / fixture / generated paths are excluded up-front via the
+///    shared [`is_vendored_or_fixture_path`] predicate. These paths produce
+///    no rename obligations — renaming source never requires editing them.
+/// 2. Each word-bounded identifier hit is re-classified with
+///    [`classify_body_match`]. Hits in comments / string literals are
+///    dropped — they don't reflect a real reference to the symbol.
+/// 3. When `require_receiver` is true (method rename / `Struct.method`
+///    shape), the hit must be preceded by `.` or `::` so
+///    `ledger.record(...)` or `Ledger::record(...)` qualifies but a bare
+///    `record` keyword in some other language (Erlang!) does not.
+/// 4. Hits from files whose language isn't in the registry are downgraded
+///    to `partial_language_match` rather than dropped — the caller is
+///    warned via `partial_language_coverage`.
+#[allow(clippy::too_many_arguments)]
+fn scan_symbol_references(
+    store: &IndexStore,
+    symbol_id: &str,
+    symbol_name: &str,
+    defining_file: &str,
+    require_receiver: bool,
+    include_vendored: bool,
+    scan_limit: usize,
+) -> anyhow::Result<ReferenceScan> {
+    if symbol_name.is_empty() {
+        return Ok(ReferenceScan {
+            references: Vec::new(),
+            complete: true,
+            scanned_files: 0,
+            excluded_vendored_or_fixture: 0,
+            rejected_comment_or_string: 0,
+            rejected_missing_receiver: 0,
+            partial_language_coverage: false,
+            confidence: "high",
+        });
+    }
+    let sym_infos = store.all_symbols_with_source()?;
+    let mut seen_files: HashSet<String> = HashSet::new();
+    let mut references = Vec::new();
+    let mut complete = true;
+    let mut excluded_vendored = 0usize;
+    let mut rejected_comment = 0usize;
+    let mut rejected_no_receiver = 0usize;
+    let mut partial_language = false;
+    for (idx, sym) in sym_infos.iter().enumerate() {
+        if idx >= scan_limit {
+            complete = false;
+            break;
+        }
+        if sym.id == symbol_id {
+            continue;
+        }
+        if sym.file == defining_file {
+            continue;
+        }
+        if !include_vendored && is_vendored_or_fixture_path(&sym.file) {
+            excluded_vendored += 1;
+            continue;
+        }
+        let Some((rel_line, col)) = locate_identifier_ci(&sym.source, symbol_name) else {
+            continue;
+        };
+        let line_text = sym
+            .source
+            .lines()
+            .nth(rel_line.saturating_sub(1) as usize)
+            .unwrap_or("");
+        // `col` is 1-based; `classify_body_match` takes a 0-based column.
+        let body_match = classify_body_match(
+            line_text,
+            col.saturating_sub(1) as usize,
+            symbol_name.len(),
+        );
+        if body_match == "comment_or_string" {
+            rejected_comment += 1;
+            continue;
+        }
+        if require_receiver
+            && !has_receiver_prefix(line_text, col.saturating_sub(1) as usize)
+        {
+            rejected_no_receiver += 1;
+            continue;
+        }
+        let lang_id = language_id_for_path(&sym.file);
+        let kind = if lang_id == UNKNOWN_LANGUAGE {
+            partial_language = true;
+            "partial_language_match"
+        } else {
+            "symbol_body_reference"
+        };
+        let absolute_line = sym.line + rel_line.saturating_sub(1);
+        references.push(ReferenceScanRow {
+            file: sym.file.clone(),
+            line: absolute_line,
+            kind,
+            enclosing_symbol: Some(sym.name.clone()),
+            body_match_kind: body_match,
+        });
+        seen_files.insert(sym.file.clone());
+    }
+    let confidence = if !partial_language && references.iter().all(|r| r.kind == "symbol_body_reference") {
+        "high"
+    } else if references.is_empty() {
+        "none_after_filters"
+    } else {
+        "partial"
+    };
+    Ok(ReferenceScan {
+        references,
+        complete,
+        scanned_files: seen_files.len(),
+        excluded_vendored_or_fixture: excluded_vendored,
+        rejected_comment_or_string: rejected_comment,
+        rejected_missing_receiver: rejected_no_receiver,
+        partial_language_coverage: partial_language,
+        confidence,
+    })
+}
+
+/// True when the identifier at 0-based byte column `col` is immediately
+/// preceded (ignoring turbofish) by `.` or `::` — a receiver / path
+/// qualifier. Used to distinguish `ledger.record(...)` and
+/// `SavingsLedger::record(...)` from a bare `record` token that happens
+/// to live in unrelated code (Erlang keyword, field name, etc.).
+fn has_receiver_prefix(line_text: &str, col: usize) -> bool {
+    if col == 0 {
+        return false;
+    }
+    let before = &line_text.as_bytes()[..col.min(line_text.len())];
+    // Tolerate whitespace / `<T>` between the qualifier and the identifier
+    // (`obj . record(`, `Ledger:: <u32>record(`) — bounded scan only.
+    let mut end = before.len();
+    while end > 0 && (before[end - 1] == b' ' || before[end - 1] == b'\t') {
+        end -= 1;
+    }
+    if end == 0 {
+        return false;
+    }
+    let trimmed = &before[..end];
+    if trimmed.ends_with(b".") {
+        return true;
+    }
+    if trimmed.ends_with(b"::") {
+        return true;
+    }
+    // `foo::<T>::record(` — after trimming angle-bracketed generics the
+    // tail should still end in `::`.
+    if let Some(lt) = trimmed.iter().rposition(|b| *b == b'<')
+        && let Some(gt) = trimmed.iter().rposition(|b| *b == b'>')
+        && lt < gt
+    {
+        let head = &trimmed[..lt];
+        if head.ends_with(b"::") {
+            return true;
+        }
+    }
+    false
+}
+
+/// FIXUP T1.1 + crate_graph: dispatch trait/interface detection to the
+/// owning Language. Per-language code (`.ends_with(".rs")` etc.) used to
+/// live here; it now sits beside the rest of each language's
+/// implementation in `codesight-language-support`.
 fn detect_trait_impl_sites(
     store: &IndexStore,
     file_path: &str,
@@ -172,332 +433,22 @@ fn detect_trait_impl_sites(
     if symbol_name.is_empty() {
         return Ok((None, Vec::new()));
     }
-    if file_path.ends_with(".rs") {
-        detect_rust_trait_impl_sites(store, file_path, symbol_name)
-    } else if file_path.ends_with(".go") {
-        // ROADMAP P0.3 #4: Go interface-method dispatch. A rename on an
-        // interface method must cover every receiver with a matching
-        // method name. We can't do full type inference, so we over-trigger:
-        // any file with a `func (…) method(` is flagged as a candidate impl.
-        detect_go_interface_impl_sites(store, file_path, symbol_name)
-    } else {
-        Ok((None, Vec::new()))
-    }
-}
-
-fn detect_rust_trait_impl_sites(
-    store: &IndexStore,
-    file_path: &str,
-    symbol_name: &str,
-) -> anyhow::Result<(Option<String>, Vec<String>)> {
+    let registry = codesight_language_support::builtin_registry();
+    let Some(lang) = registry.for_path(std::path::Path::new(file_path)) else {
+        return Ok((None, Vec::new()));
+    };
     let contents = store.all_file_contents().unwrap_or_default();
     let defining = contents
         .iter()
         .find(|(p, _)| p == file_path)
         .map(|(_, c)| c.as_str())
         .unwrap_or("");
-
-    // Branch A — the starting file declares the trait that owns this method.
-    // Branch B — the starting file is an `impl <Trait> for X` site; find the
-    //            trait by scanning the repo for matching `trait <Trait>` with
-    //            this method name, then enumerate every impl.
-    let trait_owner = owning_trait_for_symbol(defining, symbol_name).or_else(|| {
-        owning_trait_from_impl_site(defining, symbol_name).and_then(|candidate| {
-            contents.iter().find_map(|(_, c)| {
-                owning_trait_for_symbol(c, symbol_name)
-                    .filter(|found| found == &candidate)
-            })
-        })
-    });
-    let Some(trait_owner) = trait_owner else {
-        return Ok((None, Vec::new()));
-    };
-    let mut hits = Vec::new();
-    for (p, content) in &contents {
-        if p == file_path {
-            continue;
-        }
-        if !p.ends_with(".rs") {
-            continue;
-        }
-        if file_impls_trait_method(content, &trait_owner, symbol_name)
-            || owning_trait_for_symbol(content, symbol_name).as_deref() == Some(trait_owner.as_str())
-        {
-            hits.push(p.clone());
-        }
-    }
-    hits.sort();
-    hits.dedup();
-    Ok((Some(trait_owner), hits))
-}
-
-/// Scan a Go source for a `type <Name> interface { ... <method>(... }` block.
-/// Returns the interface name when a matching method signature is found.
-fn owning_interface_for_method_go(source: &str, method: &str) -> Option<String> {
-    let mut current_iface: Option<String> = None;
-    let mut depth: i32 = 0;
-    let method_prefix = format!("{method}(");
-    for raw in source.lines() {
-        let line = raw.trim_start();
-        if current_iface.is_none() {
-            if let Some(rest) = line.strip_prefix("type ")
-                && let Some(idx) = rest.find(" interface")
-            {
-                let name = rest[..idx].trim_end_matches(&[' ', '[', '\t'][..]);
-                // Skip generic type-parameter brackets if present.
-                let name = name.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or(name);
-                if !name.is_empty() {
-                    current_iface = Some(name.to_string());
-                    depth = if line.contains('{') { 1 } else { 0 };
-                }
-            }
-        } else {
-            if line.starts_with('}') {
-                depth -= 1;
-                if depth <= 0 {
-                    current_iface = None;
-                    depth = 0;
-                }
-                continue;
-            }
-            if line.contains('{') {
-                depth += 1;
-            }
-            if line.starts_with(&method_prefix)
-                || line
-                    .split_whitespace()
-                    .next()
-                    .map(|first| first == method || first.starts_with(&method_prefix))
-                    .unwrap_or(false)
-            {
-                return current_iface.clone();
-            }
-        }
-    }
-    None
-}
-
-/// Best-effort scan for `func (recv) <method>(...)` method receivers in a Go
-/// file. Over-triggers across unrelated interfaces — same name is treated as
-/// a candidate implementor.
-fn file_has_go_method_receiver(source: &str, method: &str) -> bool {
-    let pat = format!(") {method}(");
-    let pat_star = format!(") *{method}("); // unlikely but cheap to include
-    source
-        .lines()
-        .any(|line| line.contains(pat.as_str()) || line.contains(pat_star.as_str()))
-}
-
-fn detect_go_interface_impl_sites(
-    store: &IndexStore,
-    file_path: &str,
-    symbol_name: &str,
-) -> anyhow::Result<(Option<String>, Vec<String>)> {
-    let contents = store.all_file_contents().unwrap_or_default();
-    let defining = contents
-        .iter()
-        .find(|(p, _)| p == file_path)
-        .map(|(_, c)| c.as_str())
-        .unwrap_or("");
-
-    let iface = owning_interface_for_method_go(defining, symbol_name).or_else(|| {
-        // If the defining file is an implementation, find an interface with
-        // the method elsewhere in the repo.
-        contents
-            .iter()
-            .find_map(|(_, c)| owning_interface_for_method_go(c, symbol_name))
-    });
-    let Some(iface) = iface else {
-        return Ok((None, Vec::new()));
-    };
-    let mut hits = Vec::new();
-    for (p, content) in &contents {
-        if p == file_path {
-            continue;
-        }
-        if !p.ends_with(".go") {
-            continue;
-        }
-        if file_has_go_method_receiver(content, symbol_name) {
-            hits.push(p.clone());
-        }
-    }
-    hits.sort();
-    hits.dedup();
-    Ok((Some(iface), hits))
-}
-
-/// Inspect an `impl <Trait> for X` site and return the trait name when the
-/// block contains a method named `symbol_name`. Mirror of
-/// [`file_impls_trait_method`] that returns the trait name instead of a bool.
-fn owning_trait_from_impl_site(source: &str, symbol_name: &str) -> Option<String> {
-    let fn_needle = format!("fn {symbol_name}");
-    let mut current_trait: Option<String> = None;
-    let mut depth: i32 = 0;
-    let mut in_impl = false;
-    for raw in source.lines() {
-        let line = raw.trim_start();
-        if !in_impl {
-            if let Some(name) = parse_impl_trait_header(line) {
-                current_trait = Some(name);
-                in_impl = true;
-                depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
-                if depth <= 0 {
-                    in_impl = false;
-                    current_trait = None;
-                }
-                continue;
-            }
-        } else {
-            depth += line.matches('{').count() as i32;
-            depth -= line.matches('}').count() as i32;
-            if line.contains(&fn_needle)
-                && line
-                    .split(&fn_needle)
-                    .nth(1)
-                    .is_some_and(|tail| matches!(tail.chars().next(), Some('(') | Some('<')))
-            {
-                return current_trait;
-            }
-            if depth <= 0 {
-                in_impl = false;
-                current_trait = None;
-            }
-        }
-    }
-    None
-}
-
-/// Parse a Rust `impl [<generics>] <Trait> for <Type>` line and return the
-/// trait name. Returns `None` for inherent impls (`impl Foo { ... }`) and for
-/// anything that doesn't start the `impl` keyword.
-fn parse_impl_trait_header(line: &str) -> Option<String> {
-    let rest = line
-        .strip_prefix("unsafe ")
-        .unwrap_or(line)
-        .strip_prefix("impl")?
-        .trim_start();
-    // Skip optional generic block `<...>`.
-    let rest = if let Some(r) = rest.strip_prefix('<') {
-        let mut depth = 1i32;
-        let mut idx = 0usize;
-        for (i, c) in r.char_indices() {
-            match c {
-                '<' => depth += 1,
-                '>' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        idx = i + 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        r[idx..].trim_start()
-    } else {
-        rest
-    };
-    // Find " for " separator — without it this is an inherent impl.
-    let for_pos = rest.find(" for ")?;
-    let trait_part = rest[..for_pos].trim();
-    // Strip any trailing generic args on the trait itself.
-    let name: String = trait_part
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .collect();
-    if name.is_empty() { None } else { Some(name) }
-}
-
-/// Walk `source` line-by-line looking for a `trait <Name> {` block whose body
-/// contains a function declaration named `symbol_name`. Returns `Some(name)` on
-/// first match. Tracks brace depth so nested blocks don't fool us.
-fn owning_trait_for_symbol(source: &str, symbol_name: &str) -> Option<String> {
-    let needle = format!("fn {symbol_name}");
-    let mut in_trait: Option<String> = None;
-    let mut depth: i32 = 0;
-    for raw in source.lines() {
-        let line = raw.trim_start();
-        if in_trait.is_none() {
-            if let Some(name) = parse_trait_header(line) {
-                in_trait = Some(name);
-                depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
-                if depth <= 0 {
-                    in_trait = None;
-                }
-                continue;
-            }
-        } else {
-            depth += line.matches('{').count() as i32;
-            depth -= line.matches('}').count() as i32;
-            if line.contains(&needle)
-                && line
-                    .split(&needle)
-                    .nth(1)
-                    .is_some_and(|tail| matches!(tail.chars().next(), Some('(') | Some('<')))
-            {
-                return in_trait;
-            }
-            if depth <= 0 {
-                in_trait = None;
-            }
-        }
-    }
-    None
-}
-
-fn parse_trait_header(line: &str) -> Option<String> {
-    let rest = line
-        .strip_prefix("pub ")
-        .or_else(|| line.strip_prefix("pub(crate) "))
-        .or_else(|| line.strip_prefix("pub(super) "))
-        .or_else(|| line.strip_prefix("unsafe "))
-        .unwrap_or(line);
-    let rest = rest.strip_prefix("trait ")?;
-    let name: String = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .collect();
-    if name.is_empty() { None } else { Some(name) }
-}
-
-fn file_impls_trait_method(source: &str, trait_name: &str, symbol_name: &str) -> bool {
-    let impl_prefix_a = format!("impl {trait_name} for ");
-    let impl_prefix_b = format!("impl<");
-    let fn_needle = format!("fn {symbol_name}");
-    let mut in_impl = false;
-    let mut depth: i32 = 0;
-    for raw in source.lines() {
-        let line = raw.trim_start();
-        if !in_impl {
-            if line.starts_with(&impl_prefix_a)
-                || (line.starts_with(&impl_prefix_b)
-                    && line.contains(&format!(" {trait_name} for ")))
-            {
-                in_impl = true;
-                depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
-                if depth <= 0 {
-                    in_impl = false;
-                }
-                continue;
-            }
-        } else {
-            depth += line.matches('{').count() as i32;
-            depth -= line.matches('}').count() as i32;
-            if line.contains(&fn_needle)
-                && line
-                    .split(&fn_needle)
-                    .nth(1)
-                    .is_some_and(|tail| matches!(tail.chars().next(), Some('(') | Some('<')))
-            {
-                return true;
-            }
-            if depth <= 0 {
-                in_impl = false;
-            }
-        }
-    }
-    false
+    Ok(
+        match lang.detect_trait_impl_sites(defining, &contents, file_path, symbol_name) {
+            Some((name, hits)) => (Some(name), hits),
+            None => (None, Vec::new()),
+        },
+    )
 }
 
 // -----------------------------------------------------------------------------

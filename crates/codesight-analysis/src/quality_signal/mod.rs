@@ -106,7 +106,7 @@ pub fn compute_quality_signal_precomputed(
     let total_files = store.file_count()?.max(1);
     let total_functions = complexities.len().max(1);
 
-    let dead_data = dead_code::dead_code_payload(store, "file", 0.5, true, &[], None)?;
+    let dead_data = dead_code::dead_code_payload(store, "file", 0.5, true, &[], None, false)?;
     let dead_files = dead_data
         .get("dead_file_count")
         .and_then(|v| v.as_u64())

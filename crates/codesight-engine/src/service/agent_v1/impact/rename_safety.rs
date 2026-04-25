@@ -80,7 +80,13 @@ impl CodeService {
             ),
         };
 
-        let data = match impact::rename_safety_payload(&store, &sym_id, new_name)? {
+        let include_vendored = args.include_vendored.unwrap_or(false)
+            || args
+                .scope
+                .as_deref()
+                .map(codesight_language_support::scope_opts_in)
+                .unwrap_or(false);
+        let data = match impact::rename_safety_payload(&store, &sym_id, new_name, include_vendored)? {
             Some(data) => data,
             None => {
                 return self.error_response(

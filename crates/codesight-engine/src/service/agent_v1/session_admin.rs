@@ -151,11 +151,31 @@ impl CodeService {
         if let Some(delta) = &quality_delta
             && delta["verdict"] == "regressed"
         {
-            warnings.push(json!({
+            // FIXUP T4.1: every high-signal warning carries the same
+            // {code, message, detail, suggested_tool} envelope so callers
+            // can act on them uniformly. `detail` carries the delta;
+            // `suggested_tool` points at the regression-check follow-up.
+            let suggested_tool = session.primary_source_id.as_ref().map(|sid| {
+                json!({
+                    "tool": "evaluate_quality",
+                    "args": {
+                        "source_id": sid,
+                        "analysis": "regression_check",
+                        "snapshot_name": "session_start",
+                    },
+                })
+            });
+            let mut warn = json!({
                 "code": "QUALITY_REGRESSION",
                 "message": "session quality delta regressed versus the session baseline.",
-                "quality_delta": delta,
-            }));
+                "detail": { "quality_delta": delta },
+            });
+            if let Some(st) = suggested_tool
+                && let Value::Object(ref mut m) = warn
+            {
+                m.insert("suggested_tool".to_string(), st);
+            }
+            warnings.push(warn);
         }
 
         let mut anti_patterns = Vec::new();
@@ -197,9 +217,9 @@ impl CodeService {
             "calls_by_tool": calls_by_tool,
             "per_tool": per_tool,
             "tokens_saved_total": session.tokens_saved_total,
-            "fallbacks_to_grep_or_bash": session.fallbacks_to_grep_or_bash,
+            "blocked_grep_bash_attempts": session.blocked_grep_bash_attempts,
             "evaluate_impact_usage": session.evaluate_impact_usage,
-            "stale_warnings_fired_with_in_flight_paths": session.stale_warnings_fired_with_in_flight_paths,
+            "stale_warnings_in_flight": session.stale_warnings_in_flight,
             "primary_source_id": session.primary_source_id,
             "use_prefix_edits": session.use_prefix_edits,
             "anti_patterns": anti_patterns,
@@ -286,12 +306,17 @@ impl CodeService {
             "change_safety": dimension_delta(baseline.change_safety, after_dimensions["change_safety"].as_f64()),
         });
 
-        let agent_before = baseline.agent_readiness_score / 10_000.0;
-        let agent_after = after_agent / 10_000.0;
-        let structural_before = baseline.structural_score / 10_000.0;
-        let structural_after = after_structural / 10_000.0;
-        let overall_before = baseline.score / 10_000.0;
-        let overall_after = after_score / 10_000.0;
+        // FIXUP T2.2: snapshot scores are persisted as f64 in [0.0, 1.0]
+        // (GovernanceSignal.score's doc comment is explicit on this), so no
+        // unit conversion is needed. The prior `/ 10_000.0` was the same
+        // bogus conversion found in quality/mod.rs and produced deltas in
+        // the 1e-5 range.
+        let agent_before = baseline.agent_readiness_score;
+        let agent_after = after_agent;
+        let structural_before = baseline.structural_score;
+        let structural_after = after_structural;
+        let overall_before = baseline.score;
+        let overall_after = after_score;
         let (new_hotspots, resolved_hotspots, largest_regression, largest_improvement) =
             hotspot_deltas(&baseline_hotspots, &after_hotspots);
         let weakest_regression = [

@@ -16,6 +16,15 @@ version = "0.1.0"
 edition = "2024"
 description = "Token-efficient code & documentation retrieval MCP server with AST-based symbol extraction"
 license = "Apache-2.0"
+# Every tests/*.rs would otherwise compile as its own binary (85 link steps,
+# each pulling the full engine+tokio+rmcp graph). One consolidated binary
+# re-uses the link once; each test still appears individually in nextest as
+# `integration::<file>::<fn>`.
+autotests = false
+
+[[test]]
+name = "integration"
+path = "tests/all.rs"
 
 [dependencies]
 anyhow = "1"
@@ -45,6 +54,15 @@ tempfile = "3"
 # the full test suite). Dev-only: the feature exposes time manipulation
 # that must not ship in the production binary.
 tokio = { version = "1", features = ["test-util"] }
+
+[profile.dev]
+# Full DWARF dominates link time when fanned across many test binaries.
+# line-tables-only keeps panic backtraces (file:line) and drops type info.
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.test]
+inherits = "dev"
 
 [profile.release]
 lto = true

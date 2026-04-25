@@ -47,6 +47,9 @@ impl Language for YamlSupport {
     fn extract_symbols(&self, file_path: &str, source: &str) -> Result<Vec<StoredSymbol>> {
         extractor::YamlExtractor.extract(file_path, source)
     }
+    fn is_reference_target(&self) -> bool {
+        false
+    }
 }
 
 pub const OPENAPI: ProfileId = ProfileId::new("openapi");

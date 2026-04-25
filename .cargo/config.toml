@@ -1,9 +1,24 @@
-# Nix-darwin: `sqlite-vec` build.rs emits `-liconv`, which isn't on the default
-# linker search path inside the Nix shell. Point rustc at the libiconv the Nix
-# libSystem stubs actually ship. Outside Nix this path is a no-op: cc falls
-# back to the SDK's own libiconv.
+# Rustc's default link driver in a Nix shell resolves `cc` to Nix gcc, which
+# rejects `-fuse-ld=<abs-path>` and mis-handles `-stdlib=libc++`. Pin the
+# linker to Xcode clang so `-fuse-ld=lld` works and cc-rs C++ builds compile.
 [target.aarch64-apple-darwin]
-rustflags = ["-L", "/nix/store/pb4vbsfgdik0qizna8vrdzk0jv746rgy-libiconv-99/lib"]
+linker = "/usr/bin/clang"
+rustflags = [
+    # Use LLD's Mach-O backend. Faster than the system ld64 when fanning
+    # across many binaries (bench, incremental test rebuilds).
+    "-C", "link-arg=-fuse-ld=lld",
+    # arm64 macOS requires every binary to carry a (possibly ad-hoc) code
+    # signature or the kernel SIGKILLs it at exec time. Apple's ld64 adds
+    # one automatically; ld64.lld does not unless we ask.
+    "-C", "link-arg=-Wl,-adhoc_codesign",
+]
+
+[target.x86_64-apple-darwin]
+linker = "/usr/bin/clang"
+rustflags = [
+    "-C", "link-arg=-fuse-ld=lld",
+    "-C", "link-arg=-Wl,-adhoc_codesign",
+]
 
 # cc-rs picks up the Nix g++ by default but passes clang-style flags
 # (`-stdlib=libc++`), which g++ rejects. Force Xcode clang so C++ build

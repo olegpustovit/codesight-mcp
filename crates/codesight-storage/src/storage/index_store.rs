@@ -14,6 +14,7 @@ use crate::{
     core::pipeline::{FileFingerprint, IndexedFileUpdate, StoredSymbol},
     db,
 };
+use codesight_core::reachability::StructuralEdge;
 use std::collections::HashMap;
 
 use super::IndexStore;
@@ -129,6 +130,7 @@ impl IndexStore {
             removed_files,
             symbol_vectors,
             &[],
+            &[],
             "",
         )
     }
@@ -145,6 +147,7 @@ impl IndexStore {
         removed_files: &[String],
         symbol_vectors: &[super::vector_index::OwnedVectorRow],
         dep_edges: &[(String, String, FactQuality)],
+        reachability_edges: &[(String, Vec<StructuralEdge>)],
         extractor_version: &str,
     ) -> anyhow::Result<()> {
         let mut conn = self.open_connection()?;
@@ -156,6 +159,7 @@ impl IndexStore {
         }
         Self::upsert_symbol_vectors(&tx, symbol_vectors)?;
         Self::replace_dep_edges_for_updated_files(&tx, updated_files, dep_edges)?;
+        Self::replace_reachability_edges_for_updated_files(&tx, reachability_edges)?;
         Self::reset_repo_info(
             &tx,
             repo,
@@ -169,6 +173,16 @@ impl IndexStore {
         // next analytic tool rebuilds from the new commit.
         if let Ok(mut guard) = self.cached_all_symbols.lock() {
             *guard = None;
+        }
+        Ok(())
+    }
+
+    fn replace_reachability_edges_for_updated_files(
+        tx: &Transaction<'_>,
+        edges_per_file: &[(String, Vec<StructuralEdge>)],
+    ) -> anyhow::Result<()> {
+        for (source_file, edges) in edges_per_file {
+            super::reachability_edges::replace_edges_for_file(tx, source_file, edges)?;
         }
         Ok(())
     }
@@ -327,11 +341,15 @@ impl IndexStore {
         let mut del_deps = tx.prepare_cached(
             "DELETE FROM dependency_edges WHERE source_file = ?1 OR target_file = ?1",
         )?;
+        let mut del_reach = tx.prepare_cached(
+            "DELETE FROM reachability_edges WHERE source_file = ?1 OR target_file = ?1",
+        )?;
         let mut del_files = tx.prepare_cached("DELETE FROM files WHERE file_path = ?1")?;
         for file_path in removed_files {
             Self::delete_symbol_vectors_for_file(tx, file_path)?;
             del_symbols.execute([file_path])?;
             del_deps.execute([file_path])?;
+            del_reach.execute([file_path])?;
             del_files.execute([file_path])?;
         }
         Ok(())

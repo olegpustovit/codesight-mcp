@@ -328,7 +328,7 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
             }
         }
     }
-    outcomes.push(if has_split && bad_rows <= PREMIUM_GATE_MAX_LINE_ZERO_REFS {
+    outcomes.push(if has_split && bad_rows == PREMIUM_GATE_MAX_LINE_ZERO_REFS {
         CheckOutcome::ok(
             "reference_provenance",
             format!(

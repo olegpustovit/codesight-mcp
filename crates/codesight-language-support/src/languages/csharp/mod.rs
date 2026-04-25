@@ -77,6 +77,25 @@ impl Language for CSharp {
         &["bin", "obj"]
     }
 
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &["bin", "obj"]
+    }
+
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        &[
+            "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
+            "class", "const", "continue", "decimal", "default", "delegate", "do", "double",
+            "else", "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float",
+            "for", "foreach", "goto", "if", "implicit", "in", "int", "interface", "internal",
+            "is", "lock", "long", "namespace", "new", "null", "object", "operator", "out",
+            "override", "params", "private", "protected", "public", "readonly", "ref", "return",
+            "sbyte", "sealed", "short", "sizeof", "stackalloc", "static", "string", "struct",
+            "switch", "this", "throw", "true", "try", "typeof", "uint", "ulong", "unchecked",
+            "unsafe", "ushort", "using", "virtual", "void", "volatile", "while", "async", "await",
+            "yield", "var", "dynamic", "partial", "nameof", "record", "init", "nint", "nuint",
+        ]
+    }
+
     fn is_restricted(&self, src: &str, _name: &str) -> bool {
         cfamily_is_restricted(src)
     }

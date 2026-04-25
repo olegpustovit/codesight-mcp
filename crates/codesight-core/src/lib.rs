@@ -1,9 +1,11 @@
 mod core;
 
 pub use core::pipeline::StoredSymbol;
+pub use core::reachability::{EdgeKind, StructuralEdge};
 pub use core::symbol_id::{SymbolId, SymbolIdRef};
 pub use core::symbols::{ExtractionTier, FactQuality, SymbolKind};
-pub use core::{pipeline, symbol_id, symbols};
+pub use core::vendor::path_contains_segment;
+pub use core::{pipeline, reachability, symbol_id, symbols, vendor};
 
 pub use core::language_id;
 pub use core::language_id::{

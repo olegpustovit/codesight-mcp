@@ -6,6 +6,7 @@
 
 pub mod imports;
 pub mod path_rename;
+mod reachability;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -72,6 +73,14 @@ impl Language for Rust {
 
     fn extract_imports(&self, source: &str) -> Vec<ImportEdge> {
         imports::extract(source)
+    }
+
+    fn reachability_edges(
+        &self,
+        content: &str,
+        source_file: &str,
+    ) -> Vec<codesight_core::StructuralEdge> {
+        reachability::reachability_edges(content, source_file)
     }
 
     /// Rust-idiomatic `use` rendering (ROADMAP P1.6). Single name →
@@ -216,6 +225,20 @@ impl Language for Rust {
         &["target"]
     }
 
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &["target"]
+    }
+
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        &[
+            "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
+            "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod",
+            "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super",
+            "trait", "true", "type", "union", "unsafe", "use", "where", "while", "box", "do",
+            "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+        ]
+    }
+
     fn outline_noise_basenames(&self) -> &'static [&'static str] {
         &["build.rs", ".codesight.toml", ".mcp.json"]
     }
@@ -326,6 +349,216 @@ impl Language for Rust {
     fn weak_type_substrings(&self) -> &'static [&'static str] {
         &["<any>", "dynany"]
     }
+
+    /// FIXUP T1.1 + crate_graph: trait-method dispatch detection lives
+    /// here so `codesight-analysis` doesn't need a `.ends_with(".rs")`
+    /// branch. Returns `(trait_name, impl_files)` when `symbol_name`
+    /// belongs to a trait declared in `defining_source` (or in any
+    /// indexed Rust file when the defining file is itself an `impl`
+    /// site).
+    fn detect_trait_impl_sites(
+        &self,
+        defining_source: &str,
+        repo_files: &[(String, String)],
+        defining_path: &str,
+        symbol_name: &str,
+    ) -> Option<(String, Vec<String>)> {
+        if symbol_name.is_empty() {
+            return None;
+        }
+        let trait_owner = owning_trait_for_symbol(defining_source, symbol_name).or_else(|| {
+            owning_trait_from_impl_site(defining_source, symbol_name).and_then(|candidate| {
+                repo_files.iter().find_map(|(_, c)| {
+                    owning_trait_for_symbol(c, symbol_name)
+                        .filter(|found| found == &candidate)
+                })
+            })
+        });
+        let trait_owner = trait_owner?;
+        let mut hits = Vec::new();
+        for (p, content) in repo_files {
+            if p == defining_path {
+                continue;
+            }
+            if !p.ends_with(".rs") {
+                continue;
+            }
+            if file_impls_trait_method(content, &trait_owner, symbol_name)
+                || owning_trait_for_symbol(content, symbol_name).as_deref()
+                    == Some(trait_owner.as_str())
+            {
+                hits.push(p.clone());
+            }
+        }
+        hits.sort();
+        hits.dedup();
+        Some((trait_owner, hits))
+    }
+}
+
+// --- Trait-dispatch helpers (FIXUP T1.1; previously in
+// codesight-analysis::impact). Kept private — only the trait method
+// surfaces them.
+
+fn owning_trait_for_symbol(source: &str, symbol_name: &str) -> Option<String> {
+    let needle = format!("fn {symbol_name}");
+    let mut in_trait: Option<String> = None;
+    let mut depth: i32 = 0;
+    for raw in source.lines() {
+        let line = raw.trim_start();
+        if in_trait.is_none() {
+            if let Some(name) = parse_trait_header(line) {
+                in_trait = Some(name);
+                depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
+                if depth <= 0 {
+                    in_trait = None;
+                }
+                continue;
+            }
+        } else {
+            depth += line.matches('{').count() as i32;
+            depth -= line.matches('}').count() as i32;
+            if line.contains(&needle)
+                && line
+                    .split(&needle)
+                    .nth(1)
+                    .is_some_and(|tail| matches!(tail.chars().next(), Some('(') | Some('<')))
+            {
+                return in_trait;
+            }
+            if depth <= 0 {
+                in_trait = None;
+            }
+        }
+    }
+    None
+}
+
+fn parse_trait_header(line: &str) -> Option<String> {
+    let rest = line
+        .strip_prefix("pub ")
+        .or_else(|| line.strip_prefix("pub(crate) "))
+        .or_else(|| line.strip_prefix("pub(super) "))
+        .or_else(|| line.strip_prefix("unsafe "))
+        .unwrap_or(line);
+    let rest = rest.strip_prefix("trait ")?;
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+fn file_impls_trait_method(source: &str, trait_name: &str, symbol_name: &str) -> bool {
+    let impl_prefix_a = format!("impl {trait_name} for ");
+    let impl_prefix_b = "impl<".to_string();
+    let fn_needle = format!("fn {symbol_name}");
+    let mut in_impl = false;
+    let mut depth: i32 = 0;
+    for raw in source.lines() {
+        let line = raw.trim_start();
+        if !in_impl {
+            if line.starts_with(&impl_prefix_a)
+                || (line.starts_with(&impl_prefix_b)
+                    && line.contains(&format!(" {trait_name} for ")))
+            {
+                in_impl = true;
+                depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
+                if depth <= 0 {
+                    in_impl = false;
+                }
+                continue;
+            }
+        } else {
+            depth += line.matches('{').count() as i32;
+            depth -= line.matches('}').count() as i32;
+            if line.contains(&fn_needle)
+                && line
+                    .split(&fn_needle)
+                    .nth(1)
+                    .is_some_and(|tail| matches!(tail.chars().next(), Some('(') | Some('<')))
+            {
+                return true;
+            }
+            if depth <= 0 {
+                in_impl = false;
+            }
+        }
+    }
+    false
+}
+
+fn owning_trait_from_impl_site(source: &str, symbol_name: &str) -> Option<String> {
+    let fn_needle = format!("fn {symbol_name}");
+    let mut current_trait: Option<String> = None;
+    let mut depth: i32 = 0;
+    let mut in_impl = false;
+    for raw in source.lines() {
+        let line = raw.trim_start();
+        if !in_impl {
+            if let Some(name) = parse_impl_trait_header(line) {
+                current_trait = Some(name);
+                in_impl = true;
+                depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
+                if depth <= 0 {
+                    in_impl = false;
+                    current_trait = None;
+                }
+                continue;
+            }
+        } else {
+            depth += line.matches('{').count() as i32;
+            depth -= line.matches('}').count() as i32;
+            if line.contains(&fn_needle)
+                && line
+                    .split(&fn_needle)
+                    .nth(1)
+                    .is_some_and(|tail| matches!(tail.chars().next(), Some('(') | Some('<')))
+            {
+                return current_trait;
+            }
+            if depth <= 0 {
+                in_impl = false;
+                current_trait = None;
+            }
+        }
+    }
+    None
+}
+
+fn parse_impl_trait_header(line: &str) -> Option<String> {
+    let rest = line
+        .strip_prefix("unsafe ")
+        .unwrap_or(line)
+        .strip_prefix("impl")?
+        .trim_start();
+    let rest = if let Some(r) = rest.strip_prefix('<') {
+        let mut depth = 1i32;
+        let mut idx = 0usize;
+        for (i, c) in r.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        idx = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        r[idx..].trim_start()
+    } else {
+        rest
+    };
+    let for_pos = rest.find(" for ")?;
+    let trait_part = rest[..for_pos].trim();
+    let name: String = trait_part
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    if name.is_empty() { None } else { Some(name) }
 }
 
 /// Map every workspace-member crate name (underscore form, as used in `use`

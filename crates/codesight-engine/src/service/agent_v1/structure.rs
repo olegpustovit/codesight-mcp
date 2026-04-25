@@ -5,7 +5,8 @@
 //! views can be read, reviewed, and tested without wading through an
 //! 8-branch dispatcher.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
@@ -219,9 +220,18 @@ impl CodeService {
             ))
         };
 
-        let crates = build_workspace_crates(&filtered_rows, pagerank.as_ref());
+        // FIXUP T3.1: ask each registered Language whether the directory
+        // hosts a real package manifest (Cargo.toml [package], package.json,
+        // pyproject.toml, …). Path-prefix grouping was wrong — `tests/` is
+        // not a crate, but the old code put it in `workspace.crates`.
+        let root = store.root_path().ok();
+        let (crates, extra_roots) =
+            partition_workspace(&filtered_rows, root.as_deref(), pagerank.as_ref());
         let top_by_centrality = top_modules_by_centrality(pagerank.as_ref(), 10);
-        let top_by_loc = top_modules_by_size(&filtered_rows, 10);
+        // FIXUP T3.2: the sort key is file size (bytes), not lines of
+        // code. Rename the response field to match `top_modules_by_size`
+        // which is already the helper's name.
+        let top_by_size = top_modules_by_size(&filtered_rows, 10);
         let entrypoints = detect_entrypoints(&filtered_rows);
         let languages: BTreeMap<String, usize> =
             filtered_rows.iter().fold(BTreeMap::new(), |mut acc, r| {
@@ -234,8 +244,9 @@ impl CodeService {
             json!({
                 "view": "repo_outline",
                 "workspace": { "crates": crates },
+                "extra_roots": extra_roots,
                 "top_modules_by_centrality": top_by_centrality,
-                "top_modules_by_loc": top_by_loc,
+                "top_modules_by_size": top_by_size,
                 "entrypoints": entrypoints,
                 "languages": languages,
             }),
@@ -473,41 +484,79 @@ impl CodeService {
     }
 }
 
-/// Per-crate rollup used by `repo_outline`'s workspace block. Each entry
-/// summarises one Cargo crate (or the repo root) with file count, symbol
-/// count, size footprint, and the top-3 PageRank files inside the crate.
-fn build_workspace_crates(
+/// FIXUP T3.1: per-package rollup + non-package roots for `repo_outline`.
+///
+/// Returns `(workspace_crates, extra_roots)` where:
+/// - `workspace_crates` only contains directories that any registered
+///   `Language::package_name_for_dir` recognises (real Cargo crates with
+///   `[package]`, `package.json`, `pyproject.toml`, …).
+/// - `extra_roots` contains everything else — `tests/`, `scripts/`,
+///   `plugins/`, root-level docs/config — classified by a closed `role`
+///   vocabulary so callers can branch on it.
+///
+/// `root` is the repo's absolute path; when `None` (e.g. an in-memory
+/// store), package detection is skipped and every file falls into
+/// `extra_roots`.
+fn partition_workspace(
     rows: &[&(String, String, i64, u64)],
+    root: Option<&Path>,
     pagerank: Option<&codesight_analysis::graph::PageRankResult>,
-) -> Vec<Value> {
-    // Group by the first two path segments — `crates/<name>/...` or just
-    // `<name>/...` for root-level directories. Files without a directory
-    // component land in a synthetic "." crate so orientation stays complete.
+) -> (Vec<Value>, Vec<Value>) {
+    let candidate_dirs: BTreeSet<String> = rows
+        .iter()
+        .filter_map(|(p, _, _, _)| dir_of(p).map(str::to_string))
+        .collect();
+    let package_roots = match root {
+        Some(r) => discover_package_roots(&candidate_dirs, r),
+        None => BTreeMap::new(),
+    };
+
     #[derive(Default)]
     struct CrateAcc {
         name: String,
+        rel_path: String,
         files: usize,
         symbols: u64,
         size: u64,
         paths: Vec<String>,
     }
     let mut by_crate: BTreeMap<String, CrateAcc> = BTreeMap::new();
+    let mut extras: BTreeMap<String, ExtraAcc> = BTreeMap::new();
+
     for (path, _lang, size, sym_count) in rows {
-        let name = crate_name_for_path(path).to_string();
-        let entry = by_crate.entry(name.clone()).or_insert_with(|| CrateAcc {
-            name: name.clone(),
-            ..CrateAcc::default()
-        });
-        entry.files += 1;
-        entry.symbols = entry.symbols.saturating_add(*sym_count);
-        entry.size = entry.size.saturating_add((*size).max(0) as u64);
-        entry.paths.push(path.clone());
+        let assigned = nearest_package_root(path, &package_roots);
+        if let Some(rel) = assigned {
+            let name = package_roots
+                .get(&rel)
+                .cloned()
+                .unwrap_or_else(|| rel.clone());
+            let entry = by_crate.entry(rel.clone()).or_insert_with(|| CrateAcc {
+                name: name.clone(),
+                rel_path: rel.clone(),
+                ..CrateAcc::default()
+            });
+            entry.files += 1;
+            entry.symbols = entry.symbols.saturating_add(*sym_count);
+            entry.size = entry.size.saturating_add((*size).max(0) as u64);
+            entry.paths.push(path.clone());
+        } else {
+            let (key, role) = extra_role_for_path(path);
+            let entry = extras.entry(key.clone()).or_insert_with(|| ExtraAcc {
+                path: key.clone(),
+                role,
+                file_count: 0,
+                hint: None,
+            });
+            entry.file_count += 1;
+            if entry.hint.is_none() && role == "other" {
+                entry.hint = Some(path.clone());
+            }
+        }
     }
+
     let mut crates: Vec<_> = by_crate.into_values().collect();
-    // Sort biggest crate (by file count) first — gives the reader an
-    // immediate sense of weight before scanning alphabetically.
     crates.sort_by(|a, b| b.files.cmp(&a.files).then_with(|| a.name.cmp(&b.name)));
-    crates
+    let crates_json: Vec<Value> = crates
         .into_iter()
         .map(|c| {
             let central = if let Some(pr) = pagerank {
@@ -523,24 +572,137 @@ fn build_workspace_crates(
             };
             json!({
                 "name": c.name,
+                "path": c.rel_path,
                 "files": c.files,
                 "symbols": c.symbols,
                 "size_bytes": c.size,
                 "central_files": central,
             })
         })
-        .collect()
+        .collect();
+
+    let mut extras_vec: Vec<_> = extras.into_values().collect();
+    extras_vec.sort_by(|a, b| {
+        b.file_count
+            .cmp(&a.file_count)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    let extras_json: Vec<Value> = extras_vec
+        .into_iter()
+        .map(|e| {
+            let mut obj = json!({
+                "path": e.path,
+                "role": e.role,
+                "file_count": e.file_count,
+            });
+            if let Some(hint) = e.hint
+                && let Value::Object(ref mut m) = obj
+            {
+                m.insert("hint".to_string(), json!(hint));
+            }
+            obj
+        })
+        .collect();
+
+    (crates_json, extras_json)
 }
 
-/// Splits `crates/<x>/...` into `<x>`, keeps root-level single-segment
-/// directories as-is, and falls back to `"."` for top-level files.
-fn crate_name_for_path(path: &str) -> &str {
-    let mut segs = path.split('/');
-    match (segs.next(), segs.next()) {
-        (Some("crates"), Some(name)) => name,
-        (Some(first), Some(_)) => first,
-        (Some(_), None) | (None, _) => ".",
+#[derive(Default)]
+struct ExtraAcc {
+    path: String,
+    role: &'static str,
+    file_count: usize,
+    hint: Option<String>,
+}
+
+/// Repo-relative directory of `path`, or `None` for top-level files.
+fn dir_of(path: &str) -> Option<&str> {
+    path.rfind('/').map(|i| &path[..i])
+}
+
+/// Walk every candidate directory and ask each registered language whether
+/// it recognises the directory as a package root. Returns a map of
+/// `repo_relative_dir → package_name`.
+fn discover_package_roots(
+    candidate_dirs: &BTreeSet<String>,
+    root: &Path,
+) -> BTreeMap<String, String> {
+    let registry = codesight_language_support::builtin_registry();
+    let mut found: BTreeMap<String, String> = BTreeMap::new();
+    // Include all ancestor dirs as candidates too — files live N levels
+    // below their package root.
+    let mut all_dirs: BTreeSet<String> = BTreeSet::new();
+    for d in candidate_dirs {
+        let mut cur: &str = d.as_str();
+        loop {
+            all_dirs.insert(cur.to_string());
+            match cur.rfind('/') {
+                Some(i) => cur = &cur[..i],
+                None => break,
+            }
+        }
     }
+    // Also probe the repo root itself.
+    all_dirs.insert(String::new());
+
+    for rel in &all_dirs {
+        let abs: PathBuf = if rel.is_empty() {
+            root.to_path_buf()
+        } else {
+            root.join(rel)
+        };
+        if let Some(name) = registry
+            .all()
+            .find_map(|lang| lang.package_name_for_dir(&abs))
+        {
+            found.insert(rel.clone(), name);
+        }
+    }
+    found
+}
+
+/// Find the longest package-root prefix that contains `file_path`.
+fn nearest_package_root(
+    file_path: &str,
+    roots: &BTreeMap<String, String>,
+) -> Option<String> {
+    let mut best: Option<&str> = None;
+    for root in roots.keys() {
+        let matches = if root.is_empty() {
+            true
+        } else {
+            file_path.starts_with(root.as_str())
+                && (file_path.len() == root.len()
+                    || file_path.as_bytes().get(root.len()) == Some(&b'/'))
+        };
+        if matches && best.map(|b| root.len() > b.len()).unwrap_or(true) {
+            best = Some(root.as_str());
+        }
+    }
+    best.map(str::to_string)
+}
+
+/// Classify a non-package file into an `extra_roots` bucket. Returns
+/// `(bucket_key, role)` where the role is from the closed vocabulary
+/// documented in the FIXUP plan.
+fn extra_role_for_path(path: &str) -> (String, &'static str) {
+    let top = path.split('/').next().unwrap_or("");
+    let role = match top {
+        "tests" => "tests",
+        "scripts" | "tools" => "scripts",
+        "plugins" => "plugins",
+        ".cargo" | ".config" | ".github" => "config",
+        "docs" | "doc" => "docs",
+        "" => "other",
+        _ if !path.contains('/') => "other",
+        _ => "other",
+    };
+    let key = if top.is_empty() || !path.contains('/') {
+        ".".to_string()
+    } else {
+        top.to_string()
+    };
+    (key, role)
 }
 
 fn top_modules_by_centrality(

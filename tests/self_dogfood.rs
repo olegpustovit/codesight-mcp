@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 
 fn dead_files(store: &IndexStore) -> Vec<String> {
-    let payload = dead_code_payload(store, "file", 0.5, true, &[], None).unwrap();
+    let payload = dead_code_payload(store, "file", 0.5, true, &[], None, false).unwrap();
     payload["dead_files"]
         .as_array()
         .cloned()
@@ -316,7 +316,8 @@ fn dead_code_payload_has_expected_keys() {
     let (config, sid, _) = index_code_fixture(&ws.path().join("idx"), ws.path()).unwrap();
     let store = open_code_store(&config, &sid).unwrap();
 
-    let payload: Value = dead_code_payload(&store, "file", 0.5, true, &[], None).unwrap();
+    let payload: Value =
+        dead_code_payload(&store, "file", 0.5, true, &[], None, false).unwrap();
     for key in [
         "analysis",
         "dead_files",

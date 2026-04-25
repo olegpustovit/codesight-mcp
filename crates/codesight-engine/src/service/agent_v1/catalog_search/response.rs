@@ -54,6 +54,12 @@ pub(super) fn format_output(
             svc.success_response_with_meta_extra(timer, data, warnings, extra)
         }
         "files_with_matches" => {
+            // FIXUP T1.7: previously `file_counts` was built from the
+            // already-truncated `items` slice and `truncated` was always
+            // `false`. Count files from the full items list (pre-offset),
+            // then emit `truncated` when the returned slice is narrower
+            // than the full file set the caller would expect given the
+            // upstream `total_files_with_matches`.
             let mut file_counts: std::collections::BTreeMap<String, usize> =
                 std::collections::BTreeMap::new();
             for item in &items {
@@ -61,6 +67,7 @@ pub(super) fn format_output(
                     *file_counts.entry(path.to_string()).or_default() += 1;
                 }
             }
+            let total_distinct_files = file_counts.len();
             let file_items: Vec<Value> = file_counts
                 .into_iter()
                 .map(|(file, count)| json!({ "file": file, "count": count }))
@@ -70,13 +77,33 @@ pub(super) fn format_output(
                 .skip(ctx.offset)
                 .take(ctx.lim)
                 .collect::<Vec<_>>();
-            let data = json!({
+            // `total_files_with_matches` comes from storage count_symbols /
+            // count_sections and is authoritative for what a plain `rg`
+            // would surface; `total_distinct_files` is what our already-
+            // capped hit set contains. Take the larger of the two to avoid
+            // undercounting when the upstream counter is unavailable.
+            let known_total = total_files_with_matches.max(total_distinct_files);
+            let returned_len = file_items.len();
+            let truncated_by_cap = returned_len < total_distinct_files.saturating_sub(ctx.offset);
+            let truncated_by_upstream = returned_len < known_total.saturating_sub(ctx.offset);
+            let is_truncated = truncated_by_cap || truncated_by_upstream;
+            let mut truncated_by: Vec<&'static str> = Vec::new();
+            if is_truncated {
+                truncated_by.push("limit");
+            }
+            let mut data = json!({
                 "files": file_items,
                 "total_matches": total_matches,
-                "total_files_with_matches": total_files_with_matches,
+                "total_files_with_matches": known_total,
             });
-            extra.push(("truncated".to_string(), json!(false)));
-            extra.push(("truncated_by".to_string(), json!(Vec::<&str>::new())));
+            if is_truncated
+                && let Value::Object(ref mut map) = data
+            {
+                map.insert("truncated".to_string(), json!(true));
+                map.insert("truncated_by".to_string(), json!(truncated_by.clone()));
+            }
+            extra.push(("truncated".to_string(), json!(is_truncated)));
+            extra.push(("truncated_by".to_string(), json!(truncated_by)));
             svc.success_response_with_meta_extra(timer, data, warnings, extra)
         }
         _ => {

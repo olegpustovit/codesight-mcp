@@ -1,45 +1,116 @@
-//! Integration tests: fuzzy search.
+//! Integration tests: fuzzy search (nucleo-matcher backed).
 
 use std::fs;
 
 use codesight_engine::config::AppConfig;
 use codesight_engine::service::CodeService;
-use codesight_retrieval::fuzzy::{edit_distance, trigrams};
+use codesight_retrieval::fuzzy::{fuzzy_rank, fuzzy_score};
 use serde_json::json;
 use tempfile::tempdir;
 
 #[test]
 fn fuzzy_search_suite() {
-    case_trigram_unit_tests();
-    case_edit_distance_unit_tests();
+    case_fuzzy_unit_tests();
     case_fuzzy_integration_cases();
 }
 
-fn case_trigram_unit_tests() {
-    let t = trigrams("hello");
-    assert!(t.contains("hel"));
-    assert!(t.contains("ell"));
-    assert!(t.contains("llo"));
-    assert_eq!(t.len(), 3);
+fn case_fuzzy_unit_tests() {
+    assert_eq!(fuzzy_score("hello", "hello"), Some(1.0));
+    assert!(fuzzy_score("helo", "hello").is_some());
+    assert!(fuzzy_score("xyz", "abc").is_none());
 
-    let short = trigrams("ab");
-    assert!(short.contains("ab"));
-
-    assert!(trigrams("").is_empty());
-
-    assert_eq!(trigrams("FOO"), trigrams("foo"));
+    let ranked = fuzzy_rank(
+        "conn_pool",
+        ["connection_pool", "get_connection", "unrelated"]
+            .iter()
+            .copied(),
+    );
+    assert!(!ranked.is_empty());
+    // `connection_pool` is the closest subsequence match.
+    let first_name = ["connection_pool", "get_connection", "unrelated"][ranked[0].0];
+    assert_eq!(first_name, "connection_pool");
 }
 
-fn case_edit_distance_unit_tests() {
-    assert_eq!(edit_distance("hello", "hello"), 0);
-    assert_eq!(edit_distance("helo", "hello"), 1);
-    assert_eq!(edit_distance("hello", "helo"), 1);
-    assert_eq!(edit_distance("hello", "hXllo"), 1);
-    assert_eq!(edit_distance("", "abc"), 3);
-    assert_eq!(edit_distance("abc", "xyz"), edit_distance("xyz", "abc"));
-    let ed = edit_distance("conn_pool", "connection_pool");
-    assert!(ed > 2, "abbreviation distance should exceed 2, got {ed}");
-    assert!(edit_distance("authenticate", "autenticate") <= 2);
+#[test]
+fn typo_finds_nearest_symbol() {
+    // `SavingLedger` is one char off from `SavingsLedger`. Nucleo must
+    // put SavingsLedger at the top, not a loosely-related distractor.
+    let names = [
+        "savings_file",
+        "savings_entry",
+        "SavingsLedger",
+        "unrelated_helper",
+    ];
+    let ranked = fuzzy_rank("SavingLedger", names.iter().copied());
+    let first = ranked.first().expect("at least one match");
+    assert_eq!(
+        names[first.0], "SavingsLedger",
+        "expected SavingsLedger first, got {:?}",
+        ranked
+    );
+
+    // Regression: an earlier revision of `compute_fuzzy_lane` clamped the
+    // light-scan at 1 250 rows, so symbols in late-sorting files silently
+    // dropped out of the fuzzy lane end-to-end — the response missed a
+    // `data.fuzzy` key entirely. Dispatch through `search_catalog` and
+    // assert the lane array is present and carries the nucleo-ranked hit.
+    let workspace = tempdir().unwrap();
+    let root = setup_fuzzy_demo_repo(workspace.path());
+    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+        workspace.path().join("idx"),
+    ))
+    .unwrap();
+    let sid = ingest(&svc, &root);
+    let res = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": sid,
+                "query": "fetchr_workr",
+                "domain": "code",
+                "unit_kinds": ["symbol"],
+                "fuzzy": true,
+                "limit": 20,
+            }),
+        )
+        .unwrap();
+    let fuzzy = res["data"]["fuzzy"].as_array().unwrap_or_else(|| {
+        panic!("`data.fuzzy` array missing when fuzzy=true; got {res:?}")
+    });
+    assert!(
+        fuzzy
+            .iter()
+            .any(|it| it["ref"]["title"].as_str() == Some("fetcher_worker")),
+        "`data.fuzzy` must carry the nucleo hit for the typo, got {fuzzy:?}"
+    );
+
+    // Tie-breaker assertion: querying `SavingLedger` must surface the
+    // `SavingsLedger` struct within the top 3 fuzzy hits. Without the
+    // length + kind-priority tie-breakers, six longer `savings_ledger_*`
+    // methods tied at 1.0 crowded the struct out to rank 7+.
+    let res = svc
+        .dispatch(
+            "search_catalog",
+            json!({
+                "source_id": sid,
+                "query": "SavingLedger",
+                "domain": "code",
+                "unit_kinds": ["symbol"],
+                "fuzzy": true,
+                "limit": 20,
+            }),
+        )
+        .unwrap();
+    let fuzzy = res["data"]["fuzzy"].as_array().cloned().unwrap_or_default();
+    let top3: Vec<&str> = fuzzy
+        .iter()
+        .take(3)
+        .filter_map(|it| it["ref"]["title"].as_str())
+        .collect();
+    assert!(
+        top3.contains(&"SavingsLedger"),
+        "expected `SavingsLedger` in top-3 fuzzy hits for `SavingLedger`, got top3={top3:?} full={fuzzy:?}"
+    );
 }
 
 fn setup_fuzzy_demo_repo(parent: &std::path::Path) -> std::path::PathBuf {
@@ -59,6 +130,23 @@ fn setup_fuzzy_demo_repo(parent: &std::path::Path) -> std::path::PathBuf {
     )
     .unwrap();
     fs::write(src.join("worker.py"), "def fetcher_worker():\n    pass\n").unwrap();
+    // Rust file exercising the fuzzy tie-breakers: a short struct name plus
+    // several longer method names that share the same subsequence of the
+    // query `SavingLedger`. With length + kind-priority tie-breakers the
+    // struct should rank ahead of the method distractors.
+    fs::write(
+        src.join("savings.rs"),
+        "pub struct SavingsLedger;\n\
+         impl SavingsLedger {\n\
+             pub fn savings_ledger_end_session(&self) {}\n\
+             pub fn savings_ledger_current_session(&self) {}\n\
+             pub fn savings_ledger_record_stale_warning(&self) {}\n\
+             pub fn savings_ledger_set_quality_session_end(&self) {}\n\
+             pub fn savings_ledger_set_quality_session_start(&self) {}\n\
+             pub fn savings_ledger_rounds_accumulated_costs(&self) {}\n\
+         }\n",
+    )
+    .unwrap();
     root
 }
 
@@ -78,17 +166,24 @@ fn ingest(svc: &CodeService, root: &std::path::Path) -> String {
 }
 
 fn symbol_names_from_search(data: &serde_json::Value) -> Vec<String> {
-    data["items"]
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .filter_map(|it| {
-            it.get("ref")?
-                .get("title")?
-                .as_str()
-                .map(std::string::ToString::to_string)
-        })
-        .collect()
+    let from_lane = |key: &str| -> Vec<String> {
+        data.get(key)
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|it| {
+                        it.get("ref")?
+                            .get("title")?
+                            .as_str()
+                            .map(std::string::ToString::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut out = from_lane("items");
+    out.extend(from_lane("fuzzy"));
+    out
 }
 
 fn case_fuzzy_integration_cases() {
@@ -109,7 +204,6 @@ fn case_fuzzy_integration_cases() {
                 "domain": "code",
                 "unit_kinds": ["symbol"],
                 "fuzzy": true,
-                "fuzzy_threshold": 0.3,
                 "limit": 20,
             }),
         )
@@ -130,23 +224,20 @@ fn case_fuzzy_integration_cases() {
                 "domain": "code",
                 "unit_kinds": ["symbol"],
                 "fuzzy": true,
-                "fuzzy_threshold": 0.3,
                 "limit": 20,
             }),
         )
         .unwrap();
-    let items = res["data"]["items"].as_array().unwrap();
-    let fuzzy_hits: Vec<_> = items
-        .iter()
-        .filter(|it| it.get("match_type").and_then(|x| x.as_str()) == Some("fuzzy"))
-        .collect();
+    let fuzzy_hits = res["data"]["fuzzy"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert!(!fuzzy_hits.is_empty(), "expected fuzzy hits");
     let hit = fuzzy_hits
         .iter()
         .find(|it| it["ref"]["title"].as_str() == Some("fetcher_worker"))
         .expect("fetcher_worker fuzzy hit");
     assert!(hit.get("fuzzy_similarity").is_some());
-    assert!(hit.get("edit_distance").is_some());
     let sim = hit["fuzzy_similarity"].as_f64().unwrap();
     assert!((0.0..=1.0).contains(&sim) && sim > 0.0);
 
@@ -194,38 +285,10 @@ fn case_fuzzy_integration_cases() {
             "search_catalog",
             json!({
                 "source_id": sid,
-                "query": "conn_pool",
-                "domain": "code",
-                "unit_kinds": ["symbol"],
-                "fuzzy": true,
-                "fuzzy_threshold": 1.0,
-                "max_edit_distance": 0,
-                "limit": 20,
-            }),
-        )
-        .unwrap();
-    let fuzzy_hits: Vec<_> = res["data"]["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|it| it.get("match_type").and_then(|x| x.as_str()) == Some("fuzzy"))
-        .collect();
-    assert!(
-        fuzzy_hits
-            .iter()
-            .all(|it| it["ref"]["title"].as_str() != Some("connection_pool"))
-    );
-
-    let res = svc
-        .dispatch(
-            "search_catalog",
-            json!({
-                "source_id": sid,
                 "query": "autenticate",
                 "domain": "code",
                 "unit_kinds": ["symbol"],
                 "fuzzy": true,
-                "max_edit_distance": 2,
                 "limit": 20,
             }),
         )
@@ -272,6 +335,8 @@ fn case_fuzzy_integration_cases() {
         .collect();
     assert_eq!(id1, id2);
 
+    // Auto-fuzzy: BM25 returns nothing → the fuzzy lane promotes rows
+    // into `items` even without `fuzzy=true`.
     let res = svc
         .dispatch(
             "search_catalog",
@@ -281,7 +346,6 @@ fn case_fuzzy_integration_cases() {
                 "domain": "code",
                 "unit_kinds": ["symbol"],
                 "fuzzy": false,
-                "fuzzy_threshold": 0.3,
                 "limit": 20,
             }),
         )

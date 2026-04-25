@@ -91,15 +91,7 @@
         "token_budget": { "type": "integer", "description": "Alias of max_tokens." },
         "fuzzy": {
           "type": "boolean",
-          "description": "Augment symbol hits with fuzzy name matching (trigram Jaccard + optional edit distance) in the code domain."
-        },
-        "fuzzy_threshold": {
-          "type": "number",
-          "description": "Trigram Jaccard threshold for fuzzy candidates (default 0.3). When set and BM25 finds no symbols, fuzzy runs even if fuzzy=false."
-        },
-        "max_edit_distance": {
-          "type": "integer",
-          "description": "Optional Levenshtein cutoff on a normalized compare key; pairs within this distance may match even when trigram similarity is low."
+          "description": "Augment symbol hits with a nucleo-matcher fuzzy lane over symbol names in the code domain."
         },
         "repo_path": { "type": "string" },
         "semantic": {
@@ -114,6 +106,10 @@
         "pattern": {
           "type": "string",
           "description": "Alias for query when query_mode=regex. Cannot be set together with query."
+        },
+        "include_vendored": {
+          "type": "boolean",
+          "description": "When true, don't deprioritize matches under vendored / asset / fixture paths or oversized JSON dumps. Default false — those hits are pushed to the tail with a heavy score penalty. A `scope=` that explicitly targets an excluded segment (e.g. `scope=assets/`) also opts in."
         }
       }
     }
@@ -303,6 +299,10 @@
           "type": "string",
           "description": "Glob pattern (e.g. `crates/foo/**/*.rs`) filtering edge endpoints by file path."
         },
+        "include_vendored": {
+          "type": "boolean",
+          "description": "find_references: when true, include hits under vendored / asset / fixture paths. Default false. A `scope=` targeting an excluded segment also opts in."
+        },
         "repo_path": { "type": "string" }
       }
     }
@@ -370,6 +370,10 @@
           "type": "string",
           "enum": ["warn", "split", "skip"],
           "description": "path_rename: how to handle grouped imports that only partially match the old prefix."
+        },
+        "include_vendored": {
+          "type": "boolean",
+          "description": "rename_safety / blast_radius: when true, include scans / importers under vendored / asset / fixture paths. Default false. A `scope=` targeting an excluded segment also opts in."
         }
       }
     }
@@ -461,6 +465,10 @@
         "scope": {
           "type": "string",
           "description": "quality_signal: optional file or directory prefix to score instead of the whole repo."
+        },
+        "include_vendored": {
+          "type": "boolean",
+          "description": "dead_code: when true, include files under vendored / asset / fixture paths in the analysis. Default false. A `scope=` targeting an excluded segment also opts in."
         },
         "repo_path": { "type": "string" }
       }

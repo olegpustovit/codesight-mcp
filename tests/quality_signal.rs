@@ -86,19 +86,23 @@ fn quality_signal_returns_all_fields() {
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "quality_signal failed: {r:?}");
     let data = &r["data"];
+    // FIXUP T2.6: governance_signal_json() deliberately dropped the
+    // composite `score` and flat `agent_dimensions`/`agent_submetrics`
+    // fields — they nest under `agent_readiness` now (P2.5).
     assert_eq!(data["analysis"], "quality_signal");
-    assert!(data["score"].is_number());
     assert!(data["structural_score"].is_number());
     assert!(data["agent_readiness_score"].is_number());
     assert!(data["assessment"].is_string());
     assert!(data["confidence"].is_string());
-    assert_eq!(data["type_annotation_method"], "measured");
+    assert_eq!(
+        data["agent_readiness"]["type_annotation_method"], "measured"
+    );
     assert!(data["bottleneck"].is_string());
     assert!(data["bottleneck_layer"].is_string());
     assert!(data["suggestion"].is_string());
     assert!(data["structural_root_causes"].is_object());
-    assert!(data["agent_dimensions"].is_object());
-    assert!(data["agent_submetrics"].is_object());
+    assert!(data["agent_readiness"]["dimensions"].is_object());
+    assert!(data["agent_readiness"]["submetrics"].is_object());
     assert!(data["coverage"].is_object());
 }
 
@@ -111,10 +115,17 @@ fn quality_signal_score_in_range() {
             json!({ "source_id": sid, "analysis": "quality_signal" }),
         )
         .unwrap();
-    let score = r["data"]["score"].as_f64().unwrap();
+    // FIXUP T2.6: composite `score` dropped — verify both surviving
+    // top-level scores are in [0, 1].
+    let structural = r["data"]["structural_score"].as_f64().unwrap();
+    let agent = r["data"]["agent_readiness_score"].as_f64().unwrap();
     assert!(
-        (0.0..=1.0).contains(&score),
-        "score {score} out of range [0.0, 1.0]"
+        (0.0..=1.0).contains(&structural),
+        "structural {structural} out of range [0.0, 1.0]"
+    );
+    assert!(
+        (0.0..=1.0).contains(&agent),
+        "agent_readiness {agent} out of range [0.0, 1.0]"
     );
 }
 
@@ -162,7 +173,9 @@ fn repo_health_includes_quality_signal_finding() {
         "repo_health should include quality_signal finding"
     );
     let ev = &qs.unwrap()["evidence"];
-    assert!(ev["score"].is_number(), "governance score missing");
+    // FIXUP T2.6: governance_signal_json deliberately dropped the
+    // composite `score` and flat `agent_*` keys (P2.5). Evidence now
+    // mirrors the new shape with nested `agent_readiness`.
     assert!(
         ev["structural_score"].is_number(),
         "structural score missing"
@@ -172,9 +185,11 @@ fn repo_health_includes_quality_signal_finding() {
         "agent readiness missing"
     );
     assert!(ev["structural_root_causes"].is_object());
-    assert!(ev["agent_dimensions"].is_object());
-    assert!(ev["agent_submetrics"].is_object());
-    assert_eq!(ev["type_annotation_method"], "measured");
+    assert!(ev["agent_readiness"]["dimensions"].is_object());
+    assert!(ev["agent_readiness"]["submetrics"].is_object());
+    assert_eq!(
+        ev["agent_readiness"]["type_annotation_method"], "measured"
+    );
 }
 
 #[test]

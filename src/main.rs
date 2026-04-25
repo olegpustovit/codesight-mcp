@@ -212,7 +212,6 @@ fn run() -> anyhow::Result<()> {
     );
     let config = AppConfig::load();
     let service = CodeService::new(config)?;
-    service.enable_background_watch();
     let service = Arc::new(service);
     service.install_arc_handle();
 

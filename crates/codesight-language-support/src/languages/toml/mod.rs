@@ -20,4 +20,7 @@ impl Language for TomlSupport {
     fn nesting_mode(&self) -> NestingMode {
         NestingMode::Indent
     }
+    fn is_reference_target(&self) -> bool {
+        false
+    }
 }

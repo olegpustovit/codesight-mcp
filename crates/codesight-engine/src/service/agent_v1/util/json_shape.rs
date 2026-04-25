@@ -176,14 +176,24 @@ pub(in crate::service) fn resolve_symbol_id_strict(
     if let Some(s) = id.filter(|s| !s.is_empty()) {
         return Ok(Some((s.to_string(), RefResolution::Id)));
     }
+    // FIXUP: when the caller supplies an explicit `start_line`, treat it as
+    // a positional claim. If `(path, line)` fails to resolve, do NOT silently
+    // fall back to `path + symbol_name` — that's how callers ended up
+    // accepting bogus refs (start_line=999) as valid hits.
+    let line_supplied = matches!(start_line, Some(l) if l > 0);
     if let (Some(p), Some(line)) = (path, start_line)
         && line > 0
     {
         if let Some(hit) = store.symbol_id_at_location(p, line)? {
             return Ok(Some((hit, RefResolution::PathLine)));
         }
+        // Honor the positional claim — caller specified a line that doesn't
+        // contain the symbol; reject rather than guess.
+        return Ok(None);
     }
-    if let Some(name) = symbol_name.filter(|s| !s.is_empty()) {
+    if !line_supplied
+        && let Some(name) = symbol_name.filter(|s| !s.is_empty())
+    {
         if let Some(p) = path.filter(|s| !s.is_empty()) {
             if let Some(hit) = store.symbol_id_at_name(p, name)? {
                 return Ok(Some((hit, RefResolution::PathName)));

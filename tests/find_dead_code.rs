@@ -30,6 +30,7 @@ fn find_dead_code(
         include_tests,
         entry_patterns,
         None,
+        false,
     )
     .unwrap()
 }

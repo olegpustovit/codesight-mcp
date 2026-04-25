@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use codesight_core::StoredSymbol;
+use codesight_core::reachability::StructuralEdge;
 use codesight_core::symbols::ExtractionTier;
 
 use crate::family::{LanguageFamily, NestingMode};
@@ -208,6 +209,46 @@ pub trait Language: Send + Sync {
     /// specific case today). Default empty; Python overrides.
     fn top_level_import_stems(&self, _source: &str, _path: &str) -> Vec<String> {
         Vec::new()
+    }
+
+    // ── Structural reachability (ingest-time) ────────────────────────────
+    /// Extract structural reachability edges from this file. Called once
+    /// per file during ingest; the returned edges are persisted in
+    /// `reachability_edges` and consumed by `dead_code` analysis.
+    ///
+    /// Edges describe re-exports, path references, match-arm dispatch,
+    /// `mod`-style declarations, import statements, and type-only refs.
+    /// Each edge points at either a target file (when the language can
+    /// resolve it cheaply during extraction) or a bare symbol name (when
+    /// the resolution would require a workspace-wide symbol index — the
+    /// dead-code reader does the symbol→file join via the persisted
+    /// symbol table).
+    ///
+    /// Default impl: translate every `ImportEdge` returned by
+    /// [`Self::extract_imports`] into one symbol edge per imported name
+    /// (plus the root package). Languages with no import extraction fall
+    /// back to [`Self::regex_reachability_patterns`]. Languages with
+    /// rich shapes beyond imports (Rust's `pub use`, `mod`, match-arm
+    /// dispatch) override this method.
+    fn reachability_edges(&self, content: &str, source_file: &str) -> Vec<StructuralEdge> {
+        let imports = self.extract_imports(content);
+        if !imports.is_empty() {
+            return crate::reachability_default::edges_from_imports(self, source_file, &imports);
+        }
+        let patterns = self.regex_reachability_patterns();
+        if patterns.is_empty() {
+            return Vec::new();
+        }
+        crate::reachability_default::extract_with_patterns(source_file, content, patterns)
+    }
+
+    /// Per-edge-kind regex patterns used by the default implementation of
+    /// [`Self::reachability_edges`]. Each entry is
+    /// `(EdgeKind, capturing_regex)` where the regex's first capture group
+    /// names a *symbol* (bare identifier). Default empty — languages with
+    /// a tree-sitter grammar override `reachability_edges` directly.
+    fn regex_reachability_patterns(&self) -> &'static [(codesight_core::EdgeKind, &'static str)] {
+        &[]
     }
 
     /// Path aliases for this language discovered in `root` (e.g. tsconfig
@@ -510,11 +551,7 @@ pub trait Language: Send + Sync {
         if normalized.is_empty() {
             return 0.0;
         }
-        if self
-            .weak_type_tokens()
-            .iter()
-            .any(|w| *w == normalized.as_str())
-        {
+        if self.weak_type_tokens().contains(&normalized.as_str()) {
             return 0.0;
         }
         if self
@@ -611,6 +648,25 @@ pub trait Language: Send + Sync {
         None
     }
 
+    /// Detect whether `symbol_name` (defined in `defining_source` at
+    /// `defining_path`) participates in a trait/interface dispatch surface
+    /// that ranges across the repo. Returns `(trait_name, impl_files)`
+    /// where `impl_files` are the other files in `repo_files` whose method
+    /// must rename in lockstep. Default `None` — most languages don't
+    /// have this concept; Rust traits and Go interfaces opt in.
+    ///
+    /// `repo_files` is `&[(path, source)]` for the indexed repo; callers
+    /// pass it once instead of forcing each language to query storage.
+    fn detect_trait_impl_sites(
+        &self,
+        _defining_source: &str,
+        _repo_files: &[(String, String)],
+        _defining_path: &str,
+        _symbol_name: &str,
+    ) -> Option<(String, Vec<String>)> {
+        None
+    }
+
     /// Whole-word match for `name` inside `source` under this language's
     /// identifier boundary rules. Default: ASCII `[A-Za-z0-9_]` boundary
     /// via [`crate::text_match::word_match`]. Per-language overrides carry
@@ -682,6 +738,32 @@ pub trait Language: Send + Sync {
     /// on the language that owns them.
     fn pruned_dirs(&self) -> &'static [&'static str] {
         &[]
+    }
+
+    /// Directory segments that hold build output, package caches, or vendored
+    /// deps for this ecosystem. Used by retrieval/ranking layers to deprioritize
+    /// search/reference hits under these paths. Default: empty. Example: Rust
+    /// returns `["target"]`.
+    ///
+    /// Distinct from [`Self::pruned_dirs`] (which the package walker prunes
+    /// at ingest time) only by call site — same segments can appear in both.
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Reserved identifiers for this language (keywords, built-in type names).
+    /// Used by cross-language scans to avoid treating keywords as identifier
+    /// matches. Default: empty.
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// When true, hits in files of this language are weak reference targets:
+    /// a mention of `fn foo` inside a YAML/TOML/JSON config is usually config
+    /// data, not a code reference. Default: true (code languages are strong
+    /// reference targets). Override to false for data/prose languages.
+    fn is_reference_target(&self) -> bool {
+        true
     }
 
     /// Repo-relative basenames whose entries are config / manifest noise in

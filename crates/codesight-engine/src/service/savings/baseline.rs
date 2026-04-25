@@ -70,7 +70,7 @@ pub(in crate::service) fn search_rg_equivalent_bytes(items: &[Value]) -> u64 {
         let line_len = item
             .pointer("/line")
             .and_then(Value::as_u64)
-            .map(|n| approximate_line_digits(n))
+            .map(approximate_line_digits)
             .unwrap_or(1);
         let snippet_len = item
             .pointer("/snippet")

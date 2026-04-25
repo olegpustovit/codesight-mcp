@@ -160,9 +160,9 @@ impl SavingsLedger {
     pub fn record_fallback_to_native_tool(&self) -> io::Result<()> {
         let mut state = self.load()?;
         ensure_active_session(&mut state);
-        state.current_session.fallbacks_to_grep_or_bash = state
+        state.current_session.blocked_grep_bash_attempts = state
             .current_session
-            .fallbacks_to_grep_or_bash
+            .blocked_grep_bash_attempts
             .saturating_add(1);
         self.store(&state)
     }
@@ -255,14 +255,14 @@ impl SavingsLedger {
         };
         if state
             .current_session
-            .stale_warnings_fired_with_in_flight_paths
+            .stale_warnings_in_flight
             .contains(&record)
         {
             return Ok(());
         }
         state
             .current_session
-            .stale_warnings_fired_with_in_flight_paths
+            .stale_warnings_in_flight
             .push(record);
         self.store(&state)
     }
@@ -314,9 +314,9 @@ fn ensure_active_session(state: &mut SavingsState) -> bool {
             ended_at: None,
             tokens_saved_total: 0,
             per_tool: HashMap::new(),
-            fallbacks_to_grep_or_bash: 0,
+            blocked_grep_bash_attempts: 0,
             evaluate_impact_usage: HashMap::new(),
-            stale_warnings_fired_with_in_flight_paths: Vec::new(),
+            stale_warnings_in_flight: Vec::new(),
             primary_source_id: None,
             quality_session_start: None,
             quality_session_end: None,

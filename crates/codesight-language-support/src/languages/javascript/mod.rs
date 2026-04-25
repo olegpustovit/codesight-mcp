@@ -87,6 +87,75 @@ pub(super) const JS_ENTRYPOINTS: &[&str] = &[
 
 pub(crate) const JS_PRUNED_DIRS: &[&str] = &["node_modules", "dist", "build", "out"];
 
+pub(crate) const JS_VENDOR_SEGMENTS: &[&str] = &[
+    "node_modules",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".parcel-cache",
+    ".cache",
+];
+
+pub(crate) const JS_RESERVED_IDENTIFIERS: &[&str] = &[
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+    "let",
+    "static",
+    "async",
+    "await",
+    "interface",
+    "implements",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "type",
+    "from",
+    "of",
+    "as",
+    "satisfies",
+    "readonly",
+    "keyof",
+    "infer",
+    "never",
+    "unknown",
+];
+
 pub(crate) const JS_CONVENTIONAL_DIRS: &[&str] = &[
     "tests/",
     "__tests__/",
@@ -120,6 +189,12 @@ impl Language for JavaScript {
     }
     fn pruned_dirs(&self) -> &'static [&'static str] {
         JS_PRUNED_DIRS
+    }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        JS_VENDOR_SEGMENTS
+    }
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        JS_RESERVED_IDENTIFIERS
     }
     fn outline_noise_basenames(&self) -> &'static [&'static str] {
         &["package.json", "package-lock.json"]

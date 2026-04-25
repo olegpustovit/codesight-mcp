@@ -424,7 +424,7 @@ fn search_sort_stable_order() {
 // ===========================================================================
 // Integration tests: repo_outline orientation shape (ROADMAP P1.3).
 // `repo_outline` is now an orientation view: per-crate rollups,
-// top_modules_by_centrality, top_modules_by_loc, entrypoints, languages.
+// top_modules_by_centrality, top_modules_by_size, entrypoints, languages.
 // (TestRepoOutlineOrientation, 3 tests)
 // ===========================================================================
 
@@ -454,8 +454,8 @@ fn repo_outline_exposes_orientation_blocks() {
         "repo_outline should include top_modules_by_centrality: {r:?}"
     );
     assert!(
-        d["top_modules_by_loc"].is_array(),
-        "repo_outline should include top_modules_by_loc: {r:?}"
+        d["top_modules_by_size"].is_array(),
+        "repo_outline should include top_modules_by_size: {r:?}"
     );
     assert!(
         d["entrypoints"].is_array(),

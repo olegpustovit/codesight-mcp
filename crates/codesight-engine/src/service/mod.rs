@@ -224,10 +224,6 @@ impl CodeService {
         self.embedder.get()
     }
 
-    pub fn enable_background_watch(&self) {
-        self.watchers.enable();
-    }
-
     /// Run `f` with the savings-ledger mutex held. Poison is recovered
     /// because a poisoned lock only means a previous caller panicked mid-run;
     /// the on-disk JSON is still readable.

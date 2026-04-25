@@ -1,19 +1,35 @@
 //! Fuzzy symbol-name augmentation for `search_catalog`.
 //!
-//! Two modes (ROADMAP P1.4):
-//!   - `auto_fuzzy`: BM25 returned zero, caller supplied a `fuzzy_threshold`.
-//!     Fuzzy rows replace the empty exact lane — returned inline via
-//!     [`augment_with_fuzzy`], matching today's behaviour.
-//!   - `explicit fuzzy=true`: run the fuzzy lane independently and keep it
-//!     separate from the exact lane. Produced by [`compute_fuzzy_lane`].
-//!     Trigram-Jaccard × Levenshtein; ≥2-edit near-duplicates of an exact
-//!     hit are dropped.
+//! Backed by `nucleo-matcher` via `codesight_retrieval::fuzzy::fuzzy_rank`.
+//! Two modes:
+//!   - `auto_fuzzy`: BM25 returned zero hits → fuzzy rows replace the empty
+//!     exact lane ([`augment_with_fuzzy`]).
+//!   - `explicit fuzzy=true`: run the fuzzy lane alongside the exact lane
+//!     ([`compute_fuzzy_lane`]).
 
 use std::collections::HashSet;
 
 use crate::service::agent_v1::args::SearchCatalogArgs;
-use codesight_retrieval::fuzzy;
+use codesight_core::SymbolKind;
+use codesight_retrieval::fuzzy::{self, FuzzyCandidate};
 use codesight_storage::storage::{IndexStore, SearchSymbol};
+
+/// Tie-break priority for the fuzzy lane. Only applied when two candidates
+/// produce identical nucleo scores — a higher priority wins. Rationale: for
+/// a typo'd identifier query the user almost certainly wants the type
+/// definition over a method that happens to share the same subsequence.
+fn kind_priority(kind: SymbolKind) -> u8 {
+    match kind {
+        // Types / definitions — what the user is most often after.
+        SymbolKind::Class | SymbolKind::Type => 5,
+        // Callables come next.
+        SymbolKind::Function | SymbolKind::Method | SymbolKind::Template => 3,
+        // Constants / values.
+        SymbolKind::Constant => 2,
+        // Re-export trail — almost never the thing a fuzzy query wants.
+        SymbolKind::Import | SymbolKind::Reexport => 1,
+    }
+}
 
 pub(super) fn augment_with_fuzzy(
     store: &IndexStore,
@@ -24,16 +40,14 @@ pub(super) fn augment_with_fuzzy(
     auto_fuzzy: bool,
     symbols: &mut Vec<SearchSymbol>,
 ) -> usize {
-    // Auto-fuzzy path: BM25 was empty → fuzzy rows land inline in `symbols`.
     let rows = collect_fuzzy_rows(store, args, scope, exclude, per_kind_cap, auto_fuzzy, symbols);
     let added = rows.len();
     symbols.extend(rows);
     added
 }
 
-/// Compute a *separate* fuzzy lane (ROADMAP P1.4). Leaves the exact lane
-/// (`primary`) untouched and drops candidates whose edit-distance to any
-/// primary hit is ≥ 2 — near-duplicates of an exact match.
+/// Compute a *separate* fuzzy lane, leaving the exact lane (`primary`)
+/// untouched.
 pub(super) fn compute_fuzzy_lane(
     store: &IndexStore,
     args: &SearchCatalogArgs,
@@ -42,18 +56,7 @@ pub(super) fn compute_fuzzy_lane(
     per_kind_cap: usize,
     primary: &[SearchSymbol],
 ) -> Vec<SearchSymbol> {
-    let mut rows =
-        collect_fuzzy_rows(store, args, scope, exclude, per_kind_cap, false, primary);
-    // ROADMAP P1.4 §4: if an exact-match hit exists for the same token, drop
-    // fuzzy candidates that only differ by ≥2 edits. Reduces near-duplicate
-    // noise (`dispatch_tool` vs `dispatch_tools` style pollution).
-    rows.retain(|r| {
-        primary.iter().all(|p| {
-            let diff = fuzzy::score_name_pair(&p.name, &r.name);
-            diff.edit_distance >= 2
-        })
-    });
-    rows
+    collect_fuzzy_rows(store, args, scope, exclude, per_kind_cap, false, primary)
 }
 
 fn collect_fuzzy_rows(
@@ -65,54 +68,47 @@ fn collect_fuzzy_rows(
     auto_fuzzy: bool,
     primary: &[SearchSymbol],
 ) -> Vec<SearchSymbol> {
-    // When the caller opts in with `fuzzy=true`, lower the trigram threshold
-    // and enable a default Levenshtein fallback so single-character
-    // transpositions in short queries (e.g. `vlaidate` → `validate`) match.
-    let threshold = args
-        .fuzzy_threshold
-        .unwrap_or(if auto_fuzzy { 0.3 } else { 0.25 });
-    let max_edit_distance = args
-        .max_edit_distance
-        .or(if auto_fuzzy { None } else { Some(2) });
     let primary_ids: HashSet<String> = primary.iter().map(|s| s.id.clone()).collect();
-    let scan_cap = per_kind_cap.saturating_mul(50).clamp(500, 12_000);
-    let Ok(candidates) = store.symbols_light_scan(args.kind.as_deref(), scope, scan_cap) else {
+    // The fuzzy lane must see every symbol in the index (post `kind` / `scope`
+    // filtering) — anything less means typos pointing to late-sorting files
+    // silently miss. `symbols_light_scan` clamps internally to 20_000, which
+    // covers every repo we ship for; extremely large monorepos degrade to
+    // "top N by file_path" instead of "nothing at all".
+    let Ok(mut candidates) = store.symbols_light_scan(args.kind.as_deref(), scope, 20_000) else {
         return Vec::new();
     };
-    let mut fuzzy_rows: Vec<SearchSymbol> = Vec::new();
-    for mut c in candidates {
+
+    // Prune exact duplicates + vendored exclusions before ranking so
+    // nucleo doesn't waste cycles on rows we'd drop.
+    candidates.retain(|c| {
         if primary_ids.contains(&c.id) {
-            continue;
+            return false;
         }
-        if exclude
+        !exclude
             .iter()
             .any(|pattern| c.file.starts_with(pattern) || c.file.contains(pattern))
-        {
-            continue;
-        }
-        let score = fuzzy::score_name_pair(&args.query, &c.name);
-        if fuzzy::fuzzy_candidate_passes(&score, threshold, max_edit_distance) {
-            if !auto_fuzzy {
-                c.match_type = Some("fuzzy".to_string());
-                c.fuzzy_similarity = Some(score.similarity);
-                c.edit_distance = Some(score.edit_distance);
-            }
-            // ROADMAP P1.4 §3: rank fuzzy lane on trigram × Levenshtein, not
-            // BM25-style word-match. Small edit distances outrank large ones
-            // at equal trigram similarity; an exact Jaccard match with 0
-            // edits (e.g. a case-only difference) gets the top slot.
-            let edit_penalty = 1.0 / (1.0 + score.edit_distance as f64);
-            c.score = score.similarity * edit_penalty;
-            fuzzy_rows.push(c);
-        }
-    }
-    fuzzy_rows.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.id.cmp(&b.id))
     });
+
+    let fuzzy_inputs: Vec<FuzzyCandidate<'_>> = candidates
+        .iter()
+        .map(|c| FuzzyCandidate {
+            name: c.name.as_str(),
+            kind_priority: kind_priority(c.kind),
+        })
+        .collect();
+    let ranked = fuzzy::fuzzy_rank(&args.query, fuzzy_inputs);
+
     let take_extra = per_kind_cap.saturating_mul(4).clamp(32, 100);
-    fuzzy_rows.truncate(take_extra);
-    fuzzy_rows
+    let mut out: Vec<SearchSymbol> = Vec::with_capacity(ranked.len().min(take_extra));
+    for (idx, score) in ranked.into_iter().take(take_extra) {
+        let mut row = candidates[idx].clone();
+        if !auto_fuzzy {
+            row.match_type = Some("fuzzy".to_string());
+            row.fuzzy_similarity = Some(score as f64);
+            row.edit_distance = None;
+        }
+        row.score = score as f64;
+        out.push(row);
+    }
+    out
 }

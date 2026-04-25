@@ -673,18 +673,26 @@ fn blast_radius_call_depth_callers_includes_process() {
 
 #[test]
 fn blast_radius_existing_fields_unchanged_with_call_depth() {
+    // FIXUP T2.4: renamed shape — `confirmed/potential` →
+    // `direct_importers/transitive_importers`, counts renamed in parallel.
     let (_ws, svc, sid) = build_call_repo();
     let r = blast_radius_with_call_depth(&svc, &sid, "helper", 1, 1);
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    assert!(r["data"]["confirmed"].is_array(), "missing confirmed");
-    assert!(r["data"]["potential"].is_array(), "missing potential");
     assert!(
-        r["data"]["confirmed_count"].is_number(),
-        "missing confirmed_count"
+        r["data"]["direct_importers"].is_array(),
+        "missing direct_importers"
     );
     assert!(
-        r["data"]["potential_count"].is_number(),
-        "missing potential_count"
+        r["data"]["transitive_importers"].is_array(),
+        "missing transitive_importers"
+    );
+    assert!(
+        r["data"]["direct_count"].is_number(),
+        "missing direct_count"
+    );
+    assert!(
+        r["data"]["transitive_count"].is_number(),
+        "missing transitive_count"
     );
     assert!(
         r["data"]["overall_risk_score"].is_number(),

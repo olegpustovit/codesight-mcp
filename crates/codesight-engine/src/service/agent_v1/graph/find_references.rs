@@ -14,14 +14,22 @@ struct RefFilter<'a> {
     scope: Option<&'a str>,
     exclude: &'a [String],
     include_non_code: bool,
+    include_vendored: bool,
 }
 
 impl<'a> RefFilter<'a> {
     fn from_args(args: &'a InspectGraphArgs) -> Self {
+        let scope = args.scope.as_deref();
+        // If the caller scopes into an excluded segment they've clearly
+        // opted in; don't re-exclude the same paths from under them.
+        let scope_opts_in = scope
+            .map(codesight_language_support::scope_opts_in)
+            .unwrap_or(false);
         Self {
-            scope: args.scope.as_deref(),
+            scope,
             exclude: args.exclude.as_deref().unwrap_or(&[]),
             include_non_code: args.include_non_code.unwrap_or(false),
+            include_vendored: args.include_vendored.unwrap_or(false) || scope_opts_in,
         }
     }
 
@@ -30,11 +38,15 @@ impl<'a> RefFilter<'a> {
             scope: None,
             exclude: &[],
             include_non_code: false,
+            include_vendored: false,
         }
     }
 
     fn admits(&self, path: &str) -> bool {
         if !self.include_non_code && is_non_code_reference_path(path) {
+            return false;
+        }
+        if !self.include_vendored && codesight_language_support::is_vendored_path(path) {
             return false;
         }
         if let Some(prefix) = self.scope
@@ -170,6 +182,10 @@ struct ReferenceRow {
     /// enclosing symbol toward the file root. Empty when the reference is
     /// top-level or comes from a `file_body_match` candidate row.
     call_chain: Vec<String>,
+    /// FIXUP T2.5: classification of a `symbol_body_match` row —
+    /// `call_site`, `use_stmt`, `type_ref`, `comment_or_string`, or `other`.
+    /// Populated only when `kind == "symbol_body_match"`.
+    body_match_kind: Option<&'static str>,
 }
 
 impl ReferenceRow {
@@ -182,6 +198,9 @@ impl ReferenceRow {
         }
         m.insert("name".into(), json!(self.name));
         m.insert("kind".into(), json!(self.kind));
+        if let Some(sub) = self.body_match_kind {
+            m.insert("body_match_kind".into(), json!(sub));
+        }
         if let Some(sym) = &self.enclosing_symbol {
             m.insert("enclosing_symbol".into(), json!(sym));
         }
@@ -197,6 +216,84 @@ impl ReferenceRow {
     fn is_semantic(&self) -> bool {
         !matches!(self.kind, "file_body_match")
     }
+}
+
+/// FIXUP T2.5: line-based classifier for `symbol_body_match` rows.
+/// Operates on the containing line and the column of the identifier; does
+/// not build a tree-sitter tree, so it's a best-effort heuristic. Returns
+/// `"other"` for any structural shape it doesn't recognize.
+fn classify_body_match(line_text: &str, ident_col: usize, ident_len: usize) -> &'static str {
+    let trimmed = line_text.trim_start();
+    let leading_ws = line_text.len() - trimmed.len();
+    // Normalize the column so `before`/`after` slicing works on char bytes
+    // while still staying sane when col points past end-of-line.
+    let col = ident_col.min(line_text.len());
+    let end = (col + ident_len).min(line_text.len());
+    let before_raw = &line_text[..col];
+    let after_raw = line_text.get(end..).unwrap_or("");
+
+    // comment_or_string: `//` anywhere before the match, odd count of `"`
+    // before, or surrounded by a `/* ... */` that opens earlier on this line.
+    let before_no_strings = strip_strings_before(before_raw);
+    if before_no_strings.contains("//") || before_no_strings.contains("/*") {
+        return "comment_or_string";
+    }
+    let quote_count = before_raw.bytes().filter(|b| *b == b'"').count();
+    if quote_count % 2 == 1 {
+        return "comment_or_string";
+    }
+
+    // use_stmt: line begins with an import-style keyword.
+    let head: &str = &line_text[leading_ws..];
+    for kw in ["use ", "import ", "from ", "require ", "require(", "pub use "] {
+        if head.starts_with(kw) {
+            return "use_stmt";
+        }
+    }
+
+    // call_site: first non-space char after the identifier is `(` — this
+    // also covers turbofish `foo::<T>(` because the `(` still follows.
+    let next = after_raw
+        .trim_start_matches(|c: char| c == ':' || c.is_ascii_whitespace());
+    if next.starts_with('(') {
+        return "call_site";
+    }
+    // Also accept `foo::<T>(` where next starts with `::<`.
+    if after_raw.trim_start().starts_with("::<") {
+        return "call_site";
+    }
+
+    // type_ref: appears in a type position. Cheap signals that rarely
+    // false-positive on real code.
+    let before_trim = before_raw.trim_end();
+    if before_trim.ends_with(':')
+        || before_trim.ends_with("->")
+        || before_trim.ends_with('<')
+        || before_trim.ends_with("impl")
+        || before_trim.ends_with(" for")
+        || before_trim.ends_with("dyn")
+    {
+        return "type_ref";
+    }
+
+    "other"
+}
+
+/// Strip matched `"..."` string literals from `s` left-to-right so a `//`
+/// inside a string doesn't register as a comment marker. Cheap and good
+/// enough for the classifier — it deliberately doesn't track triple-quoted
+/// strings or escaped quotes precisely.
+fn strip_strings_before(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_str = false;
+    for ch in s.chars() {
+        match ch {
+            '"' => in_str = !in_str,
+            _ if !in_str => out.push(ch),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Derive the scope chain (ancestor names) from a symbol's stable id using
@@ -239,14 +336,27 @@ fn collect_rows(
                 enclosing_symbol: None,
                 enclosing_kind: None,
                 call_chain: call_chain_from_stable_id(&sym.id),
+                body_match_kind: None,
             });
             seen_files.insert(sym.file.clone());
             continue;
         }
         if mentions_identifier_ci_in_file(&sym.file, &sym.source, identifier) {
-            let (line, column) = locate_identifier_ci(&sym.source, identifier)
+            let located = locate_identifier_ci(&sym.source, identifier);
+            let (line, column) = located
                 .map(|(rel_line, col)| (sym.line + rel_line - 1, Some(col)))
                 .unwrap_or((sym.line, None));
+            // FIXUP T2.5: classify the body-match position. Pull the
+            // containing line text out of `sym.source` using the relative
+            // line the locator gave us.
+            let body_match_kind = located.map(|(rel_line, col)| {
+                let line_text = sym
+                    .source
+                    .lines()
+                    .nth(rel_line.saturating_sub(1) as usize)
+                    .unwrap_or("");
+                classify_body_match(line_text, col as usize, identifier.len())
+            });
             let mut chain = call_chain_from_stable_id(&sym.id);
             chain.push(sym.name.clone());
             rows.push(ReferenceRow {
@@ -258,6 +368,7 @@ fn collect_rows(
                 enclosing_symbol: Some(sym.name.clone()),
                 enclosing_kind: Some(sym.kind.clone()),
                 call_chain: chain,
+                body_match_kind,
             });
             seen_files.insert(sym.file.clone());
         }
@@ -279,6 +390,7 @@ fn collect_rows(
             enclosing_symbol: None,
             enclosing_kind: None,
             call_chain: Vec::new(),
+            body_match_kind: None,
         });
         seen_files.insert(file.clone());
     }
@@ -392,6 +504,18 @@ impl CodeService {
         let semantic_count = semantic.len();
         let candidate_count = candidate.len();
 
+        // FIXUP T2.5: surface ambiguity at the top level. Callers should
+        // not have to iterate the `semantic_references` list hunting for
+        // `kind: "definition"` rows.
+        let definitions: Vec<Value> = semantic
+            .iter()
+            .filter(|row| {
+                row.get("kind").and_then(Value::as_str) == Some("definition")
+            })
+            .cloned()
+            .collect();
+        let definition_count = definitions.len();
+
         let _call_edges = if include_call_chain {
             Some(codesight_analysis::graph::build_call_edges(&sym_infos))
         } else {
@@ -403,6 +527,8 @@ impl CodeService {
             "identifier": identifier,
             "semantic_reference_count": semantic_count,
             "candidate_text_hit_count": candidate_count,
+            "definition_count": definition_count,
+            "definitions": definitions,
             "semantic_references": semantic,
             "candidate_text_hits": candidate,
         });
@@ -435,11 +561,17 @@ impl CodeService {
             data["call_chain"] = Value::Array(chain);
         }
 
-        self.success_response_with_warnings(
-            &MetaBuilder::new(0),
-            data,
-            partial_references_warning(candidate_count),
-        )
+        let mut warnings = partial_references_warning(candidate_count);
+        if definition_count > 1 {
+            warnings.push(json!({
+                "code": "AMBIGUOUS_DEFINITION",
+                "message": format!(
+                    "{definition_count} definitions of '{identifier}' exist; pick one before editing."
+                ),
+                "detail": { "definition_count": definition_count },
+            }));
+        }
+        self.success_response_with_warnings(&MetaBuilder::new(0), data, warnings)
     }
 }
 
@@ -483,6 +615,7 @@ mod tests {
             exclude: None,
             include_non_code: None,
             file_pattern: None,
+            include_vendored: None,
         };
         let f = RefFilter::from_args(&args);
         assert!(!f.admits("fixture.json"));
@@ -515,6 +648,7 @@ mod tests {
             exclude: Some(vec!["tests/".into()]),
             include_non_code: None,
             file_pattern: None,
+            include_vendored: None,
         };
         let f = RefFilter::from_args(&args);
         assert!(f.admits("src/service/foo.rs"));
@@ -548,9 +682,76 @@ mod tests {
             exclude: None,
             include_non_code: Some(true),
             file_pattern: None,
+            include_vendored: None,
         };
         let f = RefFilter::from_args(&args);
         assert!(f.admits("scripts/stress/x.json"));
+    }
+
+    #[test]
+    fn filter_rejects_vendored_by_default() {
+        let args = InspectGraphArgs {
+            source_id: "x".into(),
+            graph: "find_references".into(),
+            r#ref: None,
+            limit: 0,
+            repo_path: None,
+            module_path: None,
+            rules: None,
+            symbol_id: None,
+            direction: None,
+            depth: None,
+            algorithm: None,
+            top_n: None,
+            file_path: None,
+            identifier: None,
+            identifiers: None,
+            include_call_chain: None,
+            cross_repo: None,
+            fqn: None,
+            max_tokens: None,
+            scope: None,
+            exclude: None,
+            include_non_code: Some(true),
+            file_pattern: None,
+            include_vendored: None,
+        };
+        let f = RefFilter::from_args(&args);
+        assert!(!f.admits("crates/x/tests/fixtures/sample.cs"));
+        assert!(!f.admits("crates/codesight-retrieval/assets/embedder/tokenizer.json"));
+        assert!(f.admits("src/lib.rs"));
+    }
+
+    #[test]
+    fn filter_scope_into_excluded_segment_opts_in() {
+        let args = InspectGraphArgs {
+            source_id: "x".into(),
+            graph: "find_references".into(),
+            r#ref: None,
+            limit: 0,
+            repo_path: None,
+            module_path: None,
+            rules: None,
+            symbol_id: None,
+            direction: None,
+            depth: None,
+            algorithm: None,
+            top_n: None,
+            file_path: None,
+            identifier: None,
+            identifiers: None,
+            include_call_chain: None,
+            cross_repo: None,
+            fqn: None,
+            max_tokens: None,
+            scope: Some("crates/codesight-language-support/tests/fixtures/".into()),
+            exclude: None,
+            include_non_code: Some(true),
+            file_pattern: None,
+            include_vendored: None,
+        };
+        let f = RefFilter::from_args(&args);
+        assert!(f.admits("crates/codesight-language-support/tests/fixtures/csharp/sample.cs"));
     }
 
     #[test]

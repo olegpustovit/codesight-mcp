@@ -31,7 +31,8 @@ impl CodeService {
         let cycle_count = cycles.len();
         let cycles_sample: Vec<_> = cycles.iter().take(5).cloned().collect();
 
-        let dead_code_data = dead_code::dead_code_payload(&store, "file", 0.5, true, &[], None)?;
+        let dead_code_data =
+            dead_code::dead_code_payload(&store, "file", 0.5, true, &[], None, false)?;
         let dead_count = dead_code_data
             .get("dead_file_count")
             .and_then(|v| v.as_u64())
@@ -63,7 +64,10 @@ impl CodeService {
             "related_refs": [],
         })];
 
-        // Embed full governance signal (structural + agent readiness)
+        // Embed full governance signal (structural + agent readiness).
+        // FIXUP T2.6: gov.{score,structural_score,agent_readiness_score} are
+        // already normalized to `[0.0, 1.0]` — render them as percents and
+        // drop the fabricated `/10000` composite that was never meaningful.
         if let Ok(gov) = quality_signal::compute_governance_signal(&store) {
             let suggestion =
                 quality_signal::suggestion_for_bottleneck(gov.bottleneck, &gov.structural.coverage);
@@ -74,8 +78,11 @@ impl CodeService {
                 "severity": "info",
                 "confidence": 1.0,
                 "summary": format!(
-                    "Governance score: {}/10000. Structural: {}. Agent readiness: {}. Bottleneck: {}.",
-                    gov.score, gov.structural_score, gov.agent_readiness_score, gov.bottleneck
+                    "Structural: {:.0}%. Agent readiness: {:.0}%. Bottleneck: {} ({}).",
+                    gov.structural_score * 100.0,
+                    gov.agent_readiness_score * 100.0,
+                    gov.bottleneck,
+                    gov.bottleneck_layer,
                 ),
                 "evidence": evidence,
                 "related_refs": [],

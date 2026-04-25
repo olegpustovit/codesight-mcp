@@ -85,6 +85,26 @@ impl Language for Ruby {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["#"]
     }
+    fn regex_reachability_patterns(
+        &self,
+    ) -> &'static [(codesight_core::EdgeKind, &'static str)] {
+        // Ruby: `require 'foo'`, `require_relative 'foo'`, `load 'foo'`,
+        // `autoload :Foo, 'foo'`. Capture the symbol/path string.
+        &[
+            (
+                codesight_core::EdgeKind::ImportStatement,
+                r#"\brequire(?:_relative)?\s+['"]([^'"]+)['"]"#,
+            ),
+            (
+                codesight_core::EdgeKind::ImportStatement,
+                r#"\bload\s+['"]([^'"]+)['"]"#,
+            ),
+            (
+                codesight_core::EdgeKind::ImportStatement,
+                r#"\bautoload\s+:(\w+)"#,
+            ),
+        ]
+    }
     fn is_test_symbol_id(&self, id: codesight_core::SymbolIdRef<'_>) -> bool {
         // RSpec (`describe`, `context`, `it`) + Minitest (`test_…`).
         let name = id.leaf_name();
@@ -93,5 +113,16 @@ impl Language for Ruby {
                 id.parent_path().rsplit('.').next().unwrap_or(""),
                 "describe" | "context" | "it"
             )
+    }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &[".bundle"]
+    }
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        &[
+            "BEGIN", "END", "alias", "and", "begin", "break", "case", "class", "def", "defined?",
+            "do", "else", "elsif", "end", "ensure", "false", "for", "if", "in", "module", "next",
+            "nil", "not", "or", "redo", "rescue", "retry", "return", "self", "super", "then",
+            "true", "undef", "unless", "until", "when", "while", "yield",
+        ]
     }
 }

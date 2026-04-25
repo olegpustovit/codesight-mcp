@@ -39,7 +39,7 @@ fn build_repo() -> (tempfile::TempDir, AppConfig, String, IndexStore) {
 fn test_safe_rename_returns_true() {
     let (_ws, _config, _sid, store) = build_repo();
     let sym = find_symbol_id(&store, "helper").unwrap();
-    let r = rename_safety_payload(&store, &sym, "compute")
+    let r = rename_safety_payload(&store, &sym, "compute", false)
         .unwrap()
         .unwrap();
     assert!(r["safe"].as_bool().unwrap());
@@ -51,7 +51,7 @@ fn test_safe_rename_returns_true() {
 fn test_collision_detected() {
     let (_ws, _config, _sid, store) = build_repo();
     let sym = find_symbol_id(&store, "helper").unwrap();
-    let r = rename_safety_payload(&store, &sym, "other")
+    let r = rename_safety_payload(&store, &sym, "other", false)
         .unwrap()
         .unwrap();
     assert!(!r["safe"].as_bool().unwrap());
@@ -68,7 +68,7 @@ fn test_collision_detected() {
 fn test_missing_symbol_returns_none_from_domain() {
     let (_ws, _config, _sid, store) = build_repo();
     assert!(
-        rename_safety_payload(&store, "nonexistent_symbol_xyz", "foo")
+        rename_safety_payload(&store, "nonexistent_symbol_xyz", "foo", false)
             .unwrap()
             .is_none()
     );
@@ -149,7 +149,7 @@ impl Greeter for French {
     let (config, sid, _) = index_code_fixture(&ws.path().join("idx"), &src).unwrap();
     let store = open_code_store(&config, &sid).unwrap();
     let sym = find_symbol_id(&store, "greet").expect("found greet");
-    let r = rename_safety_payload(&store, &sym, "say_hi")
+    let r = rename_safety_payload(&store, &sym, "say_hi", false)
         .unwrap()
         .unwrap();
     assert_eq!(
@@ -197,7 +197,9 @@ impl Greeter for French {
 fn test_result_includes_symbol_info() {
     let (_ws, _config, _sid, store) = build_repo();
     let sym = find_symbol_id(&store, "helper").unwrap();
-    let r = rename_safety_payload(&store, &sym, "foo").unwrap().unwrap();
+    let r = rename_safety_payload(&store, &sym, "foo", false)
+        .unwrap()
+        .unwrap();
     assert_eq!(r["symbol"]["name"].as_str().unwrap(), "helper");
     assert_eq!(r["new_name"].as_str().unwrap(), "foo");
 }

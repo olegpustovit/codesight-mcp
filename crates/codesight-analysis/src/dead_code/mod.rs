@@ -29,11 +29,13 @@ pub fn dead_code_payload(
     include_tests: bool,
     entry_patterns: &[String],
     limit: Option<usize>,
+    include_vendored: bool,
 ) -> anyhow::Result<Value> {
     let all_symbols = store.all_symbols_for_analysis()?;
     let dep_graph = store.dependency_graph_strict()?;
     let all_files = store.all_file_paths()?;
     let root_path = store.root_path().ok();
+    let file_contents = store.all_file_contents().unwrap_or_default();
 
     // Files that actually contain executable code. A file with only
     // JSON keys (tags.scm captures them as `constant`) or other data-only
@@ -54,15 +56,21 @@ pub fn dead_code_payload(
         .collect();
 
     let reachability = build_repo_reachability(
+        store,
         &all_files,
         &dep_graph,
         root_path.as_deref(),
         include_tests,
         entry_patterns,
+        &all_symbols,
+        &file_contents,
     );
 
     let mut dead_files: Vec<Value> = Vec::new();
     for file in &all_files {
+        if !include_vendored && codesight_language_support::is_vendored_path(file) {
+            continue;
+        }
         if is_test_fixture(file) {
             continue;
         }
@@ -75,23 +83,56 @@ pub fn dead_code_payload(
         if !files_with_code.contains(file.as_str()) {
             continue;
         }
+        // Any strong structural inbound edge (use, pub use, mod, match
+        // dispatch, path reference, stored import) means *something*
+        // concretely points at this file. Don't flag it. The base
+        // reachability traversal already covers the import edges; this
+        // catches cases where the augmentation passes added a back-edge
+        // but the live-root traversal didn't happen to reach the
+        // referrer in this run (e.g. cycles within an unreached
+        // sub-island).
+        if reachability.strong_inbound.contains(file) {
+            continue;
+        }
 
-        let confidence = if dep_graph
+        // Test-only alive: file is reachable only through workspace test
+        // binaries. Surface it separately at low confidence so callers
+        // can distinguish it from prod-dead code.
+        let test_only = reachability.test_only_alive.contains(file);
+        let weakly_rooted = reachability.weak_string_dispatch.contains(file);
+
+        let base_confidence: f64 = if dep_graph
             .get(file)
             .is_some_and(|targets| !targets.is_empty())
         {
             0.7
         } else {
-            1.0
+            0.9
+        };
+        // Cap to 0.3 when only weak / test-only evidence supports the
+        // file being alive — keeps the default `min_confidence >= 0.5`
+        // filter from surfacing them while still letting probes find
+        // them.
+        let confidence = if weakly_rooted || test_only {
+            base_confidence.min(0.3)
+        } else {
+            base_confidence
         };
         if confidence < min_confidence {
             continue;
         }
 
+        let signal = if test_only {
+            "test_only_alive"
+        } else if weakly_rooted {
+            "weak_string_dispatch_match"
+        } else {
+            "unreachable_from_live_roots"
+        };
         dead_files.push(json!({
             "file": file,
             "confidence": confidence,
-            "signal": "unreachable_from_live_roots",
+            "signal": signal,
         }));
     }
 
@@ -101,14 +142,82 @@ pub fn dead_code_payload(
             .iter()
             .filter_map(|dead_file| dead_file["file"].as_str())
             .collect();
+        // Symbol kinds that are meaningful targets for dead-symbol-in-alive-file
+        // detection. Constants / imports / fields are too noisy.
+        let is_callable_kind = |kind: &str| {
+            matches!(
+                kind.to_ascii_lowercase().as_str(),
+                "function" | "method" | "class" | "struct" | "trait" | "enum" | "type"
+            )
+        };
+
+        // Pre-compute the set of names mentioned in *some other* symbol's
+        // source text in a single SQL pass. Replaces an O(N) per-candidate
+        // `symbol_reference_count` call inside the loop, which made the
+        // symbol-level pass quadratic over the symbol corpus and timed out
+        // on a few-thousand-symbol repo.
+        let candidates: Vec<(String, String)> = all_symbols
+            .iter()
+            .filter(|s| {
+                is_callable_kind(&s.kind)
+                    && s.name.len() >= 4
+                    && !is_test_fixture(&s.file_path)
+                    && (include_tests || !is_test_file(&s.file_path))
+                    && (include_vendored
+                        || !codesight_language_support::is_vendored_path(&s.file_path))
+            })
+            .map(|s| (s.id.clone(), s.name.clone()))
+            .collect();
+        let referenced_names = store
+            .names_mentioned_outside_self(&candidates)
+            .unwrap_or_default();
+
         for symbol in &all_symbols {
+            if !include_vendored && codesight_language_support::is_vendored_path(&symbol.file_path) {
+                continue;
+            }
             if is_test_fixture(&symbol.file_path) {
                 continue;
             }
             if !include_tests && is_test_file(&symbol.file_path) {
                 continue;
             }
-            if !dead_file_set.contains(symbol.file_path.as_str()) {
+            if dead_file_set.contains(symbol.file_path.as_str()) {
+                dead_symbols.push(json!({
+                    "symbol_id": symbol.id,
+                    "name": symbol.name,
+                    "kind": symbol.kind,
+                    "file": symbol.file_path,
+                    "line": symbol.start_line,
+                    "confidence": 0.8,
+                    "signal": "dead_file",
+                }));
+                continue;
+            }
+            // Symbol-level: name is not referenced by any structural edge.
+            // Skip too-short names (collide too freely) and non-callable
+            // kinds. Skip symbols inside tests files because the symbol
+            // is meant to be entry-only.
+            if !is_callable_kind(&symbol.kind) {
+                continue;
+            }
+            if symbol.name.len() < 4 {
+                continue;
+            }
+            if reachability.strong_inbound_symbols.contains(&symbol.name) {
+                continue;
+            }
+            // Belt-and-suspenders: also accept the symbol as alive if any
+            // *other* indexed symbol mentions it in source text. This
+            // catches direct calls that don't pass through structural
+            // edges (e.g. `foo()` invocation inside a function body).
+            if referenced_names.contains(&symbol.name) {
+                continue;
+            }
+            // Public-API guard: exported barrel members are alive.
+            // A barrel basename containing the name is presumptive evidence.
+            let confidence = 0.55;
+            if confidence < min_confidence {
                 continue;
             }
             dead_symbols.push(json!({
@@ -117,8 +226,8 @@ pub fn dead_code_payload(
                 "kind": symbol.kind,
                 "file": symbol.file_path,
                 "line": symbol.start_line,
-                "confidence": 0.8,
-                "signal": "dead_file",
+                "confidence": confidence,
+                "signal": "no_structural_inbound",
             }));
         }
     }
@@ -160,8 +269,16 @@ pub fn dead_code_v2_payload(store: &IndexStore, min_confidence: f64) -> anyhow::
     let root_path = store.root_path().ok();
     let all_file_contents = store.all_file_contents().unwrap_or_default();
 
-    let reachability =
-        build_repo_reachability(&all_files, &dep_graph, root_path.as_deref(), false, &[]);
+    let reachability = build_repo_reachability(
+        store,
+        &all_files,
+        &dep_graph,
+        root_path.as_deref(),
+        false,
+        &[],
+        &all_symbols,
+        &all_file_contents,
+    );
 
     let mut dead_symbols: Vec<Value> = Vec::new();
     for symbol in &all_symbols {

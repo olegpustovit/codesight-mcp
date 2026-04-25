@@ -72,6 +72,18 @@ impl Language for Java {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["//"]
     }
+    fn regex_reachability_patterns(
+        &self,
+    ) -> &'static [(codesight_core::EdgeKind, &'static str)] {
+        // Java: `import a.b.C;` and `import static a.b.C.foo;`. Capture
+        // the trailing identifier as a symbol edge.
+        &[
+            (
+                codesight_core::EdgeKind::ImportStatement,
+                r#"^\s*import\s+(?:static\s+)?[\w\.]+\.(\w+)\s*;"#,
+            ),
+        ]
+    }
     fn idiomatic_symbol_names(&self) -> &'static [&'static str] {
         &[
             "equals",
@@ -107,5 +119,19 @@ impl Language for Java {
         // JUnit 4/5 convention: `test…` methods plus `@Test`-annotated
         // ones. We only see leaf names, so match the prefix.
         id.leaf_name().starts_with("test")
+    }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &[".gradle", ".idea"]
+    }
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        &[
+            "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class",
+            "const", "continue", "default", "do", "double", "else", "enum", "extends", "final",
+            "finally", "float", "for", "goto", "if", "implements", "import", "instanceof", "int",
+            "interface", "long", "native", "new", "package", "private", "protected", "public",
+            "return", "short", "static", "strictfp", "super", "switch", "synchronized", "this",
+            "throw", "throws", "transient", "try", "void", "volatile", "while", "true", "false",
+            "null", "var", "yield", "record", "sealed", "non-sealed", "permits",
+        ]
     }
 }

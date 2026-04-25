@@ -52,6 +52,11 @@ impl KindFlags {
 pub(super) struct CodeSideStats {
     pub(super) more_file_hits: bool,
     pub(super) fuzzy_applied: bool,
+    /// FIXUP T1.5: true when `fuzzy=true` was explicit AND BM25 returned
+    /// zero exact symbol hits, so the fuzzy lane is all we have. The handler
+    /// uses this to emit `NO_EXACT_MATCHES_RETURNING_FUZZY`.
+    pub(super) fuzzy_explicit_no_exact: bool,
+    pub(super) name_only_applied: bool,
 }
 
 pub(super) struct SearchPlan {
@@ -117,6 +122,8 @@ impl SearchPlan {
 pub(super) struct LexicalStats {
     pub(super) more_file_hits_exist: bool,
     pub(super) fuzzy_applied: bool,
+    pub(super) fuzzy_explicit_no_exact: bool,
+    pub(super) name_only_applied: bool,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -196,6 +203,7 @@ pub(super) fn build_meta_extras(
     plan: &SearchPlan,
     fuzzy_applied: bool,
     semantic_requested: bool,
+    name_only_applied: bool,
 ) -> Vec<(String, Value)> {
     vec![
         ("domain_effective".to_string(), json!(plan.domain)),
@@ -226,6 +234,7 @@ pub(super) fn build_meta_extras(
         ),
         ("fuzzy_applied".to_string(), json!(fuzzy_applied)),
         ("semantic_applied".to_string(), json!(semantic_requested)),
+        ("name_only_applied".to_string(), json!(name_only_applied)),
     ]
 }
 

@@ -228,6 +228,46 @@ impl Language for Go {
         )
     }
 
+    /// FIXUP T1.1 + crate_graph: interface-method dispatch lives here so
+    /// `codesight-analysis` doesn't need a `.ends_with(".go")` branch.
+    /// Returns `(interface_name, impl_files)` when `symbol_name` is part
+    /// of an interface declared in `defining_source` (or in any indexed
+    /// Go file when the defining file is itself an implementation site).
+    /// Over-triggers — any file with a matching `func (recv) name(`
+    /// receiver is treated as a candidate implementor.
+    fn detect_trait_impl_sites(
+        &self,
+        defining_source: &str,
+        repo_files: &[(String, String)],
+        defining_path: &str,
+        symbol_name: &str,
+    ) -> Option<(String, Vec<String>)> {
+        if symbol_name.is_empty() {
+            return None;
+        }
+        let iface = owning_interface_for_method_go(defining_source, symbol_name).or_else(|| {
+            repo_files
+                .iter()
+                .find_map(|(_, c)| owning_interface_for_method_go(c, symbol_name))
+        });
+        let iface = iface?;
+        let mut hits = Vec::new();
+        for (p, content) in repo_files {
+            if p == defining_path {
+                continue;
+            }
+            if !p.ends_with(".go") {
+                continue;
+            }
+            if file_has_go_method_receiver(content, symbol_name) {
+                hits.push(p.clone());
+            }
+        }
+        hits.sort();
+        hits.dedup();
+        Some((iface, hits))
+    }
+
     fn is_restricted(&self, _source_text: &str, name: &str) -> bool {
         name.chars()
             .next()
@@ -250,4 +290,70 @@ impl Language for Go {
     fn weak_type_tokens(&self) -> &'static [&'static str] {
         &["any", "interface{}"]
     }
+    fn reserved_identifiers(&self) -> &'static [&'static str] {
+        &[
+            "break", "case", "chan", "const", "continue", "default", "defer", "else",
+            "fallthrough", "for", "func", "go", "goto", "if", "import", "interface", "map",
+            "package", "range", "return", "select", "struct", "switch", "type", "var", "nil",
+            "true", "false",
+        ]
+    }
+}
+
+// --- Interface-dispatch helpers (FIXUP T1.1; previously in
+// codesight-analysis::impact). Kept private — only the trait method
+// surfaces them.
+
+fn owning_interface_for_method_go(source: &str, method: &str) -> Option<String> {
+    let mut current_iface: Option<String> = None;
+    let mut depth: i32 = 0;
+    let method_prefix = format!("{method}(");
+    for raw in source.lines() {
+        let line = raw.trim_start();
+        if current_iface.is_none() {
+            if let Some(rest) = line.strip_prefix("type ")
+                && let Some(idx) = rest.find(" interface")
+            {
+                let name = rest[..idx].trim_end_matches(&[' ', '[', '\t'][..]);
+                let name = name
+                    .split(|c: char| !c.is_alphanumeric() && c != '_')
+                    .next()
+                    .unwrap_or(name);
+                if !name.is_empty() {
+                    current_iface = Some(name.to_string());
+                    depth = if line.contains('{') { 1 } else { 0 };
+                }
+            }
+        } else {
+            if line.starts_with('}') {
+                depth -= 1;
+                if depth <= 0 {
+                    current_iface = None;
+                    depth = 0;
+                }
+                continue;
+            }
+            if line.contains('{') {
+                depth += 1;
+            }
+            if line.starts_with(&method_prefix)
+                || line
+                    .split_whitespace()
+                    .next()
+                    .map(|first| first == method || first.starts_with(&method_prefix))
+                    .unwrap_or(false)
+            {
+                return current_iface.clone();
+            }
+        }
+    }
+    None
+}
+
+fn file_has_go_method_receiver(source: &str, method: &str) -> bool {
+    let pat = format!(") {method}(");
+    let pat_star = format!(") *{method}(");
+    source
+        .lines()
+        .any(|line| line.contains(pat.as_str()) || line.contains(pat_star.as_str()))
 }

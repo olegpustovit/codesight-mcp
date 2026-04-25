@@ -22,19 +22,25 @@ pub mod nesting;
 pub mod packages;
 pub mod path_rename;
 pub mod query_pack_catalog;
+pub mod reachability_default;
 pub mod registry;
 pub mod scm_engine;
 pub mod scm_imports;
 pub mod signature_density;
 pub mod text_match;
 pub mod traits;
+pub mod vendor;
 pub mod visibility;
 pub mod workspace;
 pub mod workspace_pack;
 
 pub use extensions::{
     DOC_EXTENSIONS, code_extensions, is_code_extension, is_doc_extension,
-    is_non_code_reference_path,
+    is_non_code_reference_path, is_vendored_or_fixture_path,
+};
+pub use vendor::{
+    VENDOR_JSON_MAX_BYTES, all_reserved_identifiers, is_default_excluded, is_vendor_json_dump,
+    is_vendored_path, scope_opts_in,
 };
 pub use facade::{
     additional_live_roots, all_entrypoint_basenames, class_hierarchy_note_for_path,

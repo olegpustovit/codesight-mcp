@@ -16,7 +16,6 @@
 
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
@@ -94,13 +93,10 @@ pub fn run_posttooluse() -> i32 {
         return 0;
     }
 
-    // Fire-and-forget: spawn background reindex of the single file.
-    let _ = Command::new("codesight-mcp")
-        .args(["ingest", "--path", file_path])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+    // Reindex is handled in-process by the long-lived MCP server's file watcher
+    // (see `WatcherManager` in `crates/codesight-engine/src/service/file_watcher.rs`).
+    // The watcher activates after the first `ingest_sources` call for a workspace
+    // and auto-reindexes touched files with a 500ms notify-debounce.
 
     // Count the double-read: Claude Code's Edit contract forces a native
     // Read of `file_path` before the Edit fires. If we had already returned

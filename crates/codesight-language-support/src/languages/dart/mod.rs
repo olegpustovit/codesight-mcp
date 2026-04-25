@@ -58,4 +58,7 @@ impl Language for Dart {
     fn weak_type_tokens(&self) -> &'static [&'static str] {
         &["dynamic"]
     }
+    fn vendor_segments(&self) -> &'static [&'static str] {
+        &[".dart_tool"]
+    }
 }

@@ -22,16 +22,39 @@ impl IndexStore {
         exclude: &[String],
         max_results: usize,
     ) -> anyhow::Result<Vec<SearchSymbol>> {
+        self.search_symbols_ex(query, kind, scope, exclude, max_results, false)
+    }
+
+    /// FIXUP T1.3: `name_only=true` restricts FTS MATCH to the `name` and
+    /// `qualified_name` columns via FTS5's column-filter syntax, so body,
+    /// signature, summary, and file-path features don't bleed into the
+    /// rerank. The existing `search_symbols` entry point preserves the
+    /// wide-recall behaviour.
+    pub fn search_symbols_ex(
+        &self,
+        query: &str,
+        kind: Option<&str>,
+        scope: Option<&str>,
+        exclude: &[String],
+        max_results: usize,
+        name_only: bool,
+    ) -> anyhow::Result<Vec<SearchSymbol>> {
         let query_tokens = db::tokenize(query);
         if query_tokens.is_empty() {
             return Ok(Vec::new());
         }
 
-        let fts_query = query_tokens
+        let token_expr = query_tokens
             .iter()
             .map(|token| format!("{token}*"))
             .collect::<Vec<_>>()
             .join(" OR ");
+        let fts_query = if name_only {
+            // FTS5 column-filter: restrict the match to the two name columns.
+            format!("{{name qualified_name}}: ({token_expr})")
+        } else {
+            token_expr
+        };
         let row_limit = (max_results.clamp(1, 25) * 6) as i64;
 
         let conn = self.open_read_only()?;
@@ -80,15 +103,25 @@ impl IndexStore {
             }
         }
 
+        let query_lower = query.to_ascii_lowercase();
         let mut reranked = candidates
             .into_iter()
-            .map(|candidate| rerank_candidate(candidate, &query_tokens))
+            .map(|candidate| rerank_candidate(candidate, &query_tokens, &query_lower))
             .collect::<Vec<_>>();
+        // FIXUP T1.4: deterministic tie-break — prefer shorter file paths
+        // (less nested, easier to navigate) and shorter symbol names
+        // (less likely to be a generic helper) before falling back to id
+        // ordering. Without this, scores collapsing to the same value left
+        // top-N rankings effectively random across runs.
         reranked.sort_by(|left, right| {
             right
                 .score
                 .partial_cmp(&left.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    path_depth(&left.file).cmp(&path_depth(&right.file))
+                })
+                .then_with(|| left.name.len().cmp(&right.name.len()))
                 .then_with(|| left.id.cmp(&right.id))
         });
         reranked.truncate(max_results.clamp(1, 25));
@@ -261,7 +294,11 @@ impl IndexStore {
     }
 }
 
-fn rerank_candidate(candidate: SearchCandidate, query_tokens: &[String]) -> SearchSymbol {
+fn rerank_candidate(
+    candidate: SearchCandidate,
+    query_tokens: &[String],
+    query_lower: &str,
+) -> SearchSymbol {
     let name_tokens = db::tokenize(&candidate.result.name);
     let qualified_tokens = db::tokenize(&candidate.qualified_name);
     let path_tokens = db::tokenize(&candidate.result.file);
@@ -275,6 +312,33 @@ fn rerank_candidate(candidate: SearchCandidate, query_tokens: &[String]) -> Sear
     let path_overlap = overlap(query_tokens, &path_tokens);
     let summary_overlap = overlap(query_tokens, &summary_tokens);
     let fts_score = 1.0 / (1.0 + candidate.raw_rank.max(0.0));
+
+    // FIXUP T1.4: short, common queries used to collapse top-10 to a flat
+    // 0.10 because every overlap feature was zero. Add non-binary name
+    // signals so prefix/substring matches still differentiate.
+    let name_lower = candidate.result.name.to_ascii_lowercase();
+    let qual_lower = candidate.qualified_name.to_ascii_lowercase();
+    let trimmed_query = query_lower.trim();
+    let name_prefix = if !trimmed_query.is_empty() && name_lower.starts_with(trimmed_query) {
+        if name_lower.len() == trimmed_query.len() {
+            1.0
+        } else {
+            0.7
+        }
+    } else if !trimmed_query.is_empty() && qual_lower.ends_with(trimmed_query) {
+        0.5
+    } else {
+        0.0
+    };
+    let name_substring = if !trimmed_query.is_empty()
+        && name_prefix == 0.0
+        && name_lower.contains(trimmed_query)
+    {
+        0.4
+    } else {
+        0.0
+    };
+
     let exact_phrase = if format!(
         "{} {} {} {}",
         candidate.result.file,
@@ -291,11 +355,13 @@ fn rerank_candidate(candidate: SearchCandidate, query_tokens: &[String]) -> Sear
     };
 
     let mut result = candidate.result;
-    result.score = (0.35 * name_overlap
-        + 0.20 * qualified_overlap
-        + 0.20 * path_overlap
-        + 0.15 * summary_overlap
-        + 0.10 * fts_score
+    result.score = (0.30 * name_overlap
+        + 0.18 * name_prefix
+        + 0.10 * name_substring
+        + 0.15 * qualified_overlap
+        + 0.10 * path_overlap
+        + 0.10 * summary_overlap
+        + 0.07 * fts_score
         + exact_phrase)
         .min(1.0);
     result.match_type = None;
@@ -314,4 +380,9 @@ fn overlap(query_tokens: &[String], candidate_tokens: &[String]) -> f64 {
         .filter(|token| candidate_set.contains(token))
         .count();
     matched as f64 / query_tokens.len() as f64
+}
+
+/// FIXUP T1.4: count slash-separated segments for the path-depth tie-break.
+fn path_depth(path: &str) -> usize {
+    path.bytes().filter(|b| *b == b'/').count()
 }

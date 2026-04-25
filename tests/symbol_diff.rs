@@ -310,7 +310,9 @@ fn run_diff_findings_structure(fixture: &RepoFixture, foo_id: &str, bar_id: &str
     assert_eq!(refs.len(), 2);
 }
 
-/// Diffing symbols across different files should be rejected.
+/// Cross-file diff is supported (ROADMAP P3.1) — diffing two impls of
+/// the same trait method that live in different files is the common
+/// case. Verify the response succeeds and tags the cross_file pair.
 fn run_diff_cross_file_rejected(fixture: &RepoFixture, alpha_id: &str, beta_id: &str) {
     let r = fixture
         .svc
@@ -326,7 +328,9 @@ fn run_diff_cross_file_rejected(fixture: &RepoFixture, alpha_id: &str, beta_id: 
             }),
         )
         .unwrap();
-    assert_eq!(r["ok"], false, "cross-file diff should fail: {r:?}");
+    assert!(r["ok"].as_bool().unwrap_or(false), "{r:?}");
+    let f = &r["data"]["findings"][0];
+    assert!(f.get("cross_file").is_some(), "cross_file tag missing: {r:?}");
 }
 
 /// Detect signature change between two versions of a function (re-index approach).

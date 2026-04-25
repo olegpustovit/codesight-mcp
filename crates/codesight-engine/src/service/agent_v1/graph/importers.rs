@@ -68,7 +68,12 @@ impl CodeService {
                 },
             );
         };
-        let adj = store.dependency_graph()?;
+        // Explicit-import edges undercount intra-crate access (Rust
+        // `mod x; x::Y`, Python package siblings, Go same-package
+        // references). Union with symbol-usage edges so "who imports
+        // this file" reports every file that actually references a
+        // symbol defined here.
+        let adj = codesight_analysis::graph::adjacency_with_usage_edges(&store)?;
         let importers: Vec<&String> = adj
             .iter()
             .filter(|(_, deps)| deps.iter().any(|d| d == file_path))

@@ -12,7 +12,7 @@ use crate::error::StorageResult;
 use super::schema::{EMBEDDING_DIM, INDEX_STORE_INIT_SQL};
 
 /// Bump when adding a migration; keep in sync with [`apply_code_index_migrations`].
-pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 8;
+pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 9;
 
 type MigrationStep = fn(&Connection) -> StorageResult<()>;
 
@@ -137,6 +137,49 @@ fn migrate_v8_quality_scores_as_float(conn: &Connection) -> StorageResult<()> {
     Ok(())
 }
 
+fn migrate_v9_reachability_edges(conn: &Connection) -> StorageResult<()> {
+    // Nullable target_file / target_symbol are intentional: an edge may be
+    // file-only (`mod child;` resolved to a path) or symbol-only (a re-export
+    // of a symbol whose defining file we couldn't pin down at extract time).
+    // SQLite treats NULL as distinct in UNIQUE indexes, so best-effort dedup
+    // is enforced via INSERT OR IGNORE; bounded duplicates are tolerable.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS reachability_edges (
+             source_file   TEXT NOT NULL,
+             target_file   TEXT,
+             target_symbol TEXT,
+             edge_kind     TEXT NOT NULL
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS uq_reachability_edges
+             ON reachability_edges(source_file, target_file, target_symbol, edge_kind);
+         CREATE INDEX IF NOT EXISTS idx_reachability_edges_source
+             ON reachability_edges(source_file);
+         CREATE INDEX IF NOT EXISTS idx_reachability_edges_target_file
+             ON reachability_edges(target_file);
+         CREATE INDEX IF NOT EXISTS idx_reachability_edges_target_symbol
+             ON reachability_edges(target_symbol);
+         CREATE INDEX IF NOT EXISTS idx_reachability_edges_kind
+             ON reachability_edges(edge_kind);",
+    )?;
+    // The new `reachability_edges` table is populated only at extract time, so
+    // pre-existing repos with their fingerprint cache intact would skip every
+    // unchanged file and leave the table empty until the file got edited.
+    // Clear the stored extractor version so the next ingest's stamp-drift
+    // guard (codesight-engine `index_workspace_with_symbol_vectors`) treats
+    // every existing file as needing re-extraction and fully populates the
+    // new table. Tolerate the legacy case where `repo_info` doesn't yet
+    // exist (very fresh DBs) — there's nothing to reset.
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='repo_info'",
+        [],
+        |row| row.get(0),
+    )?;
+    if exists > 0 {
+        conn.execute("UPDATE repo_info SET extractor_version = ''", [])?;
+    }
+    Ok(())
+}
+
 const CODE_INDEX_MIGRATIONS: &[(i32, MigrationStep)] = &[
     (1, migrate_v1_initial),
     (2, migrate_v2_import_fact_quality),
@@ -146,6 +189,7 @@ const CODE_INDEX_MIGRATIONS: &[(i32, MigrationStep)] = &[
     (6, migrate_v6_vec_symbol_embeddings),
     (7, migrate_v7_symbol_indexes),
     (8, migrate_v8_quality_scores_as_float),
+    (9, migrate_v9_reachability_edges),
 ];
 
 /// Apply migrations so `PRAGMA user_version == CODE_INDEX_TARGET_USER_VERSION`.
