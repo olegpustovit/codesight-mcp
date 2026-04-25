@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::Path;
 
@@ -202,7 +202,7 @@ fn doc_slug_collision_collision() {
     let sections = extract_markdown_sections("doc.md", "## foo\n\nFirst.\n\n## foo\n\nSecond.\n");
     let foo_secs: Vec<_> = sections.iter().filter(|s| s.heading == "foo").collect();
     assert_eq!(foo_secs.len(), 2);
-    let ids: HashSet<&str> = foo_secs.iter().map(|s| s.id.as_str()).collect();
+    let ids: FxHashSet<&str> = foo_secs.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(
         ids.len(),
         2,
@@ -216,7 +216,7 @@ fn doc_slug_collision_multiple() {
         extract_markdown_sections("doc.md", "## foo\n\nA.\n\n## foo\n\nB.\n\n## foo\n\nC.\n");
     let foo_secs: Vec<_> = sections.iter().filter(|s| s.heading == "foo").collect();
     assert_eq!(foo_secs.len(), 3);
-    let ids: HashSet<&str> = foo_secs.iter().map(|s| s.id.as_str()).collect();
+    let ids: FxHashSet<&str> = foo_secs.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(
         ids.len(),
         3,
@@ -627,7 +627,7 @@ fn doc_html_fixture_levels() {
     let fixtures = doc_fixtures_root();
     let html = fs::read_to_string(fixtures.join("docs/sample.html")).unwrap();
     let sections = extract_sections("sample.html", &html);
-    let by_heading: std::collections::HashMap<&str, u8> = sections
+    let by_heading: FxHashMap<&str, u8> = sections
         .iter()
         .map(|s| (s.heading.as_str(), s.level))
         .collect();

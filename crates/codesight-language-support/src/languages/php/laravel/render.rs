@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::frameworks::FileContext;
 
@@ -9,8 +9,8 @@ pub fn render_file_context(snapshot: &LaravelSnapshot, rel_path: &str) -> Option
     snapshot.file_contexts.get(&normalized).cloned()
 }
 
-pub fn metadata(snapshot: &LaravelSnapshot) -> HashMap<String, serde_json::Value> {
-    let mut meta = HashMap::new();
+pub fn metadata(snapshot: &LaravelSnapshot) -> FxHashMap<String, serde_json::Value> {
+    let mut meta = FxHashMap::default();
     let mut columns_map = serde_json::Map::new();
 
     for (table, migration) in &snapshot.migrations {

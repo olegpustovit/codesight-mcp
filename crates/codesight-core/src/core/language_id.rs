@@ -13,7 +13,7 @@
 //! ~50 entries — and the fast path for known constants bypasses
 //! allocation entirely.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
@@ -126,8 +126,8 @@ fn canonical_lookup(s: &str) -> Option<&'static str> {
 }
 
 fn intern_runtime(s: &str) -> LanguageId {
-    static INTERN: OnceLock<Mutex<HashMap<Box<str>, &'static str>>> = OnceLock::new();
-    let table = INTERN.get_or_init(|| Mutex::new(HashMap::new()));
+    static INTERN: OnceLock<Mutex<FxHashMap<Box<str>, &'static str>>> = OnceLock::new();
+    let table = INTERN.get_or_init(|| Mutex::new(FxHashMap::default()));
     let mut guard = table.lock().expect("LanguageId intern mutex poisoned");
     if let Some(&leaked) = guard.get(s) {
         return LanguageId(leaked);

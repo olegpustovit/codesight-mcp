@@ -1,11 +1,11 @@
 //! In-memory package registry and cross-repo edge materialization.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::extract_root_package_from_specifier;
 
 /// A mapping from package name -> list of repo IDs that publish it.
-pub type PackageRegistry = HashMap<String, Vec<String>>;
+pub type PackageRegistry = FxHashMap<String, Vec<String>>;
 
 /// Repo entry for building the package registry.
 #[derive(Debug, Clone)]
@@ -16,7 +16,7 @@ pub struct RepoEntry {
 
 /// Build a registry mapping package names to the repo IDs that publish them.
 pub fn build_package_registry(repos: &[RepoEntry]) -> PackageRegistry {
-    let mut registry = PackageRegistry::new();
+    let mut registry = PackageRegistry::default();
     for entry in repos {
         for name in &entry.package_names {
             registry
@@ -45,11 +45,11 @@ pub struct CrossRepoEdge {
 /// Build a cross-repo dependency map for all indexed repos.
 pub fn build_cross_repo_edges(
     repos: &[RepoEntry],
-    repo_imports: &HashMap<String, Vec<String>>,
+    repo_imports: &FxHashMap<String, Vec<String>>,
 ) -> Vec<CrossRepoEdge> {
     let registry = build_package_registry(repos);
     let mut edges = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
 
     for (consumer_repo, import_specifiers) in repo_imports {
         for specifier in import_specifiers {

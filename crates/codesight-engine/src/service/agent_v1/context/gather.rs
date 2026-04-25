@@ -1,6 +1,10 @@
+use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
 use std::fs;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 
+use codesight_analysis::graph::CallEdge;
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
@@ -11,6 +15,42 @@ use crate::service::savings::MetaBuilder;
 use codesight_core::symbols::SymbolKind;
 use codesight_language_support::imports_orchestration::context_bundle_import_lines;
 use codesight_storage::storage::IndexStore;
+
+/// Process-wide cache of `build_call_edges` results keyed on
+/// `(canonical_db_path, index_version)`. The build itself is O(N×idents)
+/// over all 5,500+ symbol bodies and produces ~110k edges on this repo;
+/// caching it shaves the remaining ~265ms off warm `assemble_context`
+/// `context_bundle` calls. Entries from older index versions are evicted
+/// on the next write (we drop any entry whose path matches but version
+/// differs at insert time).
+type CallEdgeKey = (PathBuf, u32);
+type CallEdgeCache = Mutex<FxHashMap<CallEdgeKey, Arc<Vec<CallEdge>>>>;
+
+fn call_edges_cache() -> &'static CallEdgeCache {
+    static CACHE: OnceLock<CallEdgeCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
+}
+
+fn cached_call_edges(
+    store: &IndexStore,
+) -> anyhow::Result<Arc<Vec<CallEdge>>> {
+    let version = store.current_index_version().unwrap_or(0);
+    let key = (store.db_path().to_path_buf(), version);
+    if let Ok(map) = call_edges_cache().lock()
+        && let Some(existing) = map.get(&key)
+    {
+        return Ok(existing.clone());
+    }
+    let symbols = store.all_symbols_with_source_cached()?;
+    let edges = codesight_analysis::graph::build_call_edges(symbols.as_slice());
+    let arc = Arc::new(edges);
+    if let Ok(mut map) = call_edges_cache().lock() {
+        let path = store.db_path().to_path_buf();
+        map.retain(|(p, _), _| p != &path);
+        map.insert(key, arc.clone());
+    }
+    Ok(arc)
+}
 
 #[derive(Clone)]
 pub(super) struct BundleRow {
@@ -93,8 +133,8 @@ impl CodeService {
         // per-ref (to materialize imports) but dedup across refs that
         // share the same file so large bundles don't re-read.
         let mut rows = Vec::with_capacity(sym_refs.len());
-        let mut file_cache: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let mut file_cache: FxHashMap<String, String> =
+            FxHashMap::default();
         for sym_id in ids {
             let Some(record) = records.get(&sym_id) else {
                 return Ok(Err(self.error_response(
@@ -181,6 +221,7 @@ impl CodeService {
         if depth == 0 || base.is_empty() {
             return Ok(Ok(base));
         }
+        let total_start = std::time::Instant::now();
         let mut seen: BTreeSet<String> = base.iter().map(|r| r.sym_id.clone()).collect();
         let mut extras: Vec<BundleRow> = Vec::new();
 
@@ -197,10 +238,12 @@ impl CodeService {
             }
         }
 
-        // Depth 2: one caller + one callee per base row.
+        // Depth 2: one caller + one callee per base row, walking the cached
+        // call-edge set (process-global, keyed on `(db_path, index_version)`
+        // — see `cached_call_edges` above). Without the cache, building the
+        // ~110k-edge call graph re-runs on every dispatch, costing ~265ms.
         if depth >= 2 {
-            let sym_infos = try_store!(self, timer, store.all_symbols_with_source());
-            let edges = codesight_analysis::graph::build_call_edges(&sym_infos);
+            let edges = try_store!(self, timer, cached_call_edges(store));
             for row in &base {
                 let callers =
                     codesight_analysis::graph::find_callers(&row.sym_id, &edges, 1);
@@ -225,20 +268,32 @@ impl CodeService {
             extras.retain(|r| !codesight_language_support::is_test_file(&r.file));
         }
 
-        // ROADMAP P1.5 #2: greedy centrality pack. When we have a dependency
-        // graph to rank by, sort the expansion pool by per-file PageRank so
-        // the most-central symbols win the `max_tokens` budget downstream.
-        // Files missing from the graph (new files, leafs) get score 0 and
-        // sort after ranked rows but still land ahead of the `max_tokens`
-        // cut. Empty pagerank → no reorder.
-        if let Ok(adj) = store.dependency_graph() {
-            let pr = codesight_analysis::graph::compute_pagerank(&adj, 0.85, 50, 1e-5);
+        // Greedy centrality pack: PageRank scores are cached on the store
+        // (process-global, version-keyed), so repeated bundles within an
+        // index generation skip the ~1.6s petgraph 50-iter compute.
+        let pr_scores = store
+            .pagerank_scores_cached_with(|adj| {
+                codesight_analysis::graph::compute_pagerank(adj, 0.85, 50, 1e-5).scores
+            })
+            .ok();
+        if let Some(scores) = pr_scores {
             extras.sort_by(|a, b| {
-                let sa = pr.scores.get(&a.file).copied().unwrap_or(0.0);
-                let sb = pr.scores.get(&b.file).copied().unwrap_or(0.0);
+                let sa = scores.get(&a.file).copied().unwrap_or(0.0);
+                let sb = scores.get(&b.file).copied().unwrap_or(0.0);
                 sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
             });
         }
+
+        let total_ms = total_start.elapsed().as_millis();
+        // Kept at debug level so production logs stay quiet but
+        // `RUST_LOG=codesight::bundle_timing=debug` surfaces per-call
+        // timings if a regression returns.
+        tracing::debug!(
+            target: "codesight::bundle_timing",
+            total_ms,
+            extras_len = extras.len(),
+            "expand_bundle_by_depth"
+        );
 
         let mut out = base;
         out.extend(extras);
@@ -290,7 +345,7 @@ impl CodeService {
 /// get filtered so tiny bundles don't balloon on `Option`, `Result`, `Vec`.
 fn collect_type_name_candidates(rows: &[BundleRow]) -> BTreeSet<String> {
     const IGNORE: &[&str] = &[
-        "Option", "Result", "Vec", "String", "HashMap", "HashSet", "BTreeMap",
+        "Option", "Result", "Vec", "String", "FxHashMap", "FxHashSet", "BTreeMap",
         "BTreeSet", "Box", "Arc", "Rc", "Cell", "RefCell", "Mutex", "Self",
         "None", "Some", "Ok", "Err",
     ];

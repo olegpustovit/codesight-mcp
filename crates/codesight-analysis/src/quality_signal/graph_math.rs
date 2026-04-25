@@ -1,7 +1,7 @@
 //! Graph-shaped math backing the structural signal: boundary cohesion,
 //! condensed dependency depth, longest-path-in-DAG, and the Gini coefficient.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use petgraph::algo::toposort;
 use petgraph::graph::DiGraph;
@@ -12,7 +12,7 @@ fn top_level_module(path: &str) -> &str {
 
 /// Boundary-cohesion: share of dependency edges that stay within the same
 /// top-level directory. Returns `None` when the graph has no usable edges.
-pub fn compute_module_cohesion(adj: &HashMap<String, Vec<String>>) -> Option<f64> {
+pub fn compute_module_cohesion(adj: &FxHashMap<String, Vec<String>>) -> Option<f64> {
     let mut total = 0usize;
     let mut internal = 0usize;
     for (src, targets) in adj {
@@ -31,14 +31,14 @@ pub fn compute_module_cohesion(adj: &HashMap<String, Vec<String>>) -> Option<f64
 
 /// Compute layering depth on the SCC-condensed DAG.
 pub fn condensed_dependency_depth(
-    adj: &HashMap<String, Vec<String>>,
+    adj: &FxHashMap<String, Vec<String>>,
     cycles: &[Vec<String>],
 ) -> Option<usize> {
     if adj.is_empty() {
         return None;
     }
 
-    let mut node_to_scc: HashMap<&str, usize> = HashMap::new();
+    let mut node_to_scc: FxHashMap<&str, usize> = FxHashMap::default();
     let mut scc_count = 0usize;
 
     for scc in cycles {
@@ -54,7 +54,7 @@ pub fn condensed_dependency_depth(
         }
     }
 
-    let mut dag: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut dag: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
     for (src, targets) in adj {
         let src_scc = node_to_scc[src.as_str()];
         for tgt in targets {
@@ -70,7 +70,7 @@ pub fn condensed_dependency_depth(
 }
 
 /// Longest path in a DAG via `petgraph::algo::toposort` + linear DP.
-fn longest_path_in_dag(dag: &HashMap<usize, Vec<usize>>, node_count: usize) -> Option<usize> {
+fn longest_path_in_dag(dag: &FxHashMap<usize, Vec<usize>>, node_count: usize) -> Option<usize> {
     let mut g: DiGraph<(), ()> = DiGraph::with_capacity(node_count, 0);
     let nodes: Vec<_> = (0..node_count).map(|_| g.add_node(())).collect();
     for (&u, targets) in dag {
@@ -163,36 +163,42 @@ mod tests {
 
     #[test]
     fn cohesion_all_internal() {
-        let adj = HashMap::from([
+        let adj: FxHashMap<String, Vec<String>> = [
             ("src/a.rs".to_string(), vec!["src/b.rs".to_string()]),
             ("src/b.rs".to_string(), vec!["src/c.rs".to_string()]),
-        ]);
+        ]
+        .into_iter()
+        .collect();
         let c = compute_module_cohesion(&adj).unwrap();
         assert!((c - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn cohesion_all_external() {
-        let adj = HashMap::from([
+        let adj: FxHashMap<String, Vec<String>> = [
             ("src/a.rs".to_string(), vec!["tests/b.rs".to_string()]),
             ("tests/b.rs".to_string(), vec!["src/c.rs".to_string()]),
-        ]);
+        ]
+        .into_iter()
+        .collect();
         let c = compute_module_cohesion(&adj).unwrap();
         assert!(c < 0.01);
     }
 
     #[test]
     fn cohesion_empty_graph() {
-        let adj: HashMap<String, Vec<String>> = HashMap::new();
+        let adj: FxHashMap<String, Vec<String>> = FxHashMap::default();
         assert!(compute_module_cohesion(&adj).is_none());
     }
 
     #[test]
     fn depth_flat_graph() {
-        let adj = HashMap::from([
+        let adj: FxHashMap<String, Vec<String>> = [
             ("a".to_string(), vec!["b".to_string()]),
             ("b".to_string(), vec![]),
-        ]);
+        ]
+        .into_iter()
+        .collect();
         let cycles = find_cycles(&adj);
         let d = condensed_dependency_depth(&adj, &cycles).unwrap();
         assert_eq!(d, 1);
@@ -200,7 +206,7 @@ mod tests {
 
     #[test]
     fn depth_empty_graph() {
-        let adj: HashMap<String, Vec<String>> = HashMap::new();
+        let adj: FxHashMap<String, Vec<String>> = FxHashMap::default();
         assert!(condensed_dependency_depth(&adj, &[]).is_none());
     }
 }

@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::regex::RE;
 use crate::frameworks::ExtraImport;
 
 /// Map of Laravel facade names to their underlying classes.
-fn facade_map() -> HashMap<&'static str, &'static str> {
-    let mut m = HashMap::new();
+fn facade_map() -> FxHashMap<&'static str, &'static str> {
+    let mut m = FxHashMap::default();
     m.insert("Cache", r"Illuminate\Cache\CacheManager");
     m.insert("DB", r"Illuminate\Database\DatabaseManager");
     m.insert("Log", r"Illuminate\Log\LogManager");
@@ -27,7 +27,7 @@ fn facade_map() -> HashMap<&'static str, &'static str> {
 /// Extract facade usage from PHP content and return resolved imports.
 pub fn extract_facade_imports(content: &str) -> Vec<ExtraImport> {
     let facades = facade_map();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = FxHashSet::default();
     let mut imports = Vec::new();
 
     for cap in RE.facade_call.captures_iter(content) {

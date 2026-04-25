@@ -6,7 +6,7 @@ use crate::service::agent_v1::util::*;
 use crate::service::args::GetSectionArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(super) fn context_section(
@@ -150,7 +150,7 @@ impl CodeService {
         } else {
             store.sum_file_sizes_for_paths(&[file.to_string()]).unwrap_or(0)
         };
-        let timer = MetaBuilder::new(raw_bytes);
+        let timer = MetaBuilder::new(raw_bytes).with_confidence(Confidence::Safe);
         let mut response = self.success_response_with_warnings(&timer, body, warnings)?;
         if let Value::Object(ref mut top) = response {
             let n_anc = top

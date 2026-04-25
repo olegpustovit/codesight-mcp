@@ -1,13 +1,13 @@
 //! `inspect_graph` dependency modes: cycles + forward edges (with optional cross-repo edges).
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_language_support::imports_orchestration::{extract_imports, language_for_path};
 use codesight_language_support::packages::package_reference_evidence;
 use codesight_storage::storage::{IndexStore, list_repo_summaries};
@@ -22,7 +22,7 @@ impl CodeService {
         // ROADMAP P1.1: dependency / cycle graphs are metadata views with
         // no native-tool counterfactual, so surface `tokens_saved: null`
         // rather than charge against `repo_total_bytes`.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Safe);
         let adj = store.dependency_graph_strict()?;
         let cycles = codesight_analysis::graph::find_cycles(&adj);
         self.success_response(
@@ -45,7 +45,7 @@ impl CodeService {
         // ROADMAP P1.1: dependency / cycle graphs are metadata views with
         // no native-tool counterfactual, so surface `tokens_saved: null`
         // rather than charge against `repo_total_bytes`.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Safe);
         let adj = store.dependency_graph_with_import_quality()?;
         let all_edges: Vec<Value> = adj
             .iter()
@@ -147,7 +147,7 @@ impl CodeService {
                     }
                 }
             }
-            let mut seen: HashSet<String> = HashSet::new();
+            let mut seen: FxHashSet<String> = FxHashSet::default();
             cross_repo_edges.retain(|e| {
                 let key = format!("{}->{}:{}", e["from_repo"], e["to_repo"], e["package_name"]);
                 seen.insert(key)

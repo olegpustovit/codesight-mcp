@@ -2,7 +2,7 @@
 
 pub mod imports;
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::Path;
 
@@ -160,10 +160,10 @@ impl Language for Python {
         &self,
         edge: &ImportEdge,
         from_file: &str,
-        source_files: &HashSet<String>,
+        source_files: &FxHashSet<String>,
         known_files_vec: &[String],
-        alias_map: Option<&HashMap<String, Vec<String>>>,
-        _workspace_crates: Option<&HashMap<String, String>>,
+        alias_map: Option<&FxHashMap<String, Vec<String>>>,
+        _workspace_crates: Option<&FxHashMap<String, String>>,
     ) -> Option<String> {
         if let Some(p) = crate::imports_orchestration::resolve_specifier(
             self,

@@ -1,6 +1,7 @@
 //! Class inheritance line parsing and hierarchy views.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde::Serialize;
 
@@ -109,14 +110,14 @@ pub fn compute_hierarchy_view(rows: &[ClassIndexRow], class_query: &str) -> Opti
         .iter()
         .find(|r| r.name.to_ascii_lowercase() == needle)?;
 
-    let by_lower: HashMap<String, &ClassIndexRow> = rows
+    let by_lower: FxHashMap<String, &ClassIndexRow> = rows
         .iter()
         .map(|r| (r.name.to_ascii_lowercase(), r))
         .collect();
 
     let bases: Vec<Vec<String>> = rows.iter().map(|r| parse_bases(&r.header_line)).collect();
 
-    let row_index: HashMap<String, usize> = rows
+    let row_index: FxHashMap<String, usize> = rows
         .iter()
         .enumerate()
         .map(|(i, r)| (r.name.to_ascii_lowercase(), i))
@@ -142,8 +143,8 @@ fn ancestors_of(
     target: &ClassIndexRow,
     _rows: &[ClassIndexRow],
     bases: &[Vec<String>],
-    by_lower: &HashMap<String, &ClassIndexRow>,
-    row_index: &HashMap<String, usize>,
+    by_lower: &FxHashMap<String, &ClassIndexRow>,
+    row_index: &FxHashMap<String, usize>,
 ) -> Vec<HierarchyNode> {
     let ti = row_index[&target.name.to_ascii_lowercase()];
     let mut out = Vec::new();
@@ -178,7 +179,7 @@ fn descendants_of(
     bases: &[Vec<String>],
 ) -> Vec<HierarchyNode> {
     let tkey = target.name.to_ascii_lowercase();
-    let mut child_map: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut child_map: FxHashMap<String, Vec<usize>> = FxHashMap::default();
     for (i, rb) in bases.iter().enumerate() {
         for b in rb {
             child_map.entry(b.to_ascii_lowercase()).or_default().push(i);
@@ -186,7 +187,7 @@ fn descendants_of(
     }
 
     let mut out = Vec::new();
-    let mut queued: HashSet<usize> = HashSet::new();
+    let mut queued: FxHashSet<usize> = FxHashSet::default();
     let mut queue: VecDeque<usize> = VecDeque::new();
     if let Some(kids) = child_map.get(&tkey) {
         for &idx in kids {

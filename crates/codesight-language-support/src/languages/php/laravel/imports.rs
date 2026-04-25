@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 use crate::frameworks::ExtraImport;
@@ -14,8 +14,8 @@ use super::snapshot::LaravelSnapshot;
 pub fn compute_extra_imports(
     snapshot: &LaravelSnapshot,
     root: &Path,
-) -> HashMap<String, Vec<ExtraImport>> {
-    let mut imports = HashMap::new();
+) -> FxHashMap<String, Vec<ExtraImport>> {
+    let mut imports = FxHashMap::default();
 
     collect_route_controller_imports(snapshot, root, &mut imports);
     collect_model_relationship_imports(snapshot, root, &mut imports);
@@ -32,7 +32,7 @@ pub fn compute_extra_imports(
 fn collect_route_controller_imports(
     snapshot: &LaravelSnapshot,
     root: &Path,
-    imports: &mut HashMap<String, Vec<ExtraImport>>,
+    imports: &mut FxHashMap<String, Vec<ExtraImport>>,
 ) {
     if snapshot.routes.is_empty() {
         return;
@@ -52,7 +52,7 @@ fn collect_route_controller_imports(
             continue;
         }
 
-        let mut seen_controllers = HashSet::new();
+        let mut seen_controllers = FxHashSet::default();
         let mut route_imports = Vec::new();
         for capture in RE.route_controller_fqn.captures_iter(&content) {
             let fqn = capture[1].to_string();
@@ -82,14 +82,14 @@ fn collect_route_controller_imports(
 fn collect_model_relationship_imports(
     snapshot: &LaravelSnapshot,
     root: &Path,
-    imports: &mut HashMap<String, Vec<ExtraImport>>,
+    imports: &mut FxHashMap<String, Vec<ExtraImport>>,
 ) {
     for (model_path, model_info) in &snapshot.models {
         if model_info.relationships.is_empty() {
             continue;
         }
 
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         let mut model_imports = Vec::new();
         if let Ok(content) = std::fs::read_to_string(root.join(model_path)) {
             for capture in RE.model_fqn_class.captures_iter(&content) {
@@ -125,7 +125,7 @@ fn collect_model_relationship_imports(
 fn collect_blade_imports(
     snapshot: &LaravelSnapshot,
     root: &Path,
-    imports: &mut HashMap<String, Vec<ExtraImport>>,
+    imports: &mut FxHashMap<String, Vec<ExtraImport>>,
 ) {
     for blade_path in &snapshot.blade_files {
         let full_path = root.join(blade_path);
@@ -149,7 +149,7 @@ fn collect_blade_imports(
     }
 }
 
-fn collect_facade_imports(root: &Path, imports: &mut HashMap<String, Vec<ExtraImport>>) {
+fn collect_facade_imports(root: &Path, imports: &mut FxHashMap<String, Vec<ExtraImport>>) {
     for dir in ["app/Http/Controllers", "app/Services", "app/Models"] {
         let full = root.join(dir);
         if full.exists() {
@@ -158,7 +158,7 @@ fn collect_facade_imports(root: &Path, imports: &mut HashMap<String, Vec<ExtraIm
     }
 }
 
-fn scan_php_for_facades(dir: &Path, root: &Path, imports: &mut HashMap<String, Vec<ExtraImport>>) {
+fn scan_php_for_facades(dir: &Path, root: &Path, imports: &mut FxHashMap<String, Vec<ExtraImport>>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return,
@@ -195,7 +195,7 @@ fn scan_php_for_facades(dir: &Path, root: &Path, imports: &mut HashMap<String, V
     }
 }
 
-fn collect_inertia_imports(root: &Path, imports: &mut HashMap<String, Vec<ExtraImport>>) {
+fn collect_inertia_imports(root: &Path, imports: &mut FxHashMap<String, Vec<ExtraImport>>) {
     let controllers_dir = root.join("app/Http/Controllers");
     if !controllers_dir.exists() {
         return;
@@ -219,7 +219,7 @@ fn collect_inertia_imports(root: &Path, imports: &mut HashMap<String, Vec<ExtraI
             Err(_) => continue,
         };
         let pages = extract_inertia_renders(&content);
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         for page in pages {
             if let Some(resolved) = resolve_inertia_page(root, &page)
                 && seen.insert(resolved.clone())
@@ -236,7 +236,7 @@ fn collect_inertia_imports(root: &Path, imports: &mut HashMap<String, Vec<ExtraI
 fn collect_api_call_imports(
     snapshot: &LaravelSnapshot,
     root: &Path,
-    imports: &mut HashMap<String, Vec<ExtraImport>>,
+    imports: &mut FxHashMap<String, Vec<ExtraImport>>,
 ) {
     if snapshot.routes.is_empty() {
         return;
@@ -252,7 +252,7 @@ fn scan_js_for_api_calls(
     dir: &Path,
     root: &Path,
     routes: &[super::types::RouteInfo],
-    imports: &mut HashMap<String, Vec<ExtraImport>>,
+    imports: &mut FxHashMap<String, Vec<ExtraImport>>,
 ) {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,

@@ -1,5 +1,6 @@
 //! OpenAPI/Swagger and generic JSON to Markdown for section extraction.
 
+use rustc_hash::FxHashSet;
 use std::collections::BTreeMap;
 
 pub fn sniff_openapi(content: &str, file_path: &str) -> bool {
@@ -25,7 +26,7 @@ pub fn convert_openapi(content: &str) -> String {
             Err(_) => return String::new(),
         }
     } else {
-        match serde_yaml::from_str(content) {
+        match serde_yml::from_str(content) {
             Ok(v) => v,
             Err(_) => return String::new(),
         }
@@ -127,7 +128,7 @@ pub fn convert_openapi(content: &str) -> String {
             }
             // Render properties
             if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
-                let required: std::collections::HashSet<&str> = schema
+                let required: FxHashSet<&str> = schema
                     .get("required")
                     .and_then(|v| v.as_array())
                     .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
@@ -217,10 +218,9 @@ fn render_operation(out: &mut String, op: &serde_json::Value) {
 /// Arrays are rendered as bullet lists.  Scalar roots return empty.
 /// Supports JSONC (strips `//` and `/* */` comments before parsing).
 pub fn convert_json(content: &str, file_path: &str) -> String {
-    let stripped = strip_jsonc_comments(content);
-    let doc: serde_json::Value = match serde_json::from_str(&stripped) {
-        Ok(v) => v,
-        Err(_) => return String::new(),
+    let doc = match jsonc_parser::parse_to_serde_value(content, &Default::default()) {
+        Ok(Some(v)) => v,
+        _ => return String::new(),
     };
 
     let title = if file_path.is_empty() {
@@ -312,54 +312,3 @@ fn render_json_value(value: &serde_json::Value) -> String {
     }
 }
 
-/// Strip JSONC-style comments (`//` line comments, `/* */` block comments).
-fn strip_jsonc_comments(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    let mut in_string = false;
-
-    while let Some(ch) = chars.next() {
-        if in_string {
-            result.push(ch);
-            if ch == '\\' {
-                if let Some(&next) = chars.peek() {
-                    result.push(next);
-                    chars.next();
-                }
-            } else if ch == '"' {
-                in_string = false;
-            }
-        } else if ch == '"' {
-            in_string = true;
-            result.push(ch);
-        } else if ch == '/' {
-            match chars.peek() {
-                Some(&'/') => {
-                    // Line comment — skip to end of line
-                    chars.next();
-                    for c in chars.by_ref() {
-                        if c == '\n' {
-                            result.push('\n');
-                            break;
-                        }
-                    }
-                }
-                Some(&'*') => {
-                    // Block comment — skip to */
-                    chars.next();
-                    let mut prev = ' ';
-                    for c in chars.by_ref() {
-                        if prev == '*' && c == '/' {
-                            break;
-                        }
-                        prev = c;
-                    }
-                }
-                _ => result.push(ch),
-            }
-        } else {
-            result.push(ch);
-        }
-    }
-    result
-}

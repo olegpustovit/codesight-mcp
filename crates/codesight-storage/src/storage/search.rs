@@ -1,6 +1,6 @@
 //! BM25 and lightweight symbol search with token overlap reranking.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use rusqlite::{named_params, types::Value as SqlValue};
 
@@ -94,7 +94,7 @@ impl IndexStore {
             })
         })?;
 
-        let mut seen_ids = HashSet::new();
+        let mut seen_ids = FxHashSet::default();
         let mut candidates = Vec::new();
         for row in rows {
             let candidate = row?;
@@ -365,7 +365,8 @@ fn rerank_candidate(
         + exact_phrase)
         .min(1.0);
     result.match_type = None;
-    result.fuzzy_similarity = None;
+    result.subsequence_score = None;
+    result.edit_similarity = None;
     result.edit_distance = None;
     result
 }
@@ -374,7 +375,7 @@ fn overlap(query_tokens: &[String], candidate_tokens: &[String]) -> f64 {
     if query_tokens.is_empty() {
         return 0.0;
     }
-    let candidate_set = candidate_tokens.iter().collect::<HashSet<_>>();
+    let candidate_set = candidate_tokens.iter().collect::<FxHashSet<_>>();
     let matched = query_tokens
         .iter()
         .filter(|token| candidate_set.contains(token))

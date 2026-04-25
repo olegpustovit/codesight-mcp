@@ -13,4 +13,7 @@ impl Language for TreeSitterQuerySupport {
     fn manifest(&self) -> &'static LanguageManifest {
         &TREE_SITTER_QUERY_MANIFEST
     }
+    fn is_reference_target(&self) -> bool {
+        false
+    }
 }

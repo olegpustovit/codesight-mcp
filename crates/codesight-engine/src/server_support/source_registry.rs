@@ -21,7 +21,7 @@
 //! invalidate|delete|rebuild` so the *next* reader refreshes without
 //! waiting for the fingerprint check.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -45,7 +45,7 @@ pub struct CachedSource {
 /// Process-wide, `Send + Sync`. One per `CodeService`.
 #[derive(Debug, Default)]
 pub struct SourceRegistry {
-    inner: RwLock<HashMap<String, Arc<CachedSource>>>,
+    inner: RwLock<FxHashMap<String, Arc<CachedSource>>>,
 }
 
 impl SourceRegistry {

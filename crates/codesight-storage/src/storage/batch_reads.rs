@@ -9,7 +9,7 @@
 //! variant in a loop. The single-key methods are kept for genuinely
 //! one-off lookups (e.g. `CodeService::resolve_stores`).
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use rusqlite::OptionalExtension;
@@ -55,8 +55,8 @@ impl IndexStore {
     pub fn file_outlines_batch(
         &self,
         paths: &[&str],
-    ) -> anyhow::Result<HashMap<String, Vec<serde_json::Value>>> {
-        let mut out: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+    ) -> anyhow::Result<FxHashMap<String, Vec<serde_json::Value>>> {
+        let mut out: FxHashMap<String, Vec<serde_json::Value>> = FxHashMap::default();
         if paths.is_empty() {
             return Ok(out);
         }
@@ -93,8 +93,8 @@ impl IndexStore {
 
     /// Batch-variant of [`IndexStore::file_language`]. Returns a
     /// `path → language` map; missing paths map to absent keys.
-    pub fn file_languages_batch(&self, paths: &[&str]) -> anyhow::Result<HashMap<String, String>> {
-        let mut out: HashMap<String, String> = HashMap::new();
+    pub fn file_languages_batch(&self, paths: &[&str]) -> anyhow::Result<FxHashMap<String, String>> {
+        let mut out: FxHashMap<String, String> = FxHashMap::default();
         if paths.is_empty() {
             return Ok(out);
         }
@@ -117,8 +117,8 @@ impl IndexStore {
     }
 
     /// Batch-variant of [`IndexStore::file_bytes`].
-    pub fn file_bytes_batch(&self, paths: &[&str]) -> anyhow::Result<HashMap<String, u64>> {
-        let mut out: HashMap<String, u64> = HashMap::new();
+    pub fn file_bytes_batch(&self, paths: &[&str]) -> anyhow::Result<FxHashMap<String, u64>> {
+        let mut out: FxHashMap<String, u64> = FxHashMap::default();
         if paths.is_empty() {
             return Ok(out);
         }
@@ -142,8 +142,8 @@ impl IndexStore {
 
     /// Batch-variant of [`IndexStore::file_exists`]. Returns the set of
     /// input paths that are present in the `files` table.
-    pub fn files_exist_batch(&self, paths: &[&str]) -> anyhow::Result<HashSet<String>> {
-        let mut out: HashSet<String> = HashSet::new();
+    pub fn files_exist_batch(&self, paths: &[&str]) -> anyhow::Result<FxHashSet<String>> {
+        let mut out: FxHashSet<String> = FxHashSet::default();
         if paths.is_empty() {
             return Ok(out);
         }
@@ -173,8 +173,8 @@ impl IndexStore {
         &self,
         paths: &[&str],
         kinds: &[&str],
-    ) -> anyhow::Result<HashSet<String>> {
-        let mut out: HashSet<String> = HashSet::new();
+    ) -> anyhow::Result<FxHashSet<String>> {
+        let mut out: FxHashSet<String> = FxHashSet::default();
         if paths.is_empty() || kinds.is_empty() {
             return Ok(out);
         }
@@ -204,8 +204,8 @@ impl IndexStore {
     pub fn symbol_records_batch(
         &self,
         ids: &[&str],
-    ) -> anyhow::Result<HashMap<String, SymbolRecord>> {
-        let mut out: HashMap<String, SymbolRecord> = HashMap::new();
+    ) -> anyhow::Result<FxHashMap<String, SymbolRecord>> {
+        let mut out: FxHashMap<String, SymbolRecord> = FxHashMap::default();
         if ids.is_empty() {
             return Ok(out);
         }
@@ -254,8 +254,8 @@ impl IndexStore {
     pub fn symbol_enriched_batch(
         &self,
         ids: &[&str],
-    ) -> anyhow::Result<HashMap<String, SymbolEnriched>> {
-        let mut out: HashMap<String, SymbolEnriched> = HashMap::new();
+    ) -> anyhow::Result<FxHashMap<String, SymbolEnriched>> {
+        let mut out: FxHashMap<String, SymbolEnriched> = FxHashMap::default();
         if ids.is_empty() {
             return Ok(out);
         }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::frameworks::FileContext;
 
@@ -15,8 +15,8 @@ pub fn render_file_context(snapshot: &DbtSnapshot, rel_path: &str) -> Option<Fil
         .map(|model| model.to_file_context())
 }
 
-pub fn metadata(snapshot: &DbtSnapshot) -> HashMap<String, serde_json::Value> {
-    let mut meta = HashMap::new();
+pub fn metadata(snapshot: &DbtSnapshot) -> FxHashMap<String, serde_json::Value> {
+    let mut meta = FxHashMap::default();
     meta.insert(
         "dbt_doc_blocks".into(),
         serde_json::Value::Number(serde_json::Number::from(snapshot.doc_blocks.len())),

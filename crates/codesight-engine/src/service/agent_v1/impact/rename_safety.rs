@@ -7,7 +7,7 @@ use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::agent_v1::util::{ref_requires_strict_resolution, resolve_symbol_id_strict};
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_analysis::impact;
 
 impl CodeService {
@@ -101,7 +101,24 @@ impl CodeService {
             }
         };
         // ROADMAP P1.1: structural analysis — null baseline.
-        let timer = MetaBuilder::new(0);
+        // Confidence: `safe` only when the reference scan covered every
+        // language and the rename_safety_payload's own `confidence` field
+        // is `"high"`. Mixed coverage / lower internal confidence ⇒
+        // `partial`.
+        let partial_lang = data
+            .pointer("/reference_scan/partial_language_coverage")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let internal_conf_high = data
+            .pointer("/reference_scan/confidence")
+            .and_then(Value::as_str)
+            == Some("high");
+        let confidence = if !partial_lang && internal_conf_high {
+            Confidence::Safe
+        } else {
+            Confidence::Partial
+        };
+        let timer = MetaBuilder::new(0).with_confidence(confidence);
         // ROADMAP P0.2 #3: echo which ref shape resolved so agents can
         // debug silent ambiguity. Omitted when resolution fell back to the
         // permissive opaque-id path.

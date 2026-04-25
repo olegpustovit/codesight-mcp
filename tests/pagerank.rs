@@ -1,6 +1,6 @@
 //! Integration tests: pagerank.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fs;
 use std::path::Path;
 
@@ -82,12 +82,14 @@ fn inspect_centrality(
 
 #[test]
 fn pagerank_scores_sum_to_one() {
-    let adj: HashMap<String, Vec<String>> = HashMap::from([
+    let adj: FxHashMap<String, Vec<String>> = [
         ("a.py".into(), vec!["b.py".into()]),
         ("b.py".into(), vec![]),
         ("c.py".into(), vec!["b.py".into()]),
         ("d.py".into(), vec!["b.py".into()]),
-    ]);
+    ]
+    .into_iter()
+    .collect();
     let pr = compute_pagerank(&adj, 0.85, 100, 1e-6);
     let sum: f64 = pr.scores.values().sum();
     assert!(
@@ -98,11 +100,13 @@ fn pagerank_scores_sum_to_one() {
 
 #[test]
 fn pagerank_most_imported_ranks_highest() {
-    let adj: HashMap<String, Vec<String>> = HashMap::from([
+    let adj: FxHashMap<String, Vec<String>> = [
         ("a.py".into(), vec!["b.py".into()]),
         ("b.py".into(), vec![]),
         ("c.py".into(), vec!["b.py".into()]),
-    ]);
+    ]
+    .into_iter()
+    .collect();
     let pr = compute_pagerank(&adj, 0.85, 100, 1e-6);
     let score_b = pr.scores["b.py"];
     let score_a = pr.scores["a.py"];
@@ -119,8 +123,8 @@ fn pagerank_most_imported_ranks_highest() {
 
 #[test]
 fn pagerank_empty_import_graph() {
-    let adj: HashMap<String, Vec<String>> =
-        HashMap::from([("a.py".into(), vec![]), ("b.py".into(), vec![])]);
+    let adj: FxHashMap<String, Vec<String>> =
+        [("a.py".into(), vec![]), ("b.py".into(), vec![])].into_iter().collect();
     let pr = compute_pagerank(&adj, 0.85, 100, 1e-6);
     let score_a = pr.scores["a.py"];
     let score_b = pr.scores["b.py"];
@@ -136,7 +140,7 @@ fn pagerank_empty_import_graph() {
 
 #[test]
 fn pagerank_empty_file_list() {
-    let adj: HashMap<String, Vec<String>> = HashMap::new();
+    let adj: FxHashMap<String, Vec<String>> = FxHashMap::default();
     let pr = compute_pagerank(&adj, 0.85, 100, 1e-6);
     assert!(pr.scores.is_empty());
     assert_eq!(pr.iterations, 0);
@@ -144,11 +148,13 @@ fn pagerank_empty_file_list() {
 
 #[test]
 fn pagerank_convergence_reported() {
-    let adj: HashMap<String, Vec<String>> = HashMap::from([
+    let adj: FxHashMap<String, Vec<String>> = [
         ("a.py".into(), vec!["b.py".into()]),
         ("b.py".into(), vec!["c.py".into()]),
         ("c.py".into(), vec!["a.py".into()]),
-    ]);
+    ]
+    .into_iter()
+    .collect();
     let pr = compute_pagerank(&adj, 0.85, 100, 1e-6);
     assert!(pr.iterations >= 1, "should iterate at least once");
     assert!(pr.iterations <= 100, "should converge within max_iter");
@@ -156,12 +162,14 @@ fn pagerank_convergence_reported() {
 
 #[test]
 fn pagerank_in_out_degrees() {
-    let adj: HashMap<String, Vec<String>> = HashMap::from([
+    let adj: FxHashMap<String, Vec<String>> = [
         ("a.py".into(), vec!["b.py".into()]),
         ("b.py".into(), vec![]),
         ("c.py".into(), vec!["b.py".into()]),
         ("d.py".into(), vec!["b.py".into()]),
-    ]);
+    ]
+    .into_iter()
+    .collect();
     let degrees = compute_in_out_degrees(&adj);
     assert_eq!(degrees["b.py"].in_degree, 3, "b.py should have in_degree=3");
     assert_eq!(
@@ -177,10 +185,12 @@ fn pagerank_in_out_degrees() {
 
 #[test]
 fn pagerank_self_import_ignored() {
-    let adj: HashMap<String, Vec<String>> = HashMap::from([
+    let adj: FxHashMap<String, Vec<String>> = [
         ("a.py".into(), vec!["a.py".into(), "b.py".into()]),
         ("b.py".into(), vec![]),
-    ]);
+    ]
+    .into_iter()
+    .collect();
     let degrees = compute_in_out_degrees(&adj);
     assert_eq!(
         degrees["a.py"].in_degree, 0,
@@ -194,11 +204,13 @@ fn pagerank_self_import_ignored() {
 
 #[test]
 fn pagerank_circular_imports_no_infinite_loop() {
-    let adj: HashMap<String, Vec<String>> = HashMap::from([
+    let adj: FxHashMap<String, Vec<String>> = [
         ("a.py".into(), vec!["b.py".into()]),
         ("b.py".into(), vec!["c.py".into()]),
         ("c.py".into(), vec!["a.py".into()]),
-    ]);
+    ]
+    .into_iter()
+    .collect();
     let pr = compute_pagerank(&adj, 0.85, 100, 1e-6);
     assert!(pr.iterations <= 100, "should converge within max_iter");
     let sum: f64 = pr.scores.values().sum();

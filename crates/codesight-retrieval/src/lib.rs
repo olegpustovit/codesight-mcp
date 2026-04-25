@@ -4,7 +4,6 @@
 //! boundary. Semantic retrieval runs on a bundled on-device embedder
 //! (`embedder`) — there is no external LLM summarizer.
 
-pub mod bm25_reference;
 pub mod embedder;
 pub mod fusion;
 pub mod fuzzy;

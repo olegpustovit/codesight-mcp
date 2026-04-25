@@ -6,7 +6,7 @@
 //! subtrees (dependencies, build outputs, VCS metadata) cost O(1) instead of
 //! O(subtree size).
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -55,7 +55,7 @@ pub fn discover_package_names(root: &Path) -> Vec<String> {
         return Vec::new();
     }
 
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: FxHashSet<String> = FxHashSet::default();
     let mut ordered: Vec<String> = Vec::new();
 
     let walker = WalkDir::new(root)

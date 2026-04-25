@@ -1,11 +1,11 @@
 //! Git-derived file churn and dependency-graph fan-in — both inputs to the
 //! importance weighting used across every submetric.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
-pub fn compute_fan_in(adj: &HashMap<String, Vec<String>>) -> HashMap<String, usize> {
-    let mut fan_in: HashMap<String, usize> = HashMap::new();
+pub fn compute_fan_in(adj: &FxHashMap<String, Vec<String>>) -> FxHashMap<String, usize> {
+    let mut fan_in: FxHashMap<String, usize> = FxHashMap::default();
     for src in adj.keys() {
         fan_in.entry(src.clone()).or_insert(0);
     }
@@ -17,8 +17,8 @@ pub fn compute_fan_in(adj: &HashMap<String, Vec<String>>) -> HashMap<String, usi
     fan_in
 }
 
-pub fn compute_file_churn(root: &Path) -> HashMap<String, u64> {
-    let mut churn = HashMap::<String, u64>::new();
+pub fn compute_file_churn(root: &Path) -> FxHashMap<String, u64> {
+    let mut churn = FxHashMap::default();
     if !root.join(".git").exists() {
         return churn;
     }

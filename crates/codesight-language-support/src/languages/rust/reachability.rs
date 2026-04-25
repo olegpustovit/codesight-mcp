@@ -58,7 +58,7 @@ fn extract_pub_use_reexports(content: &str, source_file: &str, out: &mut Vec<Str
                 .filter(|s| !s.is_empty() && *s != "self" && *s != "*")
                 .collect()
         } else if prefix_segments.len() >= 2
-            && !prefix_segments.last().is_some_and(|s| *s == "*")
+            && prefix_segments.last().is_none_or(|s| *s != "*")
         {
             vec![prefix_segments[prefix_segments.len() - 1]]
         } else if prefix_segments.last().is_some_and(|s| *s == "*") {
@@ -83,14 +83,14 @@ fn extract_pub_use_reexports(content: &str, source_file: &str, out: &mut Vec<Str
         // resolution downstream can chain through. We emit the leaf module
         // as a symbol edge — `dead_code` joins by name to find files
         // owning a `mod_name` symbol.
-        if let Some(module_leaf) = prefix_segments.last() {
-            if *module_leaf != "*" {
-                out.push(StructuralEdge::new_symbol(
-                    source_file,
-                    *module_leaf,
-                    EdgeKind::ReExport,
-                ));
-            }
+        if let Some(module_leaf) = prefix_segments.last()
+            && *module_leaf != "*"
+        {
+            out.push(StructuralEdge::new_symbol(
+                source_file,
+                *module_leaf,
+                EdgeKind::ReExport,
+            ));
         }
     }
 }
@@ -232,16 +232,15 @@ fn extract_imports_as_symbol_edges(
             }
         }
         // Trailing leaf when no brace (`use foo::Bar;`)
-        if e.names.is_empty() {
-            if let Some(leaf) = e.specifier.rsplit("::").next() {
-                if !leaf.is_empty() && leaf != "*" && leaf != root {
-                    out.push(StructuralEdge::new_symbol(
-                        source_file,
-                        leaf,
-                        EdgeKind::ImportStatement,
-                    ));
-                }
-            }
+        if e.names.is_empty()
+            && let Some(leaf) = e.specifier.rsplit("::").next()
+            && !leaf.is_empty() && leaf != "*" && leaf != root
+        {
+            out.push(StructuralEdge::new_symbol(
+                source_file,
+                leaf,
+                EdgeKind::ImportStatement,
+            ));
         }
     }
 }

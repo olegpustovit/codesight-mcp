@@ -237,9 +237,14 @@ fn case_fuzzy_integration_cases() {
         .iter()
         .find(|it| it["ref"]["title"].as_str() == Some("fetcher_worker"))
         .expect("fetcher_worker fuzzy hit");
-    assert!(hit.get("fuzzy_similarity").is_some());
-    let sim = hit["fuzzy_similarity"].as_f64().unwrap();
+    assert!(hit.get("subsequence_score").is_some());
+    let sim = hit["subsequence_score"].as_f64().unwrap();
     assert!((0.0..=1.0).contains(&sim) && sim > 0.0);
+    // Companion field: edit_similarity (Jaro-Winkler) is also surfaced.
+    assert!(
+        hit.get("edit_similarity").is_some(),
+        "edit_similarity should accompany subsequence_score on fuzzy hits"
+    );
 
     let res = svc
         .dispatch(

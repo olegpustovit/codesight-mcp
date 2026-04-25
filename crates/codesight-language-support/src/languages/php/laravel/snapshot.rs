@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use crate::frameworks::{ExtraImport, FileContext, rel_path, walk_files};
@@ -20,13 +20,13 @@ pub struct LaravelStats {
 
 #[derive(Debug, Clone, Default)]
 pub struct LaravelSnapshot {
-    pub(crate) models: HashMap<String, ModelInfo>,
-    pub(crate) migrations: HashMap<String, MigrationInfo>,
+    pub(crate) models: FxHashMap<String, ModelInfo>,
+    pub(crate) migrations: FxHashMap<String, MigrationInfo>,
     pub(crate) routes: Vec<RouteInfo>,
     pub(crate) blade_files: Vec<String>,
-    pub(crate) file_contexts: HashMap<String, FileContext>,
+    pub(crate) file_contexts: FxHashMap<String, FileContext>,
     pub(crate) has_inertia: bool,
-    pub extra_imports: HashMap<String, Vec<ExtraImport>>,
+    pub extra_imports: FxHashMap<String, Vec<ExtraImport>>,
 }
 
 impl LaravelSnapshot {
@@ -51,7 +51,7 @@ impl LaravelSnapshot {
         }
     }
 
-    pub fn extra_imports(&self) -> HashMap<String, Vec<ExtraImport>> {
+    pub fn extra_imports(&self) -> FxHashMap<String, Vec<ExtraImport>> {
         self.extra_imports.clone()
     }
 

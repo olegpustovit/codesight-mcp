@@ -1,5 +1,6 @@
 //! `evaluate_impact analysis=changed_units` — per-symbol added/removed/modified set across two git refs.
 
+use rustc_hash::FxHashMap;
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
@@ -9,14 +10,14 @@ use crate::service::agent_v1::util::graph::{
 };
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(super) fn evaluate_impact_changed_units(
         &self,
         args: &EvaluateImpactArgs,
     ) -> anyhow::Result<Value> {
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
 
         let root = match store.root_path() {
@@ -132,11 +133,11 @@ impl CodeService {
                 &indexer,
             );
 
-            let old_map: std::collections::HashMap<&str, &str> = old_syms
+            let old_map: FxHashMap<&str, &str> = old_syms
                 .iter()
                 .map(|(n, s)| (n.as_str(), s.as_str()))
                 .collect();
-            let new_map: std::collections::HashMap<&str, &str> = new_syms
+            let new_map: FxHashMap<&str, &str> = new_syms
                 .iter()
                 .map(|(n, s)| (n.as_str(), s.as_str()))
                 .collect();

@@ -1,7 +1,7 @@
 //! Strongly connected components (Tarjan, via `petgraph`) for dependency
 //! cycle detection.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::DiGraph;
@@ -34,16 +34,16 @@ fn is_structural_back_edge(src: &str, tgt: &str) -> bool {
 /// Returns cycles as sorted Vec<String>. Structural back-edges from child
 /// modules to their ancestor `mod.rs` / `lib.rs` / `main.rs` are excluded
 /// from the SCC search so they do not inflate extractor-tree cycles.
-pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
+pub fn find_cycles(adj: &FxHashMap<String, Vec<String>>) -> Vec<Vec<String>> {
     let mut nodes: Vec<&str> = adj.keys().map(String::as_str).collect();
     nodes.sort();
 
     let mut graph: DiGraph<&str, ()> = DiGraph::new();
-    let mut idx: HashMap<&str, _> = HashMap::with_capacity(nodes.len());
+    let mut idx: FxHashMap<&str, _> = FxHashMap::with_capacity_and_hasher(nodes.len(), Default::default());
     for node in &nodes {
         idx.insert(*node, graph.add_node(*node));
     }
-    let mut seen: HashSet<(&str, &str)> = HashSet::new();
+    let mut seen: FxHashSet<(&str, &str)> = FxHashSet::default();
     for src in &nodes {
         let Some(targets) = adj.get(*src) else {
             continue;
@@ -79,8 +79,8 @@ pub fn find_cycles(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
 mod tests {
     use super::*;
 
-    fn adj(edges: &[(&str, &str)]) -> HashMap<String, Vec<String>> {
-        let mut a: HashMap<String, Vec<String>> = HashMap::new();
+    fn adj(edges: &[(&str, &str)]) -> FxHashMap<String, Vec<String>> {
+        let mut a: FxHashMap<String, Vec<String>> = FxHashMap::default();
         for (s, t) in edges {
             a.entry((*s).to_string())
                 .or_default()

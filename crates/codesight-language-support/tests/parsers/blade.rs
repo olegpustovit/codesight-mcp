@@ -1,5 +1,6 @@
 //! Integration tests: blade.
 
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 use codesight_core::StoredSymbol;
@@ -72,7 +73,7 @@ fn test_blade_extends_extracted() {
 #[test]
 fn test_blade_sections_extracted() {
     let syms = extract_symbols();
-    let section_names: std::collections::HashSet<_> = syms
+    let section_names: FxHashSet<_> = syms
         .iter()
         .filter(|s| s.kind == codesight_core::SymbolKind::Method)
         .map(|s| s.name.as_str())
@@ -100,7 +101,7 @@ fn test_blade_component_extracted() {
 #[test]
 fn test_blade_include_extracted() {
     let syms = extract_symbols();
-    let includes: std::collections::HashSet<_> = syms
+    let includes: FxHashSet<_> = syms
         .iter()
         .filter(|s| s.kind == codesight_core::SymbolKind::Function)
         .map(|s| s.name.as_str())
@@ -167,7 +168,7 @@ fn test_blade_symbols_sorted_by_line() {
 #[test]
 fn test_blade_symbol_ids_unique() {
     let syms = extract_symbols();
-    let ids: std::collections::HashSet<_> = syms.iter().map(|s| s.id.as_str()).collect();
+    let ids: FxHashSet<_> = syms.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(ids.len(), syms.len(), "duplicate symbol IDs found");
 }
 

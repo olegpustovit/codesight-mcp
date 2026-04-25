@@ -1,6 +1,7 @@
 //! Microsoft Dynamics 365 **AL** symbols: no dedicated query pack yet, so extraction
 //! follows AL brace/keyword structure with line-oriented rules instead of shared queries.
 
+use rustc_hash::FxHashMap;
 mod helpers;
 mod re;
 
@@ -380,7 +381,7 @@ impl AlExtractor {
         symbols.sort_by_key(|s| (s.start_byte, s.end_byte));
 
         // Deduplicate IDs by appending a counter suffix
-        let mut id_counts = std::collections::HashMap::<String, u32>::new();
+        let mut id_counts = FxHashMap::<String, u32>::default();
         for sym in &mut symbols {
             let count = id_counts.entry(sym.id.clone()).or_insert(0);
             *count += 1;

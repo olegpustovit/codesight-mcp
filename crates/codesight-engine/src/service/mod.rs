@@ -7,7 +7,7 @@ pub(crate) mod file_watcher;
 pub(crate) mod helpers;
 pub mod savings;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{
     Arc, Mutex, OnceLock, PoisonError, RwLock, Weak,
@@ -326,7 +326,7 @@ impl CodeService {
         &self,
         store: &codesight_storage::storage::IndexStore,
     ) -> anyhow::Result<(f64, Vec<QualityHotspotMarker>)> {
-        let mut file_hotspots: HashMap<String, u64> = HashMap::new();
+        let mut file_hotspots: FxHashMap<String, u64> = FxHashMap::default();
         let mut total_complexity = 0_u64;
         let mut function_count = 0_u64;
 

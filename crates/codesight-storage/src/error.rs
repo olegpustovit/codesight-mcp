@@ -13,4 +13,9 @@ pub enum StorageError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     WalkDir(#[from] walkdir::Error),
+    /// Catch-all for typed storage-layer errors that don't map to a more
+    /// specific variant — e.g. an index file written by a newer binary
+    /// (`user_version > target`) when the running binary can't downgrade.
+    #[error("{0}")]
+    Other(String),
 }

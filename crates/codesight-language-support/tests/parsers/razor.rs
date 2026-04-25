@@ -1,5 +1,6 @@
 //! Integration tests: razor.
 
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 use codesight_core::{StoredSymbol, SymbolKind};
@@ -185,7 +186,7 @@ fn test_parse_public_razor_layout_fixture() {
     assert!(view.is_some(), "_Layout class should exist");
     assert_eq!(view.unwrap().language.as_str(), "razor");
 
-    let scripts: std::collections::HashMap<_, _> = syms
+    let scripts: FxHashMap<_, _> = syms
         .iter()
         .filter(|s| s.kind == SymbolKind::Function)
         .map(|s| (s.name.as_str(), s))
@@ -235,7 +236,7 @@ fn test_blazor_component_symbol() {
 #[test]
 fn test_blazor_page_routes() {
     let syms = extract_blazor_symbols();
-    let routes: std::collections::HashMap<_, _> = syms
+    let routes: FxHashMap<_, _> = syms
         .iter()
         .filter(|s| s.signature.starts_with("@page "))
         .map(|s| (s.name.as_str(), s))
@@ -252,7 +253,7 @@ fn test_blazor_page_routes() {
 #[test]
 fn test_blazor_inject_directives() {
     let syms = extract_blazor_symbols();
-    let injects: std::collections::HashMap<_, _> = syms
+    let injects: FxHashMap<_, _> = syms
         .iter()
         .filter(|s| s.signature.starts_with("@inject "))
         .map(|s| (s.name.as_str(), s))
@@ -316,7 +317,7 @@ fn test_razor_code_block_nested_generic_method_via_tree_sitter() {
 #[test]
 fn test_blazor_html_ids() {
     let syms = extract_blazor_symbols();
-    let ids: std::collections::HashSet<_> = syms
+    let ids: FxHashSet<_> = syms
         .iter()
         .filter(|s| {
             s.kind == SymbolKind::Constant

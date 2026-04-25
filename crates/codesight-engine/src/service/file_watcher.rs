@@ -1,6 +1,6 @@
 //! Background file watcher: auto-reindexes workspaces after ingest.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
@@ -16,13 +16,13 @@ struct WatchHandle {
 }
 
 pub(crate) struct WatcherManager {
-    active: Mutex<HashMap<String, WatchHandle>>,
+    active: Mutex<FxHashMap<String, WatchHandle>>,
 }
 
 impl WatcherManager {
     pub fn new() -> Self {
         Self {
-            active: Mutex::new(HashMap::new()),
+            active: Mutex::new(FxHashMap::default()),
         }
     }
 
@@ -104,7 +104,7 @@ fn collect_changed_paths(
     root: &Path,
     storage_dir: &Path,
 ) -> Vec<PathBuf> {
-    let mut paths = HashSet::new();
+    let mut paths = FxHashSet::default();
     for event in events {
         use notify::EventKind;
         match &event.kind {

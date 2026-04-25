@@ -20,9 +20,12 @@
 //! path for languages that have explicit imports; the usage scan is a
 //! structural fallback that catches intra-module access.
 
-use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
-use codesight_language_support::{is_code_extension, is_vendored_path};
+use regex::Regex;
+use rustc_hash::{FxHashMap, FxHashSet};
+
+use codesight_language_support::{is_code_extension, is_non_code_reference_path, is_vendored_path};
 use codesight_storage::storage::IndexStore;
 
 /// Short identifier names are near-guaranteed to collide with locals,
@@ -35,11 +38,9 @@ const MIN_SYMBOL_NAME_LEN: usize = 3;
 /// (`fn`, `def`, `class`, …) come from
 /// [`codesight_language_support::all_reserved_identifiers`]; this list
 /// is the cross-language verb noise that no single language owns.
-const GENERIC_VERB_STOPLIST: &[&str] = &[
-    // 3-char stdlib nouns — ubiquitous as parameters / locals
+static GENERIC_VERB_STOPLIST: phf::Set<&'static str> = phf::phf_set! {
     "str", "int", "num", "val", "ref", "tag", "key", "row", "col", "idx",
     "err", "ctx", "buf", "out", "fmt", "doc", "end", "foo", "bar", "baz",
-    // Generic lifecycle / accessor verbs
     "new", "init", "build", "make", "create", "start", "stop", "begin",
     "finish", "close", "open", "drop", "clone", "copy", "from", "into",
     "with", "get", "set", "add", "put", "run", "call", "apply", "exec",
@@ -53,13 +54,13 @@ const GENERIC_VERB_STOPLIST: &[&str] = &[
     "hash", "equal", "compare", "cmp", "partial_cmp", "default", "value",
     "name", "path", "file", "line", "kind", "entry", "node",
     "data", "meta", "state", "status", "result", "error", "option",
-];
+};
 
-fn build_identifier_stoplist() -> HashSet<String> {
-    let mut set: HashSet<String> = GENERIC_VERB_STOPLIST
-        .iter()
-        .map(|s| s.to_ascii_lowercase())
-        .collect();
+static IDENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[A-Za-z_][A-Za-z0-9_]*").unwrap());
+
+fn build_identifier_stoplist() -> FxHashSet<String> {
+    let mut set: FxHashSet<String> = GENERIC_VERB_STOPLIST.iter().map(|s| (*s).to_string()).collect();
     for kw in codesight_language_support::all_reserved_identifiers() {
         set.insert(kw.to_ascii_lowercase());
     }
@@ -101,7 +102,7 @@ fn is_edge_target_kind(kind: &str, name: &str) -> bool {
 /// types are excluded — a symbol name appearing in those files is
 /// noise, not a real usage edge.
 fn is_source_file_candidate(path: &str) -> bool {
-    if is_vendored_path(path) {
+    if is_vendored_path(path) || is_non_code_reference_path(path) {
         return false;
     }
     let ext = path.rsplit('.').next().unwrap_or("");
@@ -122,12 +123,12 @@ fn is_source_file_candidate(path: &str) -> bool {
 /// budget on the repos we target.
 pub fn build_symbol_usage_adjacency(
     store: &IndexStore,
-) -> anyhow::Result<HashMap<String, Vec<String>>> {
+) -> anyhow::Result<FxHashMap<String, Vec<String>>> {
     let symbols = store.all_symbols_with_source()?;
     let contents = store.all_file_contents().unwrap_or_default();
     let stoplist = build_identifier_stoplist();
 
-    let mut by_name: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut by_name: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
     for sym in &symbols {
         // Only named types and top-level free functions produce
         // high-signal edges. Methods collide on name across types
@@ -159,7 +160,7 @@ pub fn build_symbol_usage_adjacency(
             .insert(sym.file.clone());
     }
 
-    let mut adj: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut adj: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
     for (file_path, content) in &contents {
         // A roadmap, tokenizer dump, or tree-sitter query file can't
         // "import" a symbol. Skip the whole scan for these — also the
@@ -167,8 +168,8 @@ pub fn build_symbol_usage_adjacency(
         if !is_source_file_candidate(file_path) {
             continue;
         }
-        for token in iter_ascii_identifiers(content) {
-            let Some(defining_files) = by_name.get(token) else {
+        for m in IDENT_RE.find_iter(content) {
+            let Some(defining_files) = by_name.get(m.as_str()) else {
                 continue;
             };
             for def_file in defining_files {
@@ -198,10 +199,10 @@ pub fn build_symbol_usage_adjacency(
 /// Primary use: combine the stored `dependency_graph()` (explicit-import
 /// edges) with `build_symbol_usage_adjacency` (symbol-reference edges).
 pub fn union_adjacency(
-    primary: &HashMap<String, Vec<String>>,
-    secondary: &HashMap<String, Vec<String>>,
-) -> HashMap<String, Vec<String>> {
-    let mut merged: HashMap<String, HashSet<String>> = HashMap::new();
+    primary: &FxHashMap<String, Vec<String>>,
+    secondary: &FxHashMap<String, Vec<String>>,
+) -> FxHashMap<String, Vec<String>> {
+    let mut merged: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
     for (src, targets) in primary {
         merged
             .entry(src.clone())
@@ -230,55 +231,10 @@ pub fn union_adjacency(
 /// same-package access) show up alongside explicit-import edges.
 pub fn adjacency_with_usage_edges(
     store: &IndexStore,
-) -> anyhow::Result<HashMap<String, Vec<String>>> {
+) -> anyhow::Result<FxHashMap<String, Vec<String>>> {
     let primary = store.dependency_graph()?;
     let secondary = build_symbol_usage_adjacency(store)?;
     Ok(union_adjacency(&primary, &secondary))
-}
-
-/// Walk `source` yielding ASCII identifier tokens (`[A-Za-z_][A-Za-z0-9_]*`).
-/// Deliberately ignores comments and strings — a dedicated parser is
-/// heavier than the usage graph justifies, and the noise from the
-/// occasional comment match is dominated by real references in any
-/// meaningfully-sized file.
-fn iter_ascii_identifiers(source: &str) -> IdentifierIter<'_> {
-    IdentifierIter {
-        bytes: source.as_bytes(),
-        pos: 0,
-    }
-}
-
-struct IdentifierIter<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Iterator for IdentifierIter<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.pos < self.bytes.len() && !is_ident_start(self.bytes[self.pos]) {
-            self.pos += 1;
-        }
-        if self.pos >= self.bytes.len() {
-            return None;
-        }
-        let start = self.pos;
-        while self.pos < self.bytes.len() && is_ident_cont(self.bytes[self.pos]) {
-            self.pos += 1;
-        }
-        // SAFETY: identifier chars are a subset of ASCII, so slicing
-        // [start..pos] always sits on UTF-8 boundaries.
-        std::str::from_utf8(&self.bytes[start..self.pos]).ok()
-    }
-}
-
-fn is_ident_start(b: u8) -> bool {
-    b.is_ascii_alphabetic() || b == b'_'
-}
-
-fn is_ident_cont(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 #[cfg(test)]
@@ -286,13 +242,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn identifier_iter_yields_only_word_tokens() {
-        let got: Vec<&str> =
-            iter_ascii_identifiers("fn foo(bar: Baz) -> i32 { 42 + quux_1 }").collect();
-        assert_eq!(
-            got,
-            vec!["fn", "foo", "bar", "Baz", "i32", "quux_1"]
-        );
+    fn ident_re_yields_only_word_tokens() {
+        let got: Vec<&str> = IDENT_RE
+            .find_iter("fn foo(bar: Baz) -> i32 { 42 + quux_1 }")
+            .map(|m| m.as_str())
+            .collect();
+        assert_eq!(got, vec!["fn", "foo", "bar", "Baz", "i32", "quux_1"]);
     }
 
     #[test]
@@ -358,9 +313,9 @@ mod tests {
 
     #[test]
     fn union_adjacency_dedupes_and_sorts() {
-        let mut primary: HashMap<String, Vec<String>> = HashMap::new();
+        let mut primary: FxHashMap<String, Vec<String>> = FxHashMap::default();
         primary.insert("a".into(), vec!["b".into(), "c".into()]);
-        let mut secondary: HashMap<String, Vec<String>> = HashMap::new();
+        let mut secondary: FxHashMap<String, Vec<String>> = FxHashMap::default();
         secondary.insert("a".into(), vec!["c".into(), "d".into()]);
         secondary.insert("x".into(), vec!["y".into()]);
 

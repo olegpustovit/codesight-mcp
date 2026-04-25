@@ -1,18 +1,28 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::coupling::CouplingAssessment;
 use super::{LayerDef, compute_coupling, file_to_layer, find_cycles};
+
+// FxHashMap / FxHashSet don't implement `From<[(K,V); N]>` (that impl is on
+// `HashMap<_, _, RandomState>`), so each fixture builds via `.collect()`.
+fn map<I: IntoIterator<Item = (String, Vec<String>)>>(items: I) -> FxHashMap<String, Vec<String>> {
+    items.into_iter().collect()
+}
+
+fn set_refs<'a, I: IntoIterator<Item = &'a String>>(items: I) -> FxHashSet<&'a String> {
+    items.into_iter().collect()
+}
 
 // ── find_cycles tests (port of TestFindCycles) ─────────────────────
 
 #[test]
 fn empty_graph_returns_no_cycles() {
-    assert_eq!(find_cycles(&HashMap::new()), Vec::<Vec<String>>::new());
+    assert_eq!(find_cycles(&FxHashMap::default()), Vec::<Vec<String>>::new());
 }
 
 #[test]
 fn linear_graph_no_cycle() {
-    let adj = HashMap::from([
+    let adj = map([
         ("a".into(), vec!["b".into()]),
         ("b".into(), vec!["c".into()]),
         ("c".into(), vec![]),
@@ -22,42 +32,47 @@ fn linear_graph_no_cycle() {
 
 #[test]
 fn self_loop_not_reported() {
-    let adj = HashMap::from([("a".into(), vec!["a".into()])]);
+    let adj = map([("a".into(), vec!["a".into()])]);
     assert_eq!(find_cycles(&adj), Vec::<Vec<String>>::new());
 }
 
 #[test]
 fn two_node_mutual_cycle() {
-    let adj = HashMap::from([
+    let adj = map([
         ("x".into(), vec!["y".into()]),
         ("y".into(), vec!["x".into()]),
     ]);
     let cycles = find_cycles(&adj);
     assert_eq!(cycles.len(), 1);
+    let x = "x".to_string();
+    let y = "y".to_string();
     assert_eq!(
-        cycles[0].iter().collect::<HashSet<_>>(),
-        HashSet::from([&"x".to_string(), &"y".to_string()])
+        cycles[0].iter().collect::<FxHashSet<_>>(),
+        set_refs([&x, &y])
     );
 }
 
 #[test]
 fn three_node_cycle() {
-    let adj = HashMap::from([
+    let adj = map([
         ("a".into(), vec!["b".into()]),
         ("b".into(), vec!["c".into()]),
         ("c".into(), vec!["a".into()]),
     ]);
     let cycles = find_cycles(&adj);
     assert_eq!(cycles.len(), 1);
+    let a = "a".to_string();
+    let b = "b".to_string();
+    let c = "c".to_string();
     assert_eq!(
-        cycles[0].iter().collect::<HashSet<_>>(),
-        HashSet::from([&"a".to_string(), &"b".to_string(), &"c".to_string()])
+        cycles[0].iter().collect::<FxHashSet<_>>(),
+        set_refs([&a, &b, &c])
     );
 }
 
 #[test]
 fn two_independent_cycles() {
-    let adj = HashMap::from([
+    let adj = map([
         ("a".into(), vec!["b".into()]),
         ("b".into(), vec!["a".into()]),
         ("c".into(), vec!["d".into()]),
@@ -66,14 +81,18 @@ fn two_independent_cycles() {
     ]);
     let cycles = find_cycles(&adj);
     assert_eq!(cycles.len(), 2);
-    let sets: Vec<HashSet<&String>> = cycles.iter().map(|c| c.iter().collect()).collect();
-    assert!(sets.contains(&HashSet::from([&"a".to_string(), &"b".to_string()])));
-    assert!(sets.contains(&HashSet::from([&"c".to_string(), &"d".to_string()])));
+    let sets: Vec<FxHashSet<&String>> = cycles.iter().map(|c| c.iter().collect()).collect();
+    let a = "a".to_string();
+    let b = "b".to_string();
+    let c = "c".to_string();
+    let d = "d".to_string();
+    assert!(sets.contains(&set_refs([&a, &b])));
+    assert!(sets.contains(&set_refs([&c, &d])));
 }
 
 #[test]
 fn isolated_node_not_in_cycle() {
-    let adj = HashMap::from([
+    let adj = map([
         ("a".into(), vec!["b".into()]),
         ("b".into(), vec!["a".into()]),
         ("isolated".into(), vec![]),
@@ -85,7 +104,7 @@ fn isolated_node_not_in_cycle() {
 
 #[test]
 fn cycle_members_are_sorted() {
-    let adj = HashMap::from([
+    let adj = map([
         ("z".into(), vec!["a".into()]),
         ("a".into(), vec!["z".into()]),
     ]);
@@ -164,7 +183,7 @@ fn empty_layers() {
 
 #[test]
 fn coupling_leaf_stable() {
-    let adj = HashMap::from([
+    let adj = map([
         ("a.py".into(), vec!["b.py".into()]),
         ("b.py".into(), vec!["c.py".into()]),
         ("c.py".into(), vec![]),
@@ -178,7 +197,7 @@ fn coupling_leaf_stable() {
 
 #[test]
 fn coupling_top_unstable() {
-    let adj = HashMap::from([
+    let adj = map([
         ("a.py".into(), vec!["b.py".into()]),
         ("b.py".into(), vec![]),
     ]);

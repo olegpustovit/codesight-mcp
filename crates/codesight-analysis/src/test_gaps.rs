@@ -1,7 +1,7 @@
 //! Test gap analysis: rank untested high-risk code by
 //! `cyclomatic × (1 + fan_in) × (1 + ln(1 + churn))`.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde_json::{Value, json};
 
@@ -78,9 +78,9 @@ pub fn test_gap_payload(
 
 fn compute_gaps(
     all_symbols: &[AnalysisSymbol],
-    tested: &HashSet<String>,
-    fan_in: &HashMap<String, usize>,
-    churn: &HashMap<String, u64>,
+    tested: &FxHashSet<String>,
+    fan_in: &FxHashMap<String, usize>,
+    churn: &FxHashMap<String, u64>,
     min_complexity: u64,
 ) -> Vec<TestGap> {
     let mut gaps = Vec::new();

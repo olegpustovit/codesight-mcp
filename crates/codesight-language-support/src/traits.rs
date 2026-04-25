@@ -7,8 +7,10 @@
 //! `LivenessPolicy`, `PackageManifest`, `VisibilityModel`, `ComplexityModel`)
 //! are gone — their methods fold in here.
 
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
+
+use path_clean::PathClean;
 
 use codesight_core::StoredSymbol;
 use codesight_core::reachability::StructuralEdge;
@@ -255,8 +257,8 @@ pub trait Language: Send + Sync {
     /// `paths`, pyproject `[tool.…]`). Each alias maps to an ordered list of
     /// replacement prefixes (tsconfig's `paths` allows multiple fallbacks).
     /// Default empty.
-    fn path_aliases(&self, _root: &Path) -> HashMap<String, Vec<String>> {
-        HashMap::new()
+    fn path_aliases(&self, _root: &Path) -> FxHashMap<String, Vec<String>> {
+        FxHashMap::default()
     }
 
     /// Resolve an import edge to a project-relative file path. Default
@@ -269,10 +271,10 @@ pub trait Language: Send + Sync {
         &self,
         edge: &ImportEdge,
         from_file: &str,
-        source_files: &std::collections::HashSet<String>,
+        source_files: &FxHashSet<String>,
         _known_files_vec: &[String],
-        alias_map: Option<&HashMap<String, Vec<String>>>,
-        _workspace_crates: Option<&HashMap<String, String>>,
+        alias_map: Option<&FxHashMap<String, Vec<String>>>,
+        _workspace_crates: Option<&FxHashMap<String, String>>,
     ) -> Option<String> {
         crate::imports_orchestration::resolve_specifier(
             self,
@@ -291,24 +293,16 @@ pub trait Language: Send + Sync {
         &self,
         specifier: &str,
         from_file: &str,
-        source_files: &std::collections::HashSet<String>,
+        source_files: &FxHashSet<String>,
     ) -> Option<String> {
         let dir = match from_file.rfind('/') {
             Some(idx) => &from_file[..idx],
             None => ".",
         };
-        let joined = format!("{dir}/{specifier}");
-        let mut parts: Vec<&str> = Vec::new();
-        for component in joined.split('/') {
-            match component {
-                "." | "" => {}
-                ".." => {
-                    parts.pop();
-                }
-                other => parts.push(other),
-            }
-        }
-        let normalized = parts.join("/");
+        let normalized = Path::new(&format!("{dir}/{specifier}"))
+            .clean()
+            .to_string_lossy()
+            .replace('\\', "/");
         source_files.contains(&normalized).then_some(normalized)
     }
 
@@ -322,8 +316,8 @@ pub trait Language: Send + Sync {
     }
 
     /// Namespace-to-directory autoload map (PHP PSR-4, etc.). Default empty.
-    fn namespace_map(&self, _root: &Path) -> HashMap<String, String> {
-        HashMap::new()
+    fn namespace_map(&self, _root: &Path) -> FxHashMap<String, String> {
+        FxHashMap::default()
     }
 
     /// Resolve a language-native fully-qualified name to a `symbol_id`
@@ -333,7 +327,7 @@ pub trait Language: Send + Sync {
         &self,
         _fqn: &str,
         _root: &Path,
-        _source_files: &std::collections::HashSet<String>,
+        _source_files: &FxHashSet<String>,
     ) -> Option<String> {
         None
     }

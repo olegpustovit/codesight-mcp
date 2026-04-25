@@ -27,11 +27,11 @@ fn rust_render_emits_use_syntax_not_esm() {
     let rust = lang_for("x.rs");
     let rendered = rust.display_import_lines(&[
         edge("serde_json", &["Value"]),
-        edge("std::collections", &["HashMap", "HashSet"]),
+        edge("std::collections", &["FxHashMap", "FxHashSet"]),
         edge("std::fs", &[]),
     ]);
     assert_eq!(rendered[0], "use serde_json::Value;");
-    assert_eq!(rendered[1], "use std::collections::{HashMap, HashSet};");
+    assert_eq!(rendered[1], "use std::collections::{FxHashMap, FxHashSet};");
     assert_eq!(rendered[2], "use std::fs;");
     for line in &rendered {
         assert!(
@@ -46,7 +46,7 @@ fn rust_render_roundtrips_through_extract_imports() {
     let rust = lang_for("x.rs");
     let original = vec![
         edge("serde_json", &["Value"]),
-        edge("std::collections", &["HashMap"]),
+        edge("std::collections", &["FxHashMap"]),
     ];
     let rendered = rust.display_import_lines(&original).join("\n");
     let parsed = rust.extract_imports(&rendered);

@@ -12,7 +12,7 @@ use crate::error::StorageResult;
 use super::schema::{EMBEDDING_DIM, INDEX_STORE_INIT_SQL};
 
 /// Bump when adding a migration; keep in sync with [`apply_code_index_migrations`].
-pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 9;
+pub const CODE_INDEX_TARGET_USER_VERSION: i32 = 10;
 
 type MigrationStep = fn(&Connection) -> StorageResult<()>;
 
@@ -180,6 +180,32 @@ fn migrate_v9_reachability_edges(conn: &Connection) -> StorageResult<()> {
     Ok(())
 }
 
+fn migrate_v10_dispatch_roots(conn: &Connection) -> StorageResult<()> {
+    // String-dispatch root cache (P3 perf fix). Symbols whose name appears
+    // as a string literal in 2+ other files are flagged `strong` (likely
+    // router / handler-table dispatch); single-file mentions stay `weak`.
+    // Without this table, `evaluate_quality dead_code` recomputed the
+    // detector by scanning every file body on every call (~8 s avg on a
+    // 5k-symbol repo). Populated at the end of each successful ingest by
+    // `compute_dispatch_roots` in `codesight-engine`.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS dispatch_roots (
+             file_path TEXT NOT NULL,
+             symbol_name TEXT NOT NULL,
+             strength TEXT NOT NULL CHECK (strength IN ('strong', 'weak')),
+             PRIMARY KEY (file_path, symbol_name)
+         );
+         CREATE INDEX IF NOT EXISTS idx_dispatch_roots_file
+             ON dispatch_roots(file_path);
+         CREATE INDEX IF NOT EXISTS idx_dispatch_roots_strength
+             ON dispatch_roots(strength);",
+    )?;
+    // Empty table on first migrate; the next ingest populates it. Until
+    // then, the dead_code path falls back to in-memory detection so the
+    // gap is invisible to callers.
+    Ok(())
+}
+
 const CODE_INDEX_MIGRATIONS: &[(i32, MigrationStep)] = &[
     (1, migrate_v1_initial),
     (2, migrate_v2_import_fact_quality),
@@ -190,12 +216,47 @@ const CODE_INDEX_MIGRATIONS: &[(i32, MigrationStep)] = &[
     (7, migrate_v7_symbol_indexes),
     (8, migrate_v8_quality_scores_as_float),
     (9, migrate_v9_reachability_edges),
+    (10, migrate_v10_dispatch_roots),
 ];
 
+/// Verdict from probing an existing index file. Callers (the engine's index
+/// open path) act on `Incompatible` by deleting the file and rebuilding —
+/// agents see one `INDEX_REBUILT` warning instead of a confusing parse
+/// error two layers down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexCompatibility {
+    /// Forward migration possible (`db_version <= target`).
+    Compatible,
+    /// `db_version > target` — index was written by a newer binary. The
+    /// running binary cannot reason about the future-version schema.
+    Incompatible,
+}
+
+/// Inspect `PRAGMA user_version` against the target. Used by the engine to
+/// decide whether to migrate forward or scrap the index file.
+pub fn check_index_compatibility(conn: &Connection) -> StorageResult<IndexCompatibility> {
+    let current: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if current > CODE_INDEX_TARGET_USER_VERSION {
+        Ok(IndexCompatibility::Incompatible)
+    } else {
+        Ok(IndexCompatibility::Compatible)
+    }
+}
+
 /// Apply migrations so `PRAGMA user_version == CODE_INDEX_TARGET_USER_VERSION`.
+/// Returns an error if the index reports a *higher* user_version than the
+/// running binary supports — caller is expected to delete + rebuild rather
+/// than try to downgrade in place.
 #[instrument(level = "debug", skip(conn), fields(kind = "migrate_code_index"))]
 pub fn apply_code_index_migrations(conn: &Connection) -> StorageResult<()> {
     let mut current: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if current > CODE_INDEX_TARGET_USER_VERSION {
+        return Err(crate::error::StorageError::Other(format!(
+            "index user_version={current} > target={CODE_INDEX_TARGET_USER_VERSION}; \
+             this index was written by a newer binary. Delete the index file or \
+             upgrade the binary to match."
+        )));
+    }
     for &(target, step) in CODE_INDEX_MIGRATIONS {
         if current < target {
             step(conn)?;

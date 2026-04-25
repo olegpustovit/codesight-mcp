@@ -1,3 +1,6 @@
+use heck::ToSnakeCase;
+use pluralizer::pluralize;
+
 use super::regex::RE;
 
 use super::php_structure;
@@ -10,48 +13,11 @@ use super::types::{ModelInfo, Relationship};
 /// - `Status` -> `statuses`
 /// - `BlogPost` -> `blog_posts`
 pub fn guess_table(model_name: &str) -> String {
-    // Convert CamelCase to snake_case
-    let mut snake = String::new();
-    for (i, ch) in model_name.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 {
-            snake.push('_');
-        }
-        snake.push(ch.to_ascii_lowercase());
+    let snake = model_name.to_snake_case();
+    match snake.rsplit_once('_') {
+        Some((head, last)) => format!("{head}_{}", pluralize(last, 2, false)),
+        None => pluralize(&snake, 2, false),
     }
-
-    // Pluralize
-    pluralize(&snake)
-}
-
-fn pluralize(word: &str) -> String {
-    if word.ends_with("ies")
-        || word.ends_with("ses")
-        || word.ends_with("xes")
-        || word.ends_with("zes")
-        || word.ends_with("ches")
-        || word.ends_with("shes")
-    {
-        return word.to_string(); // already plural-looking
-    }
-    if let Some(stem) = word.strip_suffix('y') {
-        // Check if preceded by a consonant
-        let before_y = stem.chars().next_back();
-        if let Some(c) = before_y
-            && !"aeiou".contains(c)
-        {
-            return format!("{stem}ies");
-        }
-        return format!("{word}s");
-    }
-    if word.ends_with('s')
-        || word.ends_with('x')
-        || word.ends_with('z')
-        || word.ends_with("ch")
-        || word.ends_with("sh")
-    {
-        return format!("{word}es");
-    }
-    format!("{word}s")
 }
 
 /// Parse a Laravel Eloquent model file.

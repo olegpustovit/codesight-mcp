@@ -1,6 +1,6 @@
 //! Integration tests: extra extensions.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use codesight_language_support::LanguageRegistry;
@@ -28,7 +28,7 @@ fn case_registry_resolves_known_extensions() {
 
 fn case_empty_extra_extensions_no_change() {
     let mut reg = LanguageRegistry::default();
-    let warnings = reg.apply_extra_extensions(&HashMap::new());
+    let warnings = reg.apply_extra_extensions(&FxHashMap::default());
     assert!(warnings.is_empty());
     assert_eq!(lang_at(&reg, "app.py"), Some("python"));
 }
@@ -41,7 +41,7 @@ fn case_whitespace_only_extra_extensions_no_change() {
 #[test]
 fn case_valid_extra_extensions() {
     let mut reg = LanguageRegistry::default();
-    let mut mappings = HashMap::new();
+    let mut mappings = FxHashMap::default();
     mappings.insert(".xperl".to_string(), "perl".to_string());
     mappings.insert(".yperl".to_string(), "perl".to_string());
     let warnings = reg.apply_extra_extensions(&mappings);
@@ -56,7 +56,7 @@ fn case_valid_extra_extensions() {
 #[test]
 fn case_unknown_language_skipped() {
     let mut reg = LanguageRegistry::default();
-    let mut mappings = HashMap::new();
+    let mut mappings = FxHashMap::default();
     mappings.insert(".xyz".to_string(), "cobol".to_string());
     let warnings = reg.apply_extra_extensions(&mappings);
     assert!(warnings.iter().any(|w| w.contains("cobol")));
@@ -66,7 +66,7 @@ fn case_unknown_language_skipped() {
 #[test]
 fn case_malformed_entry_empty_ext() {
     let mut reg = LanguageRegistry::default();
-    let mut mappings = HashMap::new();
+    let mut mappings = FxHashMap::default();
     mappings.insert("".to_string(), "perl".to_string());
     let warnings = reg.apply_extra_extensions(&mappings);
     assert!(!warnings.is_empty());
@@ -75,7 +75,7 @@ fn case_malformed_entry_empty_ext() {
 #[test]
 fn case_malformed_entry_empty_lang() {
     let mut reg = LanguageRegistry::default();
-    let mut mappings = HashMap::new();
+    let mut mappings = FxHashMap::default();
     mappings.insert(".xyz".to_string(), "".to_string());
     let warnings = reg.apply_extra_extensions(&mappings);
     assert!(!warnings.is_empty());
@@ -85,7 +85,7 @@ fn case_malformed_entry_empty_lang() {
 #[test]
 fn case_override_builtin_extension() {
     let mut reg = LanguageRegistry::default();
-    let mut mappings = HashMap::new();
+    let mut mappings = FxHashMap::default();
     mappings.insert(".pl".to_string(), "python".to_string());
     let warnings = reg.apply_extra_extensions(&mappings);
     assert!(warnings.is_empty(), "overriding a builtin should not warn");
@@ -95,7 +95,7 @@ fn case_override_builtin_extension() {
 #[test]
 fn case_mixed_valid_and_invalid() {
     let mut reg = LanguageRegistry::default();
-    let mut mappings = HashMap::new();
+    let mut mappings = FxHashMap::default();
     mappings.insert(".xperl".to_string(), "perl".to_string());
     mappings.insert(".xyz".to_string(), "cobol".to_string());
     mappings.insert(".yperl".to_string(), "perl".to_string());
@@ -109,7 +109,7 @@ fn case_mixed_valid_and_invalid() {
 #[test]
 fn case_extra_whitespace_in_entries() {
     let mut reg = LanguageRegistry::default();
-    let mut mappings = HashMap::new();
+    let mut mappings = FxHashMap::default();
     mappings.insert(" .xperl ".to_string(), " perl ".to_string());
     let warnings = reg.apply_extra_extensions(&mappings);
     assert!(warnings.is_empty());

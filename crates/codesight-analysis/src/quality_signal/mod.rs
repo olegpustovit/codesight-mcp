@@ -1,7 +1,7 @@
 //! Structural quality signal: 5 root-cause metrics aggregated into a 0–10 000
 //! composite score via geometric mean. Designed for Sentrux parity.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use codesight_language_support::{FALLBACK_LANGUAGE, Language, builtin_registry};
@@ -56,13 +56,21 @@ pub struct SignalCoverage {
 }
 
 pub(crate) fn score_assessment(score: f64) -> &'static str {
+    // Tier breakpoints. The `borderline` band sits at the 0.65..=0.70 edge
+    // so a score that is half a percentage point under the agent-readiness
+    // threshold doesn't get the same green-light label as a score 30
+    // percentage points below it. Calibrated against the codesight repo's
+    // own self-readiness sitting at 0.69 — exactly the kind of "almost"
+    // case where the previous "good" was misleadingly generous.
     if score <= 0.30 {
         "poor"
     } else if score <= 0.50 {
         "fair"
-    } else if score <= 0.70 {
+    } else if score < 0.65 {
         "good"
-    } else if score <= 0.85 {
+    } else if score < 0.70 {
+        "borderline"
+    } else if score < 0.85 {
         "very_good"
     } else {
         "excellent"
@@ -81,7 +89,7 @@ pub fn compute_quality_signal(store: &IndexStore) -> anyhow::Result<QualitySigna
 /// Used by `repo_health` to avoid duplicate queries.
 pub fn compute_quality_signal_precomputed(
     store: &IndexStore,
-    adj: &HashMap<String, Vec<String>>,
+    adj: &FxHashMap<String, Vec<String>>,
     cycles: &[Vec<String>],
     all_symbols: &[AnalysisSymbol],
 ) -> anyhow::Result<QualitySignal> {
@@ -106,7 +114,8 @@ pub fn compute_quality_signal_precomputed(
     let total_files = store.file_count()?.max(1);
     let total_functions = complexities.len().max(1);
 
-    let dead_data = dead_code::dead_code_payload(store, "file", 0.5, true, &[], None, false)?;
+    let dead_data =
+        dead_code::dead_code_payload(store, "file", 0.5, true, &[], None, false, false)?;
     let dead_files = dead_data
         .get("dead_file_count")
         .and_then(|v| v.as_u64())
@@ -209,7 +218,7 @@ pub fn compute_quality_signal_precomputed(
 /// Count functions with identical body hashes (after language-aware normalization).
 fn duplicate_function_count(all_symbols: &[AnalysisSymbol]) -> usize {
     let registry = builtin_registry();
-    let mut body_hashes: HashMap<u64, usize> = HashMap::new();
+    let mut body_hashes: FxHashMap<u64, usize> = FxHashMap::default();
     for sym in all_symbols {
         if !is_fn_method(&sym.kind) {
             continue;

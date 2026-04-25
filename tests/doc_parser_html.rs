@@ -1,5 +1,7 @@
 //! Integration tests: doc parser html.
 
+use rustc_hash::FxHashMap;
+
 use std::fs;
 use std::path::Path;
 
@@ -197,7 +199,7 @@ fn html_fixture_levels() {
     let fixture = doc_fixtures_root().join("docs/sample.html");
     let html = fs::read_to_string(&fixture).unwrap();
     let sections = extract_html_sections("sample.html", &html);
-    let by_title: std::collections::HashMap<&str, u8> = sections
+    let by_title: FxHashMap<&str, u8> = sections
         .iter()
         .map(|s| (s.heading.as_str(), s.level))
         .collect();

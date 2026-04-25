@@ -20,8 +20,8 @@ pub fn source_slice<'a>(node: tree_sitter::Node<'_>, source: &'a str) -> Option<
 /// Dedupe a vec of edges, keeping first occurrence order; merges `names`
 /// when the same `specifier` appears multiple times.
 pub fn deduplicate_edges(edges: Vec<ImportEdge>) -> Vec<ImportEdge> {
-    use std::collections::HashMap;
-    let mut seen: HashMap<String, Vec<String>> = HashMap::new();
+    use rustc_hash::FxHashMap;
+    let mut seen: FxHashMap<String, Vec<String>> = FxHashMap::default();
     let mut order: Vec<String> = Vec::new();
     for edge in edges {
         let entry = seen.entry(edge.specifier.clone()).or_insert_with(|| {

@@ -5,10 +5,23 @@
 //! Also hosts `tokenize_name` / `relatedness_score`, which the `related`
 //! graph mode needs and which are unrelated to name-vs-query fuzzy ranking.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
+use heck::ToSnakeCase;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
+use strsim::jaro_winkler;
+
+/// Case-folded Jaro-Winkler similarity (0.0..=1.0). Use for the *honest*
+/// "how close is this to a typo" signal — `disptchTool` vs `dispatch_tool`
+/// scores ~0.92 here even though the nucleo subsequence score for the same
+/// pair sits at 1.0 (every char of the query appears in subsequence order
+/// in the candidate). The two metrics answer different questions; keep both.
+pub fn edit_similarity(query: &str, candidate: &str) -> f64 {
+    let q = query.to_ascii_lowercase();
+    let c = candidate.to_ascii_lowercase();
+    jaro_winkler(&q, &c).clamp(0.0, 1.0)
+}
 
 /// Score a single candidate against a query. Returns `None` when the query
 /// isn't a fuzzy subsequence of the candidate. When it matches, the score
@@ -98,41 +111,14 @@ fn new_matcher() -> Matcher {
 }
 
 /// Tokenize a symbol name for relatedness scoring (underscore + camel segments).
-pub fn tokenize_name(name: &str) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for segment in name.split('_') {
-        if segment.is_empty() {
-            continue;
-        }
-        for mut p in split_camel(segment) {
-            p.make_ascii_lowercase();
-            if p.len() >= 2 {
-                out.insert(p);
-            }
-        }
-    }
-    out
-}
-
-fn split_camel(part: &str) -> Vec<String> {
-    let mut parts: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    for c in part.chars() {
-        if c.is_uppercase()
-            && !cur.is_empty()
-            && cur.chars().last().is_some_and(|lc| lc.is_lowercase())
-        {
-            parts.push(std::mem::take(&mut cur));
-        }
-        cur.push(c);
-    }
-    if !cur.is_empty() {
-        parts.push(cur);
-    }
-    if parts.is_empty() && !part.is_empty() {
-        parts.push(part.to_string());
-    }
-    parts
+pub fn tokenize_name(name: &str) -> FxHashSet<String> {
+    // Convert CamelCase to snake_case first, then split on underscores.
+    // `heck::ToSnakeCase` handles acronyms and mixed cases correctly.
+    name.to_snake_case()
+        .split('_')
+        .filter(|s| s.len() >= 2)
+        .map(str::to_string)
+        .collect()
 }
 
 /// Relatedness score for the `related` graph mode — token-set Jaccard with

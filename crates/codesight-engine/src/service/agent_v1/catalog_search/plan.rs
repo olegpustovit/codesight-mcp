@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 use crate::service::agent_v1::args::SearchCatalogArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 
+use super::intent::{QueryIntent, caller_opted_into_doc_sections, classify_query};
+
 pub(super) struct KindFlags {
     pub(super) want_symbol: bool,
     pub(super) want_section: bool,
@@ -52,10 +54,6 @@ impl KindFlags {
 pub(super) struct CodeSideStats {
     pub(super) more_file_hits: bool,
     pub(super) fuzzy_applied: bool,
-    /// FIXUP T1.5: true when `fuzzy=true` was explicit AND BM25 returned
-    /// zero exact symbol hits, so the fuzzy lane is all we have. The handler
-    /// uses this to emit `NO_EXACT_MATCHES_RETURNING_FUZZY`.
-    pub(super) fuzzy_explicit_no_exact: bool,
     pub(super) name_only_applied: bool,
 }
 
@@ -69,6 +67,13 @@ pub(super) struct SearchPlan {
     pub(super) domain: String,
     pub(super) flags: KindFlags,
     pub(super) per_kind_cap: usize,
+    /// Coarse intent: `Code` penalizes doc-section hits, `Doc` boosts them,
+    /// `Unknown` leaves them alone. See `intent::classify_query`.
+    pub(super) query_intent: QueryIntent,
+    /// True when the caller passed `unit_kinds=["doc_section"]` /
+    /// `["section"]` and therefore opted in to doc-section retrieval — the
+    /// intent penalty is bypassed in that case.
+    pub(super) doc_section_opt_in: bool,
 }
 
 impl SearchPlan {
@@ -104,6 +109,8 @@ impl SearchPlan {
         } else {
             request_cap
         };
+        let query_intent = classify_query(&args.query);
+        let doc_section_opt_in = caller_opted_into_doc_sections(args.unit_kinds.as_ref());
         Ok(Self {
             output_mode,
             scope,
@@ -114,6 +121,8 @@ impl SearchPlan {
             domain,
             flags,
             per_kind_cap,
+            query_intent,
+            doc_section_opt_in,
         })
     }
 }
@@ -122,7 +131,6 @@ impl SearchPlan {
 pub(super) struct LexicalStats {
     pub(super) more_file_hits_exist: bool,
     pub(super) fuzzy_applied: bool,
-    pub(super) fuzzy_explicit_no_exact: bool,
     pub(super) name_only_applied: bool,
 }
 
@@ -204,8 +212,10 @@ pub(super) fn build_meta_extras(
     fuzzy_applied: bool,
     semantic_requested: bool,
     name_only_applied: bool,
+    doc_section_penalty: f64,
+    doc_section_rank_demotion: usize,
 ) -> Vec<(String, Value)> {
-    vec![
+    let mut extras: Vec<(String, Value)> = vec![
         ("domain_effective".to_string(), json!(plan.domain)),
         (
             "query_mode_effective".to_string(),
@@ -224,17 +234,49 @@ pub(super) fn build_meta_extras(
             "baseline_scope".to_string(),
             json!("path_line_snippet_per_returned_hit"),
         ),
-        (
+    ];
+    // Truthful meta: regex mode ignores `unit_kinds` (the file-text scan
+    // does not honor symbol/section discrimination), so emitting
+    // `unit_kinds_effective` would lie about what the engine actually
+    // filtered on. Omit it for regex; emit for keyword/natural_language.
+    if plan.query_mode_effective != "regex" {
+        extras.push((
             "unit_kinds_effective".to_string(),
             json!({
                 "symbol": plan.flags.want_symbol,
                 "section": plan.flags.want_section,
                 "file": plan.flags.want_file,
             }),
-        ),
+        ));
+    }
+    extras.extend([
         ("fuzzy_applied".to_string(), json!(fuzzy_applied)),
         ("semantic_applied".to_string(), json!(semantic_requested)),
         ("name_only_applied".to_string(), json!(name_only_applied)),
-    ]
+        // Surface the intent classifier's decision so callers can see why a
+        // doc section ranked where it did. `doc_section_penalty` echoes the
+        // *effective* multiplier — already accounts for the
+        // `unit_kinds=["doc_section"]` opt-in bypass and the gap-aware
+        // softening (0.4× hard, 0.5× when best doc/code raw scores are
+        // within 0.3).
+        (
+            "query_intent".to_string(),
+            json!(plan.query_intent.as_str()),
+        ),
+        (
+            "doc_section_penalty".to_string(),
+            json!(doc_section_penalty),
+        ),
+        // Rank-based demotion applied AFTER the score multiplier when intent
+        // is `code` and at least 2 items are returned. Doc-sections move
+        // down by `max(N/2, 3)` positions even if the multiplier alone
+        // didn't pull their score below the best code answer. Zero when
+        // intent != code or list is too short to bother.
+        (
+            "doc_section_rank_demotion".to_string(),
+            json!(doc_section_rank_demotion),
+        ),
+    ]);
+    extras
 }
 

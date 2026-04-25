@@ -1,6 +1,6 @@
 //! Integration tests: agent v1 framework dbt.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use codesight_language_support::frameworks::FrameworkProvider;
 use codesight_language_support::languages::sql::dbt::*;
@@ -95,7 +95,7 @@ fn dbt_parse_multiple_docs_dirs() {
 // ── _resolve_description ────────────────────────────────────────────────────
 #[test]
 fn dbt_resolve_doc_reference_single_quotes() {
-    let mut blocks = HashMap::new();
+    let mut blocks = FxHashMap::default();
     blocks.insert(
         "my_doc".to_string(),
         "This is the resolved text.".to_string(),
@@ -105,26 +105,26 @@ fn dbt_resolve_doc_reference_single_quotes() {
 }
 #[test]
 fn dbt_resolve_doc_reference_double_quotes() {
-    let mut blocks = HashMap::new();
+    let mut blocks = FxHashMap::default();
     blocks.insert("my_doc".to_string(), "Resolved.".to_string());
     let result = resolve_description("{{ doc(\"my_doc\") }}", &blocks);
     assert_eq!(result, "Resolved.");
 }
 #[test]
 fn dbt_resolve_plain_description() {
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let result = resolve_description("A plain description.", &blocks);
     assert_eq!(result, "A plain description.");
 }
 #[test]
 fn dbt_resolve_missing_reference() {
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let result = resolve_description("{{ doc('missing') }}", &blocks);
     assert_eq!(result, "");
 }
 #[test]
 fn dbt_resolve_empty() {
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let result = resolve_description("", &blocks);
     assert_eq!(result, "");
 }
@@ -132,14 +132,14 @@ fn dbt_resolve_empty() {
 // ── _resolve_description inline substitution ────────────────────────────────
 #[test]
 fn dbt_resolve_preserves_surrounding_text() {
-    let mut blocks = HashMap::new();
+    let mut blocks = FxHashMap::default();
     blocks.insert("my_doc".into(), "resolved text".into());
     let result = resolve_description("Prefix {{ doc('my_doc') }} suffix", &blocks);
     assert_eq!(result, "Prefix resolved text suffix");
 }
 #[test]
 fn dbt_resolve_multiple_doc_refs() {
-    let mut blocks = HashMap::new();
+    let mut blocks = FxHashMap::default();
     blocks.insert("doc_a".into(), "AAA".into());
     blocks.insert("doc_b".into(), "BBB".into());
     let result = resolve_description("{{ doc('doc_a') }} and {{ doc('doc_b') }}", &blocks);
@@ -147,20 +147,20 @@ fn dbt_resolve_multiple_doc_refs() {
 }
 #[test]
 fn dbt_resolve_missing_ref_becomes_empty_inline() {
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let result = resolve_description("Before {{ doc('missing') }} after", &blocks);
     assert_eq!(result, "Before  after");
 }
 #[test]
 fn dbt_resolve_plain_text_unchanged_inline() {
-    let mut blocks = HashMap::new();
+    let mut blocks = FxHashMap::default();
     blocks.insert("something".into(), "val".into());
     let result = resolve_description("No doc refs here.", &blocks);
     assert_eq!(result, "No doc refs here.");
 }
 #[test]
 fn dbt_resolve_full_doc_ref_wrapped() {
-    let mut blocks = HashMap::new();
+    let mut blocks = FxHashMap::default();
     blocks.insert("my_doc".into(), "resolved".into());
     let result = resolve_description("{{ doc('my_doc') }}", &blocks);
     assert_eq!(result, "resolved");
@@ -181,7 +181,7 @@ models:
       - name: amount
         description: "Order total in USD"
 "#;
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let models = parse_yml_content(yaml, &blocks);
     let m = models.get("fct_orders").unwrap();
     assert_eq!(m.description, "Order fact table");
@@ -200,7 +200,7 @@ models:
       - name: customer_id
         description: "{{ doc('customer_id_doc') }}"
 "#;
-    let mut blocks = HashMap::new();
+    let mut blocks = FxHashMap::default();
     blocks.insert("dim_customer_doc".into(), "Customer dimension".into());
     blocks.insert("customer_id_doc".into(), "Unique customer ID".into());
     let models = parse_yml_content(yaml, &blocks);
@@ -211,21 +211,21 @@ models:
 #[test]
 fn dbt_parse_yml_malformed() {
     let yaml = "not: [valid yaml: {{";
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let models = parse_yml_content(yaml, &blocks);
     assert!(models.is_empty());
 }
 #[test]
 fn dbt_parse_yml_no_models_key() {
     let yaml = "sources:\n  - name: raw\n";
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let models = parse_yml_content(yaml, &blocks);
     assert!(models.is_empty());
 }
 #[test]
 fn dbt_parse_yml_missing_name() {
     let yaml = "models:\n  - description: No name\n";
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let models = parse_yml_content(yaml, &blocks);
     assert!(models.is_empty());
 }
@@ -238,7 +238,7 @@ models:
   - name: model_b
     description: B
 "#;
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let models = parse_yml_content(yaml, &blocks);
     assert_eq!(models.len(), 2);
 }
@@ -247,7 +247,7 @@ models:
 #[test]
 fn dbt_tags_top_level_only() {
     let yaml = "models:\n  - name: m\n    tags: ['daily', 'finance']\n";
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let models = parse_yml_content(yaml, &blocks);
     let m = models.get("m").unwrap();
     assert_eq!(m.tags, vec!["daily", "finance"]);
@@ -255,7 +255,7 @@ fn dbt_tags_top_level_only() {
 #[test]
 fn dbt_tags_config_only() {
     let yaml = "models:\n  - name: m\n    config:\n      tags: ['nightly']\n";
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let models = parse_yml_content(yaml, &blocks);
     let m = models.get("m").unwrap();
     assert_eq!(m.tags, vec!["nightly"]);
@@ -269,7 +269,7 @@ models:
     config:
       tags: ['core', 'nightly']
 "#;
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let models = parse_yml_content(yaml, &blocks);
     let m = models.get("m").unwrap();
     assert_eq!(m.tags, vec!["daily", "core", "nightly"]);
@@ -277,7 +277,7 @@ models:
 #[test]
 fn dbt_tags_invalid_top_level_ignored() {
     let yaml = "models:\n  - name: m\n    tags: not_a_list\n    config:\n      tags: ['valid']\n";
-    let blocks = HashMap::new();
+    let blocks = FxHashMap::default();
     let models = parse_yml_content(yaml, &blocks);
     let m = models.get("m").unwrap();
     assert_eq!(m.tags, vec!["valid"]);
@@ -286,7 +286,7 @@ fn dbt_tags_invalid_top_level_ignored() {
 // ── DbtModelMetadata ────────────────────────────────────────────────────────
 #[test]
 fn dbt_model_metadata_to_file_context() {
-    let mut columns = HashMap::new();
+    let mut columns = FxHashMap::default();
     columns.insert("order_id".into(), "PK".into());
     columns.insert("amount".into(), "USD".into());
     let meta = DbtModelMetadata {

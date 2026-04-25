@@ -1,6 +1,6 @@
 //! Integration tests: find importers.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use codesight_language_support::dep_graph::build_dependency_graph;
 use codesight_language_support::imports_orchestration::extract_imports;
@@ -15,8 +15,8 @@ use codesight_language_support::languages::typescript::tsconfig::{
 fn resolve_specifier(
     specifier: &str,
     from_file: &str,
-    source_files: &HashSet<String>,
-    alias_map: Option<&HashMap<String, Vec<String>>>,
+    source_files: &FxHashSet<String>,
+    alias_map: Option<&FxHashMap<String, Vec<String>>>,
 ) -> Option<String> {
     codesight_language_support::imports_orchestration::resolve_specifier(
         &TypeScript,
@@ -130,7 +130,7 @@ fn extract_imports_js_dynamic_import_not_double_counted() {
 fn extract_imports_vue_pascal_case_component() {
     let content = "\n<template>\n  <UserTable :users=\"users\" />\n  <Pagination :total=\"10\" />\n</template>\n<script setup>\nconst users = []\n</script>\n";
     let result = extract_imports(content, "src/App.vue", "vue");
-    let specifiers: HashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
+    let specifiers: FxHashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
     assert!(
         specifiers.contains("UserTable"),
         "should contain UserTable: {specifiers:?}"
@@ -146,7 +146,7 @@ fn extract_imports_vue_kebab_case_component() {
     let content =
         "\n<template>\n  <user-table />\n  <my-dialog />\n</template>\n<script setup></script>\n";
     let result = extract_imports(content, "src/App.vue", "vue");
-    let specifiers: HashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
+    let specifiers: FxHashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
     assert!(
         specifiers.contains("UserTable"),
         "should contain UserTable: {specifiers:?}"
@@ -174,7 +174,7 @@ fn extract_imports_vue_already_imported_not_duplicated() {
 fn extract_imports_vue_html_elements_excluded() {
     let content = "\n<template>\n  <div><span>text</span></div>\n  <button @click=\"go\">Go</button>\n  <input type=\"text\" />\n  <h1>Title</h1>\n</template>\n<script setup></script>\n";
     let result = extract_imports(content, "src/App.vue", "vue");
-    let specifiers: HashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
+    let specifiers: FxHashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
     assert!(!specifiers.contains("div"));
     assert!(!specifiers.contains("span"));
     assert!(!specifiers.contains("button"));
@@ -185,7 +185,7 @@ fn extract_imports_vue_html_elements_excluded() {
 fn extract_imports_vue_builtins_excluded() {
     let content = "\n<template>\n  <transition name=\"fade\"><div/></transition>\n  <keep-alive><component :is=\"current\"/></keep-alive>\n  <teleport to=\"body\"><div/></teleport>\n</template>\n<script setup></script>\n";
     let result = extract_imports(content, "src/App.vue", "vue");
-    let specifiers: HashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
+    let specifiers: FxHashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
     assert!(
         !specifiers.contains("Transition"),
         "Transition is a Vue builtin"
@@ -212,7 +212,7 @@ fn extract_imports_vue_no_template_block() {
 fn extract_imports_vue_mixed_imported_and_template_only() {
     let content = "\n<template>\n  <ImportedComponent />\n  <TemplateOnly />\n</template>\n<script setup>\nimport ImportedComponent from './ImportedComponent.vue'\n</script>\n";
     let result = extract_imports(content, "src/App.vue", "vue");
-    let specifiers: HashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
+    let specifiers: FxHashSet<&str> = result.iter().map(|r| r.specifier.as_str()).collect();
     assert!(specifiers.contains("./ImportedComponent.vue"));
     assert!(specifiers.contains("TemplateOnly"));
     // ImportedComponent should NOT appear as a synthetic edge
@@ -397,7 +397,7 @@ fn extract_imports_sql_plain_sql_no_false_positives() {
 
 #[test]
 fn resolve_specifier_dbt_bare_model_name_resolves() {
-    let files: HashSet<String> = [
+    let files: FxHashSet<String> = [
         "DBT/models/dim/dim_client.sql",
         "DBT/models/fact/fact_orders.sql",
         "DBT/models/staging/stg_accounts.sql",
@@ -417,7 +417,7 @@ fn resolve_specifier_dbt_bare_model_name_resolves() {
 
 #[test]
 fn resolve_specifier_dbt_bare_name_case_insensitive() {
-    let files: HashSet<String> = [
+    let files: FxHashSet<String> = [
         "DBT/models/dim/dim_client.sql",
         "DBT/models/fact/fact_orders.sql",
     ]
@@ -435,7 +435,7 @@ fn resolve_specifier_dbt_bare_name_case_insensitive() {
 
 #[test]
 fn resolve_specifier_dbt_source_specifier_unresolvable() {
-    let files: HashSet<String> = ["DBT/models/staging/stg_accounts.sql"]
+    let files: FxHashSet<String> = ["DBT/models/staging/stg_accounts.sql"]
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -450,7 +450,7 @@ fn resolve_specifier_dbt_source_specifier_unresolvable() {
 
 #[test]
 fn resolve_specifier_dbt_bare_name_no_match() {
-    let files: HashSet<String> = ["DBT/models/dim/dim_client.sql"]
+    let files: FxHashSet<String> = ["DBT/models/dim/dim_client.sql"]
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -465,7 +465,7 @@ fn resolve_specifier_dbt_bare_name_no_match() {
 
 #[test]
 fn resolve_specifier_dbt_does_not_interfere_with_js_resolution() {
-    let files: HashSet<String> = ["src/utils.js", "src/app.js"]
+    let files: FxHashSet<String> = ["src/utils.js", "src/app.js"]
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -493,7 +493,7 @@ fn extract_imports_unsupported_empty_content() {
 // TestResolveSpecifier (22 tests) — import specifier → file path resolution
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn standard_source_files() -> HashSet<String> {
+fn standard_source_files() -> FxHashSet<String> {
     [
         "src/utils/helpers.js",
         "src/utils/index.js",
@@ -558,7 +558,7 @@ fn resolve_specifier_absolute_match() {
 
 #[test]
 fn resolve_specifier_python_relative() {
-    let files: HashSet<String> = ["lib/helpers.py"].iter().map(|s| s.to_string()).collect();
+    let files: FxHashSet<String> = ["lib/helpers.py"].iter().map(|s| s.to_string()).collect();
     let result = resolve_specifier(".helpers", "lib/module.py", &files, None);
     // Python dotted relative doesn't map to file paths directly
     assert!(result.is_none() || result.is_some());
@@ -566,7 +566,7 @@ fn resolve_specifier_python_relative() {
 
 #[test]
 fn resolve_specifier_js_to_ts_extension() {
-    let files: HashSet<String> = ["src/utils/helpers.ts", "src/app.ts"]
+    let files: FxHashSet<String> = ["src/utils/helpers.ts", "src/app.ts"]
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -576,7 +576,7 @@ fn resolve_specifier_js_to_ts_extension() {
 
 #[test]
 fn resolve_specifier_js_to_tsx_extension() {
-    let files: HashSet<String> = ["src/components/Button.tsx"]
+    let files: FxHashSet<String> = ["src/components/Button.tsx"]
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -586,7 +586,7 @@ fn resolve_specifier_js_to_tsx_extension() {
 
 #[test]
 fn resolve_specifier_js_exact_takes_priority() {
-    let files: HashSet<String> = ["src/utils/helpers.js", "src/utils/helpers.ts"]
+    let files: FxHashSet<String> = ["src/utils/helpers.js", "src/utils/helpers.ts"]
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -596,11 +596,11 @@ fn resolve_specifier_js_exact_takes_priority() {
 
 #[test]
 fn resolve_specifier_at_alias_root() {
-    let files: HashSet<String> = ["lib/utils.ts", "src/app.ts"]
+    let files: FxHashSet<String> = ["lib/utils.ts", "src/app.ts"]
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let alias_map: HashMap<String, Vec<String>> = [("@/*".to_string(), vec!["/*".to_string()])]
+    let alias_map: FxHashMap<String, Vec<String>> = [("@/*".to_string(), vec!["/*".to_string()])]
         .into_iter()
         .collect();
     let result = resolve_specifier("@/lib/utils", "src/app.ts", &files, Some(&alias_map));
@@ -609,11 +609,11 @@ fn resolve_specifier_at_alias_root() {
 
 #[test]
 fn resolve_specifier_at_alias_with_src_prefix() {
-    let files: HashSet<String> = ["src/components/Button.tsx", "src/app.ts"]
+    let files: FxHashSet<String> = ["src/components/Button.tsx", "src/app.ts"]
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let alias_map: HashMap<String, Vec<String>> = [("@/*".to_string(), vec!["src/*".to_string()])]
+    let alias_map: FxHashMap<String, Vec<String>> = [("@/*".to_string(), vec!["src/*".to_string()])]
         .into_iter()
         .collect();
     let result = resolve_specifier(
@@ -627,11 +627,11 @@ fn resolve_specifier_at_alias_with_src_prefix() {
 
 #[test]
 fn resolve_specifier_lib_alias_svelte() {
-    let files: HashSet<String> = ["src/lib/server/db.ts", "src/routes/+page.svelte"]
+    let files: FxHashSet<String> = ["src/lib/server/db.ts", "src/routes/+page.svelte"]
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let alias_map: HashMap<String, Vec<String>> =
+    let alias_map: FxHashMap<String, Vec<String>> =
         [("$lib/*".to_string(), vec!["src/lib/*".to_string()])]
             .into_iter()
             .collect();
@@ -646,15 +646,15 @@ fn resolve_specifier_lib_alias_svelte() {
 
 #[test]
 fn resolve_specifier_alias_without_map_returns_none() {
-    let files: HashSet<String> = ["lib/utils.ts"].iter().map(|s| s.to_string()).collect();
+    let files: FxHashSet<String> = ["lib/utils.ts"].iter().map(|s| s.to_string()).collect();
     let result = resolve_specifier("@/lib/utils", "src/app.ts", &files, None);
     assert_eq!(result, None);
 }
 
 #[test]
 fn resolve_specifier_alias_no_match_returns_none() {
-    let files: HashSet<String> = ["lib/utils.ts"].iter().map(|s| s.to_string()).collect();
-    let alias_map: HashMap<String, Vec<String>> = [("~/*".to_string(), vec!["src/*".to_string()])]
+    let files: FxHashSet<String> = ["lib/utils.ts"].iter().map(|s| s.to_string()).collect();
+    let alias_map: FxHashMap<String, Vec<String>> = [("~/*".to_string(), vec!["src/*".to_string()])]
         .into_iter()
         .collect();
     let result = resolve_specifier("@/lib/utils", "src/app.ts", &files, Some(&alias_map));
@@ -709,11 +709,11 @@ fn resolve_specifier_load_tsconfig_aliases_jsonc() {
 
 #[test]
 fn resolve_specifier_at_alias_nested_layout() {
-    let files: HashSet<String> = ["app/lib/utils.ts", "app/components/Widget.tsx"]
+    let files: FxHashSet<String> = ["app/lib/utils.ts", "app/components/Widget.tsx"]
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let alias_map: HashMap<String, Vec<String>> = [
+    let alias_map: FxHashMap<String, Vec<String>> = [
         ("@/*".to_string(), vec!["/*".to_string()]),
         ("@/lib/*".to_string(), vec!["app/lib/*".to_string()]),
     ]

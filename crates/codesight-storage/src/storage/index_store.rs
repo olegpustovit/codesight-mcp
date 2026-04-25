@@ -15,7 +15,7 @@ use crate::{
     db,
 };
 use codesight_core::reachability::StructuralEdge;
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::IndexStore;
 use super::convert::{to_i64_u64, to_i64_usize};
@@ -27,6 +27,30 @@ impl IndexStore {
     pub fn open(db_path: PathBuf) -> anyhow::Result<Self> {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
+        }
+        // Pre-flight: if the index file exists and was written by a *newer*
+        // binary (`user_version > target`), delete it and start fresh.
+        // Forward migrations stay automatic via `apply_code_index_migrations`;
+        // only the unsupported downgrade case triggers the wipe. Companion
+        // WAL/SHM files are deleted alongside so SQLite doesn't replay a
+        // stale write-ahead log into the new schema.
+        if db_path.exists() {
+            let needs_wipe = match db::open_rw(&db_path) {
+                Ok(conn) => matches!(
+                    migrations::check_index_compatibility(&conn),
+                    Ok(migrations::IndexCompatibility::Incompatible)
+                ),
+                Err(_) => false,
+            };
+            if needs_wipe {
+                tracing::warn!(
+                    path = %db_path.display(),
+                    "index reports a newer user_version than this binary supports — wiping and rebuilding"
+                );
+                let _ = fs::remove_file(&db_path);
+                let _ = fs::remove_file(db_path.with_extension("sqlite3-wal"));
+                let _ = fs::remove_file(db_path.with_extension("sqlite3-shm"));
+            }
         }
         let store = Self {
             db_path,
@@ -85,7 +109,7 @@ impl IndexStore {
 
     pub fn file_fingerprints(
         &self,
-    ) -> anyhow::Result<std::collections::HashMap<String, FileFingerprint>> {
+    ) -> anyhow::Result<FxHashMap<String, FileFingerprint>> {
         let conn = self.open_connection()?;
         let mut stmt = conn.prepare_cached(
             "SELECT file_path, language, size_bytes, modified_ns, content_hash FROM files",
@@ -100,7 +124,7 @@ impl IndexStore {
             })
         })?;
 
-        let mut items = HashMap::new();
+        let mut items = FxHashMap::default();
         for row in rows {
             let fingerprint = row?;
             items.insert(fingerprint.file_path.clone(), fingerprint);
@@ -170,11 +194,56 @@ impl IndexStore {
         )?;
         tx.commit()?;
         // Symbols may have shifted under us — drop the cached snapshot so the
-        // next analytic tool rebuilds from the new commit.
+        // next analytic tool rebuilds from the new commit. Process-global
+        // caches in `graph_reads` (pagerank, symbols-with-source) are keyed
+        // on `index_version` so the bump in `reset_repo_info` invalidates
+        // them automatically.
         if let Ok(mut guard) = self.cached_all_symbols.lock() {
             *guard = None;
         }
         Ok(())
+    }
+
+    /// Replace the entire `dispatch_roots` cache for this source. Called by
+    /// the engine at the end of every successful ingest. Whole-repo replace
+    /// is the right semantics — the detector is whole-repo by construction
+    /// (a name's strength depends on how many *other* files reference it,
+    /// so a per-file delta would mis-classify cross-file moves).
+    pub fn replace_dispatch_roots(
+        &self,
+        roots: &[super::dispatch_roots::DispatchRoot],
+    ) -> anyhow::Result<()> {
+        let mut conn = self.open_connection()?;
+        super::dispatch_roots::replace_all(&mut conn, roots)?;
+        Ok(())
+    }
+
+    /// Read the cached `(strong, weak)` dispatch roots. Empty when the
+    /// cache hasn't been populated yet (first run after migration v10);
+    /// callers should fall back to in-memory detection in that case.
+    pub fn dispatch_roots_cached(
+        &self,
+    ) -> anyhow::Result<(
+        Vec<super::dispatch_roots::DispatchRoot>,
+        Vec<super::dispatch_roots::DispatchRoot>,
+    )> {
+        let conn = self.open_read_only()?;
+        Ok(super::dispatch_roots::load_all(&conn)?)
+    }
+
+    /// True when `dispatch_roots` has been populated for this source.
+    pub fn dispatch_roots_populated(&self) -> anyhow::Result<bool> {
+        let conn = self.open_read_only()?;
+        Ok(super::dispatch_roots::is_populated(&conn)?)
+    }
+
+    /// Per-file strong/weak dispatch roots — the shape the dead_code path
+    /// consumes. Empty sets when the cache hasn't been populated yet.
+    pub fn dispatch_root_file_sets(
+        &self,
+    ) -> anyhow::Result<(rustc_hash::FxHashSet<String>, rustc_hash::FxHashSet<String>)> {
+        let conn = self.open_read_only()?;
+        Ok(super::dispatch_roots::load_file_sets(&conn)?)
     }
 
     fn replace_reachability_edges_for_updated_files(
@@ -398,7 +467,7 @@ impl IndexStore {
         ])?;
         // Deduplicate IDs: if two symbols share an ID (e.g., inner class
         // re-defines __init__), keep the first one seen.
-        let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_ids = FxHashSet::default();
         for symbol in &file.symbols {
             if seen_ids.insert(symbol.id.clone()) {
                 Self::insert_symbol(tx, symbol)?;

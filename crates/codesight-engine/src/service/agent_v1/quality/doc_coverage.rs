@@ -1,12 +1,13 @@
 //! `evaluate_quality analysis=doc_coverage` — match symbols to documentation sections.
 
+use rustc_hash::FxHashMap;
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_analysis::quality::extract_symbol_name_from_id;
 use codesight_storage::storage::doc_index::DocStore;
 
@@ -46,7 +47,11 @@ impl CodeService {
             );
         }
         let data = doc_coverage_payload(&doc_store, &symbol_ids)?;
-        self.success_response(timer, data)
+        let _ = timer;
+        // Heading-name match is a heuristic alignment between symbol names
+        // and section headings — partial.
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
+        self.success_response(&timer, data)
     }
 }
 
@@ -64,7 +69,7 @@ pub fn doc_coverage_payload(doc_store: &DocStore, symbol_ids: &[String]) -> anyh
     }
 
     let all_sections = doc_store.all_sections()?;
-    let mut heading_sections = std::collections::HashMap::<String, Vec<Value>>::new();
+    let mut heading_sections = FxHashMap::<String, Vec<Value>>::default();
     for section in &all_sections {
         heading_sections
             .entry(section.heading.to_lowercase())

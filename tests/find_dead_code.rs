@@ -31,6 +31,7 @@ fn find_dead_code(
         entry_patterns,
         None,
         false,
+        false,
     )
     .unwrap()
 }

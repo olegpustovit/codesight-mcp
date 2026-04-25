@@ -1,6 +1,6 @@
 //! Shared section assembly for RST/AsciiDoc and summary truncation.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use super::Section;
 
@@ -71,7 +71,7 @@ pub(crate) fn build_sections(
         raw_paths.push(ancestors.join(" > "));
     }
 
-    let mut path_counts: HashMap<String, usize> = HashMap::new();
+    let mut path_counts: FxHashMap<String, usize> = FxHashMap::default();
     let mut final_paths: Vec<String> = Vec::new();
     for path in &raw_paths {
         let count = path_counts.entry(path.clone()).or_insert(0);

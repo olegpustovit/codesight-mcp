@@ -6,7 +6,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(super) fn graph_module_coupling(
@@ -42,7 +42,7 @@ impl CodeService {
         }
         // ROADMAP P1.1: structural analysis — no native-tool counterfactual
         // that maps to `repo_total_bytes`. Null baseline is the honest signal.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Safe);
         let adj = store.dependency_graph_strict()?;
         let metrics = codesight_analysis::graph::compute_coupling(&module_path, &adj);
         self.success_response(
@@ -70,7 +70,7 @@ impl CodeService {
         if rules.is_empty() {
             let _store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
             return self.success_response(
-                &MetaBuilder::new(0),
+                &MetaBuilder::new(0).with_confidence(Confidence::Safe),
                 json!({
                     "graph": mode,
                     "repo": args.source_id,
@@ -84,7 +84,7 @@ impl CodeService {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &MetaBuilder::new(0));
         // ROADMAP P1.1: structural analysis — no native-tool counterfactual
         // that maps to `repo_total_bytes`. Null baseline is the honest signal.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Safe);
         let adj = store.dependency_graph_strict()?;
         let violations = codesight_analysis::graph::find_layer_violations(&adj, &rules);
         self.success_response(

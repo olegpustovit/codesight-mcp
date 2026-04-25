@@ -1,6 +1,6 @@
 //! Afferent / efferent coupling metrics from an adjacency list.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use serde::Serialize;
 
@@ -45,7 +45,7 @@ pub struct CouplingMetrics {
     pub dependencies: Vec<String>,
 }
 
-pub fn compute_coupling(file_path: &str, adj: &HashMap<String, Vec<String>>) -> CouplingMetrics {
+pub fn compute_coupling(file_path: &str, adj: &FxHashMap<String, Vec<String>>) -> CouplingMetrics {
     let dependencies: Vec<String> = adj.get(file_path).cloned().unwrap_or_default();
     let ce = dependencies.len();
 

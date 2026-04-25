@@ -6,8 +6,49 @@
 //! traverses the union of (a) the import dep_graph, (b) language-emitted
 //! file-target edges, plus (c) symbol-target edges resolved against the
 //! workspace symbol index. No file I/O happens here on the hot path.
+//!
+//! ## How a file becomes a live root
+//!
+//! A file is "live" if any of these admit it. Each one is independent —
+//! if any holds, the file is not flagged dead.
+//!
+//! 1. **Caller-supplied entry patterns.** Glob patterns from
+//!    `EvaluateQualityArgs.entry_point_patterns` matched against the path.
+//!    Source: `entrypoints::entrypoint_root_notes`.
+//! 2. **Entrypoint basenames.** Built-in basename list (`main.*`,
+//!    `index.*`, `lib.rs`, `__main__.py`, …). Source:
+//!    `codesight_language_support::is_entrypoint_basename`.
+//! 3. **Language live roots.** Each `Language::additional_live_roots`
+//!    contributes its own structural roots — Cargo bin/lib/test/example/bench
+//!    targets, Python `__main__` guards, and so on. Test-target binaries
+//!    contribute only when `include_tests=true`. Source:
+//!    `entrypoints::detect_language_live_roots`.
+//! 4. **String-literal dispatch (strong).** A file that defines a
+//!    function/method/class/struct/trait/enum whose name appears as a
+//!    string-literal token in `STRING_DISPATCH_STRONG_REFS` (=2) or more
+//!    *other* files is promoted to a live root. Catches handler-table /
+//!    plugin-registry dispatch generically, no per-framework hard-coding.
+//! 5. **Reachability via persisted edges.** Once the seeds are picked,
+//!    we BFS over `dep_graph` (import graph) ∪ `reachability_edges`
+//!    (re-export, mod decl, path ref, match dispatch, import-statement,
+//!    plus symbol-target edges resolved through the symbol index).
+//!
+//! In addition, a file is kept off the dead list (without becoming a
+//! live root itself) when:
+//!
+//! 6. **Strong inbound edge.** Any persisted `reachability_edges` row
+//!    points at the file (file-target) or at a symbol it defines
+//!    (symbol-target). See `RepoReachability::strong_inbound`.
+//! 7. **Test-only alive (`include_tests=false` only).** File reachable
+//!    from a workspace test-target binary but not from prod roots —
+//!    surfaced separately at low confidence.
+//! 8. **Weak string-dispatch.** Exactly one external file references a
+//!    defined symbol's name as a string literal — kept at confidence 0.3
+//!    so the default `min_confidence=0.5` filter hides it but `paranoid`
+//!    surfaces it.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 use codesight_core::reachability::EdgeKind;
@@ -26,30 +67,40 @@ use super::entrypoints::{detect_language_live_roots, entrypoint_root_notes};
 const STRING_DISPATCH_STRONG_REFS: usize = 2;
 
 pub(crate) struct RepoReachability {
-    pub live_roots: HashSet<String>,
-    pub explicit_live_roots: HashSet<String>,
-    pub reachable_files: HashSet<String>,
+    pub live_roots: FxHashSet<String>,
+    pub explicit_live_roots: FxHashSet<String>,
+    pub reachable_files: FxHashSet<String>,
+    /// Reachability under the *legacy* heuristic: same traversal, but
+    /// without the string-literal-dispatch promotion (rule 4 in the
+    /// module docs). A file in `reachable_files \ legacy_reachable_files`
+    /// is kept alive solely by string-dispatch evidence — surfaced under
+    /// `paranoid=true` as `heuristic_disagreements`.
+    pub legacy_reachable_files: FxHashSet<String>,
+    /// Files defined as `string_literal_dispatch` strong roots (rule 4).
+    /// Always non-empty when string-dispatch promoted any file.
+    pub string_dispatch_strong_roots: FxHashSet<String>,
     /// Files where a defined symbol's name appears as a string literal in
     /// exactly one other file — weak evidence of indirect dispatch.
-    pub weak_string_dispatch: HashSet<String>,
+    pub weak_string_dispatch: FxHashSet<String>,
     /// Files reached only through test-binary roots.
-    pub test_only_alive: HashSet<String>,
+    pub test_only_alive: FxHashSet<String>,
     /// Files with a strong structural inbound edge (from the persisted
     /// `reachability_edges` table — re-export, mod decl, path ref, match
     /// dispatch, import).
-    pub strong_inbound: HashSet<String>,
+    pub strong_inbound: FxHashSet<String>,
     /// Bare symbol names that some file references via a structural edge.
     /// A symbol whose name appears here is **not** dead. Filled from
     /// `reachability_edges.target_symbol`.
-    pub strong_inbound_symbols: HashSet<String>,
+    pub strong_inbound_symbols: FxHashSet<String>,
     pub evidence_notes: Vec<EvidenceNote>,
     pub framework_warning: Option<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_repo_reachability(
     store: &IndexStore,
     all_files: &[String],
-    dep_graph: &HashMap<String, Vec<String>>,
+    dep_graph: &FxHashMap<String, Vec<String>>,
     root_path: Option<&Path>,
     include_tests: bool,
     entry_patterns: &[String],
@@ -57,10 +108,10 @@ pub(crate) fn build_repo_reachability(
     file_contents: &[(String, String)],
 ) -> RepoReachability {
     let language_roots = detect_language_live_roots(root_path, all_files);
-    let all_files_set: HashSet<&str> = all_files.iter().map(String::as_str).collect();
+    let all_files_set: FxHashSet<&str> = all_files.iter().map(String::as_str).collect();
 
-    let mut live_roots = HashSet::new();
-    let mut explicit_live_roots = HashSet::new();
+    let mut live_roots = FxHashSet::default();
+    let mut explicit_live_roots = FxHashSet::default();
     let mut evidence_notes = Vec::new();
     let mut explicit_roots_found = false;
     let mut language_entry_contributed = false;
@@ -97,10 +148,34 @@ pub(crate) fn build_repo_reachability(
         });
     }
 
+    // Snapshot the seed set *before* string-dispatch promotion so we can
+    // re-traverse later for the legacy reachability set (used to surface
+    // `heuristic_disagreements` under `paranoid=true`).
+    let legacy_live_roots = live_roots.clone();
+
+    // Cached path: if `dispatch_roots` was populated at ingest, read the
+    // strong/weak file sets from storage in O(rows) instead of re-scanning
+    // every file body. Fall back to the in-memory detector when the cache
+    // is empty (first run after migration v10) or when the caller passed
+    // `include_tests=true` (the cache is computed without tests for prod
+    // analysis; tests-included queries need a fresh scan).
     let StringDispatchSignals {
         strong_roots,
         weak_roots,
-    } = detect_string_dispatch_signals(all_symbols, file_contents, include_tests);
+    } = if include_tests {
+        detect_string_dispatch_signals(all_symbols, file_contents, include_tests)
+    } else {
+        match store.dispatch_root_file_sets() {
+            Ok((strong, weak)) if !strong.is_empty() || !weak.is_empty() => {
+                StringDispatchSignals {
+                    strong_roots: strong,
+                    weak_roots: weak,
+                }
+            }
+            _ => detect_string_dispatch_signals(all_symbols, file_contents, include_tests),
+        }
+    };
+    let string_dispatch_strong_roots: FxHashSet<String> = strong_roots.iter().cloned().collect();
     for file in &strong_roots {
         if live_roots.insert(file.clone()) {
             evidence_notes.push(EvidenceNote::heuristic(
@@ -131,9 +206,9 @@ pub(crate) fn build_repo_reachability(
     // Resolve symbol-target edges back to file targets via the symbol
     // index, and accumulate `strong_inbound` / `strong_inbound_symbols`.
     let symbol_index = build_symbol_index(all_symbols, include_tests);
-    let mut extra_edges: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut strong_inbound: HashSet<String> = HashSet::new();
-    let mut strong_inbound_symbols: HashSet<String> = HashSet::new();
+    let mut extra_edges: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
+    let mut strong_inbound: FxHashSet<String> = FxHashSet::default();
+    let mut strong_inbound_symbols: FxHashSet<String> = FxHashSet::default();
     for edge in &stored_edges {
         if !include_tests && is_test_file(&edge.source_file) {
             continue;
@@ -170,12 +245,13 @@ pub(crate) fn build_repo_reachability(
 
     let active_graph = filtered_graph_with_extra(dep_graph, &extra_edges, include_tests);
     let reachable_files = traverse_reachable_files(&active_graph, &live_roots);
+    let legacy_reachable_files = traverse_reachable_files(&active_graph, &legacy_live_roots);
 
     // Workspace test-target binaries: files only reached through them
     // get marked test-only-alive (so they don't appear as dead but can be
     // surfaced separately).
     let test_only_alive = if include_tests {
-        HashSet::new()
+        FxHashSet::default()
     } else {
         compute_test_only_alive(all_files, dep_graph, &extra_edges, &live_roots, &reachable_files)
     };
@@ -195,6 +271,8 @@ pub(crate) fn build_repo_reachability(
         live_roots,
         explicit_live_roots,
         reachable_files,
+        legacy_reachable_files,
+        string_dispatch_strong_roots,
         weak_string_dispatch: weak_roots,
         test_only_alive,
         strong_inbound,
@@ -207,13 +285,13 @@ pub(crate) fn build_repo_reachability(
 /// `name -> set of files defining a symbol with that name`. Limited to
 /// callable / type kinds; constants and value bindings are excluded
 /// because their names collide too freely with arbitrary identifiers.
-type SymbolIndex<'a> = HashMap<&'a str, HashSet<&'a str>>;
+type SymbolIndex<'a> = FxHashMap<&'a str, FxHashSet<&'a str>>;
 
 fn build_symbol_index<'a>(
     all_symbols: &'a [AnalysisSymbol],
     include_tests: bool,
 ) -> SymbolIndex<'a> {
-    let mut idx: SymbolIndex<'a> = HashMap::new();
+    let mut idx: SymbolIndex<'a> = FxHashMap::default();
     let is_indexed = |kind: &str| {
         matches!(
             kind.to_ascii_lowercase().as_str(),
@@ -248,9 +326,9 @@ fn build_symbol_index<'a>(
 struct StringDispatchSignals {
     /// Files with ≥ `STRING_DISPATCH_STRONG_REFS` external string-literal
     /// mentions of a symbol they define.
-    strong_roots: HashSet<String>,
+    strong_roots: FxHashSet<String>,
     /// Files with exactly one external string-literal mention.
-    weak_roots: HashSet<String>,
+    weak_roots: FxHashSet<String>,
 }
 
 /// Scan every indexed file's raw text for string-literal tokens that match
@@ -270,7 +348,7 @@ fn detect_string_dispatch_signals(
         )
     };
 
-    let mut name_to_defs: HashMap<&str, HashSet<&str>> = HashMap::new();
+    let mut name_to_defs: FxHashMap<&str, FxHashSet<&str>> = FxHashMap::default();
     for symbol in all_symbols {
         if !is_dispatchable(&symbol.kind) {
             continue;
@@ -288,12 +366,12 @@ fn detect_string_dispatch_signals(
     }
     if name_to_defs.is_empty() {
         return StringDispatchSignals {
-            strong_roots: HashSet::new(),
-            weak_roots: HashSet::new(),
+            strong_roots: FxHashSet::default(),
+            weak_roots: FxHashSet::default(),
         };
     }
 
-    let mut external_referrers: HashMap<&str, HashSet<&str>> = HashMap::new();
+    let mut external_referrers: FxHashMap<&str, FxHashSet<&str>> = FxHashMap::default();
     for (file, content) in file_contents {
         if !include_tests && is_test_file(file) {
             continue;
@@ -312,8 +390,8 @@ fn detect_string_dispatch_signals(
         }
     }
 
-    let mut strong_roots = HashSet::new();
-    let mut weak_roots = HashSet::new();
+    let mut strong_roots = FxHashSet::default();
+    let mut weak_roots = FxHashSet::default();
     for (def, referrers) in external_referrers {
         if referrers.len() >= STRING_DISPATCH_STRONG_REFS {
             strong_roots.insert(def.to_string());
@@ -373,16 +451,16 @@ fn iter_string_literal_identifiers(source: &str) -> impl Iterator<Item = &str> {
 }
 
 fn filtered_graph_with_extra(
-    dep_graph: &HashMap<String, Vec<String>>,
-    extra_edges: &HashMap<String, HashSet<String>>,
+    dep_graph: &FxHashMap<String, Vec<String>>,
+    extra_edges: &FxHashMap<String, FxHashSet<String>>,
     include_tests: bool,
-) -> HashMap<String, Vec<String>> {
-    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+) -> FxHashMap<String, Vec<String>> {
+    let mut out: FxHashMap<String, Vec<String>> = FxHashMap::default();
     for (source, targets) in dep_graph {
         if !include_tests && is_test_file(source) {
             continue;
         }
-        let mut keep: HashSet<String> = HashSet::new();
+        let mut keep: FxHashSet<String> = FxHashSet::default();
         for target in targets {
             if include_tests || !is_test_file(target) {
                 keep.insert(target.clone());
@@ -395,7 +473,7 @@ fn filtered_graph_with_extra(
             continue;
         }
         let entry = out.entry(source.clone()).or_default();
-        let existing: HashSet<String> = entry.iter().cloned().collect();
+        let existing: FxHashSet<String> = entry.iter().cloned().collect();
         for target in targets {
             if (include_tests || !is_test_file(target)) && !existing.contains(target) {
                 entry.push(target.clone());
@@ -406,10 +484,10 @@ fn filtered_graph_with_extra(
 }
 
 fn traverse_reachable_files(
-    dep_graph: &HashMap<String, Vec<String>>,
-    live_roots: &HashSet<String>,
-) -> HashSet<String> {
-    let mut reachable = HashSet::new();
+    dep_graph: &FxHashMap<String, Vec<String>>,
+    live_roots: &FxHashSet<String>,
+) -> FxHashSet<String> {
+    let mut reachable = FxHashSet::default();
     let mut queue: VecDeque<String> = live_roots.iter().cloned().collect();
 
     while let Some(file) = queue.pop_front() {
@@ -432,21 +510,21 @@ fn traverse_reachable_files(
 /// binaries (`tests/*.rs`, `crates/*/tests/**/*.rs`).
 fn compute_test_only_alive(
     all_files: &[String],
-    dep_graph: &HashMap<String, Vec<String>>,
-    extra_edges: &HashMap<String, HashSet<String>>,
-    prod_live_roots: &HashSet<String>,
-    prod_reachable: &HashSet<String>,
-) -> HashSet<String> {
-    let mut test_seeds: HashSet<String> = HashSet::new();
+    dep_graph: &FxHashMap<String, Vec<String>>,
+    extra_edges: &FxHashMap<String, FxHashSet<String>>,
+    prod_live_roots: &FxHashSet<String>,
+    prod_reachable: &FxHashSet<String>,
+) -> FxHashSet<String> {
+    let mut test_seeds: FxHashSet<String> = FxHashSet::default();
     for file in all_files {
         if is_test_target_root(file) {
             test_seeds.insert(file.clone());
         }
     }
     if test_seeds.is_empty() {
-        return HashSet::new();
+        return FxHashSet::default();
     }
-    let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+    let mut graph: FxHashMap<String, Vec<String>> = FxHashMap::default();
     for (s, ts) in dep_graph {
         graph.entry(s.clone()).or_default().extend(ts.iter().cloned());
     }
@@ -465,8 +543,8 @@ fn is_test_target_root(file: &str) -> bool {
     if !file.ends_with(".rs") {
         return false;
     }
-    if file.starts_with("tests/") {
-        return file[6..].matches('/').count() == 0;
+    if let Some(rest) = file.strip_prefix("tests/") {
+        return rest.matches('/').count() == 0;
     }
     if let Some(idx) = file.rfind("/tests/") {
         let rest = &file[idx + 7..];

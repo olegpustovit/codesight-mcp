@@ -20,7 +20,7 @@ use crate::service::agent_v1::util::graph::build_toc_tree;
 use crate::service::agent_v1::util::pack_catalog_items_to_token_budget;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_storage::storage::IndexStore;
 use codesight_storage::storage::doc_index::DocStore;
 
@@ -73,7 +73,10 @@ impl CodeService {
         args: &InspectStructureArgs,
     ) -> anyhow::Result<StoreOrError<IndexStore>> {
         match self.ensure_repo_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(store) => Ok(Ok((store, MetaBuilder::new(0)))),
+            Ok(store) => Ok(Ok((
+                store,
+                MetaBuilder::new(0).with_confidence(Confidence::Safe),
+            ))),
             Err(e) => Ok(Err(self.error_response(&MetaBuilder::new(0), e)?)),
         }
     }
@@ -85,7 +88,10 @@ impl CodeService {
         args: &InspectStructureArgs,
     ) -> anyhow::Result<StoreOrError<DocStore>> {
         match self.ensure_doc_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(store) => Ok(Ok((store, MetaBuilder::new(0)))),
+            Ok(store) => Ok(Ok((
+                store,
+                MetaBuilder::new(0).with_confidence(Confidence::Safe),
+            ))),
             Err(e) => Ok(Err(self.error_response(&MetaBuilder::new(0), e)?)),
         }
     }
@@ -119,8 +125,8 @@ impl CodeService {
         // language, ask each language for its distinctive symbol kinds,
         // and batch-query storage once per bucket. The language itself
         // decides whether to override (`Language::reclassify_file_language`).
-        use std::collections::HashMap;
-        let mut buckets: HashMap<&str, (&'static [&'static str], Vec<&str>)> = HashMap::new();
+        use rustc_hash::{FxHashMap, FxHashSet};
+        let mut buckets: FxHashMap<&str, (&'static [&'static str], Vec<&str>)> = FxHashMap::default();
         for (path, lang, _, sym_count) in &rows {
             if *sym_count == 0 {
                 continue;
@@ -136,8 +142,8 @@ impl CodeService {
                 .1
                 .push(path.as_str());
         }
-        let mut distinctive_set: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut distinctive_set: FxHashSet<String> =
+            FxHashSet::default();
         for (kinds, paths) in buckets.values() {
             let hits = store.files_with_symbol_kinds_batch(paths, kinds)?;
             distinctive_set.extend(hits);
@@ -318,13 +324,25 @@ impl CodeService {
                 },
             );
         };
-        // Refine the timer now that we know the target file size; single-file
-        // outlines should charge only the file itself, not the whole repo.
-        let raw_bytes = store.file_bytes(p)?.unwrap_or(0);
-        let timer = MetaBuilder::new(raw_bytes);
+        // Distinguish "indexed but empty" from "unknown to the index".
+        // Without this probe a misspelled `file_path` returned `ok:true,
+        // items:[]` and the agent never realized the path didn't exist.
+        let bytes_opt = store.file_bytes(p)?;
+        let raw_bytes = bytes_opt.unwrap_or(0);
+        let timer = MetaBuilder::new(raw_bytes).with_confidence(Confidence::Safe);
         let symbols = store.file_outline(p)?;
         let lang = store.file_language(p)?.unwrap_or_default();
-        self.success_response(
+        let mut warnings: Vec<Value> = Vec::new();
+        if bytes_opt.is_none() {
+            warnings.push(json!({
+                "code": "NOT_INDEXED_PATH",
+                "message": format!(
+                    "Path `{p}` is not in the code index. Verify the path with `inspect_structure view=file_tree`, or run `ingest_sources path=. incremental=true` if it should be indexed."
+                ),
+                "detail": { "path": p },
+            }));
+        }
+        self.success_response_with_warnings(
             &timer,
             json!({
                 "view": "file_outline",
@@ -333,6 +351,7 @@ impl CodeService {
                 "symbol_count": symbols.len(),
                 "items": symbols,
             }),
+            warnings,
         )
     }
 

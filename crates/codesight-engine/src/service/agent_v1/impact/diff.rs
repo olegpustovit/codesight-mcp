@@ -9,7 +9,7 @@ use crate::service::agent_v1::util::{
 };
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 fn resolve_diff_ref(
     store: &codesight_storage::storage::IndexStore,
@@ -112,7 +112,7 @@ impl CodeService {
         // out of the index manually. Baseline size stays the larger of the
         // two files (honest for the full-file counterfactual).
         let raw_bytes = ra.file_size_bytes.max(rb.file_size_bytes);
-        let timer = MetaBuilder::new(raw_bytes);
+        let timer = MetaBuilder::new(raw_bytes).with_confidence(Confidence::Safe);
         let patch = simple_text_diff(&ra.stored_source, &rb.stored_source);
         let mut finding = json!({
             "finding_id": "diff:symbol_pair",

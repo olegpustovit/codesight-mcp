@@ -4,7 +4,7 @@ pub mod fqn;
 pub mod laravel;
 mod simple_framework;
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 use serde_json::Value;
@@ -99,7 +99,7 @@ impl Language for Php {
     fn weak_type_tokens(&self) -> &'static [&'static str] {
         &["mixed"]
     }
-    fn namespace_map(&self, root: &Path) -> HashMap<String, String> {
+    fn namespace_map(&self, root: &Path) -> FxHashMap<String, String> {
         read_composer_psr4(root).unwrap_or_default()
     }
     fn pruned_dirs(&self) -> &'static [&'static str] {
@@ -166,7 +166,7 @@ impl Language for Php {
         &self,
         fqn: &str,
         root: &Path,
-        source_files: &HashSet<String>,
+        source_files: &FxHashSet<String>,
     ) -> Option<String> {
         let map = self.namespace_map(root);
         if map.is_empty() {
@@ -176,11 +176,11 @@ impl Language for Php {
     }
 }
 
-fn read_composer_psr4(root: &Path) -> Option<HashMap<String, String>> {
+fn read_composer_psr4(root: &Path) -> Option<FxHashMap<String, String>> {
     let content = std::fs::read_to_string(root.join("composer.json")).ok()?;
     let parsed: Value = serde_json::from_str(&content).ok()?;
     let autoload = parsed.get("autoload")?.get("psr-4")?.as_object()?;
-    let mut map = HashMap::new();
+    let mut map = FxHashMap::default();
     for (ns, dir) in autoload {
         if let Some(d) = dir.as_str() {
             map.insert(ns.clone(), d.to_string());

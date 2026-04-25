@@ -10,7 +10,7 @@ use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::agent_v1::util::graph::graph_ref_symbol_id;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(super) fn graph_references(
@@ -37,7 +37,7 @@ impl CodeService {
         // ROADMAP P1.1: reference/related graphs are structural analysis.
         // Null baseline — there's no native-tool counterfactual sized like
         // a whole-repo read.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Heuristic);
         let needle = match store.symbol_names_by_id(&sym_id)? {
             Some((name, qn)) => {
                 if name.len() >= 3 {
@@ -136,7 +136,7 @@ impl CodeService {
         // ROADMAP P1.1: reference/related graphs are structural analysis.
         // Null baseline — there's no native-tool counterfactual sized like
         // a whole-repo read.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Heuristic);
         let scan_cap = limit.saturating_mul(400).clamp(2_000, 12_000);
         let candidates = match store.symbols_light_scan(None, None, scan_cap) {
             Ok(c) => c,

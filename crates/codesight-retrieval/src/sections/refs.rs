@@ -1,10 +1,10 @@
 //! URL and hashtag tag extraction from documentation text.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 pub fn extract_references(text: &str) -> Vec<String> {
     let mut result = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     // helper closure
     macro_rules! insert {
         ($url:expr) => {
@@ -80,7 +80,7 @@ pub fn extract_references(text: &str) -> Vec<String> {
 /// HTML comments `<!-- tags: tag1, tag2 -->`.
 pub fn extract_tags(text: &str) -> Vec<String> {
     let mut tags = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
 
     // Hashtag-style tags in body text (skip heading lines)
     for line in text.lines() {

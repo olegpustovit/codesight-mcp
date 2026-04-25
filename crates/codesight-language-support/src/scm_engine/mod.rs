@@ -19,9 +19,10 @@ mod tests;
 
 pub use crate::query_pack_catalog::{ScmMetadata, parse_scm_header, query_files_slice};
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Result, anyhow};
+use dashmap::DashMap;
 use tracing::warn;
 
 use codesight_core::StoredSymbol;
@@ -118,20 +119,18 @@ impl ScmExtractor {
 /// Run a lazily-compiled SCM pack against `source`. Used by the default
 /// `Language::extract_symbols` impl for every curated-SCM language.
 ///
-/// The hot path is a single `RwLock::read` + string lookup — no contention
-/// between parallel ingest workers once each language has been seen once.
+/// The hot path is a single DashMap shard lock + string lookup — no write
+/// contention between parallel ingest workers once each language is cached.
 pub fn extract_with_spec(
     language_name: &str,
     spec: &'static GrammarSpec,
     file_path: &str,
     source: &str,
 ) -> Result<Vec<StoredSymbol>> {
-    use std::collections::HashMap;
-    use std::sync::{OnceLock, RwLock};
-    static CACHE: OnceLock<RwLock<HashMap<String, &'static ScmExtractor>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    static CACHE: OnceLock<DashMap<String, Arc<ScmExtractor>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(DashMap::new);
 
-    if let Some(&existing) = cache.read().expect("scm cache poisoned").get(language_name) {
+    if let Some(existing) = cache.get(language_name) {
         return existing.extract(file_path, source);
     }
 
@@ -141,22 +140,19 @@ pub fn extract_with_spec(
         extensions: Vec::new(),
         override_extractor: None,
     };
-    let extractor = ScmExtractor::build(
+    let extractor = Arc::new(ScmExtractor::build(
         &meta,
         spec.tags_scm.to_string(),
         spec.injections_scm.map(|s| s.to_string()),
-    )?;
+    )?);
 
-    // Two racing callers for the same language both build an extractor here;
-    // the loser's extractor is dropped by inserting only if absent, so every
-    // caller observes the same cached pointer afterwards.
-    let leaked: &'static ScmExtractor = {
-        let mut guard = cache.write().expect("scm cache poisoned");
-        guard
-            .entry(language_name.to_string())
-            .or_insert_with(|| Box::leak(Box::new(extractor)))
-    };
-    leaked.extract(file_path, source)
+    // `entry(...).or_insert_with(...)` is atomic per shard — racing callers
+    // for the same language share the winner's Arc.
+    let cached = cache
+        .entry(language_name.to_string())
+        .or_insert_with(|| extractor)
+        .clone();
+    cached.extract(file_path, source)
 }
 
 pub fn build_scm_extractors() -> Result<Vec<Box<ScmExtractor>>> {

@@ -4,7 +4,7 @@
 //! [`codesight_core::symbols::FactQuality::suitable_for_strict_analysis`]. Heuristic-tier
 //! symbols remain available for exploratory graphs via [`build_call_edges_including_heuristic`].
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde::Serialize;
 
@@ -46,12 +46,21 @@ fn symbol_ok_for_policy(tier: ExtractionTier, policy: CallEdgePolicy) -> bool {
 
 fn build_call_edges_with_policy(symbols: &[SymbolInfo], policy: CallEdgePolicy) -> Vec<CallEdge> {
     // Build a `name → callee-indices` map once (O(N)). Multiple callees can
-    // share a name (e.g. every `new`); they all participate.
+    // share a name (e.g. every `new`); they all participate as fallback
+    // candidates when no same-file definition exists.
     //
-    // Replaces a naive O(N²) loop — for a 4.5k-symbol repo the old version
-    // did 20M substring searches and blew past the 2000 ms handler cap on
-    // `graph=calls` and `evaluate_impact analysis=impact_preview`.
-    let mut name_to_callees: HashMap<&str, Vec<usize>> = HashMap::new();
+    // Path-anchored fix (P4.4): when a caller's source mentions an
+    // identifier and the caller's *own file* defines a symbol with that
+    // name, restrict the edge set to those same-file definitions. Without
+    // this, every caller in the repo whose body mentioned `dispatch` got
+    // edges to all 10+ functions named `dispatch` across the codebase —
+    // the bundle and find_callers paths bled across module boundaries
+    // even though same-file resolution is overwhelmingly the right answer.
+    //
+    // Bare-name lookup remains the fallback when no same-file match exists
+    // (the caller is genuinely calling into another module).
+    let mut name_to_callees: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
+    let mut file_name_to_callees: FxHashMap<(&str, &str), Vec<usize>> = FxHashMap::default();
     for (i, callee) in symbols.iter().enumerate() {
         if !symbol_ok_for_policy(callee.extraction_tier, policy) {
             continue;
@@ -63,11 +72,15 @@ fn build_call_edges_with_policy(symbols: &[SymbolInfo], policy: CallEdgePolicy) 
             .entry(callee.name.as_str())
             .or_default()
             .push(i);
+        file_name_to_callees
+            .entry((callee.file.as_str(), callee.name.as_str()))
+            .or_default()
+            .push(i);
     }
 
     let mut edges = Vec::new();
     // Reused across callers — one allocation per build, not per caller.
-    let mut seen_callees: HashSet<usize> = HashSet::new();
+    let mut seen_callees: FxHashSet<usize> = FxHashSet::default();
     for caller in symbols {
         if caller.source.is_empty() {
             continue;
@@ -75,34 +88,39 @@ fn build_call_edges_with_policy(symbols: &[SymbolInfo], policy: CallEdgePolicy) 
         if !symbol_ok_for_policy(caller.extraction_tier, policy) {
             continue;
         }
-        // Walk identifiers in the caller's source. Each maximal run of
-        // `[A-Za-z0-9_]` is a candidate callee name — O(source_len) to
-        // scan, O(1) hash lookup per identifier. Dedup per caller so we
-        // match the old word_match-bool behavior (one edge per pair).
         seen_callees.clear();
         for ident in iter_identifiers(&caller.source) {
-            if let Some(indices) = name_to_callees.get(ident) {
-                for &ci in indices {
-                    let callee = &symbols[ci];
-                    if callee.id == caller.id {
-                        continue;
-                    }
-                    if !seen_callees.insert(ci) {
-                        continue;
-                    }
-                    edges.push(CallEdge {
-                        caller_id: caller.id.clone(),
-                        caller_name: caller.name.clone(),
-                        caller_file: caller.file.clone(),
-                        caller_line: caller.line,
-                        caller_kind: caller.kind.clone(),
-                        callee_id: callee.id.clone(),
-                        callee_name: callee.name.clone(),
-                        callee_file: callee.file.clone(),
-                        callee_line: callee.line,
-                        callee_kind: callee.kind.clone(),
-                    });
+            // Prefer same-file callees: when the caller's file defines a
+            // symbol with this name, only those participate. Fall back to
+            // the workspace-wide list when no same-file match exists.
+            let same_file = file_name_to_callees.get(&(caller.file.as_str(), ident));
+            let resolved_indices = match same_file {
+                Some(indices) => Some(indices),
+                None => name_to_callees.get(ident),
+            };
+            let Some(indices) = resolved_indices else {
+                continue;
+            };
+            for &ci in indices {
+                let callee = &symbols[ci];
+                if callee.id == caller.id {
+                    continue;
                 }
+                if !seen_callees.insert(ci) {
+                    continue;
+                }
+                edges.push(CallEdge {
+                    caller_id: caller.id.clone(),
+                    caller_name: caller.name.clone(),
+                    caller_file: caller.file.clone(),
+                    caller_line: caller.line,
+                    caller_kind: caller.kind.clone(),
+                    callee_id: callee.id.clone(),
+                    callee_name: callee.name.clone(),
+                    callee_file: callee.file.clone(),
+                    callee_line: callee.line,
+                    callee_kind: callee.kind.clone(),
+                });
             }
         }
     }
@@ -135,7 +153,7 @@ pub fn find_callers(
     max_depth: usize,
 ) -> Vec<(String, String, String, u32, String, usize)> {
     let mut result = Vec::new();
-    let mut visited = HashSet::new();
+    let mut visited = FxHashSet::default();
     visited.insert(symbol_id.to_string());
     let mut frontier: Vec<(String, usize)> = vec![(symbol_id.to_string(), 0)];
 
@@ -169,7 +187,7 @@ pub fn find_callees(
     max_depth: usize,
 ) -> Vec<(String, String, String, u32, String, usize)> {
     let mut result = Vec::new();
-    let mut visited = HashSet::new();
+    let mut visited = FxHashSet::default();
     visited.insert(symbol_id.to_string());
     let mut frontier: Vec<(String, usize)> = vec![(symbol_id.to_string(), 0)];
 

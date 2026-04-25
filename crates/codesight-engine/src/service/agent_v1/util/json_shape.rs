@@ -36,8 +36,11 @@ pub(in crate::service) fn search_hit_symbol(
     if let Some(ref m) = s.match_type {
         hit.insert("match_type".to_string(), json!(m));
     }
-    if let Some(v) = s.fuzzy_similarity {
-        hit.insert("fuzzy_similarity".to_string(), json!(v));
+    if let Some(v) = s.subsequence_score {
+        hit.insert("subsequence_score".to_string(), json!(v));
+    }
+    if let Some(v) = s.edit_similarity {
+        hit.insert("edit_similarity".to_string(), json!(v));
     }
     if let Some(v) = s.edit_distance {
         hit.insert("edit_distance".to_string(), json!(v));
@@ -231,7 +234,8 @@ mod tests {
             summary: String::new(),
             score: 0.7654321,
             match_type: Some("exact".to_string()),
-            fuzzy_similarity: None,
+            subsequence_score: None,
+            edit_similarity: None,
             edit_distance: None,
         }
     }

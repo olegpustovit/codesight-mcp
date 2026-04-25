@@ -4,7 +4,7 @@
 //! unusual DSL shapes). Column modifier chains in migrations still use regex augmentation
 //! when the tree does not yield columns.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use tree_sitter::Node;
 
@@ -34,7 +34,7 @@ pub(super) fn migration_from_tree(content: &str) -> Option<MigrationInfo> {
     }
     Some(MigrationInfo {
         table,
-        columns: HashMap::new(),
+        columns: FxHashMap::default(),
     })
 }
 

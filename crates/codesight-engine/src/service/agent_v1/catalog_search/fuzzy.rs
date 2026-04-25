@@ -7,7 +7,7 @@
 //!   - `explicit fuzzy=true`: run the fuzzy lane alongside the exact lane
 //!     ([`compute_fuzzy_lane`]).
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::service::agent_v1::args::SearchCatalogArgs;
 use codesight_core::SymbolKind;
@@ -68,7 +68,7 @@ fn collect_fuzzy_rows(
     auto_fuzzy: bool,
     primary: &[SearchSymbol],
 ) -> Vec<SearchSymbol> {
-    let primary_ids: HashSet<String> = primary.iter().map(|s| s.id.clone()).collect();
+    let primary_ids: FxHashSet<String> = primary.iter().map(|s| s.id.clone()).collect();
     // The fuzzy lane must see every symbol in the index (post `kind` / `scope`
     // filtering) — anything less means typos pointing to late-sorting files
     // silently miss. `symbols_light_scan` clamps internally to 20_000, which
@@ -104,7 +104,12 @@ fn collect_fuzzy_rows(
         let mut row = candidates[idx].clone();
         if !auto_fuzzy {
             row.match_type = Some("fuzzy".to_string());
-            row.fuzzy_similarity = Some(score as f64);
+            row.subsequence_score = Some(score as f64);
+            // Edit similarity is the typo-distance signal: a row with
+            // `subsequence_score=1.0, edit_similarity=0.4` is a long target
+            // that happens to contain the query as a subsequence, not a near
+            // spelling match. Cheap to compute, ships alongside.
+            row.edit_similarity = Some(fuzzy::edit_similarity(&args.query, &row.name));
             row.edit_distance = None;
         }
         row.score = score as f64;

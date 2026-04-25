@@ -9,7 +9,7 @@ use crate::service::agent_v1::args::{IngestSourcesArgs, ManageIndexesArgs};
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 fn invalid_request(message: String, detail: Value) -> ToolError {
     ToolError {
@@ -33,7 +33,7 @@ impl CodeService {
     pub(in crate::service) fn manage_indexes(&self, v: Value) -> anyhow::Result<Value> {
         let args: ManageIndexesArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let action = args.action.to_ascii_lowercase();
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Safe);
 
         match action.as_str() {
             "invalidate" | "delete" => self.manage_invalidate(&args, &action, &timer),
@@ -228,7 +228,7 @@ impl CodeService {
         if let Ok(store) = self.ensure_repo_store(sid, None) {
             let meta = store.repo_metadata()?;
             // ROADMAP P1.1: manage_indexes is metadata — null baseline.
-            let timer_b = MetaBuilder::new(0);
+            let timer_b = MetaBuilder::new(0).with_confidence(Confidence::Safe);
             return self.success_response(
                 &timer_b,
                 json!({

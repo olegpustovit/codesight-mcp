@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// Kind of structural reachability edge.
 ///
-/// Each variant has a stable string form (`as_str` / `from_str`) used as
+/// Each variant has a stable string form (`as_str` / `parse_kind`) used as
 /// the SQLite `edge_kind` column value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EdgeKind {
@@ -44,7 +44,7 @@ impl EdgeKind {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_kind(s: &str) -> Option<Self> {
         Some(match s {
             "reexport" => EdgeKind::ReExport,
             "path_ref" => EdgeKind::PathReference,

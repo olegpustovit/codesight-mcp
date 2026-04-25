@@ -6,7 +6,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(super) fn graph_centrality(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
@@ -75,7 +75,7 @@ impl CodeService {
         };
 
         self.success_response(
-            &MetaBuilder::new(0),
+            &MetaBuilder::new(0).with_confidence(Confidence::Safe),
             json!({
                 "graph": "centrality",
                 "algorithm": algo,

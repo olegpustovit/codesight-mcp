@@ -2,6 +2,7 @@
 //! session_end, snapshot_quality — plus the shared session_stats payload
 //! builder and quality-delta computation.
 
+use rustc_hash::FxHashMap;
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
@@ -147,14 +148,10 @@ impl CodeService {
             });
 
         let mut warnings = Vec::new();
-        let quality_delta = self.session_quality_delta(session)?;
+        let quality_delta = self.session_quality_delta(session, action)?;
         if let Some(delta) = &quality_delta
             && delta["verdict"] == "regressed"
         {
-            // FIXUP T4.1: every high-signal warning carries the same
-            // {code, message, detail, suggested_tool} envelope so callers
-            // can act on them uniformly. `detail` carries the delta;
-            // `suggested_tool` points at the regression-check follow-up.
             let suggested_tool = session.primary_source_id.as_ref().map(|sid| {
                 json!({
                     "tool": "evaluate_quality",
@@ -168,7 +165,7 @@ impl CodeService {
             let mut warn = json!({
                 "code": "QUALITY_REGRESSION",
                 "message": "session quality delta regressed versus the session baseline.",
-                "detail": { "quality_delta": delta },
+                "detail": { "verdict": "regressed" },
             });
             if let Some(st) = suggested_tool
                 && let Value::Object(ref mut m) = warn
@@ -235,10 +232,20 @@ impl CodeService {
         Ok((data, warnings))
     }
 
-    fn session_quality_delta(&self, session: &SessionState) -> anyhow::Result<Option<Value>> {
+    fn session_quality_delta(
+        &self,
+        session: &SessionState,
+        action: &str,
+    ) -> anyhow::Result<Option<Value>> {
         let Some(start) = session.quality_session_start.as_ref() else {
             return Ok(None);
         };
+        // session_stats must stay cheap (SLA <10ms warm). Only session_end
+        // pays the cost of computing a live end-state when no end-snapshot
+        // was recorded.
+        if action != "session_end" {
+            return Ok(None);
+        }
         let store = match self.ensure_repo_store(&start.source_id, None) {
             Ok(store) => store,
             Err(_) => return Ok(None),
@@ -386,11 +393,11 @@ fn hotspot_deltas(
     before: &[QualityHotspotMarker],
     after: &[QualityHotspotMarker],
 ) -> (Vec<Value>, Vec<Value>, u64, u64) {
-    let before_by_file: std::collections::HashMap<&str, u64> = before
+    let before_by_file: FxHashMap<&str, u64> = before
         .iter()
         .map(|entry| (entry.file.as_str(), entry.cyclomatic))
         .collect();
-    let after_by_file: std::collections::HashMap<&str, u64> = after
+    let after_by_file: FxHashMap<&str, u64> = after
         .iter()
         .map(|entry| (entry.file.as_str(), entry.cyclomatic))
         .collect();

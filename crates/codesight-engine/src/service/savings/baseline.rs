@@ -53,12 +53,19 @@ where
     store.sum_file_sizes_for_paths(&dedup).map_err(index_error)
 }
 
-/// Approximate the bytes `rg -n` would have emitted for the same hit set.
+/// Approximate the bytes a real "grep then read context" workflow would have
+/// cost the agent for the same hit set.
 ///
-/// One row per item: `path\tline\tsnippet\n` (3 separator bytes, no quoting,
-/// no ANSI colour). Items with no path or snippet contribute 0. The cap is
-/// intrinsically the length of `items` — the agent already asked for at most
-/// `limit` hits, so we count exactly that many.
+/// Per item: `path:line:snippet\n` (the literal `rg -n` row) **plus** a
+/// 5-line context window around the hit (`min(snippet_len * 5, 400)` bytes).
+/// Without the context window the baseline is so tight that the JSON
+/// envelope codesight returns (`{ref:{id,path,title}, score, match_type, …}`
+/// ~200 bytes/hit) outweighs it and `tokens_saved` saturates to zero on
+/// honest queries. The window models what `rg -n -C 2` or a follow-up `Read`
+/// of the matched range would actually fetch — that's the counterfactual the
+/// agent is paying compared with codesight's structured response.
+///
+/// Items with neither path nor snippet contribute 0.
 pub(in crate::service) fn search_rg_equivalent_bytes(items: &[Value]) -> u64 {
     let mut total: u64 = 0;
     for item in items {
@@ -80,8 +87,13 @@ pub(in crate::service) fn search_rg_equivalent_bytes(items: &[Value]) -> u64 {
         if path_len == 0 && snippet_len == 0 {
             continue;
         }
-        // path + ':' + line + ':' + snippet + '\n'
-        total = total.saturating_add(path_len + 1 + line_len + 1 + snippet_len + 1);
+        // Match row: path + ':' + line + ':' + snippet + '\n'
+        let row_bytes = path_len + 1 + line_len + 1 + snippet_len + 1;
+        // Context window: agents usually need a few lines around a match.
+        // Cap at 400 bytes so a single huge snippet doesn't inflate the
+        // baseline beyond what a sane `rg -C 2` / Read would return.
+        let context_window = (snippet_len.saturating_mul(5)).min(400);
+        total = total.saturating_add(row_bytes + context_window);
     }
     total
 }
@@ -110,9 +122,21 @@ mod tests {
             json!({"ref": {"path": "src/lib.rs"}, "line": 42, "snippet": "fn foo() {}"}),
             json!({"ref": {"path": "src/main.rs"}, "line": 7, "snippet": "fn main() {}"}),
         ];
-        // "src/lib.rs" (10) + ':' + "42" (2) + ':' + "fn foo() {}" (11) + '\n' = 26
-        // "src/main.rs" (11) + ':' + "7" (1) + ':' + "fn main() {}" (12) + '\n' = 27
-        assert_eq!(search_rg_equivalent_bytes(&items), 53);
+        // Row 1: "src/lib.rs"(10)+":"(1)+"42"(2)+":"(1)+"fn foo() {}"(11)+"\n"(1) = 26
+        //   + window: min(11*5, 400) = 55 → 81
+        // Row 2: "src/main.rs"(11)+":"(1)+"7"(1)+":"(1)+"fn main() {}"(12)+"\n"(1) = 27
+        //   + window: min(12*5, 400) = 60 → 87
+        assert_eq!(search_rg_equivalent_bytes(&items), 168);
+    }
+
+    #[test]
+    fn search_rg_equivalent_bytes_caps_window_at_400_bytes() {
+        // Snippet length 200 → 5*200 = 1000, capped to 400.
+        let snippet = "x".repeat(200);
+        let items = vec![json!({"ref": {"path": "f.rs"}, "line": 1, "snippet": snippet})];
+        // Row: "f.rs"(4)+":"(1)+"1"(1)+":"(1)+200+"\n"(1) = 208
+        //   + window: 400 → 608
+        assert_eq!(search_rg_equivalent_bytes(&items), 608);
     }
 
     #[test]

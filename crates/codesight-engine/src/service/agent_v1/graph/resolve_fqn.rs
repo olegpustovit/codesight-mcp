@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use serde_json::{Value, json};
 
@@ -6,7 +6,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(super) fn graph_resolve_fqn(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
@@ -35,10 +35,10 @@ impl CodeService {
             );
         };
 
-        let source_files: HashSet<String> = store.all_file_paths()?.into_iter().collect();
+        let source_files: FxHashSet<String> = store.all_file_paths()?.into_iter().collect();
         match codesight_language_support::resolve_fqn(fqn, &root, &source_files) {
             Some(symbol_id) => self.success_response(
-                &MetaBuilder::new(0),
+                &MetaBuilder::new(0).with_confidence(Confidence::Safe),
                 json!({
                     "graph": "resolve_fqn",
                     "fqn": fqn,

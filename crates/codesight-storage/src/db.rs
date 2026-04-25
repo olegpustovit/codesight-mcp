@@ -1,7 +1,6 @@
 //! Shared SQLite helpers for IndexStore and DocStore.
 
 use std::{
-    collections::HashSet,
     fs,
     ops::Deref,
     path::Path,
@@ -10,6 +9,7 @@ use std::{
 };
 
 use rusqlite::{Connection, OpenFlags, ffi};
+use rustc_hash::FxHashSet;
 
 use crate::error::StorageResult;
 
@@ -195,7 +195,7 @@ fn scan_indexed_vs_disk(
     root_path: &Path,
     file_table: &str,
     limit: usize,
-) -> StorageResult<(Vec<String>, HashSet<String>)> {
+) -> StorageResult<(Vec<String>, FxHashSet<String>)> {
     let select_sql = format!("SELECT file_path, size_bytes, modified_ns FROM {file_table}");
     let mut stmt = conn.prepare_cached(&select_sql)?;
     let rows = stmt.query_map([], |row| {
@@ -206,7 +206,7 @@ fn scan_indexed_vs_disk(
         ))
     })?;
 
-    let mut indexed = HashSet::new();
+    let mut indexed = FxHashSet::default();
     let mut stale = Vec::new();
     for row in rows {
         let (file_path, db_size, db_mtime) = row?;
@@ -237,7 +237,7 @@ fn scan_indexed_vs_disk(
 /// ignored files don't permanently mark the index stale.
 fn scan_new_files(
     root_path: &Path,
-    indexed: &HashSet<String>,
+    indexed: &FxHashSet<String>,
     is_relevant: impl Fn(&str) -> bool,
     stale: &mut Vec<String>,
     limit: usize,

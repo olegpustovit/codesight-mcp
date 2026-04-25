@@ -1,8 +1,9 @@
 //! Vue has no tree-sitter grammar — its imports are the `<script>` block
 //! parsed as JS plus any template components referenced as tags.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
+use crate::host_segments::find_html_tag_blocks;
 use crate::imports_types::ImportEdge;
 use crate::languages::javascript::JavaScript;
 use crate::traits::Language;
@@ -16,7 +17,7 @@ pub fn extract(content: &str) -> Vec<ImportEdge> {
         script_edges = JavaScript.extract_imports(script);
     }
 
-    let mut imported_names: HashSet<String> = HashSet::new();
+    let mut imported_names: FxHashSet<String> = FxHashSet::default();
     for edge in &script_edges {
         for name in &edge.names {
             imported_names.insert(name.clone());
@@ -189,19 +190,19 @@ const HTML_ELEMENTS: &[&str] = &[
 ];
 
 fn extract_script_block(content: &str) -> Option<String> {
-    let lower = content.to_ascii_lowercase();
-    let start = lower.find("<script")?;
-    let tag_end = content[start..].find('>')? + start + 1;
-    let end = lower[tag_end..].find("</script>")?;
-    Some(content[tag_end..tag_end + end].to_string())
+    find_html_tag_blocks(content, "script")
+        .ok()?
+        .into_iter()
+        .next()
+        .map(|b| b.content.to_string())
 }
 
 fn extract_template_block(content: &str) -> Option<String> {
-    let lower = content.to_ascii_lowercase();
-    let start = lower.find("<template")?;
-    let tag_end = content[start..].find('>')? + start + 1;
-    let end = lower[tag_end..].find("</template>")?;
-    Some(content[tag_end..tag_end + end].to_string())
+    find_html_tag_blocks(content, "template")
+        .ok()?
+        .into_iter()
+        .next()
+        .map(|b| b.content.to_string())
 }
 
 fn kebab_to_pascal(s: &str) -> String {
@@ -217,9 +218,9 @@ fn kebab_to_pascal(s: &str) -> String {
 }
 
 fn extract_template_components(template: &str) -> Vec<String> {
-    let mut components = HashSet::new();
-    let html_set: HashSet<&str> = HTML_ELEMENTS.iter().copied().collect();
-    let builtin_set: HashSet<&str> = VUE_BUILTINS.iter().copied().collect();
+    let mut components = FxHashSet::default();
+    let html_set: FxHashSet<&str> = HTML_ELEMENTS.iter().copied().collect();
+    let builtin_set: FxHashSet<&str> = VUE_BUILTINS.iter().copied().collect();
 
     let bytes = template.as_bytes();
     let len = bytes.len();

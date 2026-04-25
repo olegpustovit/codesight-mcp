@@ -1,6 +1,8 @@
 //! codesight-language-support — every language owns its behavior through
 //! `languages/<lang>/`. One crate, one trait, one registry.
 
+use rustc_hash::FxHashSet;
+
 pub mod complexity;
 pub mod dep_graph;
 pub mod extensions;
@@ -48,7 +50,7 @@ pub use facade::{
     function_length_warn_for_path, has_restricted_visibility, idiomatic_symbol_names_for_path,
     import_extraction_mode_for_language, is_barrel_basename, is_conventional_path,
     is_entrypoint_basename, is_outline_noise_basename, is_test_file, is_test_fixture,
-    language_family_for_path, language_id_for_path, measured_type_density_for_path,
+    is_test_symbol, language_family_for_path, language_id_for_path, measured_type_density_for_path,
     mentions_identifier_ci_in_file, mentions_identifier_in_file, nesting_mode_for_path,
     reclassify_file_language, root_package_from_specifier, supports_import_extraction,
     test_weight_multiplier,
@@ -89,7 +91,7 @@ pub fn builtin_registry() -> &'static LanguageRegistry {
 pub fn resolve_fqn(
     fqn: &str,
     root: &std::path::Path,
-    source_files: &std::collections::HashSet<String>,
+    source_files: &FxHashSet<String>,
 ) -> Option<String> {
     builtin_registry()
         .all()

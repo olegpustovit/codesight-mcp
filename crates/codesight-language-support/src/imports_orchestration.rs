@@ -5,7 +5,7 @@
 //! dispatcher over the per-language `Language` trait — the actual extraction
 //! + resolution lives in each `languages/<lang>/imports.rs`.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 use codesight_core::symbols::FactQuality;
@@ -117,8 +117,8 @@ pub fn resolve_specifier<L: Language + ?Sized>(
     lang: &L,
     specifier: &str,
     from_file: &str,
-    source_files: &HashSet<String>,
-    alias_map: Option<&HashMap<String, Vec<String>>>,
+    source_files: &FxHashSet<String>,
+    alias_map: Option<&FxHashMap<String, Vec<String>>>,
 ) -> Option<String> {
     if specifier.starts_with("source:") {
         return None;
@@ -162,8 +162,8 @@ pub fn resolve_specifier<L: Language + ?Sized>(
 fn resolve_with_aliases<L: Language + ?Sized>(
     lang: &L,
     specifier: &str,
-    source_files: &HashSet<String>,
-    alias_map: &HashMap<String, Vec<String>>,
+    source_files: &FxHashSet<String>,
+    alias_map: &FxHashMap<String, Vec<String>>,
 ) -> Option<String> {
     let mut aliases: Vec<(&String, &Vec<String>)> = alias_map.iter().collect();
     aliases.sort_by_key(|a| std::cmp::Reverse(a.0.len()));
@@ -204,10 +204,10 @@ pub fn resolve_import_edge_for_graph(
     edge: &ImportEdge,
     from_file: &str,
     lang: &str,
-    source_files: &HashSet<String>,
+    source_files: &FxHashSet<String>,
     known_files_vec: &[String],
-    alias_map: Option<&HashMap<String, Vec<String>>>,
-    workspace_crates: Option<&HashMap<String, String>>,
+    alias_map: Option<&FxHashMap<String, Vec<String>>>,
+    workspace_crates: Option<&FxHashMap<String, String>>,
 ) -> Option<String> {
     let registry = builtin_registry();
     let resolved_lang =

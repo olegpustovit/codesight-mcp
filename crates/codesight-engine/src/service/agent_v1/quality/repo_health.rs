@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_analysis::{dead_code, quality, quality_signal};
 
 impl CodeService {
@@ -21,7 +21,9 @@ impl CodeService {
                 .ok();
         }
         // ROADMAP P1.1: repo_health is a structural overview — null baseline.
-        let timer = MetaBuilder::new(0);
+        // Combines authoritative index lookups with heuristic dead_code +
+        // hotspot signals — partial.
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
         let fn_method = store.fn_method_symbol_count().unwrap_or(0);
         let avg_complexity = store.avg_line_span_fn_methods().unwrap_or(0.0);
         let index_stale = meta.is_stale.unwrap_or(false);
@@ -32,7 +34,7 @@ impl CodeService {
         let cycles_sample: Vec<_> = cycles.iter().take(5).cloned().collect();
 
         let dead_code_data =
-            dead_code::dead_code_payload(&store, "file", 0.5, true, &[], None, false)?;
+            dead_code::dead_code_payload(&store, "file", 0.5, true, &[], None, false, false)?;
         let dead_count = dead_code_data
             .get("dead_file_count")
             .and_then(|v| v.as_u64())

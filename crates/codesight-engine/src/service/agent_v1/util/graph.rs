@@ -1,6 +1,6 @@
 //! Graph / diff helpers for inspect_graph and impact.
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde_json::{Value, json};
 
@@ -81,17 +81,18 @@ pub(in crate::service) fn extract_symbol_names_from_content(
 pub(in crate::service) fn build_caller_parents(
     target_id: &str,
     edges: &[codesight_analysis::graph::CallEdge],
-) -> std::collections::HashMap<String, String> {
-    use std::collections::{HashMap, VecDeque};
-    let mut callee_to_callers: HashMap<&str, Vec<&str>> = HashMap::new();
+) -> FxHashMap<String, String> {
+    use std::collections::VecDeque;
+    use rustc_hash::FxHashMap;
+    let mut callee_to_callers: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
     for edge in edges {
         callee_to_callers
             .entry(edge.callee_id.as_str())
             .or_default()
             .push(edge.caller_id.as_str());
     }
-    let mut parents: HashMap<String, String> = HashMap::new();
-    let mut visited: HashSet<&str> = HashSet::new();
+    let mut parents: FxHashMap<String, String> = FxHashMap::default();
+    let mut visited: FxHashSet<&str> = FxHashSet::default();
     visited.insert(target_id);
     let mut queue: VecDeque<&str> = VecDeque::new();
     queue.push_back(target_id);
@@ -114,7 +115,7 @@ pub(in crate::service) fn build_caller_parents(
 pub(in crate::service) fn reconstruct_caller_chain(
     target_id: &str,
     caller_id: &str,
-    parents: &std::collections::HashMap<String, String>,
+    parents: &FxHashMap<String, String>,
 ) -> Vec<String> {
     if caller_id == target_id {
         return vec![target_id.to_string()];

@@ -1,6 +1,6 @@
 //! Integration tests: doc parser.
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::Path;
 
@@ -86,7 +86,7 @@ fn doc_parser_rst_level_order() {
     let sid = ingest_docs(&svc, ws.path());
     let items = get_outline(&svc, &sid, "docs/doc.rst");
     let tl = titles_and_levels(&items);
-    let by_title: std::collections::HashMap<&str, u64> =
+    let by_title: FxHashMap<&str, u64> =
         tl.iter().map(|(t, l)| (t.as_str(), *l)).collect();
     let doc_level = by_title.get("Doc Title").copied().unwrap_or(0);
     let sec_level = by_title.get("Section").copied().unwrap_or(0);
@@ -123,7 +123,7 @@ fn doc_parser_rst_fixture_levels() {
     let (_ws, svc, sid) = setup_fixture_doc("docs/sample.rst");
     let items = get_outline(&svc, &sid, "docs/sample.rst");
     let tl = titles_and_levels(&items);
-    let by_title: std::collections::HashMap<&str, u64> =
+    let by_title: FxHashMap<&str, u64> =
         tl.iter().map(|(t, l)| (t.as_str(), *l)).collect();
     assert_eq!(by_title.get("My RST Document").copied(), Some(1));
     assert_eq!(by_title.get("Introduction").copied(), Some(2));
@@ -152,7 +152,7 @@ fn doc_parser_rst_unique_ids() {
     let sid = ingest_docs(&svc, ws.path());
     let items = get_outline(&svc, &sid, "docs/doc.rst");
     let ids: Vec<&str> = items.iter().filter_map(|i| i["id"].as_str()).collect();
-    let unique: HashSet<&str> = ids.iter().copied().collect();
+    let unique: FxHashSet<&str> = ids.iter().copied().collect();
     assert_eq!(
         ids.len(),
         unique.len(),
@@ -179,7 +179,7 @@ fn doc_parser_adoc_levels() {
     let sid = ingest_docs(&svc, ws.path());
     let items = get_outline(&svc, &sid, "docs/doc.adoc");
     let tl = titles_and_levels(&items);
-    let by_title: std::collections::HashMap<&str, u64> =
+    let by_title: FxHashMap<&str, u64> =
         tl.iter().map(|(t, l)| (t.as_str(), *l)).collect();
     assert_eq!(by_title.get("H1").copied(), Some(1));
     assert_eq!(by_title.get("H2").copied(), Some(2));
@@ -226,7 +226,7 @@ fn doc_parser_adoc_fixture_levels() {
     let (_ws, svc, sid) = setup_fixture_doc("docs/sample.adoc");
     let items = get_outline(&svc, &sid, "docs/sample.adoc");
     let tl = titles_and_levels(&items);
-    let by_title: std::collections::HashMap<&str, u64> =
+    let by_title: FxHashMap<&str, u64> =
         tl.iter().map(|(t, l)| (t.as_str(), *l)).collect();
     assert_eq!(by_title.get("My AsciiDoc Document").copied(), Some(1));
     assert_eq!(by_title.get("Introduction").copied(), Some(2));
@@ -413,7 +413,7 @@ fn run_md_heading_levels() {
     let (ws, svc) = setup_single_doc("doc.md", content);
     let sid = ingest_docs(&svc, ws.path());
     let items = get_outline(&svc, &sid, "docs/doc.md");
-    let levels: HashSet<u64> = items.iter().filter_map(|i| i["level"].as_u64()).collect();
+    let levels: FxHashSet<u64> = items.iter().filter_map(|i| i["level"].as_u64()).collect();
     assert!(levels.contains(&1), "expected level 1");
     assert!(levels.contains(&2), "expected level 2");
     assert!(levels.contains(&3), "expected level 3");
@@ -440,7 +440,7 @@ fn run_md_slug_collision_unique_ids() {
     let sid = ingest_docs(&svc, ws.path());
     let items = get_outline(&svc, &sid, "docs/doc.md");
     let ids: Vec<&str> = items.iter().filter_map(|i| i["id"].as_str()).collect();
-    let unique: HashSet<&str> = ids.iter().copied().collect();
+    let unique: FxHashSet<&str> = ids.iter().copied().collect();
     assert_eq!(
         ids.len(),
         unique.len(),

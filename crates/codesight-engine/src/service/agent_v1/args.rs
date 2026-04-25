@@ -316,6 +316,18 @@ pub struct EvaluateImpactArgs {
     /// lists so fixture chains don't pollute the impact set.
     #[serde(default)]
     pub include_vendored: Option<bool>,
+    /// `blast_radius`: cap on per-bucket importer list. Default 25.
+    /// Totals always carry the un-truncated counts.
+    #[serde(default)]
+    pub limit: Option<usize>,
+    /// `blast_radius`: soft byte budget (~4 bytes/token). When the
+    /// serialized importer lists exceed this, both buckets are packed and
+    /// `truncated_by` is set in `_meta`. Totals still reflect full counts.
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
+    /// Alias of `max_tokens` (matches `read_content` / `search_catalog`).
+    #[serde(default)]
+    pub token_budget: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -386,6 +398,14 @@ pub struct EvaluateQualityArgs {
     /// also opts in.
     #[serde(default)]
     pub include_vendored: Option<bool>,
+    /// `dead_code` only: when true, drop the confidence floor to 0,
+    /// surface weak signals (`weak_string_dispatch_match`,
+    /// `test_only_alive`), always run the symbol-level pass, and emit
+    /// `heuristic_disagreements` listing files the legacy import-graph
+    /// reachability would have flagged dead but the current
+    /// string-literal-dispatch heuristic rescued. Default false.
+    #[serde(default)]
+    pub paranoid: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

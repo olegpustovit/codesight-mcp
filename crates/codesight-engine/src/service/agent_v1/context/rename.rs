@@ -11,7 +11,7 @@ use crate::service::agent_v1::args::AssembleContextArgs;
 use crate::service::agent_v1::graph::find_references::collect_references;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(super) fn context_rename_plan(
@@ -140,6 +140,10 @@ impl CodeService {
             "truncated": truncated,
             "estimated_tokens_to_read": used_tokens,
         });
-        self.success_response(timer, data)
+        let _ = timer;
+        // rename_plan ranks files via reference-collection heuristics + a
+        // collision check against the index — partial.
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
+        self.success_response(&timer, data)
     }
 }

@@ -1,6 +1,6 @@
 //! Plain text: paragraph-based pseudo-sections.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use super::Section;
 use super::builder::{make_summary, slug_from_text};
@@ -44,7 +44,7 @@ pub fn extract_text_sections(file_path: &str, source: &str) -> Vec<Section> {
 
     let total_bytes = source.len();
     let mut sections = Vec::new();
-    let mut id_counts: HashMap<String, usize> = HashMap::new();
+    let mut id_counts: FxHashMap<String, usize> = FxHashMap::default();
 
     for (idx, &(start, end)) in paragraphs.iter().enumerate() {
         let first_line = lines[start].trim();

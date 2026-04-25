@@ -7,6 +7,8 @@
 
 use std::sync::OnceLock;
 
+use dashmap::DashMap;
+
 use codesight_core::EdgeKind;
 use codesight_core::StructuralEdge;
 
@@ -99,23 +101,17 @@ type CompiledSet = Vec<(EdgeKind, regex::Regex)>;
 fn compile_patterns(patterns: &[(EdgeKind, &'static str)]) -> CompiledSet {
     // Cache compiled regex sets keyed by the slice's static address. Same
     // language returns the same `&'static [...]`, so this never recompiles.
-    static CACHE: OnceLock<
-        std::sync::Mutex<std::collections::HashMap<usize, CompiledSet>>,
-    > = OnceLock::new();
-    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    static CACHE: OnceLock<DashMap<usize, CompiledSet>> = OnceLock::new();
+    let cache = CACHE.get_or_init(DashMap::new);
     let key = patterns.as_ptr() as usize;
-    {
-        let guard = cache.lock().unwrap();
-        if let Some(existing) = guard.get(&key) {
-            return existing.iter().map(|(k, r)| (*k, r.clone())).collect();
-        }
+    if let Some(existing) = cache.get(&key) {
+        return existing.iter().map(|(k, r)| (*k, r.clone())).collect();
     }
     let built: CompiledSet = patterns
         .iter()
         .filter_map(|(k, p)| regex::Regex::new(p).ok().map(|r| (*k, r)))
         .collect();
-    let mut guard = cache.lock().unwrap();
-    guard.insert(key, built.clone());
+    cache.entry(key).or_insert_with(|| built.clone());
     built
 }
 

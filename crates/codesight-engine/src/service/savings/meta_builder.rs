@@ -1,8 +1,11 @@
 //! Response envelope metadata (`Meta`, `MetaBuilder`) and the retrieval
 //! class taxonomy used to interpret `tokens_saved`.
 
-use std::{collections::HashMap, time::Instant};
+use std::time::Instant;
 
+use rustc_hash::FxHashMap;
+
+use codesight_core::Confidence;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
@@ -43,11 +46,23 @@ pub struct Meta {
     /// caller didn't tag its `MetaBuilder`. See [`RetrievalClass`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retrieval_class: Option<RetrievalClass>,
+    /// Trust signal for the payload. `safe` = authoritative semantic
+    /// analysis; `partial` = mixed authoritative + heuristic, or known-
+    /// incomplete coverage; `heuristic` = best-effort string/dispatch.
+    /// Omitted when the handler doesn't tag its `MetaBuilder`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<Confidence>,
+    /// One-line rationale for `confidence` when it isn't `safe`. Lets
+    /// callers see *why* a result was downgraded (string-dispatch
+    /// heuristic, partial-language coverage, missing index entry, …).
+    /// Omitted when the handler didn't supply a reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_reason: Option<String>,
     pub total_tokens_saved: u64,
     pub response_tokens: u64,
     pub naive_tokens: u64,
-    pub cost_avoided: HashMap<String, f64>,
-    pub total_cost_avoided: HashMap<String, f64>,
+    pub cost_avoided: FxHashMap<String, f64>,
+    pub total_cost_avoided: FxHashMap<String, f64>,
     pub retrieval_engine: String,
     pub retrieval_version: String,
     /// Semver of the running codesight-mcp binary (`CARGO_PKG_VERSION`).
@@ -67,6 +82,8 @@ pub struct MetaBuilder {
     raw_bytes: u64,
     started_at: Instant,
     retrieval_class: Option<RetrievalClass>,
+    confidence: Option<Confidence>,
+    confidence_reason: Option<String>,
 }
 
 impl MetaBuilder {
@@ -75,6 +92,8 @@ impl MetaBuilder {
             raw_bytes,
             started_at: Instant::now(),
             retrieval_class: None,
+            confidence: None,
+            confidence_reason: None,
         }
     }
 
@@ -82,6 +101,21 @@ impl MetaBuilder {
     #[must_use]
     pub fn with_class(mut self, class: RetrievalClass) -> Self {
         self.retrieval_class = Some(class);
+        self
+    }
+
+    /// Tag this response with its trust level. See [`Confidence`].
+    #[must_use]
+    pub fn with_confidence(mut self, confidence: Confidence) -> Self {
+        self.confidence = Some(confidence);
+        self
+    }
+
+    /// Attach a one-line rationale for the confidence level. Surfaced as
+    /// `_meta.confidence_reason` so callers know *why* the engine downgraded.
+    #[must_use]
+    pub fn with_confidence_reason(mut self, reason: impl Into<String>) -> Self {
+        self.confidence_reason = Some(reason.into());
         self
     }
 
@@ -120,7 +154,7 @@ impl MetaBuilder {
             total_tokens_saved,
             0,
             self.raw_bytes / BYTES_PER_TOKEN,
-            HashMap::new(),
+            FxHashMap::default(),
             total_cost_avoided,
         ))
     }
@@ -131,8 +165,8 @@ impl MetaBuilder {
         total_tokens_saved: u64,
         response_tokens: u64,
         naive_tokens: u64,
-        cost_avoided: HashMap<String, f64>,
-        total_cost_avoided: HashMap<String, f64>,
+        cost_avoided: FxHashMap<String, f64>,
+        total_cost_avoided: FxHashMap<String, f64>,
     ) -> Meta {
         let raw_ms = self.started_at.elapsed().as_secs_f64() * 1000.0;
         // Round timing_ms to 2 decimals at the serialization boundary.
@@ -144,6 +178,8 @@ impl MetaBuilder {
         Meta {
             tokens_saved,
             retrieval_class: self.retrieval_class,
+            confidence: self.confidence,
+            confidence_reason: self.confidence_reason.clone(),
             total_tokens_saved,
             response_tokens,
             naive_tokens,

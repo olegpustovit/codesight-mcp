@@ -1,6 +1,6 @@
 //! `evaluate_impact analysis=change_velocity` — git-log-driven churn summary.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use serde_json::{Value, json};
 
@@ -8,14 +8,14 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(in crate::service) fn evaluate_impact_change_velocity(
         &self,
         args: &EvaluateImpactArgs,
     ) -> anyhow::Result<Value> {
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
 
         let target_owned = args
@@ -110,8 +110,8 @@ impl CodeService {
         let git_result = std::process::Command::new("git")
             .args([
                 "log",
-                "--oneline",
                 &format!("--since={days} days ago"),
+                "--format=%an",
                 "--follow",
                 "--",
                 &file_path,
@@ -121,34 +121,13 @@ impl CodeService {
 
         let (commits, authors, churn_per_week) = match git_result {
             Ok(o) if o.status.success() => {
-                let log = String::from_utf8_lossy(&o.stdout);
-                let commit_count = log.lines().filter(|l| !l.is_empty()).count();
-
-                let author_output = std::process::Command::new("git")
-                    .args([
-                        "log",
-                        &format!("--since={days} days ago"),
-                        "--format=%an",
-                        "--follow",
-                        "--",
-                        &file_path,
-                    ])
-                    .current_dir(&root)
-                    .output()
-                    .ok();
-                let authors = author_output
-                    .map(|o| {
-                        String::from_utf8_lossy(&o.stdout)
-                            .lines()
-                            .filter(|l| !l.is_empty())
-                            .collect::<HashSet<_>>()
-                            .len()
-                    })
-                    .unwrap_or(0);
-
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                let lines: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
+                let commit_count = lines.len();
+                let author_count = lines.iter().copied().collect::<FxHashSet<_>>().len();
                 let weeks = (days as f64 / 7.0).max(1.0);
                 let cpw = commit_count as f64 / weeks;
-                (commit_count, authors, cpw)
+                (commit_count, author_count, cpw)
             }
             _ => (0, 0, 0.0),
         };

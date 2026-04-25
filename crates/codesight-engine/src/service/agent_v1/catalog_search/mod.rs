@@ -3,6 +3,7 @@
 mod dense;
 mod files;
 mod fuzzy;
+mod intent;
 mod plan;
 mod response;
 mod semantic;
@@ -13,7 +14,7 @@ use crate::service::agent_v1::args::SearchCatalogArgs;
 use crate::service::agent_v1::util::{search_hit_section, search_hit_symbol};
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
-use crate::service::savings::{MetaBuilder, search_rg_equivalent_bytes};
+use crate::service::savings::{Confidence, MetaBuilder, search_rg_equivalent_bytes};
 use crate::service::{CodeService, MAX_QUERY_LEN};
 use codesight_storage::storage::IndexStore;
 use codesight_storage::storage::doc_index::DocStore;
@@ -21,6 +22,7 @@ use codesight_storage::storage::doc_index::DocStore;
 use dense::{
     materialize_dense_section_items, materialize_dense_symbol_items, merge_dense_ranked_items,
 };
+use intent::apply_intent_doc_penalty;
 use plan::{
     CodeSideStats, KindFlags, LexicalStats, SearchCounts, SearchPlan, build_meta_extras,
 };
@@ -76,7 +78,22 @@ fn item_file_class(item: &Value) -> FileClass {
         .and_then(|r| r.get("path"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    classify_path(path)
+    let path_class = classify_path(path);
+    if path_class != FileClass::Prod {
+        return path_class;
+    }
+    // Inline test detection: a symbol whose qualified name lives inside a
+    // `tests` module (`::tests.foo`, `::tests::foo`) is functionally a test
+    // even when the file path is prod source.
+    let id = item
+        .get("ref")
+        .and_then(|r| r.get("id").or_else(|| r.get("stable_id")))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if id.contains("::tests.") || id.contains("::tests::") {
+        return FileClass::Test;
+    }
+    FileClass::Prod
 }
 
 /// Merge items that refer to the same symbol / section / file into one row,
@@ -84,9 +101,9 @@ fn item_file_class(item: &Value) -> FileClass {
 /// rows for the same `stable_id` — once from the symbol layer and once from
 /// the section layer (ROADMAP P1.2).
 fn dedupe_by_stable_id(items: &mut Vec<Value>) {
-    use std::collections::HashMap;
+    use rustc_hash::FxHashMap;
     let taken = std::mem::take(items);
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut seen: FxHashMap<String, usize> = FxHashMap::default();
     let mut out: Vec<Value> = Vec::with_capacity(taken.len());
     for item in taken {
         let key = item
@@ -335,7 +352,6 @@ impl CodeService {
             more_file_hits = result.more_file_hits;
             items.extend(result.items);
         }
-        let mut fuzzy_explicit_no_exact = false;
         let mut name_only_applied = false;
         if flags.want_symbol || (!flags.want_file && !flags.want_section) {
             // FIXUP T1.3: `name_only=true` only makes sense in keyword mode
@@ -376,9 +392,6 @@ impl CodeService {
                     &symbols,
                 );
                 fuzzy_applied = !lane.is_empty();
-                if symbols.is_empty() && !lane.is_empty() {
-                    fuzzy_explicit_no_exact = true;
-                }
                 for s in lane {
                     let body = if want_body {
                         self.symbol_body_with_context(store, &s.id, ctx_lines)
@@ -417,7 +430,6 @@ impl CodeService {
         Ok(CodeSideStats {
             more_file_hits,
             fuzzy_applied,
-            fuzzy_explicit_no_exact,
             name_only_applied,
         })
     }
@@ -542,6 +554,20 @@ impl CodeService {
             plan.scope.as_deref(),
             |path| code_store.as_ref().and_then(|s| s.file_bytes(path).ok().flatten()),
         );
+        // Query-intent penalty: when the user asks a code-shaped question,
+        // doc-section hits get a 0.4× multiplier (softened to 0.5× when the
+        // best raw doc and code scores are within 0.3) so structural
+        // answers outrank prose. Stacks multiplicatively with the vendor
+        // penalty (we mutate the same `score` field in place). Skipped
+        // when the caller passed `unit_kinds=["doc_section"]` — that's an
+        // explicit opt-in to doc-section retrieval, surfaced as `1.0` in
+        // meta.
+        let (doc_section_penalty, doc_section_rank_demotion) = if plan.doc_section_opt_in {
+            (1.0, 0)
+        } else {
+            let p = apply_intent_doc_penalty(&mut items, plan.query_intent);
+            (p.multiplier, p.rank_demotion)
+        };
         if plan.query_mode_effective == "natural_language" {
             if !args.include_tests.unwrap_or(false) {
                 drop_tests(&mut items);
@@ -584,13 +610,24 @@ impl CodeService {
         // hit set (path:line:snippet per row), capped intrinsically at the
         // caller's `limit`. Not the sum of file sizes of every matched file.
         let raw_bytes = search_rg_equivalent_bytes(&items);
+        // Confidence: keyword/regex over an authoritative index is `safe`.
+        // Fuzzy or semantic / natural-language augments BM25 with heuristic
+        // scoring — drop to `partial`.
+        let confidence = match plan.query_mode_effective.as_str() {
+            "natural_language" => Confidence::Partial,
+            _ if stats.fuzzy_applied || semantic_requested => Confidence::Partial,
+            _ => Confidence::Safe,
+        };
         let timer = MetaBuilder::new(raw_bytes)
-            .with_class(crate::service::savings::RetrievalClass::Search);
+            .with_class(crate::service::savings::RetrievalClass::Search)
+            .with_confidence(confidence);
         let extra = build_meta_extras(
             &plan,
             stats.fuzzy_applied,
             semantic_requested,
             stats.name_only_applied,
+            doc_section_penalty,
+            doc_section_rank_demotion,
         );
 
         let fmt_ctx = FormatCtx {
@@ -635,6 +672,7 @@ impl CodeService {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_lexical_pass(
         &self,
         args: &SearchCatalogArgs,
@@ -647,7 +685,6 @@ impl CodeService {
     ) -> Result<LexicalStats, ToolError> {
         let mut more_file_hits_exist = false;
         let mut fuzzy_applied = false;
-        let mut fuzzy_explicit_no_exact = false;
         let mut name_only_applied = false;
         if let Some(store) = code_store {
             let stats = self.search_code_side(
@@ -662,7 +699,6 @@ impl CodeService {
             )?;
             more_file_hits_exist = stats.more_file_hits;
             fuzzy_applied = stats.fuzzy_applied;
-            fuzzy_explicit_no_exact = stats.fuzzy_explicit_no_exact;
             name_only_applied = stats.name_only_applied;
         }
         if let Some(dstore) = doc_store
@@ -673,7 +709,6 @@ impl CodeService {
         Ok(LexicalStats {
             more_file_hits_exist,
             fuzzy_applied,
-            fuzzy_explicit_no_exact,
             name_only_applied,
         })
     }
@@ -737,6 +772,7 @@ impl CodeService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustc_hash::FxHashMap;
     use semantic::DenseRankedHit;
 
     fn symbol_item(id: &str) -> Value {
@@ -850,8 +886,10 @@ mod tests {
                 },
             ],
             &[],
-            std::collections::HashMap::from([("dense".to_string(), symbol_item("dense"))]),
-            std::collections::HashMap::new(),
+            [("dense".to_string(), symbol_item("dense"))]
+                .into_iter()
+                .collect::<FxHashMap<_, _>>(),
+            FxHashMap::default(),
         );
         let ids: Vec<&str> = merged
             .iter()

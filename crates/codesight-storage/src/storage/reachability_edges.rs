@@ -60,7 +60,7 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StructuralEdge> {
     let target_file: Option<String> = row.get(1)?;
     let target_symbol: Option<String> = row.get(2)?;
     let edge_kind: String = row.get(3)?;
-    let edge_kind = EdgeKind::from_str(&edge_kind).unwrap_or(EdgeKind::ImportStatement);
+    let edge_kind = EdgeKind::parse_kind(&edge_kind).unwrap_or(EdgeKind::ImportStatement);
     Ok(StructuralEdge {
         source_file,
         target_file,

@@ -6,6 +6,7 @@ use crate::service::agent_v1::args::AssembleContextArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::MetaBuilder;
+// Confidence is set by `shape_bundle_response` on the final envelope.
 
 impl CodeService {
     pub(super) fn assemble_context_bundle(
@@ -71,10 +72,13 @@ impl CodeService {
 
         // ROADMAP P1.5: depth=2 by default — pull in a representative caller
         // + callee per user-provided symbol, plus type-name references from
-        // sig/body. Callers can cap with `max_tokens`; `include_tests=false`
-        // drops fixture / test-path rows from the expansion.
+        // sig/body. Default `include_tests=false`: tests rarely belong in a
+        // production-symbol bundle, and with the codebase's low symbol
+        // uniqueness (many same-name symbols across prod and tests) the
+        // default-true setting reliably pulled in unrelated test functions
+        // by name collision. Callers can opt back in for a test-aware view.
         let depth = args.depth.unwrap_or(2);
-        let include_tests = args.include_tests.unwrap_or(true);
+        let include_tests = args.include_tests.unwrap_or(false);
         let rows = match self.expand_bundle_by_depth(
             &store,
             base_rows,

@@ -1,5 +1,6 @@
 //! Integration tests: arrow functions.
 
+use rustc_hash::FxHashSet;
 use codesight_core::SymbolKind;
 use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
 
@@ -154,7 +155,7 @@ fn case_multiple_mixed() {
     let syms = scm_extractor("javascript")
         .extract("multi.js", src)
         .unwrap();
-    let names: std::collections::HashSet<_> = syms
+    let names: FxHashSet<_> = syms
         .iter()
         .filter(|s| s.kind == SymbolKind::Function)
         .map(|s| s.name.as_str())

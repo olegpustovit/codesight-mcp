@@ -1,13 +1,36 @@
 //! Repo-level graph reads, file listings, and staleness.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
+use rustc_hash::FxHashMap;
 use serde_json::Value;
 
 use crate::core::symbols::FactQuality;
 
 use super::IndexStore;
+
+/// Process-wide cache of derived analysis results keyed on
+/// `(canonical_db_path, index_version)`. Survives `IndexStore::open_existing`
+/// returning a fresh handle on every dispatch — without it, the per-`IndexStore`
+/// `cached_pagerank` field cannot help because every request opens a brand new
+/// store. Entries from older index versions are evicted on the next write.
+type PagerankKey = (PathBuf, u32);
+type PagerankCache = Mutex<FxHashMap<PagerankKey, Arc<FxHashMap<String, f64>>>>;
+type SymbolsKey = (PathBuf, u32);
+type SymbolsCache =
+    Mutex<FxHashMap<SymbolsKey, Arc<Vec<crate::storage::SymbolSourceRecord>>>>;
+
+fn pagerank_cache() -> &'static PagerankCache {
+    static CACHE: OnceLock<PagerankCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
+}
+
+fn symbols_with_source_cache() -> &'static SymbolsCache {
+    static CACHE: OnceLock<SymbolsCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
+}
 
 impl IndexStore {
     fn parse_import_edge_quality(value: &str) -> FactQuality {
@@ -17,7 +40,7 @@ impl IndexStore {
     /// Return the file-level dependency adjacency list from stored edges (all import tiers).
     pub fn dependency_graph(
         &self,
-    ) -> anyhow::Result<std::collections::HashMap<String, Vec<String>>> {
+    ) -> anyhow::Result<FxHashMap<String, Vec<String>>> {
         Ok(self
             .dependency_graph_with_import_quality()?
             .into_iter()
@@ -28,12 +51,12 @@ impl IndexStore {
     /// Stored dependency edges with [`FactQuality`] from import extraction (see REFACTOR_PLAN).
     pub fn dependency_graph_with_import_quality(
         &self,
-    ) -> anyhow::Result<std::collections::HashMap<String, Vec<(String, FactQuality)>>> {
+    ) -> anyhow::Result<FxHashMap<String, Vec<(String, FactQuality)>>> {
         // RW connection so schema migration runs before reads on older indexes.
         let conn = self.open_connection()?;
 
-        let mut adj: std::collections::HashMap<String, Vec<(String, FactQuality)>> =
-            std::collections::HashMap::new();
+        let mut adj: FxHashMap<String, Vec<(String, FactQuality)>> =
+            FxHashMap::default();
         {
             let mut stmt = conn.prepare_cached("SELECT file_path FROM files")?;
             let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
@@ -63,10 +86,10 @@ impl IndexStore {
     /// Adjacency built only from import edges marked suitable for strict graph analysis.
     pub fn dependency_graph_strict(
         &self,
-    ) -> anyhow::Result<std::collections::HashMap<String, Vec<String>>> {
+    ) -> anyhow::Result<FxHashMap<String, Vec<String>>> {
         let detailed = self.dependency_graph_with_import_quality()?;
-        let mut out: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
+        let mut out: FxHashMap<String, Vec<String>> =
+            FxHashMap::default();
         for (src, targets) in detailed {
             let keep: Vec<String> = targets
                 .into_iter()
@@ -79,6 +102,63 @@ impl IndexStore {
     }
 
     /// Return all symbols with their source text, for call graph building.
+    /// Cached variant of [`Self::all_symbols_with_source`]. Backed by a
+    /// process-global map keyed on `(db_path, index_version)` so a fresh
+    /// `IndexStore::open_existing` (the default at every dispatch) reuses
+    /// the same `Arc` snapshot. A bump in `index_version` after
+    /// `apply_index_with_deps` invalidates older entries naturally because
+    /// the lookup key changes.
+    pub fn all_symbols_with_source_cached(
+        &self,
+    ) -> anyhow::Result<Arc<Vec<crate::storage::SymbolSourceRecord>>> {
+        let version = self.current_index_version().unwrap_or(0);
+        let key = (self.db_path.clone(), version);
+        if let Ok(map) = symbols_with_source_cache().lock()
+            && let Some(existing) = map.get(&key)
+        {
+            return Ok(existing.clone());
+        }
+        let loaded = Arc::new(self.all_symbols_with_source()?);
+        if let Ok(mut map) = symbols_with_source_cache().lock() {
+            map.retain(|(p, _), _| p != &self.db_path);
+            map.insert(key, loaded.clone());
+        }
+        Ok(loaded)
+    }
+
+    /// Returns a cached map of `file_path -> pagerank_score` over the file
+    /// dependency graph. PetGraph's 50-iteration page-rank costs ~1.6s on
+    /// a 565-file repo; without this cache `assemble_context context_bundle`
+    /// pays that cost on every call. The cache is process-global and keyed
+    /// on `(db_path, index_version)` so it survives `IndexStore::open_existing`
+    /// returning a fresh handle. The caller passes the compute closure so
+    /// the analysis-layer PageRank impl stays out of `codesight-storage`.
+    pub fn pagerank_scores_cached_with<F>(
+        &self,
+        compute: F,
+    ) -> anyhow::Result<Arc<rustc_hash::FxHashMap<String, f64>>>
+    where
+        F: FnOnce(
+            &rustc_hash::FxHashMap<String, Vec<String>>,
+        ) -> rustc_hash::FxHashMap<String, f64>,
+    {
+        let version = self.current_index_version().unwrap_or(0);
+        let key = (self.db_path.clone(), version);
+        if let Ok(map) = pagerank_cache().lock()
+            && let Some(existing) = map.get(&key)
+        {
+            return Ok(existing.clone());
+        }
+        let adj = self.dependency_graph()?;
+        let scores = compute(&adj);
+        let arc = Arc::new(scores);
+        if let Ok(mut map) = pagerank_cache().lock() {
+            map.retain(|(p, _), _| p != &self.db_path);
+            map.insert(key, arc.clone());
+        }
+        Ok(arc)
+    }
+
     pub fn all_symbols_with_source(
         &self,
     ) -> anyhow::Result<Vec<crate::storage::SymbolSourceRecord>> {

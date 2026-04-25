@@ -1,6 +1,6 @@
 //! `inspect_graph graph=importers` — who imports this file, plus optional cross-repo importers.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use serde_json::{Value, json};
 
@@ -9,7 +9,7 @@ use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::agent_v1::util::path_matches_filter;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_language_support::imports_orchestration::{extract_imports, language_for_path};
 use codesight_language_support::packages::package_reference_evidence;
 use codesight_storage::storage::{IndexStore, list_repo_summaries};
@@ -52,7 +52,10 @@ impl CodeService {
             "imports": imports,
             "has_imports": !imports.is_empty(),
         });
-        self.success_response(&MetaBuilder::new(0), data)
+        self.success_response(
+            &MetaBuilder::new(0).with_confidence(Confidence::Safe),
+            data,
+        )
     }
 
     pub(super) fn graph_importers(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
@@ -148,7 +151,7 @@ impl CodeService {
                     }
                 }
             }
-            let mut seen: HashSet<String> = HashSet::new();
+            let mut seen: FxHashSet<String> = FxHashSet::default();
             cross_importers.retain(|e| {
                 let key = format!("{}->{}:{}", e["from_repo"], e["to_repo"], e["package_name"]);
                 seen.insert(key)
@@ -157,6 +160,14 @@ impl CodeService {
             data["cross_repo_importers"] = json!(cross_importers);
         }
 
-        self.success_response(&MetaBuilder::new(0), data)
+        let warnings = vec![json!({
+            "code": "GRAPH_USAGE_HEURISTIC",
+            "message": "importers mixes authoritative explicit-import edges with heuristic symbol-usage edges (Rust `mod x; x::Y`, Python sibling access, Go same-package). The result is more complete than imports alone but may include intra-package references the parser could not statically resolve.",
+        })];
+        self.success_response_with_warnings(
+            &MetaBuilder::new(0).with_confidence(Confidence::Partial),
+            data,
+            warnings,
+        )
     }
 }

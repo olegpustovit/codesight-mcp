@@ -4,7 +4,7 @@
 //! No weighted-sum mode, no score normalization (§8.2 of
 //! `IDF_REPLACEMENT.md`).
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 const RRF_K: f64 = 60.0;
 
@@ -15,7 +15,7 @@ where
     I: IntoIterator<Item = String>,
     J: IntoIterator<Item = String>,
 {
-    let mut scores: HashMap<String, f64> = HashMap::new();
+    let mut scores: FxHashMap<String, f64> = FxHashMap::default();
     for (rank, id) in lexical.into_iter().enumerate() {
         *scores.entry(id).or_insert(0.0) += 1.0 / (RRF_K + (rank + 1) as f64);
     }

@@ -4,7 +4,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::AssembleContextArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(super) fn context_query_suggestions(
@@ -15,8 +15,9 @@ impl CodeService {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         // ROADMAP P1.1: query_suggestions is a metadata-only view (repo
         // summary + sample queries). No sensible per-call counterfactual —
-        // surface `tokens_saved: null` by passing a 0 baseline.
-        let timer_overall = MetaBuilder::new(0);
+        // surface `tokens_saved: null` by passing a 0 baseline. Suggestions
+        // are heuristic samples drawn from index distributions.
+        let timer_overall = MetaBuilder::new(0).with_confidence(Confidence::Heuristic);
         let summary = match store.repo_summary() {
             Ok(s) => s,
             Err(e) => return self.error_response(timer, index_error(e)),

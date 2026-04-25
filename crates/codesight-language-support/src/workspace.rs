@@ -9,7 +9,7 @@
 //! redesign. Extractors still read query pack roots through
 //! [`project_query_pack_roots`] to build SCM extractor overlays.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -19,7 +19,7 @@ pub const PROJECT_CONFIG_FILE: &str = ".codesight.toml";
 #[derive(Debug, Deserialize)]
 pub struct CodesightProjectConfig {
     #[serde(default)]
-    pub extra_extensions: Option<HashMap<String, String>>,
+    pub extra_extensions: Option<FxHashMap<String, String>>,
     #[serde(default)]
     pub query_pack_roots: Option<Vec<String>>,
 }
@@ -29,7 +29,7 @@ pub fn read_project_config(project_root: &Path) -> Option<CodesightProjectConfig
     toml::from_str(&content).ok()
 }
 
-pub fn project_extra_extensions(project_root: &Path) -> HashMap<String, String> {
+pub fn project_extra_extensions(project_root: &Path) -> FxHashMap<String, String> {
     read_project_config(project_root)
         .and_then(|cfg| cfg.extra_extensions)
         .unwrap_or_default()
@@ -63,7 +63,7 @@ pub fn project_query_pack_roots(project_root: &Path) -> Vec<PathBuf> {
 
 fn dedupe_query_pack_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut out = Vec::with_capacity(roots.len());
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     for root in roots {
         let key = root.canonicalize().unwrap_or_else(|_| root.clone());
         if seen.insert(key) {

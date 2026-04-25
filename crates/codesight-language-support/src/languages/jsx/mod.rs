@@ -1,6 +1,6 @@
 //! JSX language — re-registers JavaScript grammar/behavior for `.jsx` files.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 use crate::family::{LanguageFamily, NestingMode};
@@ -64,7 +64,7 @@ impl Language for Jsx {
         &self,
         specifier: &str,
         from_file: &str,
-        source_files: &HashSet<String>,
+        source_files: &FxHashSet<String>,
     ) -> Option<String> {
         js_resolve_relative(specifier, from_file, source_files)
     }

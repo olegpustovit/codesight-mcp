@@ -1,6 +1,6 @@
 //! `evaluate_quality analysis=broken_links` — markdown internal link check.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 static MD_INTERNAL_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").expect("infallible markdown link regex")
@@ -24,9 +24,9 @@ impl CodeService {
         let doc_store =
             require_store!(doc: self, &args.source_id, args.repo_path.as_deref(), timer);
         let all_sections = doc_store.all_sections()?;
-        let all_files: HashSet<String> = doc_store.all_doc_files()?.into_iter().collect();
+        let all_files: FxHashSet<String> = doc_store.all_doc_files()?.into_iter().collect();
 
-        let mut file_headings: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut file_headings: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
         for sec in &all_sections {
             file_headings
                 .entry(sec.file_path.clone())
@@ -46,8 +46,12 @@ impl CodeService {
             }
         }
 
+        let _ = timer;
+        // Markdown link check is a regex scan over indexed sections —
+        // partial (regex-driven, not a full parser).
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
         self.success_response(
-            timer,
+            &timer,
             json!({
                 "analysis": "broken_links",
                 "repo": args.source_id,
@@ -63,8 +67,8 @@ impl CodeService {
 fn check_internal_link(
     sec: &codesight_storage::storage::doc_index::SectionRecord,
     target: &str,
-    all_files: &HashSet<String>,
-    file_headings: &HashMap<String, HashSet<String>>,
+    all_files: &FxHashSet<String>,
+    file_headings: &FxHashMap<String, FxHashSet<String>>,
 ) -> Option<Value> {
     if target.starts_with("http://")
         || target.starts_with("https://")

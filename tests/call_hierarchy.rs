@@ -1,6 +1,6 @@
 //! Integration tests: call hierarchy.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::fs;
 use std::path::Path;
 
@@ -318,7 +318,7 @@ fn call_hierarchy_no_cycles_in_callers() {
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let callers = r["data"]["callers"].as_array().unwrap();
     let ids: Vec<&str> = callers.iter().filter_map(|c| c["id"].as_str()).collect();
-    let unique: HashSet<&str> = ids.iter().copied().collect();
+    let unique: FxHashSet<&str> = ids.iter().copied().collect();
     assert_eq!(
         ids.len(),
         unique.len(),
@@ -334,7 +334,7 @@ fn call_hierarchy_no_cycles_in_callees() {
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let callees = r["data"]["callees"].as_array().unwrap();
     let ids: Vec<&str> = callees.iter().filter_map(|c| c["id"].as_str()).collect();
-    let unique: HashSet<&str> = ids.iter().copied().collect();
+    let unique: FxHashSet<&str> = ids.iter().copied().collect();
     assert_eq!(
         ids.len(),
         unique.len(),
@@ -575,7 +575,7 @@ fn impact_preview_no_duplicate_affected_symbols() {
         .iter()
         .filter_map(|s| s["id"].as_str())
         .collect();
-    let unique: HashSet<&str> = ids.iter().copied().collect();
+    let unique: FxHashSet<&str> = ids.iter().copied().collect();
     assert_eq!(
         ids.len(),
         unique.len(),
@@ -605,13 +605,13 @@ fn impact_preview_affected_by_file_keys_match_affected_symbols() {
     let (_ws, svc, sid) = build_call_repo();
     let r = impact_preview(&svc, &sid, "helper");
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
-    let files_in_list: HashSet<&str> = r["data"]["affected_symbols"]
+    let files_in_list: FxHashSet<&str> = r["data"]["affected_symbols"]
         .as_array()
         .unwrap()
         .iter()
         .filter_map(|s| s["file"].as_str())
         .collect();
-    let files_in_dict: HashSet<&str> = r["data"]["affected_by_file"]
+    let files_in_dict: FxHashSet<&str> = r["data"]["affected_by_file"]
         .as_object()
         .unwrap()
         .keys()

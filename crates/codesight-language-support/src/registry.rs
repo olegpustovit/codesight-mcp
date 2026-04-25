@@ -1,7 +1,8 @@
 //! `LanguageRegistry` — the single entry point every crate above L0.75
 //! uses to look up language identity and behavior.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -10,11 +11,11 @@ use crate::manifest::{HostProfile, LanguageId, ProfileId, ResolvedLanguage, UNKN
 use crate::traits::Language;
 
 pub struct LanguageRegistry {
-    by_id: HashMap<LanguageId, Arc<dyn Language>>,
-    by_filename: HashMap<String, LanguageId>,
-    by_compound_ext: HashMap<String, LanguageId>,
-    by_ext: HashMap<String, LanguageId>,
-    extra_ext: HashMap<String, LanguageId>,
+    by_id: FxHashMap<LanguageId, Arc<dyn Language>>,
+    by_filename: FxHashMap<String, LanguageId>,
+    by_compound_ext: FxHashMap<String, LanguageId>,
+    by_ext: FxHashMap<String, LanguageId>,
+    extra_ext: FxHashMap<String, LanguageId>,
     profiles: Vec<(LanguageId, &'static HostProfile)>,
     curated: BTreeSet<LanguageId>,
 }
@@ -25,11 +26,11 @@ impl LanguageRegistry {
     /// [`LanguageRegistry::for_workspace_root`].
     pub fn empty() -> Self {
         Self {
-            by_id: HashMap::new(),
-            by_filename: HashMap::new(),
-            by_compound_ext: HashMap::new(),
-            by_ext: HashMap::new(),
-            extra_ext: HashMap::new(),
+            by_id: FxHashMap::default(),
+            by_filename: FxHashMap::default(),
+            by_compound_ext: FxHashMap::default(),
+            by_ext: FxHashMap::default(),
+            extra_ext: FxHashMap::default(),
             profiles: Vec::new(),
             curated: BTreeSet::new(),
         }
@@ -48,7 +49,7 @@ impl LanguageRegistry {
         let mut reg = Self::builtin();
         reg.register_workspace_query_packs(root)?;
         let extras = crate::workspace::project_extra_extensions(root);
-        let typed: HashMap<String, LanguageId> = extras
+        let typed: FxHashMap<String, LanguageId> = extras
             .iter()
             .map(|(ext, lang_name)| {
                 let id = reg
@@ -238,7 +239,7 @@ impl LanguageRegistry {
     /// External callers / `.codesight.toml` use [`Self::apply_extra_extensions`].
     pub fn apply_extra_extension_ids(
         &mut self,
-        mappings: &HashMap<String, LanguageId>,
+        mappings: &FxHashMap<String, LanguageId>,
     ) -> Vec<String> {
         let mut rejected = Vec::new();
         for (ext, id) in mappings {
@@ -255,7 +256,7 @@ impl LanguageRegistry {
     /// Register extra `(extension, language_name)` mappings. Returns a list
     /// of human-readable warnings for entries the registry could not accept
     /// (empty extension, unknown language, etc.).
-    pub fn apply_extra_extensions(&mut self, mappings: &HashMap<String, String>) -> Vec<String> {
+    pub fn apply_extra_extensions(&mut self, mappings: &FxHashMap<String, String>) -> Vec<String> {
         let mut warnings = Vec::new();
         for (ext_raw, lang_raw) in mappings {
             let ext = ext_raw.trim().to_string();
@@ -430,7 +431,7 @@ mod tests {
     #[test]
     fn apply_extra_extensions_rejects_unknown_language_id() {
         let mut r = LanguageRegistry::empty();
-        let mut mappings = HashMap::new();
+        let mut mappings = FxHashMap::default();
         mappings.insert(".foo".to_string(), RUST);
         let rejected = r.apply_extra_extension_ids(&mappings);
         assert_eq!(rejected, vec![".foo".to_string()]);
@@ -439,7 +440,7 @@ mod tests {
     #[test]
     fn apply_extra_extensions_routes_registered_extension() {
         let mut r = LanguageRegistry::builtin();
-        let mut mappings = HashMap::new();
+        let mut mappings = FxHashMap::default();
         mappings.insert(".rsx".to_string(), RUST);
         assert!(r.apply_extra_extension_ids(&mappings).is_empty());
         assert_eq!(r.identify_path(Path::new("foo.rsx")), RUST);
@@ -544,7 +545,7 @@ mod tests {
     #[test]
     fn phase_c_extra_extensions_rejects_malformed_entries() {
         let mut r = LanguageRegistry::builtin();
-        let mut mappings = HashMap::new();
+        let mut mappings = FxHashMap::default();
         mappings.insert(String::new(), RUST);
         mappings.insert(".".to_string(), RUST);
         mappings.insert(".xx".to_string(), LanguageId::new("nosuchlanguage"));

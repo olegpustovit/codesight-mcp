@@ -5,7 +5,7 @@
 //! on the Python language so the generic orchestration stays language-
 //! agnostic.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Resolve dotted-module `import_targets` to project-relative file paths.
 /// Each target is matched against every `.py` file's stem (or the package
@@ -16,9 +16,9 @@ pub fn resolve_imports_to_files(
     source_file: &str,
 ) -> Vec<String> {
     let mut resolved = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
 
-    let mut stem_to_file: HashMap<String, Vec<String>> = HashMap::new();
+    let mut stem_to_file: FxHashMap<String, Vec<String>> = FxHashMap::default();
     for f in known_files {
         if let Some(stem) = python_file_stem(f) {
             stem_to_file.entry(stem).or_default().push(f.clone());

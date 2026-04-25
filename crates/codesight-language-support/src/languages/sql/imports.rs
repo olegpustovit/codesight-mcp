@@ -2,13 +2,13 @@
 //! `{{ source('s', 't') }}` references. Hand-rolled scanner because dbt's
 //! Jinja interpolation isn't reachable via the SQL tree-sitter grammar.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::imports_types::{ImportEdge, extract_quoted_string, extract_quoted_string_with_rest};
 
 pub fn extract(content: &str) -> Vec<ImportEdge> {
     let mut edges = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
 
     let bytes = content.as_bytes();
     let len = bytes.len();

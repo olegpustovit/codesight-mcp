@@ -1,6 +1,6 @@
 //! Integration tests: related symbols.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::fs;
 
 use codesight_engine::config::AppConfig;
@@ -30,13 +30,13 @@ fn related_symbols_suite() {
 }
 
 fn case_tokenize_name_unit() {
-    let expected: HashSet<_> = ["get", "user"].into_iter().map(String::from).collect();
+    let expected: FxHashSet<_> = ["get", "user"].into_iter().map(String::from).collect();
     assert_eq!(tokenize_name("get_user"), expected);
     let gubi = tokenize_name("getUserById");
     assert!(
         gubi.contains("get") && gubi.contains("user") && gubi.contains("by") && gubi.contains("id")
     );
-    let expected: HashSet<_> = ["process"].into_iter().map(String::from).collect();
+    let expected: FxHashSet<_> = ["process"].into_iter().map(String::from).collect();
     assert_eq!(tokenize_name("process"), expected);
     let abc = tokenize_name("a_b_c");
     assert!(!abc.contains("a") && !abc.contains("b") && !abc.contains("c"));

@@ -4,7 +4,7 @@ pub mod nextjs;
 mod simple_framework;
 pub mod tsconfig;
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 use tree_sitter::Language as TsLanguage;
@@ -76,14 +76,14 @@ impl Language for TypeScript {
     fn imports_query(&self) -> Option<&'static str> {
         Some(include_str!("queries/imports.scm"))
     }
-    fn path_aliases(&self, root: &Path) -> HashMap<String, Vec<String>> {
+    fn path_aliases(&self, root: &Path) -> FxHashMap<String, Vec<String>> {
         tsconfig::load_tsconfig_aliases(&root.to_string_lossy())
     }
     fn resolve_relative_specifier(
         &self,
         specifier: &str,
         from_file: &str,
-        source_files: &HashSet<String>,
+        source_files: &FxHashSet<String>,
     ) -> Option<String> {
         js_resolve_relative(specifier, from_file, source_files)
     }

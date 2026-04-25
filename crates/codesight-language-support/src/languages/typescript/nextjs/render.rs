@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::frameworks::FileContext;
 
@@ -59,8 +59,8 @@ pub fn render_file_context(snapshot: &NextjsSnapshot, rel_path: &str) -> Option<
     None
 }
 
-pub fn metadata(snapshot: &NextjsSnapshot) -> HashMap<String, serde_json::Value> {
-    let mut meta = HashMap::new();
+pub fn metadata(snapshot: &NextjsSnapshot) -> FxHashMap<String, serde_json::Value> {
+    let mut meta = FxHashMap::default();
 
     let routes: Vec<serde_json::Value> = snapshot
         .page_routes

@@ -1,5 +1,6 @@
 //! Integration tests: languages.
 
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 use codesight_core::SymbolKind;
@@ -689,8 +690,8 @@ fn test_parse_cpp_mixed_header_deterministic_selection() {
     assert!(!run1.is_empty());
     assert!(!run2.is_empty());
 
-    let langs1: std::collections::HashSet<_> = run1.iter().map(|s| s.language).collect();
-    let langs2: std::collections::HashSet<_> = run2.iter().map(|s| s.language).collect();
+    let langs1: FxHashSet<_> = run1.iter().map(|s| s.language).collect();
+    let langs2: FxHashSet<_> = run2.iter().map(|s| s.language).collect();
     assert_eq!(langs1, langs2);
     assert_eq!(langs1.len(), 1, "should have exactly one language");
 }

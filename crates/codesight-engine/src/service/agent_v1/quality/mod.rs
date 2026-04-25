@@ -5,6 +5,10 @@ mod refactor_targets;
 mod repo_health;
 mod test_gaps;
 
+use rustc_hash::FxHashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
@@ -12,11 +16,90 @@ use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_analysis::{
     agent_readiness::compute_agent_readiness_for_scope, dead_code, quality, quality_signal,
     thresholds::current_thresholds,
 };
+
+/// In-process memoisation for `evaluate_quality analysis=dead_code`. The
+/// underlying analysis loads every file body and re-runs the string-dispatch
+/// detector on each call (~8 s on the codesight repo). Subsequent calls with
+/// the same key during a short TTL window return the cached payload.
+///
+/// Invalidation is generational: every cache entry stamps the
+/// `catalog_generation` it was computed under; a fresh ingest bumps the
+/// counter and any older entry is treated as stale on lookup. The TTL is the
+/// secondary safety net for cases where a file mutates without an ingest
+/// (e.g. external `git checkout` outside the watcher) — agents see at most
+/// `DEAD_CODE_TTL` seconds of staleness before recompute.
+const DEAD_CODE_TTL: Duration = Duration::from_secs(30);
+const DEAD_CODE_CACHE_MAX: usize = 32;
+
+#[derive(Eq, PartialEq, Hash, Clone)]
+struct DeadCodeCacheKey {
+    source_id: String,
+    granularity: String,
+    min_confidence_bits: u64,
+    include_tests: bool,
+    include_vendored: bool,
+    paranoid: bool,
+    top_n: usize,
+    entry_patterns: Vec<String>,
+    max_tokens: Option<u32>,
+}
+
+struct DeadCodeCacheEntry {
+    generation: u64,
+    cached_at: Instant,
+    payload: Value,
+}
+
+fn dead_code_cache() -> &'static Mutex<FxHashMap<DeadCodeCacheKey, DeadCodeCacheEntry>> {
+    static CACHE: OnceLock<Mutex<FxHashMap<DeadCodeCacheKey, DeadCodeCacheEntry>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
+}
+
+fn dead_code_cache_lookup(
+    key: &DeadCodeCacheKey,
+    current_generation: u64,
+) -> Option<Value> {
+    let cache = dead_code_cache().lock().ok()?;
+    let entry = cache.get(key)?;
+    if entry.generation != current_generation {
+        return None;
+    }
+    if entry.cached_at.elapsed() > DEAD_CODE_TTL {
+        return None;
+    }
+    Some(entry.payload.clone())
+}
+
+fn dead_code_cache_store(key: DeadCodeCacheKey, generation: u64, payload: Value) {
+    let Ok(mut cache) = dead_code_cache().lock() else {
+        return;
+    };
+    if cache.len() >= DEAD_CODE_CACHE_MAX {
+        // Evict the oldest entry. The cache is small enough that a linear
+        // scan is cheaper than maintaining a heap.
+        if let Some(oldest_key) = cache
+            .iter()
+            .min_by_key(|(_, e)| e.cached_at)
+            .map(|(k, _)| k.clone())
+        {
+            cache.remove(&oldest_key);
+        }
+    }
+    cache.insert(
+        key,
+        DeadCodeCacheEntry {
+            generation,
+            cached_at: Instant::now(),
+            payload,
+        },
+    );
+}
 
 impl CodeService {
     pub(in crate::service) fn evaluate_quality(&self, v: Value) -> anyhow::Result<Value> {
@@ -186,7 +269,7 @@ impl CodeService {
             }
         };
         // ROADMAP P1.1: quality analysis — null baseline.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Safe);
         // ROADMAP P0.2 #3: echo which ref shape resolved the target.
         let mut extras: Vec<(String, Value)> = Vec::new();
         if let Some(r) = resolution {
@@ -203,7 +286,12 @@ impl CodeService {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         let granularity = args.granularity.as_deref().unwrap_or("file");
         let min_confidence = args.min_confidence.unwrap_or(0.5);
-        let include_tests = args.include_tests.unwrap_or(true);
+        // Default false: test functions inside `mod tests` (Rust),
+        // `def test_…` (Python), `TestXxx` (Go), etc. are entry-only —
+        // invoked by the test harness, not by other indexed code — so
+        // flagging them as "no_structural_inbound" is meaningless. Pass
+        // `include_tests=true` to inspect test code on its own merits.
+        let include_tests = args.include_tests.unwrap_or(false);
         let entry_patterns = args.entry_point_patterns.clone().unwrap_or_default();
         let limit = args.top_n.unwrap_or(25);
         let include_vendored = args.include_vendored.unwrap_or(false)
@@ -212,20 +300,49 @@ impl CodeService {
                 .as_deref()
                 .map(codesight_language_support::scope_opts_in)
                 .unwrap_or(false);
+        let paranoid = args.paranoid.unwrap_or(false);
         // ROADMAP P1.1: quality analysis — null baseline.
-        let timer = MetaBuilder::new(0);
-        let mut data = dead_code::dead_code_payload(
-            &store,
-            granularity,
-            min_confidence,
+        // dead_code reachability is fundamentally heuristic: string-dispatch
+        // entry points and trait-object call sites can't be ruled out from
+        // a static index alone. The `confidence_reason` companion tells
+        // callers exactly which heuristic limited the verdict.
+        let timer = MetaBuilder::new(0)
+            .with_confidence(Confidence::Heuristic)
+            .with_confidence_reason(
+                "string-literal-dispatch heuristic; manual review for plugin / handler-table dispatch",
+            );
+
+        let cache_key = DeadCodeCacheKey {
+            source_id: args.source_id.clone(),
+            granularity: granularity.to_string(),
+            min_confidence_bits: min_confidence.to_bits(),
             include_tests,
-            &entry_patterns,
-            Some(limit),
             include_vendored,
-        )?;
-        if let Some(budget) = args.max_tokens {
-            dead_code::pack_dead_code_to_budget(&mut data, budget);
-        }
+            paranoid,
+            top_n: limit,
+            entry_patterns: entry_patterns.clone(),
+            max_tokens: args.max_tokens,
+        };
+        let generation = self.catalog_generation();
+        let data = if let Some(cached) = dead_code_cache_lookup(&cache_key, generation) {
+            cached
+        } else {
+            let mut fresh = dead_code::dead_code_payload(
+                &store,
+                granularity,
+                min_confidence,
+                include_tests,
+                &entry_patterns,
+                Some(limit),
+                include_vendored,
+                paranoid,
+            )?;
+            if let Some(budget) = args.max_tokens {
+                dead_code::pack_dead_code_to_budget(&mut fresh, budget);
+            }
+            dead_code_cache_store(cache_key, generation, fresh.clone());
+            fresh
+        };
         // ROADMAP P2.8: emit actionable_next hints pointing at the top-3
         // flagged files so the agent can confirm/reject via find_references
         // in one round-trip instead of guessing which hit to probe.
@@ -273,7 +390,7 @@ impl CodeService {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         let min_confidence = args.min_confidence.unwrap_or(0.5);
         // ROADMAP P1.1: quality analysis — null baseline.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Heuristic);
         let data = dead_code::dead_code_v2_payload(&store, min_confidence)?;
         self.success_response(&timer, data)
     }
@@ -285,7 +402,9 @@ impl CodeService {
     ) -> anyhow::Result<Value> {
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), timer);
         // ROADMAP P1.1: quality analysis — null baseline.
-        let timer = MetaBuilder::new(0);
+        // Multi-signal aggregation (structural + agent readiness + heuristic
+        // sub-metrics) — partial.
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
 
         let gov = quality_signal::compute_governance_signal(&store)?;
         let suggestion =
@@ -294,6 +413,22 @@ impl CodeService {
         // quality_signal response adds analysis label and coverage block.
         let obj = data.as_object_mut().unwrap();
         obj.insert("analysis".into(), json!("quality_signal"));
+        // TL;DR: surface the highest-severity recommendation as a one-line
+        // `next_action` so callers don't have to parse the recommendations
+        // array to know what to do.
+        if let Some(top) = data
+            .get("recommendations")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.first())
+            .and_then(|r| r.get("suggestion"))
+            .and_then(|s| s.as_str())
+            .map(str::to_string)
+        {
+            data.as_object_mut()
+                .unwrap()
+                .insert("next_action".into(), json!(top));
+        }
+        let obj = data.as_object_mut().unwrap();
         obj.insert(
             "coverage".into(),
             json!({
@@ -382,7 +517,7 @@ impl CodeService {
         };
 
         // ROADMAP P1.1: quality analysis — null baseline.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
 
         let gov = quality_signal::compute_governance_signal(&store)?;
 

@@ -13,7 +13,7 @@
 //! [`codesight_language_support::path_rename`] so tool handlers can import
 //! them from one place.
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde_json::{Value, json};
 
@@ -67,8 +67,8 @@ pub fn rename_safety_payload(
     }
 
     let adjacency = store.dependency_graph()?;
-    let mut checked_files = HashSet::from([file_path.clone()]);
-    let mut reverse_adj = std::collections::HashMap::<String, Vec<String>>::new();
+    let mut checked_files: FxHashSet<String> = std::iter::once(file_path.clone()).collect();
+    let mut reverse_adj = FxHashMap::<String, Vec<String>>::default();
     for (source, targets) in &adjacency {
         for target in targets {
             reverse_adj
@@ -299,7 +299,7 @@ fn scan_symbol_references(
         });
     }
     let sym_infos = store.all_symbols_with_source()?;
-    let mut seen_files: HashSet<String> = HashSet::new();
+    let mut seen_files: FxHashSet<String> = FxHashSet::default();
     let mut references = Vec::new();
     let mut complete = true;
     let mut excluded_vendored = 0usize;

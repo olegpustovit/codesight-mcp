@@ -2,7 +2,7 @@
   {
     "name": "ingest_sources",
     "capabilities_version": "v1",
-    "description": "Create or refresh indexes for a local path. Use domains code, docs, or auto.",
+    "description": "Create or refresh the index for a local path (code, docs, or both). Use `incremental=true` (default) to amortize re-ingest after edits; pass `domains` to scope to one side. Returns a `source_id` that every other tool requires. Returns `_meta.confidence: safe|partial|heuristic`.",
     "inputSchema": {
       "type": "object",
       "required": ["path"],
@@ -11,131 +11,157 @@
           "type": "string",
           "enum": ["local_path", "single_file", "git_repo"],
           "default": "local_path",
-          "description": "git_repo is not implemented."
+          "description": "Source kind. `git_repo` is not implemented."
         },
         "domains": {
           "type": "string",
           "enum": ["code", "docs", "auto"],
-          "default": "auto"
+          "default": "auto",
+          "description": "Which index to build. `auto` ingests whichever the path contains."
         },
-        "path": { "type": "string" },
-        "incremental": { "type": "boolean", "default": true },
+        "path": { "type": "string", "description": "Filesystem path to ingest." },
+        "incremental": { "type": "boolean", "default": true, "description": "Reuse the existing index and reprocess only changed files." },
         "enrichment": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Optional; not implemented."
+          "description": "Reserved; not implemented."
         }
       }
-    }
+    },
+    "examples": [
+      { "name": "first ingest of cwd", "args": { "path": "." } },
+      { "name": "fast incremental refresh", "args": { "path": ".", "incremental": true } },
+      { "name": "code-only ingest", "args": { "path": ".", "domains": "code" } }
+    ]
   },
   {
     "name": "catalog_sources",
     "capabilities_version": "v2",
-    "description": "List indexed sources (code and docs) with capabilities and hints. Code and docs for the same workspace share one `source_id`, distinguished by the `domains` field on each entry. On downstream calls, pass `source_id` together with the `domain` you want to query (where supported). v2 adds `lightweight=true` for warmup-cost trims.",
+    "description": "List indexed sources with their capabilities, language counts, and freshness. Code and docs for the same workspace share one `source_id` and appear as separate entries distinguished by `domain`. Pair the returned `source_id` with `domain` on downstream calls; pass `cursor` to page when many sources are registered. Returns `_meta.confidence: safe|partial|heuristic`.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "cursor": { "type": "string" }
+        "cursor": { "type": "string", "description": "Pagination cursor returned by a prior call." }
       }
-    }
+    },
+    "examples": [
+      { "name": "list all sources", "args": {} },
+      { "name": "next page", "args": { "cursor": "<opaque-cursor>" } }
+    ]
   },
   {
     "name": "search_catalog",
     "capabilities_version": "v2",
-    "description": "Unified search over symbols, sections, and file text. Preferred over native Grep for all code exploration — returns structured results with token savings. Use query_mode=keyword for identifiers (fastest), regex for patterns, natural_language for questions. When `domain` is omitted, defaults to `code` for `keyword`/`regex` and `hybrid` for `natural_language`. Effective values are echoed in `_meta`. v2 adds `rg -n`-equivalent honest baseline, `fuzzy=true` two-lane response, `unit_kinds=[\"doc_section\"]`, SYMBOL_NOT_FOUND_IN_CODE hint.",
+    "description": "Unified ranked search over symbols, doc sections, and raw file text — preferred over native Grep for any code or docs lookup. `query_mode=keyword` is the fastest path for identifiers; `regex` auto-routes to file-text scanning (and ignores `unit_kinds`); `natural_language` enables dense retrieval and answers questions. Narrow with `unit_kinds` (`symbol`, `section`, `file`, or alias `doc_section` to opt into doc-only search), `scope` / `exclude` / `file_pattern`, and budget with `max_tokens`. With `fuzzy=true` the response carries two lanes — an exact BM25 lane and a parallel nucleo-matcher lane ranked by subsequence score with a kind-priority tie-break (types > callables > constants > re-exports) — so typos still surface candidates without polluting the exact ranking. Returns `_meta.confidence: safe|partial|heuristic`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "query"],
       "properties": {
-        "source_id": { "type": "string" },
-        "query": { "type": "string" },
+        "source_id": { "type": "string", "description": "From `catalog_sources`." },
+        "query": { "type": "string", "description": "Search text. With `query_mode=regex`, may also be passed as `pattern`." },
         "domain": {
           "type": "string",
           "enum": ["code", "docs", "hybrid"],
-          "description": "When omitted, defaults to `code` for keyword/regex and `hybrid` for natural_language. Pass explicitly to override."
+          "description": "Defaults to `code` for keyword/regex and `hybrid` for natural_language. Pass explicitly to override."
         },
         "unit_kinds": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": { "type": "string" },
+          "description": "Limit hits to `symbol`, `section`, and/or `file`. Alias `doc_section` resolves to `section` and is the recommended way to scope a search to docs only. Ignored under `query_mode=regex`."
         },
-        "scope": { "type": "string" },
+        "scope": { "type": "string", "description": "Repo-relative prefix or substring inclusion filter." },
         "exclude": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Repo-relative prefixes or substrings to skip. Complements `scope` (inclusion)."
+          "description": "Repo-relative prefixes or substrings to skip. Complements `scope`."
         },
-        "limit": { "type": "integer", "default": 25 },
+        "limit": { "type": "integer", "default": 25, "description": "Max items returned." },
         "offset": {
           "type": "integer",
           "default": 0,
-          "description": "Skip the first N ranked hits before applying limit. Useful for pagination; applies after ranking and before truncation."
+          "description": "Skip the first N ranked hits before applying limit (pagination)."
         },
         "query_mode": {
           "type": "string",
           "enum": ["keyword", "natural_language", "regex"],
-          "description": "regex mode auto-routes to file-text search (unit_kinds ignored)."
+          "description": "`keyword` (default-ish): exact / BM25 over identifiers. `regex`: file-text scan (`unit_kinds` ignored). `natural_language`: dense retrieval, implies `semantic=true`."
         },
         "context_lines": {
           "type": "integer",
-          "description": "Lines of before/after context for file-text hits always, and for symbol/section hits when include_body=true."
+          "description": "Lines of before/after context for file-text hits, and for symbol/section hits when `include_body=true`. Default 0."
         },
         "include_body": {
           "type": "boolean",
           "description": "Include the full source span (symbols) or section text (sections). Default false."
         },
-        "file_pattern": { "type": "string" },
+        "file_pattern": { "type": "string", "description": "Glob filter on file path." },
         "max_tokens": {
           "type": "integer",
-          "description": "Optional cap on serialized size of items (token_budget alias). Uses BYTES_PER_TOKEN (~4 bytes per token)."
+          "description": "Soft cap on serialized item bytes (~4 bytes/token). Alias: `token_budget`."
         },
-        "token_budget": { "type": "integer", "description": "Alias of max_tokens." },
+        "token_budget": { "type": "integer", "description": "Alias of `max_tokens`." },
         "fuzzy": {
           "type": "boolean",
-          "description": "Augment symbol hits with a nucleo-matcher fuzzy lane over symbol names in the code domain."
+          "description": "Add a nucleo-matcher fuzzy lane over symbol names alongside the exact lane (code domain only). Default false."
         },
-        "repo_path": { "type": "string" },
+        "repo_path": { "type": "string", "description": "Override the resolved repo root for this call." },
         "semantic": {
           "type": "boolean",
-          "description": "Augment symbol/section retrieval with dense embeddings. `query_mode=natural_language` implies this automatically; when dense retrieval is unavailable or the request only targets files, the response succeeds with a `SEMANTIC_FALLBACK` warning."
+          "description": "Augment retrieval with dense embeddings. Implied by `query_mode=natural_language`. Falls back to lexical with a `SEMANTIC_FALLBACK` warning when embeddings are unavailable."
         },
         "output_mode": {
           "type": "string",
           "enum": ["items", "count", "files_with_matches"],
-          "description": "items (default): full results. count: {count, files} only. files_with_matches: [{file, count}]."
+          "description": "`items` (default): full results. `count`: `{count, files}`. `files_with_matches`: `[{file, count}]`."
         },
         "pattern": {
           "type": "string",
-          "description": "Alias for query when query_mode=regex. Cannot be set together with query."
+          "description": "Alias for `query` when `query_mode=regex`. Mutually exclusive with `query`."
         },
         "include_vendored": {
           "type": "boolean",
-          "description": "When true, don't deprioritize matches under vendored / asset / fixture paths or oversized JSON dumps. Default false — those hits are pushed to the tail with a heavy score penalty. A `scope=` that explicitly targets an excluded segment (e.g. `scope=assets/`) also opts in."
+          "description": "Include matches under vendored / asset / fixture paths and oversized JSON dumps. Default false (such hits are pushed to the tail with a heavy score penalty). A `scope=` targeting an excluded segment also opts in."
         }
       }
-    }
+    },
+    "examples": [
+      {
+        "name": "find a symbol by name",
+        "args": { "source_id": "<id>", "query": "rename_safety_payload", "query_mode": "keyword", "unit_kinds": ["symbol"] }
+      },
+      {
+        "name": "regex over source files",
+        "args": { "source_id": "<id>", "query_mode": "regex", "pattern": "TODO\\(.*\\)", "context_lines": 1 }
+      },
+      {
+        "name": "doc-only search",
+        "args": { "source_id": "<id>", "query": "rename safety", "unit_kinds": ["doc_section"] }
+      }
+    ]
   },
   {
     "name": "read_content",
     "capabilities_version": "v2",
-    "description": "Batch read symbols, sections, or bounded file ranges. Whole-file reads work but are a last resort — prefer inspect_structure view=file_outline first, then symbol/section reads or bounded ranges. Each `refs` entry may be an object (see properties) OR a shorthand string: \"path:N-M\" for a file range, \"path:N\" for a single line, or \"path::Name#kind\" for a symbol. May emit TOKEN_HEAVY_READ warning when a full-file read exceeds the configured threshold. v2 adds honest full-file baseline for range reads and OUTLINE_FIRST_HINT warning carrying the outline inline.",
+    "description": "Batch-read symbols, doc sections, or bounded file ranges in one call (always prefer this to N reads). Each `refs` entry can be an object or a shorthand string: `\"path:N-M\"` (range), `\"path:N\"` (single line), `\"path::Name#kind\"` (symbol). Whole-file reads work but are a last resort — call `inspect_structure view=file_outline` first; oversized reads emit `TOKEN_HEAVY_READ` and outline-first hints. Set `max_tokens` to bound the payload (later refs stub out with `truncated: true`); set `wait_for_fresh=true` when a reindex is mid-flight. Returns `_meta.confidence: safe|partial|heuristic`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "refs"],
       "properties": {
-        "source_id": { "type": "string" },
+        "source_id": { "type": "string", "description": "From `catalog_sources`." },
         "refs": {
           "type": "array",
+          "description": "List of refs to read. Each entry resolves to a symbol, section, or file range.",
           "items": {
             "type": "object",
             "required": ["kind"],
             "properties": {
               "kind": { "type": "string", "enum": ["symbol", "section", "file"] },
-              "id": { "type": "string" },
-              "stable_id": { "type": "string" },
-              "path": { "type": "string" },
-              "source_id": { "type": "string" },
-              "start_line": { "type": "integer" },
-              "end_line": { "type": "integer" },
+              "id": { "type": "string", "description": "Stable id (legacy alias of `stable_id`)." },
+              "stable_id": { "type": "string", "description": "Stable id of the symbol or section." },
+              "path": { "type": "string", "description": "Repo-relative file path." },
+              "source_id": { "type": "string", "description": "Override the call-level `source_id`." },
+              "start_line": { "type": "integer", "description": "1-based start line for `kind=file` ranges." },
+              "end_line": { "type": "integer", "description": "1-based inclusive end line for `kind=file` ranges." },
               "symbol_name": { "type": "string", "description": "Bare symbol name. Combine with `path` (preferred) or pass alone for a globally unique name." }
             }
           }
@@ -143,34 +169,48 @@
         "include": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "e.g. body, hash, window"
+          "description": "Optional payload extras: `body`, `hash`, `window`."
         },
-        "verify": { "type": "boolean", "default": false },
-        "context_lines": { "type": "integer", "default": 0 },
+        "verify": { "type": "boolean", "default": false, "description": "Recompute content hashes against disk." },
+        "context_lines": { "type": "integer", "default": 0, "description": "Lines of before/after context per ref." },
         "max_tokens": {
           "type": "integer",
-          "description": "Soft token budget for the combined item payload (~4 bytes/token). Once exceeded, later refs are stubbed with {truncated: true, reason: 'token_budget_exceeded', suggestion: ...} instead of returning a JSON-escaped preview. Alias: token_budget."
+          "description": "Soft token budget for the combined payload (~4 bytes/token). Later refs stub with `{truncated: true, reason: 'token_budget_exceeded'}`. Alias: `token_budget`."
         },
-        "token_budget": { "type": "integer", "description": "Alias for max_tokens." },
+        "token_budget": { "type": "integer", "description": "Alias of `max_tokens`." },
         "wait_for_fresh": {
           "type": "boolean",
           "default": false,
-          "description": "If a reindex is mid-flight for this source_id, block until it completes or max_wait_ms elapses (FEEDBACK.md §5b)."
+          "description": "If a reindex is mid-flight for this `source_id`, block until it completes or `max_wait_ms` elapses."
         },
-        "max_wait_ms": { "type": "integer", "default": 2000, "maximum": 30000 },
-        "repo_path": { "type": "string" }
+        "max_wait_ms": { "type": "integer", "default": 2000, "maximum": 30000, "description": "Upper bound on `wait_for_fresh` blocking." },
+        "repo_path": { "type": "string", "description": "Override the resolved repo root." }
       }
-    }
+    },
+    "examples": [
+      {
+        "name": "read a symbol body",
+        "args": { "source_id": "<id>", "refs": [{ "kind": "symbol", "path": "src/lib.rs", "symbol_name": "main" }] }
+      },
+      {
+        "name": "batch range reads",
+        "args": { "source_id": "<id>", "refs": ["src/lib.rs:1-40", "src/main.rs:10-25"] }
+      },
+      {
+        "name": "bounded budget read",
+        "args": { "source_id": "<id>", "refs": [{ "kind": "file", "path": "README.md", "start_line": 1, "end_line": 60 }], "max_tokens": 4000 }
+      }
+    ]
   },
   {
     "name": "inspect_structure",
     "capabilities_version": "v2",
-    "description": "Tree, outline, TOC, and document structure views. Use view=file_outline before reading a whole file — decide which symbols you need, then read those with read_content. Use view=file_tree instead of native Glob for project structure. v2 reshapes `repo_outline` to workspace/crates/top_modules/entrypoints and caps `file_tree` default depth at 2.",
+    "description": "File trees, file outlines, repo rollups, table-of-contents views, and class hierarchies — use this instead of native Glob, `ls -R`, or reading whole files just to see their shape. Pick `view=file_outline` (or `file_paths` for a batch) before any whole-file read; `view=file_tree` for project structure (`max_files` truncates); `view=repo_outline` / `repository_rollup` for a workspace-level summary; `view=toc` / `toc_tree` / `document_outline` for docs. Returns `_meta.confidence: safe|partial|heuristic`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "view"],
       "properties": {
-        "source_id": { "type": "string" },
+        "source_id": { "type": "string", "description": "From `catalog_sources`." },
         "view": {
           "type": "string",
           "enum": [
@@ -182,46 +222,61 @@
             "toc_tree",
             "document_outline",
             "class_hierarchy"
-          ]
+          ],
+          "description": "Which structural view to render."
         },
         "path": {
           "type": "string",
-          "description": "file_tree: optional subtree prefix (repo-relative). file_outline: file path."
+          "description": "`file_tree`: optional subtree prefix. `file_outline`: file path."
         },
         "file_path": {
           "type": "string",
-          "description": "file_outline: file path (alternative to `path`)."
+          "description": "`file_outline`: file path (alternative to `path`)."
         },
         "class_path": {
           "type": "string",
-          "description": "class_hierarchy: required — name of the class to root the hierarchy on."
+          "description": "`class_hierarchy`: required — class name to root the hierarchy on."
         },
         "file_paths": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Batch file_outline (mutually exclusive with path/file_path)."
+          "description": "`file_outline`: batch form (mutually exclusive with `path`/`file_path`)."
         },
         "max_files": {
           "type": "integer",
-          "description": "file_tree only: max files before truncation (default 500)."
+          "description": "`file_tree`: max files before truncation. Default 500."
         },
         "max_tokens": {
           "type": "integer",
-          "description": "Optional token budget (≈4 bytes/token) applied to file_tree and repo_outline."
+          "description": "Token budget (~4 bytes/token) applied to `file_tree` and `repo_outline`."
         },
-        "repo_path": { "type": "string" }
+        "repo_path": { "type": "string", "description": "Override the resolved repo root." }
       }
-    }
+    },
+    "examples": [
+      {
+        "name": "outline before reading",
+        "args": { "source_id": "<id>", "view": "file_outline", "file_path": "src/lib.rs" }
+      },
+      {
+        "name": "subtree file tree",
+        "args": { "source_id": "<id>", "view": "file_tree", "path": "crates/codesight-engine/src/" }
+      },
+      {
+        "name": "workspace overview",
+        "args": { "source_id": "<id>", "view": "repo_outline" }
+      }
+    ]
   },
   {
     "name": "inspect_graph",
     "capabilities_version": "v2",
-    "description": "Reference, import, and dependency graph queries. Prefer over manual Grep-based reference tracking — returns structured graph data with cross-file resolution. v2 splits `find_references` into `semantic_references` + `candidate_text_hits` (drops `line:0` noise) and tags `calls` edges with `edge_kind: direct|indirect`.",
+    "description": "Reference, import, and dependency-graph queries with cross-file resolution — preferred over manual Grep walks. Pick `graph`: `imports` / `importers` for file-to-file edges (importers union explicit `use`-statement edges with symbol-usage edges, so a Rust `mod x; x::Y` access counts even when no `use` exists); `references` / `find_references` (split into `semantic_references` + `candidate_text_hits`) for symbol usages; `calls` (tagged `edge_kind: direct|indirect`) for the call graph; `dependencies` / `dependency_cycles` / `module_coupling` / `layer_violations` / `centrality` for module-level analysis; `resolve_fqn` for fully-qualified-name lookup. Narrow with `scope`, `exclude`, `file_pattern`. Returns `_meta.confidence: safe|partial|heuristic`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "graph"],
       "properties": {
-        "source_id": { "type": "string" },
+        "source_id": { "type": "string", "description": "From `catalog_sources`." },
         "graph": {
           "type": "string",
           "enum": [
@@ -237,58 +292,59 @@
             "layer_violations",
             "find_references",
             "resolve_fqn"
-          ]
+          ],
+          "description": "Which graph query to run."
         },
         "ref": {
           "type": "object",
-          "description": "Target symbol ref for references/related."
+          "description": "`references` / `related`: target symbol ref."
         },
         "symbol_id": {
           "type": "string",
-          "description": "calls: required — stable id of the symbol whose call sites to enumerate."
+          "description": "`calls`: required — stable id of the symbol whose call sites to enumerate."
         },
         "file_path": {
           "type": "string",
-          "description": "imports/importers: required — file path whose imports (outgoing) or importers (incoming) to enumerate."
+          "description": "`imports` / `importers`: required — file path whose outgoing or incoming edges to enumerate."
         },
         "identifier": {
           "type": "string",
-          "description": "find_references: required — identifier to search for."
+          "description": "`find_references`: required — identifier to search for."
         },
         "identifiers": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "find_references: batch form — multiple identifiers to search for in a single call."
+          "description": "`find_references`: batch form."
         },
         "include_call_chain": {
           "type": "boolean",
-          "description": "find_references: include calling-symbol chain info on each hit."
+          "description": "`find_references`: include calling-symbol chain on each hit."
         },
         "fqn": {
           "type": "string",
-          "description": "resolve_fqn: required — fully-qualified name to resolve."
+          "description": "`resolve_fqn`: required — fully-qualified name to resolve."
         },
         "algorithm": {
           "type": "string",
-          "description": "centrality: ranking algorithm (e.g. pagerank, degree)."
+          "description": "`centrality`: ranking algorithm (e.g. `pagerank`, `degree`)."
         },
         "top_n": {
           "type": "integer",
-          "description": "centrality: cap returned ranked entries."
+          "description": "`centrality`: cap returned ranked entries."
         },
         "cross_repo": {
           "type": "boolean",
-          "description": "dependencies: include cross-repo package edges when true."
+          "description": "`dependencies` / `importers`: include cross-repo package edges. Default false."
         },
         "max_tokens": {
           "type": "integer",
-          "description": "dependencies: optional token budget (≈4 bytes/token) for edges/nodes. Alias `token_budget`."
+          "description": "`dependencies`: token budget (~4 bytes/token) for edges/nodes. Alias `token_budget`."
         },
-        "token_budget": { "type": "integer", "description": "Alias of max_tokens." },
-        "limit": { "type": "integer", "default": 20 },
+        "token_budget": { "type": "integer", "description": "Alias of `max_tokens`." },
+        "limit": { "type": "integer", "default": 20, "description": "Max edges/hits returned." },
         "scope": {
           "type": "string",
-          "description": "Path-prefix / substring inclusion filter — applies to imports, importers, find_references, references, related, calls."
+          "description": "Path-prefix / substring inclusion filter. Applies to imports, importers, find_references, references, related, calls."
         },
         "exclude": {
           "type": "array",
@@ -301,21 +357,35 @@
         },
         "include_vendored": {
           "type": "boolean",
-          "description": "find_references: when true, include hits under vendored / asset / fixture paths. Default false. A `scope=` targeting an excluded segment also opts in."
+          "description": "`find_references`: include hits under vendored / asset / fixture paths. Default false. A `scope=` targeting an excluded segment also opts in."
         },
-        "repo_path": { "type": "string" }
+        "repo_path": { "type": "string", "description": "Override the resolved repo root." }
       }
-    }
+    },
+    "examples": [
+      {
+        "name": "who imports this file",
+        "args": { "source_id": "<id>", "graph": "importers", "file_path": "crates/codesight-core/src/lib.rs" }
+      },
+      {
+        "name": "find references to an identifier",
+        "args": { "source_id": "<id>", "graph": "find_references", "identifier": "rename_safety_payload" }
+      },
+      {
+        "name": "detect cycles",
+        "args": { "source_id": "<id>", "graph": "dependency_cycles" }
+      }
+    ]
   },
   {
     "name": "evaluate_impact",
     "capabilities_version": "v2",
-    "description": "Change-oriented analysis: blast radius, rename safety, module-path rewrites, diffs, and since-commit change reports. v2: strict refs (NOT_FOUND on unresolved structured refs), trait-dispatch awareness in rename_safety, cross-file diff, and `_meta.actionable_next` hints on blast_radius/hotspots/dead_code.",
+    "description": "Change-oriented analysis: `blast_radius`, `rename_safety`, `path_rename` (Rust `use`-prefix rewrites; `apply=true` writes to disk), `diff` (two symbol refs in the same file), `changed_units` / `change_velocity` (commit-anchored). `rename_safety` resolves refs strictly (NOT_FOUND on unresolved structured refs), is trait-dispatch-aware, requires a receiver-shape prefix at call sites for method-like symbols (so `obj.foo(` and `Type::foo(` count but a bare `foo` does not), reports the count of `excluded_vendored_or_fixture` hits skipped by the scan, and emits a `confidence` field on the reference scan (`high` / `partial` / `none_after_filters`). Returns `_meta.confidence: safe|partial|heuristic` (separate from the scan-local `reference_scan.confidence`).",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
       "properties": {
-        "source_id": { "type": "string" },
+        "source_id": { "type": "string", "description": "From `catalog_sources`." },
         "analysis": {
           "type": "string",
           "enum": [
@@ -326,7 +396,8 @@
             "changed_units",
             "diff",
             "change_velocity"
-          ]
+          ],
+          "description": "Which analysis to run."
         },
         "refs": {
           "type": "array",
@@ -334,13 +405,13 @@
           "items": {
             "type": "object",
             "properties": {
-              "kind": { "type": "string" },
-              "id": { "type": "string" },
-              "stable_id": { "type": "string" },
-              "source_id": { "type": "string" },
-              "path": { "type": "string" },
-              "start_line": { "type": "integer" },
-              "end_line": { "type": "integer" },
+              "kind": { "type": "string", "description": "`symbol` for symbol refs, `commit` for commit refs." },
+              "id": { "type": "string", "description": "Symbol stable id, or commit sha for commit refs." },
+              "stable_id": { "type": "string", "description": "Symbol stable id." },
+              "source_id": { "type": "string", "description": "Override the call-level `source_id`." },
+              "path": { "type": "string", "description": "Repo-relative file path." },
+              "start_line": { "type": "integer", "description": "1-based line of the symbol definition." },
+              "end_line": { "type": "integer", "description": "1-based inclusive end line." },
               "symbol_name": { "type": "string", "description": "Bare symbol name. Combine with `path` (preferred) or pass alone for a globally unique name." },
               "new_name": {
                 "type": "string",
@@ -349,44 +420,78 @@
             }
           }
         },
-        "repo_path": { "type": "string" },
+        "repo_path": { "type": "string", "description": "Override the resolved repo root." },
         "from": {
           "type": "string",
-          "description": "path_rename: fully-qualified Rust path prefix to rewrite."
+          "description": "`path_rename`: fully-qualified Rust path prefix to rewrite."
         },
         "to": {
           "type": "string",
-          "description": "path_rename: replacement fully-qualified Rust path prefix."
+          "description": "`path_rename`: replacement fully-qualified Rust path prefix."
         },
         "apply": {
           "type": "boolean",
-          "description": "path_rename: when true, write edits to disk and reindex the repo. Default false (dry-run)."
+          "description": "`path_rename`: when true, write edits to disk and reindex. Default false (dry-run)."
         },
         "scope": {
           "type": "string",
-          "description": "path_rename: optional file or directory prefix to limit candidate files."
+          "description": "`path_rename`: optional file or directory prefix to limit candidates."
         },
         "handle_partial_group_imports": {
           "type": "string",
           "enum": ["warn", "split", "skip"],
-          "description": "path_rename: how to handle grouped imports that only partially match the old prefix."
+          "description": "`path_rename`: how to handle grouped imports that only partially match the old prefix."
         },
         "include_vendored": {
           "type": "boolean",
-          "description": "rename_safety / blast_radius: when true, include scans / importers under vendored / asset / fixture paths. Default false. A `scope=` targeting an excluded segment also opts in."
+          "description": "`rename_safety` / `blast_radius`: include scans / importers under vendored / asset / fixture paths. Default false. A `scope=` targeting an excluded segment also opts in."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "`blast_radius`: cap on per-bucket importer list (default 25). `direct_importers_total` / `transitive_importers_total` always carry the un-truncated counts."
+        },
+        "max_tokens": {
+          "type": "integer",
+          "description": "`blast_radius`: soft byte budget (~4 bytes/token). When the serialized importer lists exceed this, both buckets are packed and `truncated_by` is set in `_meta`."
+        },
+        "token_budget": {
+          "type": "integer",
+          "description": "Alias of `max_tokens`."
         }
       }
-    }
+    },
+    "examples": [
+      {
+        "name": "rename safety check",
+        "args": {
+          "source_id": "<id>",
+          "analysis": "rename_safety",
+          "refs": [{ "kind": "symbol", "path": "src/foo.rs", "symbol_name": "old_name", "new_name": "new_name" }]
+        }
+      },
+      {
+        "name": "blast radius",
+        "args": {
+          "source_id": "<id>",
+          "analysis": "blast_radius",
+          "refs": [{ "kind": "symbol", "path": "src/lib.rs", "symbol_name": "main" }]
+        }
+      },
+      {
+        "name": "dry-run path rename",
+        "args": { "source_id": "<id>", "analysis": "path_rename", "from": "old::module", "to": "new::module" }
+      }
+    ]
   },
   {
     "name": "evaluate_quality",
     "capabilities_version": "v2",
-    "description": "Quality metrics: complexity, repo_health, dead_code, hotspots, doc_coverage, broken_links, quality_signal, regression_check, test_gaps. `quality_signal` returns structural root causes plus 4 agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) and their sub-metrics; when `scope` is provided it reports the targeted file or directory slice, weakest dimension, threshold failures, and top offenders. With `_meta_verbose=true`, `_meta.thresholds` echoes the active defaults from `crates/codesight-analysis/src/thresholds.rs` plus any `CODESIGHT_THRESHOLD_*` overrides. `regression_check` compares the same snapshot dimensions. v2: unified `agent_readiness` block (dimensions + submetrics), `max_wait_ms`/`partial_ok` budget knobs, `_meta.actionable_next` on dead_code/hotspots.",
+    "description": "Quality metrics: `complexity`, `repo_health`, `dead_code`, `hotspots`, `doc_coverage`, `broken_links`, `refactor_targets`, `quality_signal` (4 agent-readiness dimensions plus structural root causes; pass `scope` for a slice), `regression_check` (compare against a snapshot), `test_gaps`. `dead_code` walks reachability over the import graph plus structural edges and applies a string-literal dispatch heuristic — a symbol whose name appears as a string literal in two or more other files is promoted to a live root (likely router / handler-table dispatch); single-file mentions stay weak signals. By default both `dead_files` and `dead_symbols` exclude test code: test files (`*_test.go`, `tests/`, `test_*.py`, …) and inline test functions (Rust `mod tests`, `#[test]`, Python `def test_…`, Go `TestXxx`) are entry-only — the harness invokes them, not other indexed code, so a `no_structural_inbound` verdict is meaningless. Pass `include_tests=true` to inspect test code on its own merits. Tune further with `granularity`, `min_confidence`, `entry_point_patterns`, `include_vendored`, and `paranoid` (drops the confidence floor to 0.0, forces a symbol-level pass, and emits `heuristic_disagreements`). With `_meta_verbose=true`, `_meta.thresholds` echoes defaults from `crates/codesight-analysis/src/thresholds.rs`. Returns `_meta.confidence: safe|partial|heuristic`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "analysis"],
       "properties": {
-        "source_id": { "type": "string" },
+        "source_id": { "type": "string", "description": "From `catalog_sources`." },
         "analysis": {
           "type": "string",
           "enum": [
@@ -400,149 +505,206 @@
             "quality_signal",
             "regression_check",
             "test_gaps"
-          ]
+          ],
+          "description": "Which analysis to run."
         },
         "refs": {
           "type": "array",
-          "description": "complexity: required symbol ref. doc_coverage: required list of symbol refs (capped at 200)."
+          "description": "`complexity`: required symbol ref. `doc_coverage`: required list of symbol refs (capped at 200)."
         },
         "granularity": {
           "type": "string",
           "enum": ["file", "symbol"],
-          "description": "dead_code: file or symbol granularity (default file)."
+          "description": "`dead_code`: file or symbol granularity. Default `file`."
         },
         "min_confidence": {
           "type": "number",
-          "description": "dead_code: minimum confidence threshold (default 0.5)."
+          "description": "`dead_code`: minimum confidence threshold. Default 0.5."
         },
         "include_tests": {
           "type": "boolean",
-          "description": "dead_code: include test files (default true)."
+          "description": "`dead_code`: include test files and inline test functions (Rust `mod tests`, `#[test]`, Python `def test_…`, Go `TestXxx`) in `dead_files` and `dead_symbols`. Default false — test code is entry-only and meaningless under reachability."
         },
         "entry_point_patterns": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "dead_code: additional entry-point file-name patterns."
+          "description": "`dead_code`: extra entry-point file-name patterns to treat as live roots."
         },
         "top_n": {
           "type": "integer",
-          "description": "hotspots / dead_code / refactor_targets: cap the returned list size (default 50 for hotspots/refactor_targets, 25 for dead_code)."
+          "description": "`hotspots` / `dead_code` / `refactor_targets`: cap the returned list (default 50 for hotspots/refactor_targets, 25 for dead_code)."
         },
         "top_files": {
           "type": "integer",
-          "description": "refactor_targets (repo mode, when file_path is omitted): number of hottest files to scan (default 10)."
+          "description": "`refactor_targets` (repo mode, when `file_path` is omitted): number of hottest files to scan. Default 10."
         },
         "top_caller_files": {
           "type": "integer",
           "default": 10,
-          "description": "refactor_targets: max caller_files entries per candidate (clamped 1..=50). When truncated, `caller_files_total` on the same entry carries the full count."
+          "description": "`refactor_targets`: max `caller_files` entries per candidate (clamped 1..=50). When truncated, `caller_files_total` carries the full count."
         },
         "include_conventional": {
           "type": "boolean",
           "default": false,
-          "description": "hotspots / refactor_targets: include scripts/, tests/, examples/, benches/, build.rs, fixtures/, testdata/, stress/ in the scan. Off by default — codegen helpers and fixtures otherwise dominate the ranking."
+          "description": "`hotspots` / `refactor_targets`: include scripts/, tests/, examples/, benches/, build.rs, fixtures/, testdata/, stress/. Off by default — codegen helpers and fixtures otherwise dominate the ranking."
         },
         "file_path": {
           "type": "string",
-          "description": "refactor_targets: file to scope the scan to. Omit for repo-wide mode over the hottest `top_files`."
+          "description": "`refactor_targets`: file to scope the scan to. Omit for repo-wide mode over the hottest `top_files`."
         },
         "min_complexity": {
           "type": "integer",
-          "description": "hotspots: minimum cyclomatic complexity threshold."
+          "description": "`hotspots`: minimum cyclomatic complexity threshold."
         },
         "max_tokens": {
           "type": "integer",
-          "description": "dead_code: serialized-response token budget (≈4 bytes/token). Trims dead_files/dead_symbols until the response fits. Alias: token_budget."
+          "description": "`dead_code`: serialized-response token budget (~4 bytes/token). Trims `dead_files`/`dead_symbols` until the response fits. Alias: `token_budget`."
         },
         "token_budget": {
           "type": "integer",
-          "description": "Alias for max_tokens."
+          "description": "Alias for `max_tokens`."
         },
         "snapshot_name": {
           "type": "string",
-          "description": "regression_check: baseline snapshot name (default \"session\")."
+          "description": "`regression_check`: baseline snapshot name. Default `session`."
         },
         "scope": {
           "type": "string",
-          "description": "quality_signal: optional file or directory prefix to score instead of the whole repo."
+          "description": "`quality_signal`: optional file or directory prefix to score instead of the whole repo."
         },
         "include_vendored": {
           "type": "boolean",
-          "description": "dead_code: when true, include files under vendored / asset / fixture paths in the analysis. Default false. A `scope=` targeting an excluded segment also opts in."
+          "description": "`dead_code`: include files under vendored / asset / fixture paths. Default false. A `scope=` targeting an excluded segment also opts in."
         },
-        "repo_path": { "type": "string" }
+        "paranoid": {
+          "type": "boolean",
+          "default": false,
+          "description": "`dead_code`: drop the confidence floor to 0.0 (surfacing `weak_string_dispatch_match` / `test_only_alive`), always run the symbol-level pass, and emit `heuristic_disagreements` listing files the legacy import-graph reachability would have flagged dead but the current string-literal-dispatch heuristic rescued."
+        },
+        "repo_path": { "type": "string", "description": "Override the resolved repo root." }
       }
-    }
+    },
+    "examples": [
+      {
+        "name": "repo-wide dead code",
+        "args": { "source_id": "<id>", "analysis": "dead_code", "granularity": "file", "top_n": 25 }
+      },
+      {
+        "name": "paranoid dead code (cross-check heuristics)",
+        "args": { "source_id": "<id>", "analysis": "dead_code", "paranoid": true, "top_n": 50 }
+      },
+      {
+        "name": "hotspots over a slice",
+        "args": { "source_id": "<id>", "analysis": "hotspots", "min_complexity": 20 }
+      },
+      {
+        "name": "agent-readiness for a slice",
+        "args": { "source_id": "<id>", "analysis": "quality_signal", "scope": "crates/codesight-engine/src/" }
+      }
+    ]
   },
   {
     "name": "assemble_context",
     "capabilities_version": "v2",
-    "description": "Bundle search+read, section neighbor context, or suggestions. v2 adds `depth` knob (default 2) on `context_bundle` (pulls in type refs + representative caller/callee), `include_tests` filter, language-native import rendering (Rust `use`, Python `from/import`, …), and honest full-file baseline for `tokens_saved`.",
+    "description": "Bundle search+read into one packed payload, expand a doc section with neighbors, or get ranked / suggestion lists. Pick `mode`: `context_bundle` (one symbol ref + `depth` knob, default 2 — pulls in type refs and a representative caller/callee, renders imports in language-native form, honors `include_tests`); `section_context` (one section ref + child headings); `ranked` / `query_suggestions` (opening-move shortlist for a `query`); `rename_plan` (collision pre-check). All modes report honest full-file baseline `tokens_saved` and respect `max_tokens` / `token_budget`. Returns `_meta.confidence: safe|partial|heuristic`.",
     "inputSchema": {
       "type": "object",
       "required": ["source_id", "mode"],
       "properties": {
-        "source_id": { "type": "string" },
+        "source_id": { "type": "string", "description": "From `catalog_sources`." },
         "mode": {
           "type": "string",
-          "enum": ["bundle", "context_bundle", "section_context", "ranked", "query_suggestions", "rename_plan"]
+          "enum": ["bundle", "context_bundle", "section_context", "ranked", "query_suggestions", "rename_plan"],
+          "description": "Which assembly mode to run."
         },
-        "query": { "type": "string" },
+        "query": { "type": "string", "description": "Search text for `ranked` / `query_suggestions`; falls back as `old_name` for `rename_plan`." },
         "refs": {
           "type": "array",
-          "description": "section_context: required — one section ref. context_bundle: required — one symbol ref. Same shape as read_content refs."
+          "description": "`section_context`: required — one section ref. `context_bundle`: required — one symbol ref. Same shape as `read_content` refs."
         },
-        "limit": { "type": "integer", "default": 5 },
+        "limit": { "type": "integer", "default": 5, "description": "Max items returned." },
         "include_children": {
           "type": "boolean",
           "default": true,
-          "description": "section_context: include direct child headings."
+          "description": "`section_context`: include direct child headings."
         },
         "max_tokens": {
           "type": "integer",
-          "description": "section_context: cap primary section body. context_bundle / ranked: token budget (≈4 bytes/token). Alias: token_budget."
+          "description": "Token budget (~4 bytes/token). Alias: `token_budget`."
         },
-        "token_budget": { "type": "integer", "description": "Alias of max_tokens for context_bundle and ranked." },
+        "token_budget": { "type": "integer", "description": "Alias of `max_tokens`." },
         "budget_strategy": {
           "type": "string",
-          "description": "context_bundle: compact (strip sources) or most_relevant (ordering label; packing uses token budget when set)."
+          "description": "`context_bundle`: `compact` (strip sources) or `most_relevant` (ordering label; packing uses token budget when set)."
         },
         "include_budget_report": {
           "type": "boolean",
-          "description": "context_bundle: include budget_report block when true."
+          "description": "`context_bundle`: include a `budget_report` block."
         },
-        "strategy": { "type": "string", "description": "ranked: strategy label (default bm25)." },
+        "strategy": { "type": "string", "description": "`ranked`: strategy label. Default `bm25`." },
         "include_kinds": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "ranked: filter symbol hits to these kinds (e.g. class)."
+          "description": "`ranked`: filter symbol hits to these kinds (e.g. `class`)."
         },
         "old_name": {
           "type": "string",
-          "description": "rename_plan: existing symbol name being renamed. Falls back to `query` when unset."
+          "description": "`rename_plan`: existing symbol name. Falls back to `query` when unset."
         },
         "new_name": {
           "type": "string",
-          "description": "rename_plan: proposed new name used for collision checks."
+          "description": "`rename_plan`: proposed new name used for collision checks."
         },
-        "repo_path": { "type": "string" }
+        "repo_path": { "type": "string", "description": "Override the resolved repo root." }
       }
-    }
+    },
+    "examples": [
+      {
+        "name": "ticket kickoff bundle",
+        "args": {
+          "source_id": "<id>",
+          "mode": "context_bundle",
+          "refs": [{ "kind": "symbol", "path": "src/lib.rs", "symbol_name": "main" }],
+          "max_tokens": 8000
+        }
+      },
+      {
+        "name": "expand a doc section",
+        "args": {
+          "source_id": "<id>",
+          "mode": "section_context",
+          "refs": [{ "kind": "section", "stable_id": "<section-id>" }]
+        }
+      },
+      {
+        "name": "opening-move suggestions",
+        "args": { "source_id": "<id>", "mode": "query_suggestions", "query": "how does indexing work" }
+      }
+    ]
   },
   {
     "name": "manage_indexes",
     "capabilities_version": "v1",
-    "description": "Invalidate, delete, rebuild, status, snapshot_quality, session_stats, session_end, or analysis_health. Most actions target a single source and require `source_id`; `session_stats` is global and does not. `session_end` captures the end-of-session quality snapshot, closes the active session ledger, and returns the same rollup as `session_stats` plus `quality_delta` warnings when quality regressed. `rebuild` additionally requires `root_hint`. `analysis_health` surfaces graph/reachability/staleness counters (FEEDBACK.md §7) — `unresolved_use_statements > 0` and zero `workspace_crate_edges` in a multi-crate repo are red flags.",
+    "description": "Index lifecycle and session bookkeeping: `invalidate`, `delete`, `rebuild` (requires `root_hint`), `status`, `snapshot_quality`, `session_stats`, `session_end`, `analysis_health`. Most actions target a single source and require `source_id`; `session_stats` is global and does not. `session_end` captures the closing quality snapshot, closes the session ledger, and returns the same rollup as `session_stats` plus `quality_delta` warnings on regression. `analysis_health` surfaces graph / reachability / staleness counters — `unresolved_use_statements > 0` and zero `workspace_crate_edges` in a multi-crate repo are red flags. Returns `_meta.confidence: safe|partial|heuristic`.",
     "inputSchema": {
       "type": "object",
       "required": ["action"],
       "properties": {
-        "action": { "type": "string", "enum": ["invalidate", "delete", "rebuild", "status", "snapshot_quality", "session_stats", "session_end", "analysis_health"] },
+        "action": {
+          "type": "string",
+          "enum": ["invalidate", "delete", "rebuild", "status", "snapshot_quality", "session_stats", "session_end", "analysis_health"],
+          "description": "Lifecycle action to run."
+        },
         "source_id": { "type": "string", "description": "Required for invalidate/delete/rebuild/status/snapshot_quality; ignored for session_stats/session_end unless needed for snapshot capture." },
-        "root_hint": { "type": "string", "description": "Filesystem path; required for `rebuild`." },
-        "domains": { "type": "string" },
-        "snapshot_name": { "type": "string", "description": "snapshot_quality: logical name for the snapshot (default \"session\"). Overwrites existing." }
+        "root_hint": { "type": "string", "description": "Filesystem path. Required for `rebuild`." },
+        "domains": { "type": "string", "description": "Limit to one domain (`code` / `docs`)." },
+        "snapshot_name": { "type": "string", "description": "`snapshot_quality`: logical name for the snapshot (default `session`). Overwrites existing." }
       }
-    }
+    },
+    "examples": [
+      { "name": "session end rollup", "args": { "action": "session_end" } },
+      { "name": "index health check", "args": { "action": "analysis_health", "source_id": "<id>" } },
+      { "name": "rebuild from scratch", "args": { "action": "rebuild", "source_id": "<id>", "root_hint": "/path/to/repo" } }
+    ]
   }
 ]

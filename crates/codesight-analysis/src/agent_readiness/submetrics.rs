@@ -2,18 +2,32 @@
 //! signal. Every call here is per-function math over language-support facade
 //! outputs; the orchestration lives in `signal.rs`.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
+use std::path::Path;
+
+use codesight_core::SymbolIdRef;
 use codesight_language_support::family::LanguageFamily;
 use codesight_language_support::{
-    fallback_type_baseline_for_path, has_restricted_visibility, idiomatic_symbol_names_for_path,
-    is_test_file, language_family_for_path, max_nesting_depth_for_path,
-    measured_type_density_for_path,
+    builtin_registry, fallback_type_baseline_for_path, has_restricted_visibility,
+    idiomatic_symbol_names_for_path, is_test_file, is_test_symbol, language_family_for_path,
+    max_nesting_depth_for_path, measured_type_density_for_path,
 };
 use codesight_storage::storage::AnalysisSymbol;
 
-use super::is_language_test_id;
 use crate::agent_readiness::is_fn_method;
+
+/// True when `sym`'s stable id is recognized as a test by its owning
+/// language but the file itself is not a test file (Rust `#[cfg(test)] mod
+/// tests` inside a production source file, Python `def test_…` next to
+/// regular module code). Used by `test_oracle_quality` to bucket inline
+/// tests separately from sibling-`_test.rs`-style external tests.
+fn is_inline_test_symbol(sym: &AnalysisSymbol) -> bool {
+    !is_test_file(&sym.file_path)
+        && builtin_registry()
+            .for_path(Path::new(&sym.file_path))
+            .is_some_and(|lang| lang.is_test_symbol_id(SymbolIdRef::new(&sym.id)))
+}
 use crate::complexity::cyclomatic_complexity_for_path;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,8 +60,8 @@ pub(super) struct FunctionFacts<'a> {
     pub(super) is_test: bool,
 }
 
-pub(super) fn graph_files(adj: &HashMap<String, Vec<String>>) -> HashSet<String> {
-    let mut files = HashSet::new();
+pub(super) fn graph_files(adj: &FxHashMap<String, Vec<String>>) -> FxHashSet<String> {
+    let mut files = FxHashSet::default();
     for (src, targets) in adj {
         files.insert(src.clone());
         for tgt in targets {
@@ -63,9 +77,9 @@ pub(super) fn importance_weight(fan_in: usize, churn: u64) -> f64 {
 
 pub(super) fn build_function_facts<'a>(
     all_symbols: &'a [AnalysisSymbol],
-    fan_in: &HashMap<String, usize>,
-    graph_files: &HashSet<String>,
-    churn: &HashMap<String, u64>,
+    fan_in: &FxHashMap<String, usize>,
+    graph_files: &FxHashSet<String>,
+    churn: &FxHashMap<String, u64>,
 ) -> Vec<FunctionFacts<'a>> {
     all_symbols
         .iter()
@@ -97,7 +111,7 @@ pub(super) fn build_function_facts<'a>(
                 type_annotation_score,
                 type_annotation_method,
                 graph_backed: graph_files.contains(&sym.file_path),
-                is_test: is_test_symbol(sym),
+                is_test: is_test_symbol(&sym.file_path, &sym.id),
             })
         })
         .collect()
@@ -115,20 +129,20 @@ fn is_idiomatic_for_language(sym: &AnalysisSymbol) -> bool {
 
 pub(super) fn compute_symbol_uniqueness(
     all_symbols: &[AnalysisSymbol],
-    fan_in: &HashMap<String, usize>,
-    churn: &HashMap<String, u64>,
+    fan_in: &FxHashMap<String, usize>,
+    churn: &FxHashMap<String, u64>,
 ) -> f64 {
     let important: Vec<&AnalysisSymbol> = all_symbols
         .iter()
         .filter(|sym| is_navigability_symbol(&sym.kind))
-        .filter(|sym| !is_test_symbol(sym))
+        .filter(|sym| !is_test_symbol(&sym.file_path, &sym.id))
         .filter(|sym| !is_idiomatic_for_language(sym))
         .collect();
     if important.is_empty() {
         return 1.0;
     }
 
-    let mut name_files: HashMap<&str, HashSet<&str>> = HashMap::new();
+    let mut name_files: FxHashMap<&str, FxHashSet<&str>> = FxHashMap::default();
     for sym in &important {
         name_files
             .entry(sym.name.as_str())
@@ -217,14 +231,14 @@ pub(super) fn weighted_type_density(facts: &[FunctionFacts<'_>]) -> f64 {
 
 pub(super) fn compute_test_oracle_quality(
     all_symbols: &[AnalysisSymbol],
-    adj: &HashMap<String, Vec<String>>,
+    adj: &FxHashMap<String, Vec<String>>,
     facts: &[FunctionFacts<'_>],
 ) -> f64 {
-    let mut source_function_counts: HashMap<&str, usize> = HashMap::new();
-    let mut source_weights: HashMap<&str, f64> = HashMap::new();
-    let mut inline_test_counts: HashMap<&str, usize> = HashMap::new();
-    let mut external_test_counts: HashMap<String, f64> = HashMap::new();
-    let mut test_file_function_counts: HashMap<&str, usize> = HashMap::new();
+    let mut source_function_counts: FxHashMap<&str, usize> = FxHashMap::default();
+    let mut source_weights: FxHashMap<&str, f64> = FxHashMap::default();
+    let mut inline_test_counts: FxHashMap<&str, usize> = FxHashMap::default();
+    let mut external_test_counts: FxHashMap<String, f64> = FxHashMap::default();
+    let mut test_file_function_counts: FxHashMap<&str, usize> = FxHashMap::default();
 
     for fact in facts {
         if fact.is_test {
@@ -249,7 +263,7 @@ pub(super) fn compute_test_oracle_quality(
             *test_file_function_counts
                 .entry(sym.file_path.as_str())
                 .or_default() += 1;
-        } else if is_language_test_id(sym) {
+        } else if is_inline_test_symbol(sym) {
             *inline_test_counts
                 .entry(sym.file_path.as_str())
                 .or_default() += 1;
@@ -297,9 +311,9 @@ pub(super) fn compute_test_oracle_quality(
 }
 
 pub(super) fn compute_change_locality(
-    graph_files: &HashSet<String>,
-    fan_in: &HashMap<String, usize>,
-    churn: &HashMap<String, u64>,
+    graph_files: &FxHashSet<String>,
+    fan_in: &FxHashMap<String, usize>,
+    churn: &FxHashMap<String, u64>,
 ) -> f64 {
     if graph_files.is_empty() {
         return 1.0;
@@ -331,7 +345,7 @@ pub(super) fn compute_interface_encapsulation(all_symbols: &[AnalysisSymbol]) ->
     let mut total = 0usize;
     let mut restricted = 0usize;
     for sym in all_symbols {
-        if is_test_symbol(sym) {
+        if is_test_symbol(&sym.file_path, &sym.id) {
             continue;
         }
         total += 1;
@@ -362,10 +376,6 @@ fn is_navigability_symbol(kind: &str) -> bool {
         kind.to_ascii_lowercase().as_str(),
         "function" | "method" | "class" | "struct" | "trait" | "interface" | "enum"
     )
-}
-
-pub(super) fn is_test_symbol(sym: &AnalysisSymbol) -> bool {
-    is_test_file(&sym.file_path) || is_language_test_id(sym)
 }
 
 fn measure_type_annotation(sym: &AnalysisSymbol) -> (f64, TypeAnnotationMethod) {
@@ -401,7 +411,7 @@ mod idiomatic_exemption_tests {
         let syms: Vec<AnalysisSymbol> = (0..50)
             .map(|i| sym(&format!("src/mod_{i}.rs"), "new"))
             .collect();
-        let score = compute_symbol_uniqueness(&syms, &HashMap::new(), &HashMap::new());
+        let score = compute_symbol_uniqueness(&syms, &FxHashMap::default(), &FxHashMap::default());
         assert!(
             score >= 0.99,
             "expected ~1.0 when every symbol is idiomatic Rust `new`, got {score}"
@@ -413,7 +423,7 @@ mod idiomatic_exemption_tests {
         let syms: Vec<AnalysisSymbol> = (0..40)
             .map(|i| sym(&format!("pkg/mod_{i}.py"), "__init__"))
             .collect();
-        let score = compute_symbol_uniqueness(&syms, &HashMap::new(), &HashMap::new());
+        let score = compute_symbol_uniqueness(&syms, &FxHashMap::default(), &FxHashMap::default());
         assert!(
             score >= 0.99,
             "expected ~1.0 when every symbol is Python `__init__`, got {score}"
@@ -426,7 +436,7 @@ mod idiomatic_exemption_tests {
         let syms: Vec<AnalysisSymbol> = (0..20)
             .map(|i| sym(&format!("src/mod_{i}.rs"), "frobnicate"))
             .collect();
-        let score = compute_symbol_uniqueness(&syms, &HashMap::new(), &HashMap::new());
+        let score = compute_symbol_uniqueness(&syms, &FxHashMap::default(), &FxHashMap::default());
         assert!(
             score < 0.1,
             "expected heavy penalty for 20-way collision on non-idiomatic name, got {score}"
@@ -447,7 +457,7 @@ mod idiomatic_exemption_tests {
         ];
         // The Ruby trio is exempt; the Rust trio still collides 3-way.
         // Variants-minus-1 = 2 on three remaining files; score = 1/(1+2)=0.33.
-        let score = compute_symbol_uniqueness(&syms, &HashMap::new(), &HashMap::new());
+        let score = compute_symbol_uniqueness(&syms, &FxHashMap::default(), &FxHashMap::default());
         assert!(
             (0.3..0.4).contains(&score),
             "expected Rust-only collision around 0.33, got {score}"

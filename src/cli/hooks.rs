@@ -14,6 +14,7 @@
 //!   - Known build/VCS/runtime Bash prefixes (`SAFE_BASH_PREFIXES`) pass
 //!     through without inspection.
 
+use rustc_hash::FxHashMap;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -419,8 +420,8 @@ fn detect_use_prefix_rewrite(tool_input: &Value) -> Option<String> {
     } else {
         return None;
     };
-    let mut old_prefixes = std::collections::HashMap::<String, u32>::new();
-    let mut new_prefixes = std::collections::HashMap::<String, u32>::new();
+    let mut old_prefixes = FxHashMap::default();
+    let mut new_prefixes = FxHashMap::default();
     for line in old_src.lines() {
         if let Some(prefix) = use_path_prefix(line) {
             *old_prefixes.entry(prefix).or_default() += 1;

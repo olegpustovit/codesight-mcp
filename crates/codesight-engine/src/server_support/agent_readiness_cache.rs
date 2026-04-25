@@ -2,7 +2,7 @@
 //! agent-readiness probes. The service writes entries; the hooks read them to
 //! decide whether to surface refactor hints during `Edit`/`Write`.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ pub const TTL: Duration = Duration::from_secs(300);
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct State {
     #[serde(default)]
-    pub entries: HashMap<String, Entry>,
+    pub entries: FxHashMap<String, Entry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

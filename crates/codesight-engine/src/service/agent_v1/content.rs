@@ -8,7 +8,7 @@ use crate::service::agent_v1::args::{ContentRef, ReadContentArgs};
 use crate::service::agent_v1::util::{err_item, resolve_symbol_id};
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::args::{FileContentArgs, GetSectionArgs};
-use crate::service::savings::{MetaBuilder, RetrievalClass};
+use crate::service::savings::{Confidence, MetaBuilder, RetrievalClass};
 
 /// Strip unwanted fields and inject `ref` block into an item.
 fn strip_and_tag(
@@ -225,11 +225,13 @@ impl CodeService {
         let mut returned_bytes = 0u64;
         let mut warned_full_file_reads = 0u64;
         let mut budget_exhausted = false;
+        let mut actually_stubbed = 0u64;
 
         for pref in &args.refs {
             if budget_exhausted {
                 items.push(oversized_ref_stub(pref));
                 warnings.push(token_budget_warning(pref));
+                actually_stubbed += 1;
                 continue;
             }
             let sid = pref.source_id.as_deref().unwrap_or(&args.source_id);
@@ -238,6 +240,26 @@ impl CodeService {
             } else {
                 self.ensure_repo_store(sid, repo_path).ok()
             };
+
+            // Pre-flight: for whole-file reads we can project the cost via
+            // `file_bytes`. If the projection would blow the running byte
+            // budget, replace the body with an outline-as-stub *instead* of
+            // reading the file. The post-loop check below covers the
+            // symbol/section/range cases where projection isn't free.
+            if let Some(preflight) = try_preflight_oversized_file(
+                pref,
+                repo_store_for_ref.as_ref(),
+                returned_bytes,
+                bytes_budget,
+            ) {
+                items.push(preflight.stub);
+                warnings.push(preflight.warning);
+                actually_stubbed += 1;
+                budget_exhausted = true;
+                scopes.file_full += 1;
+                continue;
+            }
+
             let opts = ReadOpts {
                 sid,
                 repo_path,
@@ -263,11 +285,11 @@ impl CodeService {
                     if scope == "file_full" && item_bytes > TOKEN_HEAVY_READ_BYTES {
                         warnings.push(token_heavy_read_warning(pref, item_bytes));
                         warned_full_file_reads += 1;
-                        // ROADMAP P2.3: pair the heavy-read warning with the
-                        // file's outline inline so the agent can retry with
-                        // symbol refs in one round-trip. Only emit when the
-                        // outline resolves — otherwise the warning above is
-                        // the most we can say.
+                        // In-budget but heavy: keep the data and offer the
+                        // outline as a follow-up suggestion (not a substitute).
+                        // Pre-flight stubbing handles the over-budget case
+                        // before we reach this point, so this branch is now
+                        // strictly an advisory.
                         if let Some(path) = pref.path.as_deref()
                             && let Some(store) = repo_store_for_ref.as_ref()
                             && let Ok(outline) = store.file_outline(path)
@@ -301,14 +323,16 @@ impl CodeService {
         // yields savings=0 (response≈baseline), a symbol/range read yields
         // positive savings. No `.max(1)` floor — when `raw_bytes_total` is
         // legitimately 0 we want `tokens_saved: null`, not a fabricated 1.
-        let timer = MetaBuilder::new(raw_bytes_total).with_class(class);
+        let timer = MetaBuilder::new(raw_bytes_total)
+            .with_class(class)
+            .with_confidence(Confidence::Safe);
         let extra = build_read_meta_extras(
             &scopes,
             returned_bytes,
             warned_full_file_reads,
             args.verify,
             want_hash,
-            budget_exhausted,
+            actually_stubbed,
         );
         self.success_response_with_meta_extra(&timer, json!({ "items": items }), warnings, extra)
     }
@@ -399,6 +423,75 @@ fn extract_item_bytes(item: &Value) -> u64 {
                 .map(|s| s.len() as u64)
         })
         .unwrap_or(0)
+}
+
+struct PreflightStub {
+    stub: Value,
+    warning: Value,
+}
+
+/// Pre-flight projection for whole-file reads. Returns a stub + warning when
+/// the file's known size would push `returned_bytes` past `bytes_budget`,
+/// so callers can replace the body with an outline-as-stub *before* the read
+/// happens. Skips ranged reads (we'd need line-byte offsets to project
+/// honestly), non-file refs (cheap), and budget-less calls (no contract to
+/// uphold). Refusing to read is the contract — augmenting an over-budget
+/// response with a "you should have used outline" hint is not.
+fn try_preflight_oversized_file(
+    pref: &ContentRef,
+    repo_store: Option<&IndexStore>,
+    returned_bytes: u64,
+    bytes_budget: Option<u64>,
+) -> Option<PreflightStub> {
+    let budget = bytes_budget?;
+    if !pref.kind.eq_ignore_ascii_case("file") {
+        return None;
+    }
+    if pref.start_line.is_some() || pref.end_line.is_some() {
+        return None;
+    }
+    let path = pref.path.as_deref().or(pref.id.as_deref())?;
+    let store = repo_store?;
+    let file_size = store.file_bytes(path).ok().flatten()?;
+    if returned_bytes.saturating_add(file_size) <= budget {
+        return None;
+    }
+    let outline = store.file_outline(path).ok().unwrap_or_default();
+    let outline_json =
+        serde_json::to_value(&outline).unwrap_or_else(|_| Value::Array(Vec::new()));
+    let stub = json!({
+        "ref": {
+            "kind": pref.kind,
+            "path": path,
+            "source_id": pref.source_id,
+        },
+        "truncated": true,
+        "reason": "token_budget_exceeded_preflight",
+        "projected_bytes": file_size,
+        "outline": outline_json,
+        "suggestion": {
+            "tool": "read_content",
+            "args": {
+                "refs": [{
+                    "kind": "symbol",
+                    "path": path,
+                    "symbol_name": "<pick from outline>"
+                }]
+            },
+        },
+    });
+    let warning = json!({
+        "code": "TOKEN_BUDGET_EXCEEDED",
+        "message": format!(
+            "Skipped whole-file read of `{path}` ({file_size} bytes) — would have exceeded the {budget}-byte cap. Outline returned in place; retry with symbol refs."
+        ),
+        "detail": {
+            "path": path,
+            "projected_bytes": file_size,
+            "budget_bytes": budget,
+        },
+    });
+    Some(PreflightStub { stub, warning })
 }
 
 /// Stub emitted in place of an unread ref when the running byte budget has
@@ -501,7 +594,7 @@ fn build_read_meta_extras(
     warned_full_file_reads: u64,
     verify: bool,
     want_hash: bool,
-    budget_exhausted: bool,
+    actually_stubbed: u64,
 ) -> Vec<(String, Value)> {
     let mut extra: Vec<(String, Value)> = vec![
         (
@@ -520,11 +613,14 @@ fn build_read_meta_extras(
         ),
     ];
 
-    // FEEDBACK.md §3a: strip `next_step_hint` once the response is already
-    // over budget — it's duplicative and costs tokens we don't have.
-    if budget_exhausted {
+    // Truthful: only flag the response as truncated when at least one ref
+    // was actually replaced with a stub. A budget-exhausted flag without an
+    // actual stub means "the last in-budget ref happened to fit under the
+    // wire" — not a truncation worth telling the caller about.
+    if actually_stubbed > 0 {
         extra.push(("truncated".to_string(), json!(true)));
         extra.push(("truncated_by".to_string(), json!(["token_budget"])));
+        extra.push(("stubbed_refs".to_string(), json!(actually_stubbed)));
         return extra;
     }
 

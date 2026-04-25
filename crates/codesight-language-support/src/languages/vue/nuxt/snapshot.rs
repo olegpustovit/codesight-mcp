@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use crate::frameworks::{ExtraImport, rel_path, walk_files};
@@ -14,10 +14,10 @@ pub struct NuxtStats {
 
 #[derive(Debug, Clone, Default)]
 pub struct NuxtSnapshot {
-    pub(crate) page_routes: HashMap<String, String>,
-    pub(crate) api_routes: HashMap<String, NuxtApiRoute>,
-    pub(crate) auto_import_map: HashMap<String, String>,
-    pub(crate) extra_imports: HashMap<String, Vec<ExtraImport>>,
+    pub(crate) page_routes: FxHashMap<String, String>,
+    pub(crate) api_routes: FxHashMap<String, NuxtApiRoute>,
+    pub(crate) auto_import_map: FxHashMap<String, String>,
+    pub(crate) extra_imports: FxHashMap<String, Vec<ExtraImport>>,
 }
 
 impl NuxtSnapshot {
@@ -38,7 +38,7 @@ impl NuxtSnapshot {
         }
     }
 
-    pub fn extra_imports(&self) -> HashMap<String, Vec<ExtraImport>> {
+    pub fn extra_imports(&self) -> FxHashMap<String, Vec<ExtraImport>> {
         self.extra_imports.clone()
     }
 

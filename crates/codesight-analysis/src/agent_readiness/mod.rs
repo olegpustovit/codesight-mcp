@@ -5,11 +5,10 @@
 //! mode, entry-points) live in `codesight-language-support`. This module
 //! is pure scoring math on top of the façade.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
-use codesight_core::SymbolIdRef;
-use codesight_language_support::{builtin_registry, is_test_file};
+use codesight_language_support::{is_test_file, is_test_symbol};
 use codesight_storage::storage::AnalysisSymbol;
 
 use crate::thresholds::current_thresholds;
@@ -75,18 +74,11 @@ pub fn is_fn_method(kind: &str) -> bool {
     kind.eq_ignore_ascii_case("function") || kind.eq_ignore_ascii_case("method")
 }
 
-/// True when `sym`'s stable id is recognized as a test by its owning language.
-pub(super) fn is_language_test_id(sym: &AnalysisSymbol) -> bool {
-    builtin_registry()
-        .for_path(Path::new(&sym.file_path))
-        .is_some_and(|lang| lang.is_test_symbol_id(SymbolIdRef::new(&sym.id)))
-}
-
 pub fn tested_file_set(
     all_symbols: &[AnalysisSymbol],
-    adj: &HashMap<String, Vec<String>>,
-) -> HashSet<String> {
-    let mut tested: HashSet<String> = HashSet::new();
+    adj: &FxHashMap<String, Vec<String>>,
+) -> FxHashSet<String> {
+    let mut tested: FxHashSet<String> = FxHashSet::default();
 
     for (src, targets) in adj {
         if is_test_file(src) {
@@ -97,7 +89,7 @@ pub fn tested_file_set(
     }
 
     for sym in all_symbols {
-        if is_language_test_id(sym) {
+        if is_test_symbol(&sym.file_path, &sym.id) {
             tested.insert(sym.file_path.clone());
         }
     }
@@ -107,7 +99,7 @@ pub fn tested_file_set(
 
 pub fn compute_agent_readiness(
     all_symbols: &[AnalysisSymbol],
-    adj: &HashMap<String, Vec<String>>,
+    adj: &FxHashMap<String, Vec<String>>,
     root: Option<&Path>,
 ) -> AgentReadinessSignal {
     let churn = root.map(compute_file_churn).unwrap_or_default();
@@ -119,7 +111,7 @@ pub fn compute_agent_readiness(
 
 pub fn compute_agent_readiness_for_scope(
     all_symbols: &[AnalysisSymbol],
-    adj: &HashMap<String, Vec<String>>,
+    adj: &FxHashMap<String, Vec<String>>,
     root: Option<&Path>,
     scope: &str,
 ) -> Option<ScopedAgentReadiness> {
@@ -297,7 +289,7 @@ mod tests {
                 "fn handle() {}",
             ),
         ];
-        let adj = HashMap::new();
+        let adj = FxHashMap::default();
         let tested = tested_file_set(&syms, &adj);
         assert!(tested.contains("src/foo.rs"));
         assert!(!tested.contains("src/bar.rs"));
@@ -306,10 +298,12 @@ mod tests {
     #[test]
     fn tested_file_set_detects_dep_graph_edges() {
         let syms = vec![];
-        let adj = HashMap::from([(
+        let adj: FxHashMap<String, Vec<String>> = [(
             "tests/integration.rs".to_string(),
             vec!["src/lib.rs".to_string()],
-        )]);
+        )]
+        .into_iter()
+        .collect();
         let tested = tested_file_set(&syms, &adj);
         assert!(tested.contains("src/lib.rs"));
     }

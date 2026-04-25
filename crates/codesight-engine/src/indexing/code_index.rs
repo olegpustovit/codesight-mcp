@@ -1,7 +1,7 @@
 //! Domain-owned code indexing orchestration: crawl, delta planning, graph construction, persist.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -10,8 +10,10 @@ use std::{
 
 use ignore::WalkBuilder;
 use rayon::prelude::*;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::instrument;
 
+use codesight_storage::storage::dispatch_roots::{DispatchRoot, DispatchStrength};
 use codesight_storage::storage::vector_index::OwnedVectorRow;
 
 use codesight_storage::storage::IndexStore;
@@ -24,6 +26,7 @@ use crate::{
     config::{AppConfig, GITIGNORE_WARNING_FILE_THRESHOLD},
     indexing::Indexer,
     repo_id::normalize_repo_id,
+    service::helpers::to_repo_relative,
 };
 
 #[derive(Debug, Clone)]
@@ -116,7 +119,7 @@ where
     let existing = if stored_stamp == extractor_version {
         store.file_fingerprints()?
     } else {
-        HashMap::new()
+        FxHashMap::default()
     };
 
     let registry = indexer.registry_for(root);
@@ -129,8 +132,8 @@ where
         .collect();
 
     let mut warnings = Vec::new();
-    let mut seen_files: HashSet<String> =
-        HashSet::with_capacity(outcomes.len().max(existing.len()));
+    let mut seen_files: FxHashSet<String> =
+        FxHashSet::with_capacity_and_hasher(outcomes.len().max(existing.len()), Default::default());
     let mut touched_files = Vec::new();
     let mut updated_files = Vec::new();
     let mut graph_sources: Vec<(String, String)> = Vec::new();
@@ -213,6 +216,17 @@ where
         &reachability_edges,
         &extractor_version,
     )?;
+
+    // P3 perf fix: compute string-dispatch roots once at ingest end and
+    // persist to the `dispatch_roots` table. The detector's input is
+    // `(symbol set, file contents)` — both fingerprinted at ingest, so
+    // running it here amortises the ~8 s scan that used to fire on every
+    // `evaluate_quality dead_code` call. Best-effort: a failure here logs
+    // at debug and leaves the cache empty (dead_code falls back to the
+    // in-memory detector). We never block the ingest commit on it.
+    if let Err(error) = populate_dispatch_roots_cache(&store) {
+        tracing::debug!(?error, "dispatch_roots cache population failed; using fallback");
+    }
 
     let package_names =
         codesight_language_support::packages::extract_package_names(&root.to_string_lossy());
@@ -318,7 +332,7 @@ fn walk_candidates(
 /// from the worker thread so they still end up in the structured log.
 fn process_file(
     file: WalkedFile,
-    existing: &HashMap<String, FileFingerprint>,
+    existing: &FxHashMap<String, FileFingerprint>,
     registry: &LanguageRegistry,
 ) -> Option<FileOutcome> {
     let bytes = match fs::read(&file.abs_path) {
@@ -391,15 +405,159 @@ fn compute_reachability_edges_for_sources(
         .collect()
 }
 
+/// Compute string-dispatch root signals from the freshly-committed index
+/// and persist them to the `dispatch_roots` cache. The algorithm mirrors
+/// `codesight_analysis::dead_code::reachability::detect_string_dispatch_signals`
+/// but at ingest time so consumers can query in O(rows) instead of
+/// re-scanning every file body on every call.
+fn populate_dispatch_roots_cache(store: &IndexStore) -> anyhow::Result<()> {
+    let symbols = store.all_symbols_for_analysis()?;
+    if symbols.is_empty() {
+        store.replace_dispatch_roots(&[])?;
+        return Ok(());
+    }
+    let file_contents = store.all_file_contents()?;
+    let roots = compute_dispatch_roots(&symbols, &file_contents);
+    store.replace_dispatch_roots(&roots)?;
+    Ok(())
+}
+
+/// Detect symbol names that appear as string literals in 2+ *other* files
+/// (`strong`) or exactly one other file (`weak`). Skips test files for both
+/// definitions and referrers — test code is entry-only by construction and
+/// should not promote a prod symbol to a live root.
+fn compute_dispatch_roots(
+    symbols: &[codesight_storage::storage::AnalysisSymbol],
+    file_contents: &[(String, String)],
+) -> Vec<DispatchRoot> {
+    let is_dispatchable = |kind: &str| {
+        matches!(
+            kind.to_ascii_lowercase().as_str(),
+            "function" | "method" | "class" | "struct" | "trait" | "enum"
+        )
+    };
+    let is_test = codesight_language_support::is_test_file;
+
+    // (name, defining_file) → tracked. `name_to_defs[name]` lists every
+    // file that defines a dispatchable symbol with this name.
+    let mut name_to_defs: FxHashMap<&str, FxHashSet<&str>> = FxHashMap::default();
+    for symbol in symbols {
+        if !is_dispatchable(&symbol.kind) {
+            continue;
+        }
+        if symbol.name.len() < 3 {
+            continue;
+        }
+        if is_test(&symbol.file_path) {
+            continue;
+        }
+        name_to_defs
+            .entry(symbol.name.as_str())
+            .or_default()
+            .insert(symbol.file_path.as_str());
+    }
+    if name_to_defs.is_empty() {
+        return Vec::new();
+    }
+
+    // (defining_file, name) → set of *other* files that mention the name in
+    // a string literal. The dead_code detector's `STRING_DISPATCH_STRONG_REFS=2`
+    // is the strong threshold.
+    let mut referrers: FxHashMap<(&str, &str), FxHashSet<&str>> = FxHashMap::default();
+    for (file, content) in file_contents {
+        if is_test(file) {
+            continue;
+        }
+        for token in iter_string_literal_identifiers_local(content) {
+            if let Some(defining_files) = name_to_defs.get(token) {
+                for def in defining_files {
+                    if *def != file.as_str() {
+                        referrers
+                            .entry((*def, token))
+                            .or_default()
+                            .insert(file.as_str());
+                    }
+                }
+            }
+        }
+    }
+
+    const STRONG_REFS: usize = 2;
+    let mut out = Vec::with_capacity(referrers.len());
+    for ((file, name), refs) in referrers {
+        let strength = if refs.len() >= STRONG_REFS {
+            DispatchStrength::Strong
+        } else {
+            DispatchStrength::Weak
+        };
+        out.push(DispatchRoot {
+            file_path: file.to_string(),
+            symbol_name: name.to_string(),
+            strength,
+        });
+    }
+    out
+}
+
+/// Local copy of the string-literal identifier scanner. Mirrors
+/// `codesight_analysis::dead_code::reachability::iter_string_literal_identifiers`
+/// — kept private here to avoid a dep cycle (engine → analysis → engine).
+/// False negatives are fine; the heuristic is additive.
+fn iter_string_literal_identifiers_local(source: &str) -> Vec<&str> {
+    let bytes = source.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' {
+            let quote = b;
+            i += 1;
+            let start = i;
+            while i < bytes.len() && bytes[i] != quote {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'\n' {
+                    break;
+                }
+                i += 1;
+            }
+            let literal = &source[start..i.min(bytes.len())];
+            // Walk runs of `[A-Za-z0-9_]` inside the literal.
+            let lb = literal.as_bytes();
+            let mut j = 0;
+            while j < lb.len() {
+                let c = lb[j];
+                let is_id_start = c.is_ascii_alphabetic() || c == b'_';
+                if is_id_start {
+                    let s = j;
+                    while j < lb.len()
+                        && (lb[j].is_ascii_alphanumeric() || lb[j] == b'_')
+                    {
+                        j += 1;
+                    }
+                    if j - s >= 3 {
+                        out.push(&literal[s..j]);
+                    }
+                } else {
+                    j += 1;
+                }
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 fn modified_ns(time: &SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos() as u64)
         .unwrap_or_default()
-}
-
-fn to_repo_relative(path: &Path, root: &Path) -> anyhow::Result<String> {
-    let relative = path.strip_prefix(root)?;
-    Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
 #[derive(Debug, Clone)]
@@ -469,7 +627,7 @@ pub fn reindex_files(
         .file_fingerprints()
         .map(|fps| fps.into_keys().collect())
         .unwrap_or_default();
-    let removed_set: HashSet<&str> = buckets.removed.iter().map(String::as_str).collect();
+    let removed_set: FxHashSet<&str> = buckets.removed.iter().map(String::as_str).collect();
     known_paths.retain(|p| !removed_set.contains(p.as_str()));
     for update in &buckets.updated {
         if !known_paths.iter().any(|p| p == &update.file_path) {

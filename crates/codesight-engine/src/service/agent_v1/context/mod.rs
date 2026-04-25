@@ -17,7 +17,7 @@ use crate::service::agent_v1::args::{
 use crate::service::agent_v1::util::*;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
-use crate::service::savings::{MetaBuilder, sum_code_file_sizes};
+use crate::service::savings::{Confidence, MetaBuilder, sum_code_file_sizes};
 
 /// Build a minimal `SearchCatalogArgs` with only the essential fields set.
 fn search_args(source_id: &str, query: &str, repo_path: Option<&str>) -> SearchCatalogArgs {
@@ -159,7 +159,7 @@ impl CodeService {
             .and_then(|store| sum_code_file_sizes(&store, bundle_paths).ok())
             .unwrap_or(0);
         self.success_response(
-            &MetaBuilder::new(raw_bytes),
+            &MetaBuilder::new(raw_bytes).with_confidence(Confidence::Partial),
             json!({ "mode": "bundle", "items": packed }),
         )
     }
@@ -284,7 +284,7 @@ impl CodeService {
             .and_then(|store| sum_code_file_sizes(&store, included_paths).ok())
             .unwrap_or(0);
         self.success_response_with_warnings(
-            &MetaBuilder::new(raw_bytes),
+            &MetaBuilder::new(raw_bytes).with_confidence(Confidence::Partial),
             json!({ "mode": "ranked", "context_items": context_items, "total_tokens": total_tokens, "strategy": strategy_label }),
             Vec::new(),
         )
@@ -292,7 +292,7 @@ impl CodeService {
 
     pub(in crate::service) fn assemble_context(&self, v: Value) -> anyhow::Result<Value> {
         let args: AssembleContextArgs = ValidatedArgs::from_validated(v)?.into_inner();
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
         match args.mode.to_ascii_lowercase().as_str() {
             "bundle" => self.assemble_bundle(&args, &timer),
             "ranked" => self.assemble_ranked(&args, &timer),

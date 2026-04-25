@@ -37,7 +37,8 @@ pub(crate) fn search_symbol_from_row(row: &Row<'_>, score: f64) -> rusqlite::Res
         summary: row.get(6)?,
         score,
         match_type: None,
-        fuzzy_similarity: None,
+        subsequence_score: None,
+        edit_similarity: None,
         edit_distance: None,
     })
 }

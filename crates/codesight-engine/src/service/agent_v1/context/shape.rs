@@ -4,7 +4,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::{AssembleContextArgs, ContentRef};
 use crate::service::agent_v1::util::{resolve_symbol_id, token_estimate_for_context};
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
-use crate::service::savings::{MetaBuilder, sum_code_file_sizes};
+use crate::service::savings::{Confidence, MetaBuilder, sum_code_file_sizes};
 use codesight_storage::storage::IndexStore;
 
 use super::gather::BundleRow;
@@ -171,7 +171,9 @@ impl CodeService {
             .filter(|f| !f.is_empty())
             .collect();
         let raw_bytes = sum_code_file_sizes(store, paths).unwrap_or(0);
-        let timer = MetaBuilder::new(raw_bytes);
+        // Confidence: combines authoritative symbol reads with heuristic
+        // relevance ranking + depth expansion — partial.
+        let timer = MetaBuilder::new(raw_bytes).with_confidence(Confidence::Partial);
         self.success_response(&timer, body)
     }
 
@@ -183,7 +185,7 @@ impl CodeService {
         budget_report: Option<Value>,
     ) -> anyhow::Result<Value> {
         // Empty-bundle path: no files were read → no baseline.
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
         if include_report {
             let body = json!({
                 "mode": "context_bundle",

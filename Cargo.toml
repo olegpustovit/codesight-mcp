@@ -36,6 +36,7 @@ codesight-language-support = { path = "crates/codesight-language-support" }
 codesight-retrieval = { path = "crates/codesight-retrieval" }
 codesight-storage = { path = "crates/codesight-storage" }
 rmcp = { version = "1.5", default-features = false, features = ["server", "transport-io", "macros"] }
+rustc-hash = "2"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

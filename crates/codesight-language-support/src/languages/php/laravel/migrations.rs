@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use regex::Regex;
 
@@ -30,7 +30,7 @@ fn parse_migration_regex(content: &str) -> Option<MigrationInfo> {
     })
 }
 
-fn migration_columns_regex(content: &str) -> HashMap<String, Vec<String>> {
+fn migration_columns_regex(content: &str) -> FxHashMap<String, Vec<String>> {
     let helpers = [
         "timestamps",
         "softDeletes",
@@ -39,9 +39,9 @@ fn migration_columns_regex(content: &str) -> HashMap<String, Vec<String>> {
         "nullableTimestamps",
     ];
     let Some(col_re) = Regex::new(r#"\$table->\w+\(\s*['"]([\w]+)['"]\s*\)"#).ok() else {
-        return HashMap::new();
+        return FxHashMap::default();
     };
-    let mut columns: HashMap<String, Vec<String>> = HashMap::new();
+    let mut columns: FxHashMap<String, Vec<String>> = FxHashMap::default();
     for cap in col_re.captures_iter(content) {
         let col_name = cap[1].to_string();
         if helpers.contains(&col_name.as_str()) {

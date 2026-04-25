@@ -1,6 +1,6 @@
 //! Layer definitions, path-to-layer mapping, and import boundary violations.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -52,13 +52,13 @@ pub struct LayerViolation {
 }
 
 pub fn find_layer_violations(
-    adj: &HashMap<String, Vec<String>>,
+    adj: &FxHashMap<String, Vec<String>>,
     rules: &[LayerDef],
 ) -> Vec<LayerViolation> {
     let mut violations = Vec::new();
 
     // Build a quick lookup: layer_name → may_not_import set
-    let prohibited: HashMap<&str, HashSet<&str>> = rules
+    let prohibited: FxHashMap<&str, FxHashSet<&str>> = rules
         .iter()
         .map(|r| {
             (

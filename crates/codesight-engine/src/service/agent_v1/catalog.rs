@@ -1,6 +1,6 @@
 //! List indexed sources (`catalog_sources`).
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -9,7 +9,7 @@ use crate::path_map;
 use crate::service::CodeService;
 use crate::service::agent_v1::args::CatalogSourcesArgs;
 use crate::service::agent_v1::validate::ValidatedArgs;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_storage::storage::doc_index::{DocStore, list_doc_summaries};
 use codesight_storage::storage::list_repo_summaries;
 
@@ -30,7 +30,7 @@ impl CodeService {
     pub(in crate::service) fn catalog_sources(&self, v: Value) -> anyhow::Result<Value> {
         let args: CatalogSourcesArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let lightweight = args.lightweight.unwrap_or(false);
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Safe);
 
         // Body cache: same generation ⇒ reuse the memoised payload. The
         // per-process `catalog_generation` counter is bumped on every
@@ -69,8 +69,8 @@ impl CodeService {
         let registry = self.source_registry();
         let initial_code_rows = list_repo_summaries(&self.config.repos_dir())?;
         let mut code_rows: Vec<_> = Vec::with_capacity(initial_code_rows.len());
-        let mut root_paths: HashMap<String, String> =
-            HashMap::with_capacity(initial_code_rows.len());
+        let mut root_paths: FxHashMap<String, String> =
+            FxHashMap::with_capacity_and_hasher(initial_code_rows.len(), Default::default());
         for m in initial_code_rows {
             if let Ok(store) = self.ensure_repo_store(&m.repo, None)
                 && let Ok(snap) = registry.snapshot(&m.repo, &store)

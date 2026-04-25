@@ -1,6 +1,7 @@
 //! Analysis-oriented aggregations and reference counts.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use rusqlite::OptionalExtension;
 
@@ -172,9 +173,9 @@ impl IndexStore {
     pub fn names_mentioned_outside_self(
         &self,
         candidates: &[(String, String)],
-    ) -> anyhow::Result<std::collections::HashSet<String>> {
-        use std::collections::{HashMap, HashSet};
-        let mut by_name: HashMap<String, HashSet<String>> = HashMap::new();
+    ) -> anyhow::Result<FxHashSet<String>> {
+        use rustc_hash::{FxHashMap, FxHashSet};
+        let mut by_name: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
         for (id, name) in candidates {
             if name.len() < 2 {
                 continue;
@@ -185,7 +186,7 @@ impl IndexStore {
                 .insert(id.clone());
         }
         if by_name.is_empty() {
-            return Ok(HashSet::new());
+            return Ok(FxHashSet::default());
         }
         let conn = self.open_read_only()?;
         let mut stmt = conn.prepare_cached(
@@ -194,7 +195,7 @@ impl IndexStore {
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
-        let mut found: HashSet<String> = HashSet::new();
+        let mut found: FxHashSet<String> = FxHashSet::default();
         for row in rows {
             let (sid, body) = row?;
             if body.is_empty() {
@@ -202,8 +203,8 @@ impl IndexStore {
             }
             // Identifier-token scan: yields each maximal `[A-Za-z_][A-Za-z0-9_]*`
             // run once per body, dedup'd via a per-body set so repeated calls
-            // to the same name don't pay extra HashMap lookups.
-            let mut seen_tokens: HashSet<&str> = HashSet::new();
+            // to the same name don't pay extra FxHashMap lookups.
+            let mut seen_tokens: FxHashSet<&str> = FxHashSet::default();
             let bytes = body.as_bytes();
             let mut i = 0usize;
             while i < bytes.len() {
@@ -227,10 +228,10 @@ impl IndexStore {
                 if found.contains(tok) {
                     continue;
                 }
-                if let Some(owners) = by_name.get(tok) {
-                    if !owners.contains(sid.as_str()) {
-                        found.insert(tok.to_string());
-                    }
+                if let Some(owners) = by_name.get(tok)
+                    && !owners.contains(sid.as_str())
+                {
+                    found.insert(tok.to_string());
                 }
             }
         }
@@ -305,7 +306,7 @@ impl IndexStore {
         super::reachability_edges::all_edges_for_kinds(&conn, kinds).map_err(Into::into)
     }
 
-    pub fn file_max_end_lines(&self) -> anyhow::Result<HashMap<String, u64>> {
+    pub fn file_max_end_lines(&self) -> anyhow::Result<FxHashMap<String, u64>> {
         let conn = self.open_read_only()?;
         let mut stmt =
             conn.prepare_cached("SELECT file_path, MAX(end_line) FROM symbols GROUP BY file_path")?;
@@ -314,7 +315,7 @@ impl IndexStore {
             let end_line: i64 = row.get(1)?;
             Ok((path, end_line as u64))
         })?;
-        let mut map = HashMap::new();
+        let mut map = FxHashMap::default();
         for row in rows {
             let (path, end_line) = row?;
             map.insert(path, end_line);

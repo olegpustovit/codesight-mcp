@@ -5,7 +5,7 @@
 //! (`imports_orchestration::resolve_import_edge_for_graph`) into a repo-wide
 //! file→file adjacency map with propagated [`FactQuality`].
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use rayon::prelude::*;
 
@@ -16,7 +16,7 @@ use crate::imports_orchestration::{
 };
 
 /// Build a file-level dependency adjacency list from source files.
-pub fn build_dependency_graph(files: &[(String, String)]) -> HashMap<String, Vec<String>> {
+pub fn build_dependency_graph(files: &[(String, String)]) -> FxHashMap<String, Vec<String>> {
     build_dependency_graph_with_aliases(files, None, None)
 }
 
@@ -24,9 +24,9 @@ pub fn build_dependency_graph(files: &[(String, String)]) -> HashMap<String, Vec
 /// path alias support and workspace-crate (Rust) cross-crate `use` resolution.
 pub fn build_dependency_graph_with_aliases(
     files: &[(String, String)],
-    alias_map: Option<&HashMap<String, Vec<String>>>,
-    workspace_crates: Option<&HashMap<String, String>>,
-) -> HashMap<String, Vec<String>> {
+    alias_map: Option<&FxHashMap<String, Vec<String>>>,
+    workspace_crates: Option<&FxHashMap<String, String>>,
+) -> FxHashMap<String, Vec<String>> {
     let mut adj = fold_adjacency_from_edges(build_dependency_graph_edges_with_aliases(
         files,
         alias_map,
@@ -53,8 +53,8 @@ pub fn build_dependency_graph_with_aliases(
 /// index.
 pub fn build_dependency_graph_edges_with_aliases(
     files: &[(String, String)],
-    alias_map: Option<&HashMap<String, Vec<String>>>,
-    workspace_crates: Option<&HashMap<String, String>>,
+    alias_map: Option<&FxHashMap<String, Vec<String>>>,
+    workspace_crates: Option<&FxHashMap<String, String>>,
 ) -> Vec<(String, String, FactQuality)> {
     build_dependency_graph_edges_full(files, None, alias_map, workspace_crates)
 }
@@ -65,10 +65,10 @@ pub fn build_dependency_graph_edges_with_aliases(
 pub fn build_dependency_graph_edges_full(
     files: &[(String, String)],
     known_paths: Option<&[String]>,
-    alias_map: Option<&HashMap<String, Vec<String>>>,
-    workspace_crates: Option<&HashMap<String, String>>,
+    alias_map: Option<&FxHashMap<String, Vec<String>>>,
+    workspace_crates: Option<&FxHashMap<String, String>>,
 ) -> Vec<(String, String, FactQuality)> {
-    let known_files: HashSet<String> = match known_paths {
+    let known_files: FxHashSet<String> = match known_paths {
         Some(paths) => paths.iter().cloned().collect(),
         None => files.iter().map(|(p, _)| p.clone()).collect(),
     };
@@ -103,9 +103,9 @@ pub fn build_dependency_graph_edges_full(
 
 fn fold_adjacency_from_edges(
     edges: Vec<(String, String, FactQuality)>,
-) -> HashMap<String, Vec<String>> {
-    let mut adj: HashMap<String, Vec<String>> = HashMap::new();
-    let mut seen: HashSet<(String, String)> = HashSet::new();
+) -> FxHashMap<String, Vec<String>> {
+    let mut adj: FxHashMap<String, Vec<String>> = FxHashMap::default();
+    let mut seen: FxHashSet<(String, String)> = FxHashSet::default();
     for (src, tgt, _) in edges {
         if seen.insert((src.clone(), tgt.clone())) {
             adj.entry(src).or_default().push(tgt);

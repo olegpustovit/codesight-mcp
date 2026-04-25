@@ -1,6 +1,6 @@
 //! Integration tests: agent v1 framework core.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use codesight_language_support::frameworks::profiles::{detect_framework, profile_to_meta};
@@ -231,7 +231,7 @@ fn collect_imports_merges_into_empty() {
             names: vec!["UserController".into()],
         }],
     ))];
-    let mut file_imports: HashMap<String, Vec<ExtraImport>> = HashMap::new();
+    let mut file_imports: FxHashMap<String, Vec<ExtraImport>> = FxHashMap::default();
     collect_extra_imports(&mut file_imports, &providers);
     assert!(file_imports.contains_key("routes/web.php"));
     assert_eq!(file_imports["routes/web.php"].len(), 1);
@@ -246,7 +246,7 @@ fn collect_imports_merges_existing_no_duplicates() {
             names: vec![],
         }],
     ))];
-    let mut file_imports: HashMap<String, Vec<ExtraImport>> = HashMap::new();
+    let mut file_imports: FxHashMap<String, Vec<ExtraImport>> = FxHashMap::default();
     file_imports.insert(
         "routes/web.php".into(),
         vec![ExtraImport {
@@ -267,7 +267,7 @@ fn collect_imports_deduplicates_same_specifier() {
             names: vec![],
         }],
     ))];
-    let mut file_imports: HashMap<String, Vec<ExtraImport>> = HashMap::new();
+    let mut file_imports: FxHashMap<String, Vec<ExtraImport>> = FxHashMap::default();
     file_imports.insert(
         "routes/web.php".into(),
         vec![ExtraImport {
@@ -298,7 +298,7 @@ fn collect_imports_multiple_providers() {
             }],
         )),
     ];
-    let mut file_imports = HashMap::new();
+    let mut file_imports = FxHashMap::default();
     collect_extra_imports(&mut file_imports, &providers);
     assert_eq!(file_imports["routes/web.php"].len(), 2);
 }
@@ -315,14 +315,14 @@ fn collect_imports_failing_provider_does_not_crash() {
             }],
         )),
     ];
-    let mut file_imports = HashMap::new();
+    let mut file_imports = FxHashMap::default();
     collect_extra_imports(&mut file_imports, &providers);
     assert!(file_imports.contains_key("routes/web.php"));
 }
 #[test]
 fn collect_imports_empty_providers_list() {
     let providers: Vec<Box<dyn FrameworkProvider>> = vec![];
-    let mut file_imports: HashMap<String, Vec<ExtraImport>> = HashMap::new();
+    let mut file_imports: FxHashMap<String, Vec<ExtraImport>> = FxHashMap::default();
     file_imports.insert("existing.php".into(), vec![]);
     collect_extra_imports(&mut file_imports, &providers);
     assert!(file_imports.contains_key("existing.php"));
@@ -331,7 +331,7 @@ fn collect_imports_empty_providers_list() {
 fn collect_imports_base_provider_returns_empty() {
     let providers: Vec<Box<dyn FrameworkProvider>> =
         vec![Box::new(StubProvider::new("base", true))];
-    let mut file_imports = HashMap::new();
+    let mut file_imports = FxHashMap::default();
     collect_extra_imports(&mut file_imports, &providers);
     assert!(file_imports.is_empty());
 }
@@ -623,14 +623,14 @@ impl FrameworkProvider for StubProvider {
             .filter(|(f, _)| f == rel_path)
             .map(|(_, ctx)| ctx.clone())
     }
-    fn get_extra_imports(&self) -> anyhow::Result<HashMap<String, Vec<ExtraImport>>> {
+    fn get_extra_imports(&self) -> anyhow::Result<FxHashMap<String, Vec<ExtraImport>>> {
         Ok(match &self.imports {
             Some((file, imps)) => {
-                let mut m = HashMap::new();
+                let mut m = FxHashMap::default();
                 m.insert(file.clone(), imps.clone());
                 m
             }
-            None => HashMap::new(),
+            None => FxHashMap::default(),
         })
     }
 }
@@ -667,7 +667,7 @@ impl FrameworkProvider for FailingImportsProvider {
     fn get_file_context(&self, _rel_path: &str) -> Option<FileContext> {
         None
     }
-    fn get_extra_imports(&self) -> anyhow::Result<HashMap<String, Vec<ExtraImport>>> {
+    fn get_extra_imports(&self) -> anyhow::Result<FxHashMap<String, Vec<ExtraImport>>> {
         anyhow::bail!("intentional error in get_extra_imports")
     }
 }
@@ -699,7 +699,7 @@ impl FrameworkProvider for MetadataProvider {
     fn get_file_context(&self, _rel_path: &str) -> Option<FileContext> {
         None
     }
-    fn get_metadata(&self) -> HashMap<String, serde_json::Value> {
+    fn get_metadata(&self) -> FxHashMap<String, serde_json::Value> {
         self.meta.iter().cloned().collect()
     }
 }

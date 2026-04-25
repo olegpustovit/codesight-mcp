@@ -1,15 +1,23 @@
 //! PageRank and degree metrics on file dependency graphs.
+//!
+//! Thin adapter over `petgraph::algo::page_rank` and petgraph's directed-edge
+//! degree iterators. petgraph's PageRank handles dangling-node mass
+//! redistribution internally, so output sums to ~1.0 like the previous
+//! hand-rolled impl.
 
-use std::collections::{HashMap, HashSet};
-
+use petgraph::Direction;
+use petgraph::Graph;
+use petgraph::algo::page_rank;
+use petgraph::graph::NodeIndex;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 
 /// Result of a PageRank computation.
 #[derive(Debug, Clone, Serialize)]
 pub struct PageRankResult {
     /// Node → score (sums to ~1.0).
-    pub scores: HashMap<String, f64>,
-    /// Number of iterations until convergence.
+    pub scores: FxHashMap<String, f64>,
+    /// Number of iterations executed.
     pub iterations: usize,
 }
 
@@ -20,171 +28,103 @@ pub struct InOutDegree {
     pub out_degree: usize,
 }
 
-/// Compute in-degree and out-degree for every node in the adjacency list.
-/// Self-loops are excluded.
-pub fn compute_in_out_degrees(adj: &HashMap<String, Vec<String>>) -> HashMap<String, InOutDegree> {
-    let mut result: HashMap<String, InOutDegree> = HashMap::new();
+/// Build a `petgraph::Graph` from an adjacency list, skipping self-loops and
+/// deduping parallel edges. Returns the graph and a sorted node list whose
+/// position equals the corresponding `NodeIndex::index()`.
+fn build_graph(
+    adj: &FxHashMap<String, Vec<String>>,
+) -> (Graph<(), ()>, Vec<String>, FxHashMap<String, NodeIndex>) {
+    let mut nodes_set: FxHashSet<&str> = adj.keys().map(String::as_str).collect();
+    for deps in adj.values() {
+        for d in deps {
+            nodes_set.insert(d.as_str());
+        }
+    }
+    let mut nodes: Vec<String> = nodes_set.into_iter().map(String::from).collect();
+    nodes.sort();
 
-    // Initialize all nodes
-    for node in adj.keys() {
-        result.entry(node.clone()).or_insert(InOutDegree {
-            in_degree: 0,
-            out_degree: 0,
-        });
+    let mut graph = Graph::<(), ()>::new();
+    let mut idx: FxHashMap<String, NodeIndex> = FxHashMap::default();
+    for n in &nodes {
+        idx.insert(n.clone(), graph.add_node(()));
     }
 
-    for (source, deps) in adj {
-        let mut seen = HashSet::new();
+    for (src, deps) in adj {
+        let si = idx[src];
+        let mut seen: FxHashSet<&str> = FxHashSet::default();
         for dep in deps {
-            if dep == source {
-                continue; // skip self-loops
+            if dep == src || !seen.insert(dep.as_str()) {
+                continue;
             }
-            if seen.insert(dep.clone()) {
-                result
-                    .entry(source.clone())
-                    .or_insert(InOutDegree {
-                        in_degree: 0,
-                        out_degree: 0,
-                    })
-                    .out_degree += 1;
-                result
-                    .entry(dep.clone())
-                    .or_insert(InOutDegree {
-                        in_degree: 0,
-                        out_degree: 0,
-                    })
-                    .in_degree += 1;
+            if let Some(&di) = idx.get(dep) {
+                graph.add_edge(si, di, ());
             }
         }
     }
 
-    // Fix out_degree: we incremented per unique dep, but we need to also
-    // count from adj directly (excluding self-loops and deduping).
-    // Actually the above already does this correctly via `seen`. Let's recount.
-    for (source, deps) in adj {
-        let unique_out: HashSet<_> = deps.iter().filter(|d| *d != source).collect();
-        if let Some(entry) = result.get_mut(source) {
-            entry.out_degree = unique_out.len();
-        }
-    }
+    (graph, nodes, idx)
+}
 
-    result
+/// Compute in-degree and out-degree for every node in the adjacency list.
+/// Self-loops are excluded, parallel edges deduped.
+pub fn compute_in_out_degrees(
+    adj: &FxHashMap<String, Vec<String>>,
+) -> FxHashMap<String, InOutDegree> {
+    let (graph, nodes, idx) = build_graph(adj);
+    nodes
+        .into_iter()
+        .map(|n| {
+            let i = idx[&n];
+            let in_degree = graph.edges_directed(i, Direction::Incoming).count();
+            let out_degree = graph.edges_directed(i, Direction::Outgoing).count();
+            (
+                n,
+                InOutDegree {
+                    in_degree,
+                    out_degree,
+                },
+            )
+        })
+        .collect()
 }
 
 /// Compute PageRank on a directed graph.
 ///
 /// - `adj`: adjacency list (source → [targets])
 /// - `damping`: damping factor, typically 0.85
-/// - `max_iter`: maximum iterations
-/// - `tol`: convergence tolerance
+/// - `max_iter`: number of iterations to run
 ///
-/// Self-loops are ignored. Returns scores summing to ~1.0.
+/// Self-loops and parallel edges are ignored. Returns scores summing to ~1.0
+/// (petgraph redistributes dangling-node mass each iteration).
 pub fn compute_pagerank(
-    adj: &HashMap<String, Vec<String>>,
+    adj: &FxHashMap<String, Vec<String>>,
     damping: f64,
     max_iter: usize,
-    tol: f64,
+    _tol: f64,
 ) -> PageRankResult {
-    let nodes: Vec<String> = {
-        let mut s: HashSet<String> = adj.keys().cloned().collect();
-        for deps in adj.values() {
-            for d in deps {
-                s.insert(d.clone());
-            }
-        }
-        let mut v: Vec<String> = s.into_iter().collect();
-        v.sort();
-        v
-    };
-
-    let n = nodes.len();
-    if n == 0 {
+    if adj.is_empty() {
         return PageRankResult {
-            scores: HashMap::new(),
+            scores: FxHashMap::default(),
             iterations: 0,
         };
     }
-
-    let node_idx: HashMap<&str, usize> = nodes
-        .iter()
-        .enumerate()
-        .map(|(i, s)| (s.as_str(), i))
-        .collect();
-
-    // Build adjacency as index lists (excluding self-loops)
-    let mut out_edges: Vec<Vec<usize>> = vec![Vec::new(); n];
-    let mut in_edges: Vec<Vec<usize>> = vec![Vec::new(); n];
-
-    for (src, deps) in adj {
-        let Some(&si) = node_idx.get(src.as_str()) else {
-            continue;
+    let (graph, nodes, idx) = build_graph(adj);
+    if graph.node_count() == 0 {
+        return PageRankResult {
+            scores: FxHashMap::default(),
+            iterations: 0,
         };
-        let mut seen = HashSet::new();
-        for dep in deps {
-            if dep == src {
-                continue;
-            }
-            let Some(&di) = node_idx.get(dep.as_str()) else {
-                continue;
-            };
-            if seen.insert(di) {
-                out_edges[si].push(di);
-                in_edges[di].push(si);
-            }
-        }
     }
-
-    let uniform = 1.0 / n as f64;
-    let mut scores = vec![uniform; n];
-    let base = (1.0 - damping) / n as f64;
-    let mut iterations = 0;
-
-    for _ in 0..max_iter {
-        iterations += 1;
-        let mut new_scores = vec![base; n];
-
-        // Distribute dangling node mass
-        let dangling_sum: f64 = (0..n)
-            .filter(|&i| out_edges[i].is_empty())
-            .map(|i| scores[i])
-            .sum();
-        let dangling_add = damping * dangling_sum / n as f64;
-        for s in &mut new_scores {
-            *s += dangling_add;
-        }
-
-        // Normal PageRank contribution
-        for v in 0..n {
-            let out_deg = out_edges[v].len();
-            if out_deg == 0 {
-                continue;
-            }
-            let contrib = damping * scores[v] / out_deg as f64;
-            for &u in &out_edges[v] {
-                new_scores[u] += contrib;
-            }
-        }
-
-        // Check convergence
-        let diff: f64 = scores
-            .iter()
-            .zip(new_scores.iter())
-            .map(|(a, b)| (a - b).abs())
-            .sum();
-        scores = new_scores;
-
-        if diff < tol {
-            break;
-        }
-    }
-
-    let mut result = HashMap::new();
-    for (i, node) in nodes.iter().enumerate() {
-        result.insert(node.clone(), scores[i]);
-    }
-
+    let raw = page_rank(&graph, damping, max_iter);
+    let scores = nodes
+        .into_iter()
+        .map(|n| {
+            let i = idx[&n].index();
+            (n, raw[i])
+        })
+        .collect();
     PageRankResult {
-        scores: result,
-        iterations,
+        scores,
+        iterations: max_iter,
     }
 }

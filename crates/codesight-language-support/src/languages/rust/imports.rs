@@ -1,7 +1,7 @@
 //! Rust import extraction (tree-sitter primary + line-based fallback) plus
 //! anchor-aware specifier → file resolution.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use tree_sitter::Node;
 
@@ -301,7 +301,7 @@ pub fn resolve_edge(
     edge: &ImportEdge,
     from_file: &str,
     known_files_vec: &[String],
-    workspace_crates: Option<&HashMap<String, String>>,
+    workspace_crates: Option<&FxHashMap<String, String>>,
 ) -> Option<String> {
     let full_path = if let Some(first) = edge.names.first() {
         if edge.specifier.is_empty() {
@@ -322,7 +322,7 @@ pub fn resolve_rust_specifier(
     specifier: &str,
     from_file: &str,
     known_files: &[String],
-    workspace_crates: Option<&HashMap<String, String>>,
+    workspace_crates: Option<&FxHashMap<String, String>>,
 ) -> Option<String> {
     let mut segments: Vec<&str> = specifier.split("::").filter(|s| !s.is_empty()).collect();
     let first = segments.first().copied()?;
@@ -631,7 +631,7 @@ mod rust_resolve_tests {
             "crates/my-lib/src/lib.rs",
             "crates/my-lib/src/inner.rs",
         ]);
-        let mut ws = HashMap::new();
+        let mut ws = FxHashMap::default();
         ws.insert("my_lib".to_string(), "crates/my-lib/src/lib.rs".to_string());
         let got = resolve_rust_specifier("my_lib::do_thing", "src/main.rs", &known, Some(&ws));
         assert_eq!(got.as_deref(), Some("crates/my-lib/src/lib.rs"));
@@ -640,7 +640,7 @@ mod rust_resolve_tests {
     #[test]
     fn workspace_crate_wins_over_bare_sibling_even_when_sibling_exists() {
         let known = files(&["src/main.rs", "src/utils.rs", "crates/utils/src/lib.rs"]);
-        let mut ws = HashMap::new();
+        let mut ws = FxHashMap::default();
         ws.insert("utils".to_string(), "crates/utils/src/lib.rs".to_string());
         let got = resolve_rust_specifier("utils::helper", "src/main.rs", &known, Some(&ws));
         assert_eq!(got.as_deref(), Some("crates/utils/src/lib.rs"));
@@ -649,7 +649,7 @@ mod rust_resolve_tests {
     #[test]
     fn workspace_crate_does_not_apply_to_anchored_paths() {
         let known = files(&["src/main.rs", "src/utils.rs", "crates/utils/src/lib.rs"]);
-        let mut ws = HashMap::new();
+        let mut ws = FxHashMap::default();
         ws.insert("utils".to_string(), "crates/utils/src/lib.rs".to_string());
         let got = resolve_rust_specifier("self::utils", "src/main.rs", &known, Some(&ws));
         assert_eq!(got.as_deref(), Some("src/utils.rs"));

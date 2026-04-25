@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_analysis::quality;
 
 impl CodeService {
@@ -20,7 +20,8 @@ impl CodeService {
         let include_conventional = args.include_conventional.unwrap_or(false);
 
         // ROADMAP P1.1: quality analysis — null baseline.
-        let timer = MetaBuilder::new(0);
+        // Hotspots aggregate complexity + churn + size — partial.
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
         let data = quality::hotspots_payload(&store, min_complexity, top_n, include_conventional)?;
 
         // FIXUP T1.2: point the agent at a split-planning follow-up.

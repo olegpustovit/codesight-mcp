@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 use crate::frameworks::{rel_path, walk_files};
@@ -14,11 +14,11 @@ pub struct NextjsStats {
 
 #[derive(Debug, Clone, Default)]
 pub struct NextjsSnapshot {
-    pub(crate) page_routes: HashMap<String, String>,
-    pub(crate) api_routes: HashMap<String, Vec<String>>,
-    pub(crate) layouts: HashSet<String>,
-    pub(crate) middlewares: HashMap<String, Option<String>>,
-    pub(crate) errors: HashSet<String>,
+    pub(crate) page_routes: FxHashMap<String, String>,
+    pub(crate) api_routes: FxHashMap<String, Vec<String>>,
+    pub(crate) layouts: FxHashSet<String>,
+    pub(crate) middlewares: FxHashMap<String, Option<String>>,
+    pub(crate) errors: FxHashSet<String>,
 }
 
 impl NextjsSnapshot {

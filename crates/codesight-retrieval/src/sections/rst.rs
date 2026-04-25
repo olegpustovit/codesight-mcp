@@ -1,6 +1,6 @@
 //! reStructuredText heading extraction via adornment lines.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use super::Section;
 use super::builder::build_sections;
@@ -37,7 +37,7 @@ pub fn extract_rst_sections(file_path: &str, source: &str) -> Vec<Section> {
     let mut headings: Vec<(String, usize, usize)> = Vec::new();
     let mut adornment_styles: Vec<(u8, bool)> = Vec::new();
     let mut heading_style_indices: Vec<usize> = Vec::new();
-    let mut consumed: HashSet<usize> = HashSet::new();
+    let mut consumed: FxHashSet<usize> = FxHashSet::default();
 
     let mut byte_offsets: Vec<usize> = Vec::with_capacity(lines.len());
     {

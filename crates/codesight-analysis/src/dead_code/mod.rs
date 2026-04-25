@@ -3,12 +3,12 @@
 mod entrypoints;
 mod reachability;
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use serde_json::{Value, json};
 
 use codesight_language_support::{
-    is_barrel_basename, is_test_file, is_test_fixture, mentions_identifier_in_file,
+    is_barrel_basename, is_test_file, is_test_fixture, is_test_symbol, mentions_identifier_in_file,
 };
 use codesight_storage::storage::{AnalysisSymbol, IndexStore};
 
@@ -22,6 +22,15 @@ use self::reachability::build_repo_reachability;
 /// (full counts are always reported via `dead_file_count` / `dead_symbol_count`).
 /// `None` means unbounded, preserving existing callers that pass through the
 /// internal `repo_health` → `dead_code` integration.
+///
+/// When `paranoid=true`:
+/// - the effective `min_confidence` floor is dropped to `0.0` so weak
+///   signals (`weak_string_dispatch_match`, `test_only_alive`) surface;
+/// - symbol-level dead detection runs regardless of `granularity`;
+/// - `heuristic_disagreements` is emitted listing files the legacy
+///   import-graph reachability would have flagged dead but the current
+///   string-literal-dispatch heuristic rescued.
+#[allow(clippy::too_many_arguments)]
 pub fn dead_code_payload(
     store: &IndexStore,
     granularity: &str,
@@ -30,7 +39,10 @@ pub fn dead_code_payload(
     entry_patterns: &[String],
     limit: Option<usize>,
     include_vendored: bool,
+    paranoid: bool,
 ) -> anyhow::Result<Value> {
+    let effective_min_confidence = if paranoid { 0.0 } else { min_confidence };
+    let symbol_pass = paranoid || granularity == "symbol";
     let all_symbols = store.all_symbols_for_analysis()?;
     let dep_graph = store.dependency_graph_strict()?;
     let all_files = store.all_file_paths()?;
@@ -49,7 +61,7 @@ pub fn dead_code_payload(
             "function" | "method" | "class" | "trait" | "struct" | "enum" | "type" | "module"
         )
     };
-    let files_with_code: HashSet<&str> = all_symbols
+    let files_with_code: FxHashSet<&str> = all_symbols
         .iter()
         .filter(|s| is_executable(&s.kind))
         .map(|s| s.file_path.as_str())
@@ -66,21 +78,32 @@ pub fn dead_code_payload(
         &file_contents,
     );
 
-    let mut dead_files: Vec<Value> = Vec::new();
-    for file in &all_files {
+    // Filter shared across both the `dead_files` pass and the
+    // `heuristic_disagreements` pass — only files that meaningfully sit
+    // on the reachability graph deserve a verdict.
+    let in_scope = |file: &str| -> bool {
         if !include_vendored && codesight_language_support::is_vendored_path(file) {
-            continue;
+            return false;
         }
         if is_test_fixture(file) {
-            continue;
+            return false;
         }
         if !include_tests && is_test_file(file) {
+            return false;
+        }
+        if !files_with_code.contains(file) {
+            return false;
+        }
+        true
+    };
+
+    let mut dead_files: Vec<Value> = Vec::new();
+    let mut new_dead_set: FxHashSet<&str> = FxHashSet::default();
+    for file in &all_files {
+        if !in_scope(file.as_str()) {
             continue;
         }
         if reachability.reachable_files.contains(file) {
-            continue;
-        }
-        if !files_with_code.contains(file.as_str()) {
             continue;
         }
         // Any strong structural inbound edge (use, pub use, mod, match
@@ -118,7 +141,7 @@ pub fn dead_code_payload(
         } else {
             base_confidence
         };
-        if confidence < min_confidence {
+        if confidence < effective_min_confidence {
             continue;
         }
 
@@ -134,11 +157,46 @@ pub fn dead_code_payload(
             "confidence": confidence,
             "signal": signal,
         }));
+        new_dead_set.insert(file.as_str());
+    }
+
+    // Paranoid mode: surface files where the legacy import-graph
+    // reachability disagreed with the current heuristic (i.e. files that
+    // would have been dead before the string-literal-dispatch promotion
+    // rescued them).
+    let mut heuristic_disagreements: Vec<Value> = Vec::new();
+    if paranoid {
+        for file in &all_files {
+            if !in_scope(file.as_str()) {
+                continue;
+            }
+            if new_dead_set.contains(file.as_str()) {
+                continue;
+            }
+            if reachability.legacy_reachable_files.contains(file) {
+                continue;
+            }
+            if reachability.strong_inbound.contains(file) {
+                continue;
+            }
+            let strong = reachability.string_dispatch_strong_roots.contains(file);
+            let weak = reachability.weak_string_dispatch.contains(file);
+            if !(strong || weak) {
+                continue;
+            }
+            heuristic_disagreements.push(json!({
+                "file": file,
+                "old_dead": true,
+                "new_dead": false,
+                "new_signal": "string_literal_dispatch",
+                "strong_or_weak": if strong { "strong" } else { "weak" },
+            }));
+        }
     }
 
     let mut dead_symbols: Vec<Value> = Vec::new();
-    if granularity == "symbol" {
-        let dead_file_set: HashSet<&str> = dead_files
+    if symbol_pass {
+        let dead_file_set: FxHashSet<&str> = dead_files
             .iter()
             .filter_map(|dead_file| dead_file["file"].as_str())
             .collect();
@@ -162,7 +220,7 @@ pub fn dead_code_payload(
                 is_callable_kind(&s.kind)
                     && s.name.len() >= 4
                     && !is_test_fixture(&s.file_path)
-                    && (include_tests || !is_test_file(&s.file_path))
+                    && (include_tests || !is_test_symbol(&s.file_path, &s.id))
                     && (include_vendored
                         || !codesight_language_support::is_vendored_path(&s.file_path))
             })
@@ -179,7 +237,7 @@ pub fn dead_code_payload(
             if is_test_fixture(&symbol.file_path) {
                 continue;
             }
-            if !include_tests && is_test_file(&symbol.file_path) {
+            if !include_tests && is_test_symbol(&symbol.file_path, &symbol.id) {
                 continue;
             }
             if dead_file_set.contains(symbol.file_path.as_str()) {
@@ -216,8 +274,10 @@ pub fn dead_code_payload(
             }
             // Public-API guard: exported barrel members are alive.
             // A barrel basename containing the name is presumptive evidence.
-            let confidence = 0.55;
-            if confidence < min_confidence {
+            // Symbol-level "no inbound + name not mentioned anywhere" is
+            // weaker evidence than file-level reachability; cap at 0.4.
+            let confidence: f64 = if paranoid { 0.4 } else { 0.55 };
+            if confidence < effective_min_confidence {
                 continue;
             }
             dead_symbols.push(json!({
@@ -234,25 +294,37 @@ pub fn dead_code_payload(
 
     let dead_file_count = dead_files.len();
     let dead_symbol_count = dead_symbols.len();
+    let disagreement_count = heuristic_disagreements.len();
     let truncated = match limit {
         Some(cap) => {
-            let need = dead_files.len() > cap || dead_symbols.len() > cap;
+            let need = dead_files.len() > cap
+                || dead_symbols.len() > cap
+                || heuristic_disagreements.len() > cap;
             dead_files.truncate(cap);
             dead_symbols.truncate(cap);
+            heuristic_disagreements.truncate(cap);
             need
         }
         None => false,
     };
+    let dead_symbols_out = if symbol_pass { json!(dead_symbols) } else { json!([]) };
+    let dead_symbol_count_out = if symbol_pass { dead_symbol_count } else { 0 };
     let mut data = json!({
         "analysis": "dead_code",
         "dead_files": dead_files,
         "dead_file_count": dead_file_count,
-        "dead_symbols": if granularity == "symbol" { json!(dead_symbols) } else { json!([]) },
-        "dead_symbol_count": if granularity == "symbol" { dead_symbol_count } else { 0 },
+        "dead_symbols": dead_symbols_out,
+        "dead_symbol_count": dead_symbol_count_out,
         "live_root_count": reachability.live_roots.len(),
         "truncated": truncated,
         "analysis_notes": "dead code detection uses dependency-graph reachability plus labeled entry-root heuristics",
     });
+
+    if paranoid {
+        data["paranoid"] = json!(true);
+        data["heuristic_disagreements"] = json!(heuristic_disagreements);
+        data["heuristic_disagreement_count"] = json!(disagreement_count);
+    }
 
     if let Some(framework_warning) = reachability.framework_warning {
         data["framework_warning"] = json!(framework_warning);

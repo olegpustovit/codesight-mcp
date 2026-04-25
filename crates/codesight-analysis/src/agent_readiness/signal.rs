@@ -1,7 +1,7 @@
 //! Compose the four agent-readiness dimensions from precomputed submetrics
 //! and aggregate them into a single 0–10000 signal.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use codesight_language_support::family::LanguageFamily;
 use codesight_storage::storage::AnalysisSymbol;
@@ -15,10 +15,10 @@ use super::{AgentReadinessDimensions, AgentReadinessSignal, AgentReadinessSubmet
 
 pub(super) fn agent_signal_from_inputs(
     all_symbols: &[AnalysisSymbol],
-    adj: &HashMap<String, Vec<String>>,
-    fan_in: &HashMap<String, usize>,
-    _graph_files: &HashSet<String>,
-    churn: &HashMap<String, u64>,
+    adj: &FxHashMap<String, Vec<String>>,
+    fan_in: &FxHashMap<String, usize>,
+    _graph_files: &FxHashSet<String>,
+    churn: &FxHashMap<String, u64>,
     facts: &[FunctionFacts<'_>],
 ) -> AgentReadinessSignal {
     if facts.is_empty() {
@@ -47,11 +47,11 @@ pub(super) fn agent_signal_from_inputs(
         };
     }
 
-    let scope_graph_files: HashSet<String> = facts
+    let scope_graph_files: FxHashSet<String> = facts
         .iter()
         .map(|fact| fact.sym.file_path.clone())
         .collect();
-    let scope_symbols: HashSet<&str> = facts.iter().map(|fact| fact.sym.id.as_str()).collect();
+    let scope_symbols: FxHashSet<&str> = facts.iter().map(|fact| fact.sym.id.as_str()).collect();
     let relevant_symbols: Vec<AnalysisSymbol> = all_symbols
         .iter()
         .filter(|sym| {
@@ -110,12 +110,12 @@ pub(super) fn agent_signal_from_inputs(
         .iter()
         .filter(|fact| fact.graph_backed)
         .map(|fact| fact.sym.file_path.as_str())
-        .collect::<HashSet<_>>()
+        .collect::<FxHashSet<_>>()
         .len();
     let total_function_files = facts
         .iter()
         .map(|fact| fact.sym.file_path.as_str())
-        .collect::<HashSet<_>>()
+        .collect::<FxHashSet<_>>()
         .len()
         .max(1);
     let graph_coverage_ratio = graph_backed_function_files as f64 / total_function_files as f64;

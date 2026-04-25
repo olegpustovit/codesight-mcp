@@ -10,13 +10,13 @@ use crate::service::agent_v1::args::IngestSourcesArgs;
 use crate::service::agent_v1::util::doc_format_to_type_label;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory, canonicalize_root};
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_storage::storage::doc_index::DocStore;
 
 impl CodeService {
     pub(in crate::service) fn ingest_sources(&self, v: Value) -> anyhow::Result<Value> {
         let args: IngestSourcesArgs = ValidatedArgs::from_validated(v)?.into_inner();
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Safe);
         let mut warnings = Vec::new();
 
         if !args.enrichment.is_empty() {
@@ -160,6 +160,23 @@ impl CodeService {
             last_doc = Some(self.do_index_local(&path_for_index)?);
         }
 
+        // Suppress no-op cache bumps. Without this, the PostToolUse hook
+        // fires `ingest_sources(incremental=true)` after every Edit/Write
+        // and evicts the `catalog_sources` body cache even when nothing
+        // material changed — the cold path then walks every source and
+        // turns warm 5 ms calls into 100+ ms ones. We treat code+docs as
+        // "no-op" when both reingests touched zero files.
+        let code_changed = last_code
+            .as_ref()
+            .map(|c| c.files_reindexed > 0 || c.files_removed > 0)
+            .unwrap_or(false);
+        let docs_changed = last_doc
+            .as_ref()
+            .map(|d| d.file_count > 0)
+            .unwrap_or(false)
+            && !args.incremental;
+        let any_change = code_changed || docs_changed || !args.incremental;
+
         let indexed_docs = last_doc.is_some();
         let source_id = normalize_repo_id(&path_for_index);
         let mut data = match (last_code, last_doc) {
@@ -234,13 +251,14 @@ impl CodeService {
 
         reindex_guard.mark_done();
 
-        // The on-disk fingerprint (`repo_info.indexed_at`) just moved, so the
-        // next cross-source reader should refresh. `snapshot()` would catch
-        // the drift on its own, but explicit invalidation skips the extra
-        // SELECT on the next hit.
-        self.source_registry().invalidate(&source_id);
-        // Any response `catalog_sources` previously memoised is now stale.
-        self.bump_catalog_generation();
+        // Only invalidate cross-source caches when something actually
+        // changed. A reingest that touched zero files leaves `repo_info`
+        // unchanged on disk, so neither the source-registry snapshot nor
+        // the `catalog_sources` body need to refresh.
+        if any_change {
+            self.source_registry().invalidate(&source_id);
+            self.bump_catalog_generation();
+        }
 
         self.watchers.ensure_watching(
             &source_id,

@@ -6,7 +6,7 @@
 //! shared trait, registry, payload types, and profile helpers that those
 //! per-framework modules plug into.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 pub mod profiles;
@@ -197,7 +197,7 @@ macro_rules! impl_framework_provider {
 
             fn get_metadata(
                 &self,
-            ) -> std::collections::HashMap<String, serde_json::Value> {
+            ) -> rustc_hash::FxHashMap<String, serde_json::Value> {
                 self.snapshot.as_ref().map(metadata).unwrap_or_default()
             }
 
@@ -205,7 +205,7 @@ macro_rules! impl_framework_provider {
                 fn get_extra_imports(
                     &$ei_self,
                 ) -> anyhow::Result<
-                    std::collections::HashMap<String, Vec<$crate::frameworks::ExtraImport>>,
+                    rustc_hash::FxHashMap<String, Vec<$crate::frameworks::ExtraImport>>,
                 > {
                     $ei_body
                 }
@@ -234,13 +234,13 @@ pub trait FrameworkProvider: Send + Sync {
     fn get_file_context(&self, rel_path: &str) -> Option<FileContext>;
 
     /// Return extra metadata key-value pairs for the project.
-    fn get_metadata(&self) -> HashMap<String, serde_json::Value> {
-        HashMap::new()
+    fn get_metadata(&self) -> FxHashMap<String, serde_json::Value> {
+        FxHashMap::default()
     }
 
     /// Return extra imports keyed by relative file path.
-    fn get_extra_imports(&self) -> anyhow::Result<HashMap<String, Vec<ExtraImport>>> {
-        Ok(HashMap::new())
+    fn get_extra_imports(&self) -> anyhow::Result<FxHashMap<String, Vec<ExtraImport>>> {
+        Ok(FxHashMap::default())
     }
 }
 
@@ -278,7 +278,7 @@ pub fn enrich_symbol(symbol: &mut EnrichableSymbol, providers: &[Box<dyn Framewo
 /// Individual provider failures are caught so one bad provider doesn't block
 /// others.
 pub fn collect_extra_imports(
-    file_imports: &mut HashMap<String, Vec<ExtraImport>>,
+    file_imports: &mut FxHashMap<String, Vec<ExtraImport>>,
     providers: &[Box<dyn FrameworkProvider>],
 ) {
     for p in providers {
@@ -306,8 +306,8 @@ pub fn collect_extra_imports(
 /// Returns (merged metadata, list of collision warnings).
 pub fn collect_metadata(
     providers: &[Box<dyn FrameworkProvider>],
-) -> (HashMap<String, serde_json::Value>, Vec<String>) {
-    let mut result: HashMap<String, serde_json::Value> = HashMap::new();
+) -> (FxHashMap<String, serde_json::Value>, Vec<String>) {
+    let mut result: FxHashMap<String, serde_json::Value> = FxHashMap::default();
     let mut warnings: Vec<String> = Vec::new();
 
     for p in providers {

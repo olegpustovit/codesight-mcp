@@ -6,7 +6,7 @@
 //! [`ToolError::InvalidArgument`] whose detail includes the JSON Pointer of the
 //! offending field.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::sync::OnceLock;
 
@@ -72,7 +72,7 @@ struct ToolSchema {
 }
 
 struct ToolRegistry {
-    schemas: HashMap<String, ToolSchema>,
+    schemas: FxHashMap<String, ToolSchema>,
     definitions: Vec<Value>,
 }
 
@@ -82,7 +82,7 @@ fn registry() -> &'static Result<ToolRegistry, String> {
     REGISTRY.get_or_init(build_registry)
 }
 
-fn schemas() -> Option<&'static HashMap<String, ToolSchema>> {
+fn schemas() -> Option<&'static FxHashMap<String, ToolSchema>> {
     registry().as_ref().ok().map(|r| &r.schemas)
 }
 
@@ -112,7 +112,7 @@ fn build_registry() -> Result<ToolRegistry, String> {
     let Value::Array(tools) = parsed else {
         return Err("src/tools.json root must be a JSON array".to_string());
     };
-    let mut schemas = HashMap::with_capacity(tools.len());
+    let mut schemas = FxHashMap::with_capacity_and_hasher(tools.len(), Default::default());
     for tool in &tools {
         let Some(name) = tool.get("name").and_then(Value::as_str) else {
             continue;

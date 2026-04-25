@@ -121,6 +121,21 @@ pub fn is_test_fixture(path: &str) -> bool {
     generic_is_test_fixture(path)
 }
 
+/// True when the symbol identified by `symbol_id` (defined in `path`) is a
+/// test under its owning language's conventions. Combines path-based
+/// detection ([`is_test_file`]) with the per-language
+/// [`Language::is_test_symbol_id`] hook so callers don't have to branch on
+/// language. Catches Rust `#[cfg(test)] mod tests` blocks inside otherwise
+/// production files, Python `def test_…` inside module siblings, Go
+/// `TestXxx` in `_test.go`, etc.
+pub fn is_test_symbol(path: &str, symbol_id: &str) -> bool {
+    if is_test_file(path) {
+        return true;
+    }
+    lookup_for_path(path)
+        .is_some_and(|lang| lang.is_test_symbol_id(codesight_core::SymbolIdRef::new(symbol_id)))
+}
+
 /// Entrypoint basenames across every registered language. Flattened.
 pub fn all_entrypoint_basenames() -> Vec<&'static str> {
     let mut all: Vec<&'static str> = Vec::new();
@@ -145,9 +160,9 @@ pub fn is_entrypoint_basename(basename: &str) -> bool {
 /// True when `basename` is any registered language's barrel-index file
 /// (Python `__init__.py`, TS `index.ts`, …). Materialised once per process.
 pub fn is_barrel_basename(basename: &str) -> bool {
-    use std::collections::HashSet;
+    use rustc_hash::FxHashSet;
     use std::sync::OnceLock;
-    static SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    static SET: OnceLock<FxHashSet<&'static str>> = OnceLock::new();
     let set = SET.get_or_init(|| {
         builtin_registry()
             .all()
@@ -162,9 +177,9 @@ pub fn is_barrel_basename(basename: &str) -> bool {
 /// first call (union of every `Language::outline_noise_basenames`) so this
 /// runs in O(1) hash lookup on the hot path.
 pub fn is_outline_noise_basename(path: &str) -> bool {
-    use std::collections::HashSet;
+    use rustc_hash::FxHashSet;
     use std::sync::OnceLock;
-    static SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    static SET: OnceLock<FxHashSet<&'static str>> = OnceLock::new();
     let set = SET.get_or_init(|| {
         builtin_registry()
             .all()

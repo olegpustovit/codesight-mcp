@@ -21,7 +21,7 @@
 //! [`crate::Language::vendor_segments`] plus the [`UNIVERSAL_VENDOR_SEGMENTS`]
 //! cross-language conventions.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use codesight_core::path_contains_segment;
 
@@ -60,8 +60,8 @@ pub const VENDOR_JSON_MAX_BYTES: u64 = 64 * 1024;
 /// Build the unioned list of vendor segments — every registered language's
 /// [`Language::vendor_segments`] plus [`UNIVERSAL_VENDOR_SEGMENTS`]. Tens of
 /// segments total; safe to call per-request.
-fn all_vendor_segments() -> HashSet<&'static str> {
-    let mut set: HashSet<&'static str> = UNIVERSAL_VENDOR_SEGMENTS.iter().copied().collect();
+fn all_vendor_segments() -> FxHashSet<&'static str> {
+    let mut set: FxHashSet<&'static str> = UNIVERSAL_VENDOR_SEGMENTS.iter().copied().collect();
     for lang in builtin_registry().all() {
         set.extend(lang.vendor_segments().iter().copied());
     }
@@ -125,11 +125,11 @@ pub fn scope_opts_in(scope: &str) -> bool {
 }
 
 /// Unioned reserved-identifier set — every registered language's
-/// [`Language::reserved_identifiers`] folded into one [`HashSet`]. Callers
+/// [`Language::reserved_identifiers`] folded into one [`FxHashSet`]. Callers
 /// (today: usage_edges scanner) build this once and reuse it across the scan.
 #[must_use]
-pub fn all_reserved_identifiers() -> HashSet<&'static str> {
-    let mut set: HashSet<&'static str> = HashSet::new();
+pub fn all_reserved_identifiers() -> FxHashSet<&'static str> {
+    let mut set: FxHashSet<&'static str> = FxHashSet::default();
     for lang in builtin_registry().all() {
         set.extend(lang.reserved_identifiers().iter().copied());
     }

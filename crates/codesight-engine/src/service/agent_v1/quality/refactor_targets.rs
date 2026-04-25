@@ -1,7 +1,7 @@
 //! `evaluate_quality analysis=refactor_targets` — high-complexity,
 //! high-fan-in candidates with truncated caller-file listing.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde_json::{Value, json};
 
@@ -9,7 +9,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_analysis::complexity::cyclomatic_complexity_for_path;
 use codesight_analysis::quality;
 
@@ -27,7 +27,8 @@ impl CodeService {
         let top_caller_files = args.top_caller_files.unwrap_or(10).clamp(1, 50);
 
         // ROADMAP P1.1: quality analysis — null baseline.
-        let timer = MetaBuilder::new(0);
+        // Aggregates complexity (safe per-symbol) + caller heuristics — partial.
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
 
         let all_symbols = store.all_symbols_cached()?;
 
@@ -73,7 +74,7 @@ impl CodeService {
         } else {
             "repository"
         };
-        let file_set: HashSet<&str> = scope_files.iter().map(String::as_str).collect();
+        let file_set: FxHashSet<&str> = scope_files.iter().map(String::as_str).collect();
 
         struct Cand<'a> {
             sym: &'a codesight_storage::storage::AnalysisSymbol,
@@ -101,7 +102,7 @@ impl CodeService {
             cands.push(Cand { sym, cyclomatic });
         }
 
-        let mut name_to_cands: HashMap<&str, Vec<usize>> = HashMap::new();
+        let mut name_to_cands: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
         for (ci, cand) in cands.iter().enumerate() {
             if cand.sym.name.len() < 2 {
                 continue;
@@ -113,8 +114,8 @@ impl CodeService {
         }
 
         let mut counts: Vec<usize> = vec![0; cands.len()];
-        let mut files: Vec<HashSet<&str>> = vec![HashSet::new(); cands.len()];
-        let mut seen_in_other: HashSet<usize> = HashSet::new();
+        let mut files: Vec<FxHashSet<&str>> = vec![FxHashSet::default(); cands.len()];
+        let mut seen_in_other: FxHashSet<usize> = FxHashSet::default();
         for other in &*all_symbols {
             if name_to_cands.is_empty() {
                 break;

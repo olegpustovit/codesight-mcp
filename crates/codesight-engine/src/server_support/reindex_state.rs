@@ -6,8 +6,9 @@
 //! settles. Read-path handlers never block — they annotate responses with
 //! `STALE_DATA_WARNING` when a reindex is mid-flight.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex};
+use parking_lot::{Condvar, Mutex};
+use rustc_hash::FxHashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // ─── Public types ────────────────────────────────────────────────────────────
@@ -75,7 +76,7 @@ impl RepoReindexState {
     /// already in progress. On success, flips `reindexing=true`, clears the
     /// event, bumps `deferred_generation`, and sets `stale_since` if unset.
     fn try_begin_reindex(&self, files_in_flight: &[String]) -> Result<(), ()> {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self.inner.lock();
         if inner.reindexing {
             return Err(());
         }
@@ -109,20 +110,20 @@ impl RepoReindexState {
 
 /// Thread-safe manager holding reindex states for multiple repos.
 pub struct ReindexStateManager {
-    states: Mutex<HashMap<String, Arc<RepoReindexState>>>,
+    states: Mutex<FxHashMap<String, Arc<RepoReindexState>>>,
 }
 
 impl ReindexStateManager {
     pub fn new() -> Self {
         Self {
-            states: Mutex::new(HashMap::new()),
+            states: Mutex::new(FxHashMap::default()),
         }
     }
 
     /// Get or create the per-repo state. Returns the same `Arc` for repeated calls
     /// with the same `repo`.
     pub fn get_state(&self, repo: &str) -> Arc<RepoReindexState> {
-        let mut map = self.states.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = self.states.lock();
         map.entry(repo.to_string())
             .or_insert_with(|| Arc::new(RepoReindexState::new()))
             .clone()
@@ -136,7 +137,7 @@ impl ReindexStateManager {
     /// - Increments `deferred_generation`
     pub fn mark_reindex_start(&self, repo: &str, files_in_flight: &[String]) {
         let state = self.get_state(repo);
-        let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = state.inner.lock();
         inner.reindexing = true;
         inner.event_set = false;
         inner.files_in_flight = files_in_flight.to_vec();
@@ -169,7 +170,7 @@ impl ReindexStateManager {
     /// - Sets the event (unblocks waiters)
     pub fn mark_reindex_done(&self, repo: &str) {
         let state = self.get_state(repo);
-        let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = state.inner.lock();
         inner.reindexing = false;
         inner.stale_since = None;
         inner.files_in_flight.clear();
@@ -187,7 +188,7 @@ impl ReindexStateManager {
     /// - Sets the event (unblocks waiters)
     pub fn mark_reindex_failed(&self, repo: &str, error: &str) {
         let state = self.get_state(repo);
-        let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = state.inner.lock();
         inner.reindexing = false;
         inner.consecutive_failures += 1;
         inner.last_error = Some(error.to_string());
@@ -200,7 +201,7 @@ impl ReindexStateManager {
     /// Error and failure count are only exposed when `consecutive_failures >= 2`.
     pub fn get_status(&self, repo: &str) -> ReindexStatus {
         let state = self.get_state(repo);
-        let inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = state.inner.lock();
 
         let stale_since_ms = inner
             .stale_since
@@ -229,10 +230,10 @@ impl ReindexStateManager {
 
     /// Snapshot the list of repos currently being reindexed.
     pub fn in_flight_repos(&self) -> Vec<String> {
-        let map = self.states.lock().unwrap_or_else(|e| e.into_inner());
+        let map = self.states.lock();
         let mut out = Vec::new();
         for (repo, state) in map.iter() {
-            let inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+            let inner = state.inner.lock();
             if inner.reindexing {
                 out.push(repo.clone());
             }
@@ -249,7 +250,7 @@ impl ReindexStateManager {
 
         // Check if we even have state for this repo
         {
-            let map = self.states.lock().unwrap_or_else(|e| e.into_inner());
+            let map = self.states.lock();
             if !map.contains_key(repo) {
                 return WaitResult {
                     fresh: true,
@@ -263,25 +264,19 @@ impl ReindexStateManager {
 
         let state = self.get_state(repo);
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000));
-        let deadline = Instant::now() + timeout;
 
-        let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = state.inner.lock();
+        let result = state
+            .cvar
+            .wait_while_for(&mut inner, |i| !i.event_set, timeout);
 
-        // Wait while event is not set (reindex in progress, no result yet)
-        while !inner.event_set {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return WaitResult {
-                    fresh: false,
-                    waited_ms: start.elapsed().as_millis() as u64,
-                    reason: Some("timeout".to_string()),
-                    reindex_error: None,
-                    reindex_failures: None,
-                };
-            }
-            inner = match state.cvar.wait_timeout(inner, remaining) {
-                Ok((guard, _)) => guard,
-                Err(p) => p.into_inner().0,
+        if result.timed_out() {
+            return WaitResult {
+                fresh: false,
+                waited_ms: start.elapsed().as_millis() as u64,
+                reason: Some("timeout".to_string()),
+                reindex_error: None,
+                reindex_failures: None,
             };
         }
 

@@ -1,18 +1,18 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 use codesight_core::ExtractionTier;
 use codesight_language_support::LanguageRegistry;
 use codesight_language_support::query_pack_catalog::GrammarCatalog;
 
-fn curated_languages() -> HashSet<String> {
+fn curated_languages() -> FxHashSet<String> {
     LanguageRegistry::builtin()
         .curated_languages()
         .map(|id| id.as_str().to_string())
         .collect()
 }
 
-fn all_languages() -> HashSet<String> {
+fn all_languages() -> FxHashSet<String> {
     LanguageRegistry::builtin()
         .all()
         .map(|lang| lang.id().as_str().to_string())

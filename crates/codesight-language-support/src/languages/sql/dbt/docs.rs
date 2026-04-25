@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -15,8 +15,8 @@ static DOC_CALL_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Parse `{% docs <name> %}...{% enddocs %}` blocks from markdown content.
-pub fn parse_doc_blocks_from_content(content: &str) -> HashMap<String, String> {
-    let mut blocks = HashMap::new();
+pub fn parse_doc_blocks_from_content(content: &str) -> FxHashMap<String, String> {
+    let mut blocks = FxHashMap::default();
     for cap in DOCS_BLOCK_RE.captures_iter(content) {
         let name = cap[1].to_string();
         let body = cap[2].trim().to_string();
@@ -26,8 +26,8 @@ pub fn parse_doc_blocks_from_content(content: &str) -> HashMap<String, String> {
 }
 
 /// Parse doc blocks from all `.md` files in a directory (non-recursive).
-pub fn parse_doc_blocks(dir: &Path) -> HashMap<String, String> {
-    let mut blocks = HashMap::new();
+pub fn parse_doc_blocks(dir: &Path) -> FxHashMap<String, String> {
+    let mut blocks = FxHashMap::default();
     if !dir.exists() {
         return blocks;
     }
@@ -45,8 +45,8 @@ pub fn parse_doc_blocks(dir: &Path) -> HashMap<String, String> {
 }
 
 /// Parse doc blocks from multiple directories.
-pub fn parse_doc_blocks_multi(dirs: &[&Path]) -> HashMap<String, String> {
-    let mut blocks = HashMap::new();
+pub fn parse_doc_blocks_multi(dirs: &[&Path]) -> FxHashMap<String, String> {
+    let mut blocks = FxHashMap::default();
     for dir in dirs {
         blocks.extend(parse_doc_blocks(dir));
     }
@@ -55,7 +55,7 @@ pub fn parse_doc_blocks_multi(dirs: &[&Path]) -> HashMap<String, String> {
 
 /// Resolve `{{ doc('name') }}` or `{{ doc("name") }}` references in a description.
 /// Supports inline substitution (surrounding text preserved).
-pub fn resolve_description(desc: &str, doc_blocks: &HashMap<String, String>) -> String {
+pub fn resolve_description(desc: &str, doc_blocks: &FxHashMap<String, String>) -> String {
     if desc.is_empty() {
         return String::new();
     }

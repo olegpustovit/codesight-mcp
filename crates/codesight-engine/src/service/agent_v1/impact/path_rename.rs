@@ -9,7 +9,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateImpactArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_analysis::complexity::cyclomatic_complexity_for_path;
 use codesight_analysis::impact;
 use codesight_storage::storage::IndexStore;
@@ -71,7 +71,9 @@ impl CodeService {
         };
         let (files, changes) = impact::summarize_path_rename(&plan);
         // ROADMAP P1.1: structural analysis — null baseline.
-        let timer = MetaBuilder::new(0);
+        // Confidence is `partial`: the rewrite is a byte-level scan over
+        // text spans guided by language hints, not a full semantic rewrite.
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
 
         if args.apply.unwrap_or(false) && !plan.collisions.is_empty() {
             return self.error_response(

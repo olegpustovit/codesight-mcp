@@ -1,17 +1,17 @@
 //! Integration tests: fqn.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use codesight_language_support::languages::php::fqn::{Psr4Map, fqn_to_symbol, symbol_to_fqn};
 
 fn standard_psr4_map() -> Psr4Map {
-    let mut map = HashMap::new();
+    let mut map = FxHashMap::default();
     map.insert("App\\".to_string(), "app/".to_string());
     map.insert("Database\\".to_string(), "database/".to_string());
     map
 }
 
-fn standard_source_files() -> HashSet<String> {
+fn standard_source_files() -> FxHashSet<String> {
     [
         "app/Models/User.php",
         "app/Models/Post.php",
@@ -166,7 +166,7 @@ fn fqn_to_symbol_roundtrip_method() {
 
 #[test]
 fn fqn_to_symbol_empty_psr4_map() {
-    let map: Psr4Map = HashMap::new();
+    let map: Psr4Map = FxHashMap::default();
     let files = standard_source_files();
     let result = fqn_to_symbol("App\\Models\\User", &map, &files);
     assert_eq!(result, None);
@@ -175,7 +175,7 @@ fn fqn_to_symbol_empty_psr4_map() {
 #[test]
 fn fqn_to_symbol_empty_source_files() {
     let map = standard_psr4_map();
-    let files: HashSet<String> = HashSet::new();
+    let files: FxHashSet<String> = FxHashSet::default();
     let result = fqn_to_symbol("App\\Models\\User", &map, &files);
     assert_eq!(result, None);
 }

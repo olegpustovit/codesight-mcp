@@ -3,7 +3,9 @@
 //! These live on the owning language so that non-JS callers of
 //! `resolve_specifier` do not inherit JS extension guessing.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
+
+use path_clean::PathClean;
 
 /// Resolve a `./` or `../` relative specifier using JS module semantics:
 /// normalize the path against `from_file`, then try the configured
@@ -11,10 +13,13 @@ use std::collections::HashSet;
 pub fn resolve_js_relative(
     specifier: &str,
     from_file: &str,
-    source_files: &HashSet<String>,
+    source_files: &FxHashSet<String>,
 ) -> Option<String> {
     let dir = parent_dir(from_file);
-    let resolved = normalize_path(&format!("{dir}/{specifier}"));
+    let resolved = std::path::Path::new(&format!("{dir}/{specifier}"))
+        .clean()
+        .to_string_lossy()
+        .replace('\\', "/");
     resolve_js_path(&resolved, source_files)
 }
 
@@ -23,7 +28,7 @@ pub fn resolve_js_relative(
 /// Tries (in order): the exact base, each of `.ts/.tsx/.js/.jsx/.vue/.mjs/.cjs`,
 /// `index.{ts,tsx,js,jsx}`, and finally `.js → .ts/.tsx` remap for projects
 /// that kept `.js` imports after a TypeScript migration.
-pub fn resolve_js_path(base: &str, source_files: &HashSet<String>) -> Option<String> {
+pub fn resolve_js_path(base: &str, source_files: &FxHashSet<String>) -> Option<String> {
     if source_files.contains(base) {
         return Some(base.to_string());
     }
@@ -62,18 +67,4 @@ fn parent_dir(path: &str) -> String {
         Some(idx) => path[..idx].to_string(),
         None => ".".to_string(),
     }
-}
-
-fn normalize_path(path: &str) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    for component in path.split('/') {
-        match component {
-            "." | "" => {}
-            ".." => {
-                parts.pop();
-            }
-            other => parts.push(other),
-        }
-    }
-    parts.join("/")
 }

@@ -1,5 +1,6 @@
 //! Integration tests: yaml language.
 
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use codesight_core::SymbolKind;
@@ -79,7 +80,7 @@ fn extract_yaml(source: &str, file_path: &str) -> Vec<codesight_core::StoredSymb
 
 fn by_qualified(
     symbols: &[codesight_core::StoredSymbol],
-) -> std::collections::HashMap<&str, &codesight_core::StoredSymbol> {
+) -> FxHashMap<&str, &codesight_core::StoredSymbol> {
     symbols
         .iter()
         .map(|s| (s.qualified_name.as_str(), s))

@@ -1,6 +1,6 @@
 //! Integration tests: css.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 use codesight_core::SymbolKind;
@@ -168,7 +168,7 @@ fn test_css_returns_symbols() {
 #[test]
 fn test_css_rule_sets_extracted() {
     let syms = css_syms();
-    let names: HashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains(":root"), "missing :root");
     assert!(names.contains("body"), "missing body");
     assert!(names.contains(".container"), "missing .container");
@@ -271,7 +271,7 @@ fn test_css_supports_extracted() {
 fn test_css_symbol_ids_unique() {
     let syms = css_syms();
     let ids: Vec<&str> = syms.iter().map(|s| s.id.as_str()).collect();
-    let unique: HashSet<&str> = ids.iter().copied().collect();
+    let unique: FxHashSet<&str> = ids.iter().copied().collect();
     assert_eq!(ids.len(), unique.len(), "Duplicate symbol IDs found");
 }
 
@@ -310,7 +310,7 @@ fn test_css_via_parse_file() {
         !syms.is_empty(),
         "Expected CSS symbols via parse_file dispatch, got 0"
     );
-    let names: HashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
     assert!(
         names.contains(".container"),
         "missing .container via parse_file"
@@ -427,7 +427,7 @@ fn test_scss_returns_symbols() {
 #[test]
 fn test_scss_variables_extracted() {
     let syms = scss_syms();
-    let names: HashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains("$primary-color"), "missing $primary-color");
     assert!(names.contains("$font-size"), "missing $font-size");
 }
@@ -453,7 +453,7 @@ fn test_scss_variable_kind() {
 #[test]
 fn test_scss_mixin_extracted() {
     let syms = scss_syms();
-    let names: HashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
     assert!(
         names.contains("@mixin flex-center"),
         "missing @mixin flex-center"
@@ -480,7 +480,7 @@ fn test_scss_mixin_kind() {
 #[test]
 fn test_scss_function_extracted() {
     let syms = scss_syms();
-    let names: HashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
     assert!(
         names.contains("@function px-to-rem"),
         "missing @function px-to-rem"
@@ -502,7 +502,7 @@ fn test_scss_function_kind() {
 #[test]
 fn test_scss_rule_set_extracted() {
     let syms = scss_syms();
-    let names: HashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains(".container"), "missing .container");
 }
 
@@ -522,7 +522,7 @@ fn test_scss_rule_set_kind() {
 #[test]
 fn test_scss_placeholder_extracted() {
     let syms = scss_syms();
-    let names: HashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
     assert!(
         names.contains("%visually-hidden"),
         "missing %visually-hidden"
@@ -562,7 +562,7 @@ fn test_scss_supports_extracted() {
 #[test]
 fn test_scss_symbol_ids_unique() {
     let syms = scss_syms();
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     for s in &syms {
         assert!(
             seen.insert(s.id.as_str()),
@@ -606,7 +606,7 @@ fn test_scss_via_parse_file() {
         "Expected >= 6 SCSS symbols via parse_file dispatch, got {}",
         syms.len()
     );
-    let names: HashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = syms.iter().map(|s| s.name.as_str()).collect();
     assert!(
         names.contains("$primary-color"),
         "missing $primary-color via parse_file"

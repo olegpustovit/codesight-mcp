@@ -1,5 +1,7 @@
 //! Integration tests: doc parser jupyter.
 
+use rustc_hash::FxHashMap;
+
 use std::path::Path;
 
 use codesight_retrieval::sections::{
@@ -106,7 +108,7 @@ fn notebook_code_in_section_body() {
 #[test]
 fn notebook_hierarchy_wired() {
     let (_md, sections) = fixture_sections();
-    let by_heading: std::collections::HashMap<&str, &codesight_retrieval::sections::Section> =
+    let by_heading: FxHashMap<&str, &codesight_retrieval::sections::Section> =
         sections.iter().map(|s| (s.heading.as_str(), s)).collect();
 
     let validation = by_heading

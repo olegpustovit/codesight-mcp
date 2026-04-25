@@ -1,6 +1,6 @@
 //! `evaluate_impact analysis=impact_preview` — BFS over call edges.
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde_json::{Value, json};
 
@@ -12,14 +12,14 @@ use crate::service::agent_v1::util::{
 };
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(in crate::service) fn evaluate_impact_impact_preview(
         &self,
         args: &EvaluateImpactArgs,
     ) -> anyhow::Result<Value> {
-        let timer = MetaBuilder::new(0);
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
         let store = require_store!(repo: self, &args.source_id, args.repo_path.as_deref(), &timer);
 
         let sym_name_from_id = args.symbol_id.as_deref().unwrap_or("");
@@ -122,9 +122,9 @@ impl CodeService {
         let callers = codesight_analysis::graph::find_callers(&sym_id, &edges, 3);
 
         let mut affected_symbols: Vec<Value> = Vec::new();
-        let mut seen_ids = HashSet::new();
-        let mut affected_by_file: std::collections::HashMap<String, Vec<Value>> =
-            std::collections::HashMap::new();
+        let mut seen_ids = FxHashSet::default();
+        let mut affected_by_file: FxHashMap<String, Vec<Value>> =
+            FxHashMap::default();
 
         for (cid, cname, cfile, cline, ckind, _depth) in &callers {
             if seen_ids.insert(cid.clone()) {

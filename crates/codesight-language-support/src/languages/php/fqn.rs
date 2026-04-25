@@ -3,28 +3,28 @@
 //! Kept next to the PHP language module because the semantics (namespace
 //! separator `\`, `.php` extension, `composer.json` layout) are PHP-specific.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use codesight_core::SymbolIdRef;
 
 /// PSR-4 autoloading map: namespace prefix → directory prefix.
 /// E.g. `{"App\\": "app/", "Database\\": "database/"}`
-pub type Psr4Map = HashMap<String, String>;
+pub type Psr4Map = FxHashMap<String, String>;
 
 /// Load PSR-4 autoloading map from a `composer.json` file.
 pub fn load_psr4_map(source_root: &str) -> Psr4Map {
     let composer_path = format!("{source_root}/composer.json");
     let content = match std::fs::read_to_string(&composer_path) {
         Ok(c) => c,
-        Err(_) => return HashMap::new(),
+        Err(_) => return FxHashMap::default(),
     };
 
     let parsed: serde_json::Value = match serde_json::from_str(&content) {
         Ok(v) => v,
-        Err(_) => return HashMap::new(),
+        Err(_) => return FxHashMap::default(),
     };
 
-    let mut map = HashMap::new();
+    let mut map = FxHashMap::default();
 
     if let Some(autoload) = parsed.get("autoload")
         && let Some(psr4) = autoload.get("psr-4").and_then(|v| v.as_object())
@@ -98,7 +98,7 @@ pub fn symbol_to_fqn(symbol_id: &str, psr4_map: &Psr4Map) -> Option<String> {
 pub fn fqn_to_symbol(
     fqn: &str,
     psr4_map: &Psr4Map,
-    source_files: &HashSet<String>,
+    source_files: &FxHashSet<String>,
 ) -> Option<String> {
     if !fqn.contains('\\') {
         return None;

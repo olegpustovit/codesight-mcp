@@ -2,8 +2,9 @@
 //! per-session tool counters, and related markers. Writes are atomic
 //! (tmp file + rename) and reads tolerate missing files.
 
-use std::{collections::HashMap, fs, io, path::PathBuf};
+use std::{fs, io, path::PathBuf};
 
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -14,7 +15,7 @@ use super::session::{QualitySnapshotMarker, ReadContentStats, SessionState, Stal
 struct SavingsState {
     total_tokens_saved: u64,
     #[serde(default)]
-    total_cost_avoided: HashMap<String, f64>,
+    total_cost_avoided: FxHashMap<String, f64>,
     #[serde(default)]
     current_session: SessionState,
 }
@@ -45,7 +46,7 @@ impl SavingsLedger {
         Ok(self.load()?.total_tokens_saved)
     }
 
-    pub fn record(&self, delta: u64) -> io::Result<(u64, HashMap<String, f64>)> {
+    pub fn record(&self, delta: u64) -> io::Result<(u64, FxHashMap<String, f64>)> {
         let mut state = self.load()?;
         state.total_tokens_saved = state.total_tokens_saved.saturating_add(delta);
         for (model, cost) in cost_for_tokens(delta) {
@@ -58,7 +59,7 @@ impl SavingsLedger {
         Ok((total, total_cost))
     }
 
-    pub fn current_state(&self) -> io::Result<(u64, HashMap<String, f64>)> {
+    pub fn current_state(&self) -> io::Result<(u64, FxHashMap<String, f64>)> {
         let state = self.load()?;
         Ok((
             state.total_tokens_saved,
@@ -144,12 +145,18 @@ impl SavingsLedger {
     }
 
     pub fn current_session(&self) -> io::Result<SessionState> {
-        Ok(self.ensure_session()?.0)
+        let mut session = self.ensure_session()?.0;
+        // Prune-on-read: callers (`session_stats`, `catalog_sources` envelope)
+        // never see stale entries past the TTL even if no fresh warning was
+        // recorded since.
+        session.prune_stale_warnings();
+        Ok(session)
     }
 
     pub fn end_session(&self) -> io::Result<SessionState> {
         let mut state = self.load()?;
         ensure_active_session(&mut state);
+        state.current_session.prune_stale_warnings();
         if state.current_session.ended_at.is_none() {
             state.current_session.ended_at = Some(chrono::Utc::now().to_rfc3339());
             self.store(&state)?;
@@ -249,16 +256,27 @@ impl SavingsLedger {
     pub fn record_stale_warning(&self, repo: &str, files_in_flight: &[String]) -> io::Result<()> {
         let mut state = self.load()?;
         ensure_active_session(&mut state);
+        // Drop stale entries before appending — keeps the ledger from
+        // accumulating an hours-old wall of warnings.
+        state.current_session.prune_stale_warnings();
         let record = StaleWarningRecord {
             repo: repo.to_string(),
             files_in_flight: files_in_flight.to_vec(),
+            recorded_at: chrono::Utc::now().to_rfc3339(),
         };
-        if state
+        // Dedup ignores `recorded_at` so a re-record of the same in-flight
+        // set doesn't bloat the ledger; the pre-TTL prune above handles
+        // cleanup of *truly* stale entries.
+        let already_present = state
             .current_session
             .stale_warnings_in_flight
-            .contains(&record)
-        {
-            return Ok(());
+            .iter()
+            .any(|existing| {
+                existing.repo == record.repo
+                    && existing.files_in_flight == record.files_in_flight
+            });
+        if already_present {
+            return self.store(&state);
         }
         state
             .current_session
@@ -313,17 +331,17 @@ fn ensure_active_session(state: &mut SavingsState) -> bool {
             started_at: chrono::Utc::now().to_rfc3339(),
             ended_at: None,
             tokens_saved_total: 0,
-            per_tool: HashMap::new(),
+            per_tool: FxHashMap::default(),
             blocked_grep_bash_attempts: 0,
-            evaluate_impact_usage: HashMap::new(),
+            evaluate_impact_usage: FxHashMap::default(),
             stale_warnings_in_flight: Vec::new(),
             primary_source_id: None,
             quality_session_start: None,
             quality_session_end: None,
-            use_prefix_edits: HashMap::new(),
+            use_prefix_edits: FxHashMap::default(),
             codesight_read_paths: std::collections::BTreeSet::new(),
             edits_after_codesight_read: 0,
-            full_file_read_counts: HashMap::new(),
+            full_file_read_counts: FxHashMap::default(),
         };
     }
     needs_new

@@ -6,6 +6,8 @@
 
 use std::path::Path;
 
+use rustc_hash::FxHashMap;
+
 /// Metadata about a detected framework.
 #[derive(Debug, Clone)]
 pub struct FrameworkProfile {
@@ -25,8 +27,8 @@ pub struct LayerDefinition {
 /// Convert a profile to a JSON-like metadata map.
 pub fn profile_to_meta(
     profile: &FrameworkProfile,
-) -> std::collections::HashMap<String, serde_json::Value> {
-    let mut meta = std::collections::HashMap::new();
+) -> FxHashMap<String, serde_json::Value> {
+    let mut meta = FxHashMap::default();
 
     let mut fp = serde_json::Map::new();
     fp.insert(

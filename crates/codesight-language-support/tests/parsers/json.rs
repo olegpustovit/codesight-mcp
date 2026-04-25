@@ -1,6 +1,6 @@
 //! Integration tests: json.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 use codesight_core::SymbolKind;
@@ -93,7 +93,7 @@ fn test_json_returns_symbols() {
 #[test]
 fn test_json_top_level_keys_extracted() {
     let symbols = syms();
-    let names: HashSet<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains("name"), "missing 'name'");
     assert!(names.contains("version"), "missing 'version'");
     assert!(names.contains("dependencies"), "missing 'dependencies'");
@@ -149,7 +149,7 @@ fn test_json_symbol_signature() {
 #[test]
 fn test_json_symbol_ids_unique() {
     let symbols = syms();
-    let ids: HashSet<&str> = symbols.iter().map(|s| s.id.as_str()).collect();
+    let ids: FxHashSet<&str> = symbols.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(
         ids.len(),
         symbols.len(),
@@ -190,7 +190,7 @@ fn test_json_via_parse_file() {
     let symbols = ext
         .extract_symbols("package.json", PACKAGE_JSON)
         .expect("extraction should succeed");
-    let names: HashSet<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains("name"), "missing 'name' via registry path");
     assert!(
         names.contains("dependencies"),
@@ -226,7 +226,7 @@ fn test_json_array_root() {
 #[test]
 fn test_json_no_nested_keys() {
     let symbols = syms();
-    let names: HashSet<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+    let names: FxHashSet<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
     assert!(
         !names.contains("react"),
         "'react' is a nested key and should not be extracted"

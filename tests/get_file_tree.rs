@@ -1,6 +1,6 @@
 //! Integration tests: get file tree.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fs;
 use std::path::Path;
 
@@ -69,9 +69,9 @@ fn inspect_file_tree(svc: &CodeService, sid: &str, extra: Value) -> Value {
     svc.dispatch("inspect_structure", base).unwrap()
 }
 
-fn flatten_files(nodes: &[Value]) -> HashMap<String, Value> {
-    let mut out = HashMap::new();
-    fn walk(nodes: &[Value], out: &mut HashMap<String, Value>) {
+fn flatten_files(nodes: &[Value]) -> FxHashMap<String, Value> {
+    let mut out = FxHashMap::default();
+    fn walk(nodes: &[Value], out: &mut FxHashMap<String, Value>) {
         for n in nodes {
             match n["type"].as_str() {
                 Some("file") => {

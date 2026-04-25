@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use crate::frameworks::walk_files;
@@ -18,8 +18,8 @@ pub struct DbtStats {
 pub struct DbtSnapshot {
     pub(crate) dbt_root: PathBuf,
     pub(crate) model_paths: Vec<String>,
-    pub(crate) doc_blocks: HashMap<String, String>,
-    pub(crate) models: HashMap<String, DbtModelMetadata>,
+    pub(crate) doc_blocks: FxHashMap<String, String>,
+    pub(crate) models: FxHashMap<String, DbtModelMetadata>,
 }
 
 impl DbtSnapshot {
@@ -29,8 +29,8 @@ impl DbtSnapshot {
         let mut snapshot = Self {
             dbt_root,
             model_paths: vec!["models".into()],
-            doc_blocks: HashMap::new(),
-            models: HashMap::new(),
+            doc_blocks: FxHashMap::default(),
+            models: FxHashMap::default(),
         };
         snapshot.load_model_paths();
         snapshot.load_doc_blocks();
@@ -68,8 +68,8 @@ impl DbtSnapshot {
     fn load_model_paths(&mut self) {
         let project_yml = self.dbt_root.join("dbt_project.yml");
         if let Ok(content) = std::fs::read_to_string(project_yml)
-            && let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content)
-            && let Some(serde_yaml::Value::Sequence(paths)) = yaml.get("model-paths")
+            && let Ok(yaml) = serde_yml::from_str::<serde_yml::Value>(&content)
+            && let Some(serde_yml::Value::Sequence(paths)) = yaml.get("model-paths")
         {
             self.model_paths = paths
                 .iter()
@@ -118,7 +118,7 @@ impl DbtSnapshot {
         }
     }
 
-    fn collect_yml_with_blocks(&mut self, dir: &Path, doc_blocks: &HashMap<String, String>) {
+    fn collect_yml_with_blocks(&mut self, dir: &Path, doc_blocks: &FxHashMap<String, String>) {
         for path in walk_files(dir) {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if (ext == "yml" || ext == "yaml")

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use crate::frameworks::FileContext;
@@ -10,7 +10,7 @@ use super::docs::resolve_description;
 pub struct DbtModelMetadata {
     pub description: String,
     pub tags: Vec<String>,
-    pub columns: HashMap<String, String>,
+    pub columns: FxHashMap<String, String>,
 }
 
 impl DbtModelMetadata {
@@ -31,23 +31,23 @@ impl DbtModelMetadata {
 /// Parse models from YAML content. Returns model_name -> DbtModelMetadata.
 pub fn parse_yml_content(
     content: &str,
-    doc_blocks: &HashMap<String, String>,
-) -> HashMap<String, DbtModelMetadata> {
-    let mut result = HashMap::new();
+    doc_blocks: &FxHashMap<String, String>,
+) -> FxHashMap<String, DbtModelMetadata> {
+    let mut result = FxHashMap::default();
 
-    let yaml: serde_yaml::Value = match serde_yaml::from_str(content) {
+    let yaml: serde_yml::Value = match serde_yml::from_str(content) {
         Ok(v) => v,
         Err(_) => return result,
     };
 
     let models = match yaml.get("models") {
-        Some(serde_yaml::Value::Sequence(seq)) => seq,
+        Some(serde_yml::Value::Sequence(seq)) => seq,
         _ => return result,
     };
 
     for model in models {
         let name = match model.get("name") {
-            Some(serde_yaml::Value::String(s)) => s.clone(),
+            Some(serde_yml::Value::String(s)) => s.clone(),
             _ => continue,
         };
 
@@ -60,7 +60,7 @@ pub fn parse_yml_content(
 
         // Tags: merge top-level tags + config.tags, deduplicated
         let mut tags = Vec::new();
-        if let Some(serde_yaml::Value::Sequence(top_tags)) = model.get("tags") {
+        if let Some(serde_yml::Value::Sequence(top_tags)) = model.get("tags") {
             for t in top_tags {
                 if let Some(s) = t.as_str() {
                     tags.push(s.to_string());
@@ -68,7 +68,7 @@ pub fn parse_yml_content(
             }
         }
         if let Some(config) = model.get("config")
-            && let Some(serde_yaml::Value::Sequence(cfg_tags)) = config.get("tags")
+            && let Some(serde_yml::Value::Sequence(cfg_tags)) = config.get("tags")
         {
             for t in cfg_tags {
                 if let Some(s) = t.as_str()
@@ -79,8 +79,8 @@ pub fn parse_yml_content(
             }
         }
 
-        let mut columns = HashMap::new();
-        if let Some(serde_yaml::Value::Sequence(cols)) = model.get("columns") {
+        let mut columns = FxHashMap::default();
+        if let Some(serde_yml::Value::Sequence(cols)) = model.get("columns") {
             for col in cols {
                 if let Some(col_name) = col.get("name").and_then(|v| v.as_str()) {
                     let col_desc_raw = col
@@ -110,9 +110,9 @@ pub fn parse_yml_content(
 /// Parse YAML files in a directory.
 pub fn parse_yml_files(
     dir: &Path,
-    doc_blocks: &HashMap<String, String>,
-) -> HashMap<String, DbtModelMetadata> {
-    let mut result = HashMap::new();
+    doc_blocks: &FxHashMap<String, String>,
+) -> FxHashMap<String, DbtModelMetadata> {
+    let mut result = FxHashMap::default();
     if !dir.exists() {
         return result;
     }

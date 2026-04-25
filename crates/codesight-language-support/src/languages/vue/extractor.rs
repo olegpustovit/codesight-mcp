@@ -1,5 +1,6 @@
 //! **Vue single-file components**: `<script>`, `<template>`, and `<style>` blocks need SFC-aware
 //! parsing, not one flat query pack over the whole file.
+
 use anyhow::Result;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -397,6 +398,7 @@ fn push_vue_symbol(
 mod tests {
     use super::VueExtractor;
     use codesight_core::symbols::SymbolKind;
+    use rustc_hash::{FxHashMap, FxHashSet};
 
     const VUE_JS_SOURCE: &str = r#"<template>
   <div>{{ message }}</div>
@@ -570,7 +572,7 @@ export default {
         let symbols = VueExtractor
             .extract("Counter.vue", VUE_COMPOSITION_SOURCE)
             .unwrap();
-        let funcs: std::collections::HashMap<&str, &codesight_core::StoredSymbol> = symbols
+        let funcs: FxHashMap<&str, &codesight_core::StoredSymbol> = symbols
             .iter()
             .filter(|s| s.kind == SymbolKind::Function)
             .map(|s| (s.name.as_str(), s))
@@ -609,7 +611,7 @@ export default {
         let symbols = VueExtractor
             .extract("MyList.vue", VUE_OPTIONS_SOURCE)
             .unwrap();
-        let methods: std::collections::HashSet<&str> = symbols
+        let methods: FxHashSet<&str> = symbols
             .iter()
             .filter(|s| s.kind == SymbolKind::Method)
             .map(|s| s.name.as_str())
@@ -623,7 +625,7 @@ export default {
         let symbols = VueExtractor
             .extract("MyList.vue", VUE_OPTIONS_SOURCE)
             .unwrap();
-        let methods: std::collections::HashSet<&str> = symbols
+        let methods: FxHashSet<&str> = symbols
             .iter()
             .filter(|s| s.kind == SymbolKind::Method)
             .map(|s| s.name.as_str())

@@ -1,6 +1,6 @@
 //! Per-model pricing + cost-rounding helpers for the savings ledger.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Per-million-token input pricing (USD).
 const MODEL_PRICING: &[(&str, f64)] = &[
@@ -9,7 +9,7 @@ const MODEL_PRICING: &[(&str, f64)] = &[
     ("gpt4o", 2.50),
 ];
 
-pub(super) fn cost_for_tokens(tokens: u64) -> HashMap<String, f64> {
+pub(super) fn cost_for_tokens(tokens: u64) -> FxHashMap<String, f64> {
     MODEL_PRICING
         .iter()
         .map(|&(model, price)| {
@@ -23,7 +23,7 @@ pub(super) fn round_cost(value: f64) -> f64 {
     (value * 10_000.0).round() / 10_000.0
 }
 
-pub(super) fn round_cost_map(mut values: HashMap<String, f64>) -> HashMap<String, f64> {
+pub(super) fn round_cost_map(mut values: FxHashMap<String, f64>) -> FxHashMap<String, f64> {
     for value in values.values_mut() {
         *value = round_cost(*value);
     }

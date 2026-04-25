@@ -6,7 +6,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 impl CodeService {
     pub(super) fn graph_calls(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
@@ -164,6 +164,10 @@ impl CodeService {
         body.insert("depth_reached".to_string(), json!(max_depth));
         body.insert("truncated".to_string(), json!(truncated));
 
-        self.success_response_with_warnings(&MetaBuilder::new(0), Value::Object(body), warnings)
+        self.success_response_with_warnings(
+            &MetaBuilder::new(0).with_confidence(Confidence::Heuristic),
+            Value::Object(body),
+            warnings,
+        )
     }
 }

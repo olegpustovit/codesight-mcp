@@ -1,7 +1,7 @@
 //! Shared tree-sitter helpers for language extractors (Strategy implementations).
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use tree_sitter::{Node, Parser, Tree};
 
@@ -18,7 +18,7 @@ thread_local! {
     /// `(thread, grammar)` pair is safe: `Parser` is `Send` but not `Sync`,
     /// so the thread-local scope is exactly right. N is small (one entry per
     /// grammar the worker has seen), so a hash map keeps lookups flat.
-    static PARSERS: RefCell<HashMap<GrammarKey, Parser>> = RefCell::new(HashMap::new());
+    static PARSERS: RefCell<FxHashMap<GrammarKey, Parser>> = RefCell::new(FxHashMap::default());
 }
 
 /// Fingerprint used to key the thread-local parser pool. `tree_sitter::Language`

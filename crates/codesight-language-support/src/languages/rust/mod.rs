@@ -8,7 +8,7 @@ pub mod imports;
 pub mod path_rename;
 mod reachability;
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::Path;
 
@@ -107,10 +107,10 @@ impl Language for Rust {
         &self,
         edge: &ImportEdge,
         from_file: &str,
-        _source_files: &HashSet<String>,
+        _source_files: &FxHashSet<String>,
         known_files_vec: &[String],
-        _alias_map: Option<&HashMap<String, Vec<String>>>,
-        workspace_crates: Option<&HashMap<String, String>>,
+        _alias_map: Option<&FxHashMap<String, Vec<String>>>,
+        workspace_crates: Option<&FxHashMap<String, String>>,
     ) -> Option<String> {
         imports::resolve_edge(edge, from_file, known_files_vec, workspace_crates)
     }
@@ -564,8 +564,8 @@ fn parse_impl_trait_header(line: &str) -> Option<String> {
 /// Map every workspace-member crate name (underscore form, as used in `use`
 /// statements) to the repo-relative path of its library root (`src/lib.rs` by
 /// default, or the `[lib] path` override when set).
-pub fn workspace_crates_from_root(root: &Path) -> std::collections::HashMap<String, String> {
-    let mut out = std::collections::HashMap::new();
+pub fn workspace_crates_from_root(root: &Path) -> FxHashMap<String, String> {
+    let mut out = FxHashMap::default();
     if !root.is_dir() {
         return out;
     }
@@ -703,8 +703,8 @@ const CONVENTIONAL_RUST_DIRS: &[&str] = &[
 fn detect_foreign_trait_impl_files(
     root_path: Option<&Path>,
     all_files: &[String],
-) -> HashSet<String> {
-    let mut hits = HashSet::new();
+) -> FxHashSet<String> {
+    let mut hits = FxHashSet::default();
     let Some(root) = root_path else {
         return hits;
     };
@@ -728,13 +728,13 @@ fn detect_foreign_trait_impl_files(
     hits
 }
 
-fn detect_cargo_target_files(root_path: Option<&Path>, all_files: &[String]) -> HashSet<String> {
-    let mut targets = HashSet::new();
+fn detect_cargo_target_files(root_path: Option<&Path>, all_files: &[String]) -> FxHashSet<String> {
+    let mut targets = FxHashSet::default();
     let Some(root) = root_path else {
         return targets;
     };
 
-    let file_set: HashSet<&str> = all_files.iter().map(String::as_str).collect();
+    let file_set: FxHashSet<&str> = all_files.iter().map(String::as_str).collect();
     let cargo_dirs: Vec<String> = ignore::WalkBuilder::new(root)
         .git_ignore(true)
         .hidden(false)

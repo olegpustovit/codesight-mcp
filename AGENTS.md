@@ -116,7 +116,36 @@ changes are welcome; bloat is the enemy.
 
 ### 5. Performance — local SSD SQLite, no excuses.
 
-- Dispatch → handler: **< 50 ms** cached, **< 200 ms** cold.
+**Per-tool SLA tiers.** Different tools have different inherent costs;
+hold each to its own bar instead of one global threshold.
+
+| Tool / variant | Warm | Cold | Notes |
+|---|---|---|---|
+| `catalog_sources` | < 30 ms | < 200 ms | Body cache; no-op ingest doesn't bump generation. |
+| `search_catalog query_mode=keyword` | < 20 ms | < 100 ms | FTS5 + BM25. |
+| `search_catalog query_mode=regex` | < 30 ms | < 150 ms | File-text scan, capped by `limit`. |
+| `search_catalog query_mode=natural_language` | < 100 ms | < 400 ms | Dense embedder warmup on cold. |
+| `inspect_structure view=file_outline` | < 10 ms | < 50 ms | Single-table SELECT. |
+| `inspect_structure view=file_tree` | < 50 ms | < 200 ms | Repo-wide; honors `max_files`. |
+| `inspect_structure view=repo_outline` | < 50 ms | < 200 ms | Centrality precomputed. |
+| `read_content` (symbol/section/range) | < 30 ms | < 150 ms | Per-ref ≤ 5 ms warm. |
+| `inspect_graph graph=imports/importers/calls` | < 20 ms | < 100 ms | Indexed lookups. |
+| `inspect_graph graph=dependency_cycles` | < 100 ms | < 500 ms | O(V+E) Tarjan. |
+| `evaluate_impact blast_radius` | < 50 ms | < 250 ms | Reverse-BFS, depth ≤ 2. |
+| `evaluate_impact rename_safety` | < 100 ms | < 500 ms | File-text scan over importers. |
+| `evaluate_quality hotspots` | < 500 ms | < 2 s | Whole-repo cyclomatic walk. |
+| `evaluate_quality dead_code` | < 100 ms (cached) | < 5 s | 30 s in-process memo + persisted dispatch_roots cache. |
+| `evaluate_quality repo_health` | < 1 s | < 3 s | Aggregates multiple analyses. |
+| `assemble_context context_bundle` | < 100 ms | < 500 ms | Caller/callee depth-2 expansion. |
+| `manage_indexes session_stats` | < 10 ms | < 30 ms | Reads ledger JSON. |
+| `ingest_sources` (incremental, no-op) | < 200 ms | — | Fingerprint comparison only. |
+| `ingest_sources` (incremental, edit) | — | < 1 s/changed file | Full extractor pipeline. |
+
+A tool exceeding its tier in a real workload is a regression — log it and
+investigate. The tier is the bar; "but it's better than before" is not.
+
+- Legacy headline (kept for compatibility):
+  Dispatch → handler: **< 50 ms** cached, **< 200 ms** cold.
 - Incremental reindex after single-file edit: **< 100 ms**.
 - Cold full ingest of this repo: **< 5 s**.
 

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use codesight_language_support::is_non_code_reference_path;
 use codesight_language_support::mentions_identifier_ci_in_file;
@@ -8,7 +8,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::InspectGraphArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 
 struct RefFilter<'a> {
     scope: Option<&'a str>,
@@ -124,7 +124,7 @@ pub(crate) fn collect_references(
     let filter = RefFilter::new_permissive();
 
     let mut out: Vec<RefMatch> = Vec::new();
-    let mut seen_files: HashSet<String> = HashSet::new();
+    let mut seen_files: FxHashSet<String> = FxHashSet::default();
     for sym in &sym_infos {
         if !filter.admits(&sym.file) {
             continue;
@@ -314,7 +314,7 @@ fn collect_rows(
     skip_definition: bool,
 ) -> Vec<ReferenceRow> {
     let mut rows: Vec<ReferenceRow> = Vec::new();
-    let mut seen_files: HashSet<String> = HashSet::new();
+    let mut seen_files: FxHashSet<String> = FxHashSet::default();
 
     for sym in sym_infos {
         if !filter.admits(&sym.file) {
@@ -477,7 +477,7 @@ impl CodeService {
             .filter_map(|r| r.get("semantic_reference_count")?.as_u64())
             .sum::<u64>() as usize;
         self.success_response_with_warnings(
-            &MetaBuilder::new(0),
+            &MetaBuilder::new(0).with_confidence(Confidence::Safe),
             json!({
                 "graph": "find_references",
                 "total_semantic_references": total_semantic,
@@ -571,7 +571,11 @@ impl CodeService {
                 "detail": { "definition_count": definition_count },
             }));
         }
-        self.success_response_with_warnings(&MetaBuilder::new(0), data, warnings)
+        self.success_response_with_warnings(
+            &MetaBuilder::new(0).with_confidence(Confidence::Safe),
+            data,
+            warnings,
+        )
     }
 }
 

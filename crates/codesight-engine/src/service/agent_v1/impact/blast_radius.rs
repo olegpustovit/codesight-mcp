@@ -1,6 +1,6 @@
 //! `evaluate_impact analysis=blast_radius` — reverse-import BFS with optional call hierarchy.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde_json::{Value, json};
 
@@ -8,12 +8,12 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::{ContentRef, EvaluateImpactArgs};
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
-use crate::service::savings::MetaBuilder;
+use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_storage::storage::IndexStore;
 
 /// Build reverse adjacency (file → its importers) from forward dep graph.
-fn build_reverse_adj(adj: &HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
-    let mut reverse: HashMap<String, Vec<String>> = HashMap::new();
+fn build_reverse_adj(adj: &FxHashMap<String, Vec<String>>) -> FxHashMap<String, Vec<String>> {
+    let mut reverse: FxHashMap<String, Vec<String>> = FxHashMap::default();
     for (src, targets) in adj {
         for tgt in targets {
             reverse.entry(tgt.clone()).or_default().push(src.clone());
@@ -85,12 +85,12 @@ struct BfsResult {
 /// on a legitimate importer sitting behind a vendored edge).
 fn bfs_importers(
     start_file: &str,
-    reverse_adj: &HashMap<String, Vec<String>>,
+    reverse_adj: &FxHashMap<String, Vec<String>>,
     depth: u64,
     include_vendored: bool,
 ) -> BfsResult {
     let mut layers = Vec::new();
-    let mut visited = HashSet::new();
+    let mut visited = FxHashSet::default();
     let mut direct_importers = Vec::new();
     let mut transitive_importers: Vec<(String, u64)> = Vec::new();
 
@@ -215,18 +215,36 @@ impl CodeService {
                 layers: Vec::new(),
             });
 
-        let direct_count = bfs.direct_importers.len();
-        let transitive_count = bfs.transitive_importers.len();
-        let total_impacted = direct_count + transitive_count;
+        let direct_total = bfs.direct_importers.len();
+        let transitive_total = bfs.transitive_importers.len();
+        let total_impacted = direct_total + transitive_total;
         let overall_risk = if total_impacted == 0 {
             0.0
         } else {
             (total_impacted as f64 / all_files.len().max(1) as f64).min(1.0)
         };
 
+        // List-output contract: every list-returning variant respects
+        // `limit` (default 25) so a hot symbol with 500 importers doesn't
+        // hand the agent an unreadable wall. Totals stay un-truncated.
+        let limit = args.limit.unwrap_or(25);
+        let direct_truncated = direct_total > limit;
+        let transitive_truncated = transitive_total > limit;
+        let direct_slice: Vec<String> =
+            bfs.direct_importers.iter().take(limit).cloned().collect();
+        let transitive_slice: Vec<(String, u64)> = bfs
+            .transitive_importers
+            .iter()
+            .take(limit)
+            .cloned()
+            .collect();
+
         // ROADMAP P1.1: impact analysis is structural — no native-tool
         // counterfactual. Null baseline (`tokens_saved: null`).
-        let timer = MetaBuilder::new(0);
+        // Confidence is `partial`: the BFS now unions explicit imports with
+        // symbol-usage edges (heuristic), so the importer set mixes
+        // authoritative + heuristic signals.
+        let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
 
         // FIXUP T2.4: `findings` is a depth-histogram; the file list is
         // already surfaced via `direct_importers` / `transitive_importers`.
@@ -259,8 +277,7 @@ impl CodeService {
             })
             .collect();
 
-        let transitive_json: Vec<Value> = bfs
-            .transitive_importers
+        let transitive_json: Vec<Value> = transitive_slice
             .iter()
             .map(|(file, depth)| json!({ "file": file, "depth": depth }))
             .collect();
@@ -269,12 +286,46 @@ impl CodeService {
             "analysis": "blast_radius",
             "overall_risk_score": overall_risk,
             "importer_count": total_impacted,
-            "direct_importers": bfs.direct_importers,
+            "direct_importers": direct_slice,
+            "direct_importers_total": direct_total,
             "transitive_importers": transitive_json,
-            "direct_count": direct_count,
-            "transitive_count": transitive_count,
+            "transitive_importers_total": transitive_total,
+            "direct_count": direct_total,
+            "transitive_count": transitive_total,
+            "limit": limit,
             "findings": layer_findings,
+            "granularity": "file",
+            "transitive_note": "transitive importers reach the parent file via N hops; they may not reference this specific symbol. Use inspect_graph graph=references for symbol-level scoping.",
         });
+
+        // Soft byte budget: pack importer lists when over the cap. Totals
+        // remain authoritative; the caller sees `truncated_by` to know.
+        let max_tokens = args.max_tokens.or(args.token_budget);
+        let mut truncated_by: Vec<&'static str> = Vec::new();
+        if direct_truncated || transitive_truncated {
+            truncated_by.push("limit");
+        }
+        if let Some(max_t) = max_tokens {
+            let budget_bytes = (max_t as u64).saturating_mul(4);
+            if let Ok(bytes) = serde_json::to_vec(&data)
+                && (bytes.len() as u64) > budget_bytes
+            {
+                let target_per_bucket = (budget_bytes / 8).max(256) as usize;
+                if let Some(arr) = data
+                    .get_mut("direct_importers")
+                    .and_then(Value::as_array_mut)
+                {
+                    pack_string_list_to_bytes(arr, target_per_bucket);
+                }
+                if let Some(arr) = data
+                    .get_mut("transitive_importers")
+                    .and_then(Value::as_array_mut)
+                {
+                    pack_value_list_to_bytes(arr, target_per_bucket);
+                }
+                truncated_by.push("token_budget");
+            }
+        }
 
         if args.include_depth_scores.unwrap_or(false) {
             data["impact_by_depth"] = json!(impact_by_depth);
@@ -336,6 +387,34 @@ impl CodeService {
         if let Some(r) = resolution {
             extras.push(("resolution".to_string(), json!(r)));
         }
+        if !truncated_by.is_empty() {
+            extras.push(("truncated".to_string(), json!(true)));
+            extras.push(("truncated_by".to_string(), json!(truncated_by)));
+        }
         self.success_response_with_meta_extra(&timer, data, Vec::new(), extras)
+    }
+}
+
+/// Trim a JSON array of strings until its serialized size fits `target_bytes`.
+/// Drops from the tail (rank-stable for already-sorted lists). Always leaves
+/// at least one element when the input is non-empty.
+fn pack_string_list_to_bytes(arr: &mut Vec<Value>, target_bytes: usize) {
+    while arr.len() > 1 {
+        let bytes = serde_json::to_vec(&arr).map(|v| v.len()).unwrap_or(0);
+        if bytes <= target_bytes {
+            return;
+        }
+        arr.pop();
+    }
+}
+
+/// As `pack_string_list_to_bytes` but for objects (e.g. `{file, depth}`).
+fn pack_value_list_to_bytes(arr: &mut Vec<Value>, target_bytes: usize) {
+    while arr.len() > 1 {
+        let bytes = serde_json::to_vec(&arr).map(|v| v.len()).unwrap_or(0);
+        if bytes <= target_bytes {
+            return;
+        }
+        arr.pop();
     }
 }

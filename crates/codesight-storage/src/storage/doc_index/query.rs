@@ -1,11 +1,12 @@
 //! Read-side queries for the doc index: FTS search, section lookup, summaries.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     path::{Path, PathBuf},
 };
 
 use rusqlite::OptionalExtension;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::Value;
 
 use crate::config::BYTES_PER_TOKEN;
@@ -18,7 +19,7 @@ use crate::storage::row_utils::{
 use super::{DocStore, SearchSection, SectionRecord};
 
 impl DocStore {
-    pub fn file_fingerprints(&self) -> anyhow::Result<HashMap<String, FileFingerprint>> {
+    pub fn file_fingerprints(&self) -> anyhow::Result<FxHashMap<String, FileFingerprint>> {
         let conn = self.open_connection()?;
         let mut stmt = conn.prepare_cached(
             "SELECT file_path, format, size_bytes, modified_ns, content_hash FROM doc_files",
@@ -32,7 +33,7 @@ impl DocStore {
                 content_hash: row.get(4)?,
             })
         })?;
-        let mut items = HashMap::new();
+        let mut items = FxHashMap::default();
         for row in rows {
             let fp = row?;
             items.insert(fp.file_path.clone(), fp);
@@ -91,7 +92,7 @@ impl DocStore {
         })?;
 
         let mut results: Vec<SearchSection> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = FxHashSet::default();
         for row in rows {
             let s = row?;
             if seen.insert(s.id.clone()) {

@@ -2,7 +2,7 @@
 
 pub mod imports;
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::fs;
 use std::path::Path;
 
@@ -17,7 +17,7 @@ use crate::visibility::js_like_is_restricted;
 pub(crate) fn js_resolve_relative(
     specifier: &str,
     from_file: &str,
-    source_files: &HashSet<String>,
+    source_files: &FxHashSet<String>,
 ) -> Option<String> {
     imports::resolve_js_relative(specifier, from_file, source_files)
 }
@@ -221,7 +221,7 @@ impl Language for JavaScript {
         &self,
         specifier: &str,
         from_file: &str,
-        source_files: &HashSet<String>,
+        source_files: &FxHashSet<String>,
     ) -> Option<String> {
         js_resolve_relative(specifier, from_file, source_files)
     }

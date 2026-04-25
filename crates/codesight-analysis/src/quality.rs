@@ -1,6 +1,6 @@
 //! Domain-level quality payload builders used by handlers and slice tests.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use codesight_core::SymbolIdRef;
 use codesight_language_support::{
@@ -123,7 +123,7 @@ pub fn hotspots_payload(
 /// regressions visible without letting them dominate the top of the list.
 pub fn hotspots_payload_from_cached(
     all_symbols: &[AnalysisSymbol],
-    file_churn: &HashMap<String, u64>,
+    file_churn: &FxHashMap<String, u64>,
     git_available: bool,
     min_complexity: u64,
     top_n: usize,
@@ -185,7 +185,7 @@ pub fn hotspots_payload_from_cached(
 /// "scope_files" for `refactor_targets` stay stable after the plumbing switch.
 pub fn top_hotspot_files_from_cached(
     all_symbols: &[AnalysisSymbol],
-    file_churn: &HashMap<String, u64>,
+    file_churn: &FxHashMap<String, u64>,
     top_n: usize,
     include_conventional: bool,
 ) -> Vec<String> {

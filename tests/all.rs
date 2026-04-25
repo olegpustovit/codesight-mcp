@@ -21,7 +21,6 @@
 #[path = "analysis_health.rs"]            mod analysis_health;
 #[path = "architecture_tools.rs"]         mod architecture_tools;
 #[path = "blast_radius.rs"]               mod blast_radius;
-#[path = "bm25_correctness.rs"]           mod bm25_correctness;
 #[path = "call_hierarchy.rs"]             mod call_hierarchy;
 #[path = "catalog_search_defaults.rs"]    mod catalog_search_defaults;
 #[path = "change_velocity.rs"]            mod change_velocity;

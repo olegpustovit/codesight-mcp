@@ -1,6 +1,7 @@
 //! Dense-lane helpers: similarity conversion, row materialization, and RRF
 //! fusion of lexical + dense results.
 
+use rustc_hash::FxHashMap;
 use serde_json::Value;
 
 use crate::service::CodeService;
@@ -22,12 +23,12 @@ pub(super) fn materialize_dense_symbol_items(
     dense_hits: &[DenseRankedHit],
     include_body: bool,
     context_lines: usize,
-) -> Result<std::collections::HashMap<String, Value>, ToolError> {
+) -> Result<FxHashMap<String, Value>, ToolError> {
     let Some(store) = store else {
-        return Ok(std::collections::HashMap::new());
+        return Ok(FxHashMap::default());
     };
     let ids: Vec<String> = dense_hits.iter().map(|hit| hit.id.clone()).collect();
-    let scores: std::collections::HashMap<&str, f64> = dense_hits
+    let scores: FxHashMap<&str, f64> = dense_hits
         .iter()
         .map(|hit| (hit.id.as_str(), dense_similarity(hit.distance)))
         .collect();
@@ -56,12 +57,12 @@ pub(super) fn materialize_dense_section_items(
     dense_hits: &[DenseRankedHit],
     include_body: bool,
     context_lines: usize,
-) -> Result<std::collections::HashMap<String, Value>, ToolError> {
+) -> Result<FxHashMap<String, Value>, ToolError> {
     let Some(store) = store else {
-        return Ok(std::collections::HashMap::new());
+        return Ok(FxHashMap::default());
     };
     let ids: Vec<String> = dense_hits.iter().map(|hit| hit.id.clone()).collect();
-    let scores: std::collections::HashMap<&str, f64> = dense_hits
+    let scores: FxHashMap<&str, f64> = dense_hits
         .iter()
         .map(|hit| (hit.id.as_str(), dense_similarity(hit.distance)))
         .collect();
@@ -90,15 +91,15 @@ pub(super) fn merge_dense_ranked_items(
     items: Vec<Value>,
     dense_symbol_hits: &[DenseRankedHit],
     dense_section_hits: &[DenseRankedHit],
-    mut dense_symbol_items: std::collections::HashMap<String, Value>,
-    mut dense_section_items: std::collections::HashMap<String, Value>,
+    mut dense_symbol_items: FxHashMap<String, Value>,
+    mut dense_section_items: FxHashMap<String, Value>,
 ) -> Vec<Value> {
     let mut lex_symbols: Vec<String> = Vec::new();
     let mut lex_sections: Vec<String> = Vec::new();
-    let mut symbol_items: std::collections::HashMap<String, Value> =
-        std::collections::HashMap::new();
-    let mut section_items: std::collections::HashMap<String, Value> =
-        std::collections::HashMap::new();
+    let mut symbol_items: FxHashMap<String, Value> =
+        FxHashMap::default();
+    let mut section_items: FxHashMap<String, Value> =
+        FxHashMap::default();
     let mut others: Vec<Value> = Vec::new();
     for item in items {
         let id = item

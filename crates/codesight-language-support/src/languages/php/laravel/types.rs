@@ -1,11 +1,11 @@
 //! Shared Laravel parsing types (used by tree-sitter and regex passes).
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, Default)]
 pub struct MigrationInfo {
     pub table: String,
-    pub columns: HashMap<String, Vec<String>>, // column_name -> modifiers
+    pub columns: FxHashMap<String, Vec<String>>, // column_name -> modifiers
 }
 
 #[derive(Debug, Clone, Default)]

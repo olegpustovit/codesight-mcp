@@ -3,6 +3,7 @@
 mod analysis_reads;
 mod batch_reads;
 mod convert;
+pub mod dispatch_roots;
 pub mod doc_index;
 pub mod doc_schema;
 mod graph_reads;
