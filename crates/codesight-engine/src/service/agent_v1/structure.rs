@@ -203,6 +203,18 @@ impl CodeService {
             Ok(pair) => pair,
             Err(resp) => return Ok(resp),
         };
+        // CUTPLAN P2.4: cache the full body keyed by `(source_id,
+        // indexed_at)`. The expensive parts (PageRank over the full
+        // dependency graph + repository_rollup) are recomputed only on
+        // reingest, not per-call. Target: 50 ms warm / 200 ms cold (was
+        // 2810 ms cold).
+        let indexed_at = store
+            .repo_summary()
+            .map(|s| s.indexed_at)
+            .unwrap_or_default();
+        if let Some(cached) = self.cached_repo_outline_body(&args.source_id, &indexed_at) {
+            return self.success_response(&timer, cached);
+        }
         // ROADMAP P1.3: `repo_outline` is an *orientation* view, not a
         // symbol dump. A cold agent running one call must be able to name
         // the crates, their roles, and the first few files to read. The
@@ -245,18 +257,17 @@ impl CodeService {
                 acc
             });
 
-        self.success_response(
-            &timer,
-            json!({
-                "view": "repo_outline",
-                "workspace": { "crates": crates },
-                "extra_roots": extra_roots,
-                "top_modules_by_centrality": top_by_centrality,
-                "top_modules_by_size": top_by_size,
-                "entrypoints": entrypoints,
-                "languages": languages,
-            }),
-        )
+        let body = json!({
+            "view": "repo_outline",
+            "workspace": { "crates": crates },
+            "extra_roots": extra_roots,
+            "top_modules_by_centrality": top_by_centrality,
+            "top_modules_by_size": top_by_size,
+            "entrypoints": entrypoints,
+            "languages": languages,
+        });
+        self.store_repo_outline_body(&args.source_id, &indexed_at, body.clone());
+        self.success_response(&timer, body)
     }
 
     fn structure_repository_rollup(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {

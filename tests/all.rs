@@ -73,6 +73,7 @@
 #[path = "read_content_next_step_hint.rs"] mod read_content_next_step_hint;
 #[path = "read_content_oversized.rs"]     mod read_content_oversized;
 #[path = "refactor_targets.rs"]           mod refactor_targets;
+#[path = "reliability_probe.rs"]          mod reliability_probe;
 #[path = "related_symbols.rs"]            mod related_symbols;
 #[path = "rename_plan.rs"]                mod rename_plan;
 #[path = "repo_health.rs"]                mod repo_health;

@@ -148,7 +148,12 @@ pub fn coerce_and_validate(tool: &str, mut arguments: Value) -> Result<Value, To
     let Some(tool_schema) = schemas().and_then(|s| s.get(tool)) else {
         return Ok(arguments);
     };
-    expand_shorthand_refs(&mut arguments);
+    // CUTPLAN: the new 6-tool surface uses string-only refs and handles
+    // expansion inside its adapters. Skip the legacy `expand_shorthand_refs`
+    // path for those tools so the schema can enforce the contract.
+    if !matches!(tool, "search" | "outline" | "read" | "references" | "impact" | "health") {
+        expand_shorthand_refs(&mut arguments);
+    }
     coerce(&mut arguments, &tool_schema.schema);
     if let Err(error) = tool_schema.validator.validate(&arguments) {
         let pointer = error.instance_path.to_string();

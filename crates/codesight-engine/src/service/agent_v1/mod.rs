@@ -5,6 +5,7 @@ mod catalog;
 mod catalog_search;
 mod content;
 mod context;
+mod cutplan;
 mod file_tree;
 mod freshness;
 mod graph;

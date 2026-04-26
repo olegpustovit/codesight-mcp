@@ -36,6 +36,42 @@ impl TimeoutClass {
 }
 
 static AGENT_V1_HANDLERS: &[(&str, AgentV1Handler, TimeoutClass)] = &[
+    // CUTPLAN: 6-tool MCP surface. Public adapters live in `cutplan.rs`;
+    // legacy handler names below remain wired so internal tests and the
+    // adapters themselves can still dispatch by old name during P1→P2.
+    (
+        "search",
+        CodeService::cutplan_search,
+        TimeoutClass::Default,
+    ),
+    (
+        "outline",
+        CodeService::cutplan_outline,
+        TimeoutClass::FastRead,
+    ),
+    (
+        "read",
+        CodeService::cutplan_read,
+        TimeoutClass::FastRead,
+    ),
+    (
+        "references",
+        CodeService::cutplan_references,
+        TimeoutClass::Default,
+    ),
+    (
+        "impact",
+        CodeService::cutplan_impact,
+        TimeoutClass::Heavy,
+    ),
+    (
+        "health",
+        CodeService::cutplan_health,
+        TimeoutClass::Heavy,
+    ),
+    // ── Legacy handlers — internal-only. Not in the public tools.json.
+    //    Adapters above call into these to reuse the existing analysis
+    //    backends. They are NOT exposed to MCP clients.
     (
         "ingest_sources",
         CodeService::ingest_sources,

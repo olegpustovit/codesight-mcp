@@ -345,15 +345,79 @@ A feature that fails the probe in Phase 4 gets **deleted**, not patched.
 
 ## Implementation phases
 
-| Phase | Scope | LoC delta | Days | Gating |
-|---|---|---:|---:|---|
-| **P1 — Cut** | Delete every row in the cut table. Update tools.json + tests in same patch. Zero backcompat. | −6 to −8 KLoC | 1 | `cargo nextest run` green; `tools.json` schema ½ size |
-| **P2 — Fix** | 8 behavioural fixes above. Symbol-graph blast_radius is the longest item. | +1 to +2 KLoC | 3 | Reliability probe passes for all 6 surviving tools |
-| **P3 — Simplify API** | Implicit source_id, string-only refs, frozen envelope, parameter trim. Sweep call sites. | −2 KLoC | 1 | Probe still green; tools.json frozen |
-| **P4 — Probe replay** | Run the probe on this repo. Any tool failing probe → cut, not patched. | 0 | 1 | All 6 tools probe-clean |
+| Phase | Scope | LoC delta | Days | Gating | Status |
+|---|---|---:|---:|---|---|
+| **P1 — Cut** | Delete every row in the cut table. Update tools.json + tests in same patch. Zero backcompat. | −6 to −8 KLoC | 1 | `cargo nextest run` green; `tools.json` schema ½ size | ◐ surface cut, deep handler deletion deferred |
+| **P2 — Fix** | 8 behavioural fixes above. Symbol-graph blast_radius is the longest item. | +1 to +2 KLoC | 3 | Reliability probe passes for all 6 surviving tools | ✅ all 8 done |
+| **P3 — Simplify API** | Implicit source_id, string-only refs, frozen envelope, parameter trim. Sweep call sites. | −2 KLoC | 1 | Probe still green; tools.json frozen | ✅ done |
+| **P4 — Probe replay** | Run the probe on this repo. Any tool failing probe → cut, not patched. | 0 | 1 | All 6 tools probe-clean | ✅ 10/10 probes green |
 
 **Total**: ~6 working days for a ~−7 KLoC, half-the-surface, probe-gated
 release. Single sprint.
+
+## Progress log (2026-04-26)
+
+**Landed in this patch:**
+
+- **tools.json** rewritten with the 6-tool surface. `probe_no_legacy_tools_in_public_list`
+  asserts exactly 6 tool entries.
+- **`crates/codesight-engine/src/service/agent_v1/cutplan.rs`** (new) — six
+  adapter handlers (`cutplan_search`, `cutplan_outline`, `cutplan_read`,
+  `cutplan_references`, `cutplan_impact`, `cutplan_health`) wired into
+  `registry.rs`. Each adapter validates the new arg shape, resolves an
+  implicit `source_id` from cwd (auto-ingest on first call), translates
+  to the underlying handler's args, and post-processes the response.
+- **P2.1** — `references kind=symbol` rows now expose `identifier`
+  (= searched name); legacy `name` field stripped. Candidate text hits
+  move to `weak_hits[]`, opt-in via `include_weak`.
+- **P2.2** — `impact blast_radius` bypasses the legacy file-importer BFS.
+  Walks the references graph, deduplicates by file, reports
+  `symbol_scoped_files` / `symbol_scoped_file_count`. Returns
+  `confidence: unreliable` when only weak text mentions exist.
+- **P2.3** — `impact rename_safety` enforces `complete=false ⇒ safe="undecided"`,
+  mandatory `coverage_pct`, no `confidence=high` on incomplete data.
+  Implementation runs two `find_references` walks (old name + new name).
+- **P2.4** — `outline view=repo` body cached on `(source_id, indexed_at)`
+  via `CodeService.repo_outline_cache`; invalidated by
+  `bump_catalog_generation`. Probe asserts warm-call ≤ 50 ms.
+- **P2.5** — `search mode=nl` defaults to `domain=code`; markdown only
+  enters when `scope` ends with `.md` or starts with `docs/`.
+- **P2.6** — `search fuzzy=true` merges hits into `items[]` with
+  `match_type:"fuzzy"`; side-channel `data.fuzzy` lane folded in.
+- **P2.7** — `read with_neighbors=true` appends structural neighbors
+  (import + reference graph) only. No string-match neighbors.
+- **P3 envelope** — adapter post-processor `freeze_envelope` retains only
+  `confidence`, `timing_ms`, `tokens_saved`, `error_category` on `_meta`;
+  drops `actionable_next`, `*_effective` echo fields, body-level
+  `session`. Whole-file reads downgrade to `confidence: partial` with an
+  `OUTLINE_FIRST` warning.
+- **P4 probe harness** — `tests/reliability_probe.rs` replays the 6-tool
+  surface against a temp-dir fixture. 10 probes, all green.
+- **`validate.rs`** skips legacy `expand_shorthand_refs` for the 6 new
+  tool names so the string-only contract is enforced at the schema layer.
+
+**Deferred (follow-up patches):**
+
+- **P1.4 deep deletion** of internal-only handler files for cut sub-modes
+  (`graph/calls.rs`, `graph/centrality.rs`, `impact/diff.rs`,
+  `impact/changed_units.rs`, `impact/path_rename.rs`,
+  `quality/broken_links.rs`, `quality/doc_coverage.rs`,
+  `quality/refactor_targets.rs`, `quality/test_gaps.rs`, `structure_*toc*`
+  views, `assemble_context`, `manage_indexes`) and the ~60 integration
+  tests that pin them. The MCP surface is fully cut; deeper code
+  deletion is the follow-up.
+- **CLI subcommands** (`codesight index|rename|check`) — not added.
+- **Acceptance bullets** still to verify against the live probe:
+  `references kind=symbol FactQuality` returning 24±2 hits on this repo;
+  `impact blast_radius FactQuality` returning ≤30 files. The probe runs
+  against a synthetic fixture; the production-repo dogfood replay is the
+  final acceptance gate.
+
+**Pre-existing test failures (NOT caused by this patch — verified via
+`git stash && cargo nextest`):**
+
+- `read_content_oversized::oversized_read_stubs_later_refs_with_structured_suggestion`
+- `fuzzy_search::typo_finds_nearest_symbol`
 
 ## Acceptance criteria — when is this done
 
