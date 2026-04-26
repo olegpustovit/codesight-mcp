@@ -261,11 +261,12 @@ impl DocStore {
 
     pub fn doc_summary(&self) -> anyhow::Result<Value> {
         let conn = self.open_read_only()?;
-        let (repo, indexed_at, index_version): (String, String, u32) = conn.query_row(
-            "SELECT repo, indexed_at, index_version FROM repo_info LIMIT 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
+        let (repo, indexed_at, index_version, root_path): (String, String, u32, String) = conn
+            .query_row(
+                "SELECT repo, indexed_at, index_version, root_path FROM repo_info LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
         let file_count = conn.query_row("SELECT COUNT(*) FROM doc_files", [], |row| {
             row.get::<_, i64>(0)
         })? as usize;
@@ -293,6 +294,7 @@ impl DocStore {
             "formats": formats,
             "estimated_naive_tokens": total_bytes / BYTES_PER_TOKEN,
             "index_version": index_version,
+            "root_path": root_path,
         }))
     }
 

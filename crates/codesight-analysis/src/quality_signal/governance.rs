@@ -5,7 +5,7 @@ use codesight_storage::storage::IndexStore;
 
 use super::recommendations::build_recommendations;
 use super::{QualitySignal, compute_quality_signal_precomputed, score_assessment};
-use crate::agent_readiness::{AgentReadinessSignal, compute_agent_readiness};
+use crate::agent_readiness::{AgentReadinessInputs, AgentReadinessSignal, compute_agent_readiness};
 use crate::graph::find_cycles;
 
 /// Full triple-layer governance signal combining structural + agent readiness.
@@ -23,14 +23,27 @@ pub struct GovernanceSignal {
     pub bottleneck_layer: &'static str,
 }
 
-/// Compute the full triple-layer governance signal.
+/// Compute the full triple-layer governance signal. Loads inputs from the
+/// store; callers that already have a [`AgentReadinessInputs`] + `cycles`
+/// should use [`compute_governance_signal_precomputed`] to skip the SQL.
 pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<GovernanceSignal> {
     let adj = store.dependency_graph_strict()?;
     let cycles = find_cycles(&adj);
     let all_symbols = store.all_symbols_for_analysis()?;
+    let inputs =
+        AgentReadinessInputs::build(&all_symbols, &adj, store.root_path().ok().as_deref());
+    compute_governance_signal_precomputed(store, &cycles, &inputs)
+}
 
-    let structural = compute_quality_signal_precomputed(store, &adj, &cycles, &all_symbols)?;
-    let agent = compute_agent_readiness(&all_symbols, &adj, store.root_path().ok().as_deref());
+/// Variant of [`compute_governance_signal`] that reuses pre-loaded inputs.
+pub fn compute_governance_signal_precomputed(
+    store: &IndexStore,
+    cycles: &[Vec<String>],
+    inputs: &AgentReadinessInputs<'_>,
+) -> anyhow::Result<GovernanceSignal> {
+    let structural =
+        compute_quality_signal_precomputed(store, inputs.adj, cycles, inputs.all_symbols)?;
+    let agent = compute_agent_readiness(inputs);
     let agent_readiness_score = agent.score;
     let structural_score = structural.score;
 

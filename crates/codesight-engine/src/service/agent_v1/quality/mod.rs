@@ -6,6 +6,7 @@ mod repo_health;
 mod test_gaps;
 
 use rustc_hash::FxHashMap;
+use std::hash::Hash;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -18,23 +19,83 @@ use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::require_store;
 use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_analysis::{
-    agent_readiness::compute_agent_readiness_for_scope, dead_code, quality, quality_signal,
+    agent_readiness::{AgentReadinessInputs, compute_agent_readiness_for_scope},
+    dead_code,
+    graph::find_cycles,
+    quality, quality_signal,
     thresholds::current_thresholds,
 };
 
-/// In-process memoisation for `evaluate_quality analysis=dead_code`. The
-/// underlying analysis loads every file body and re-runs the string-dispatch
-/// detector on each call (~8 s on the codesight repo). Subsequent calls with
-/// the same key during a short TTL window return the cached payload.
+/// In-process memoisation backing `evaluate_quality` analyses whose
+/// recomputation is dominated by index reads.
 ///
-/// Invalidation is generational: every cache entry stamps the
-/// `catalog_generation` it was computed under; a fresh ingest bumps the
-/// counter and any older entry is treated as stale on lookup. The TTL is the
-/// secondary safety net for cases where a file mutates without an ingest
-/// (e.g. external `git checkout` outside the watcher) — agents see at most
-/// `DEAD_CODE_TTL` seconds of staleness before recompute.
+/// Invalidation is generational: every entry stamps the `catalog_generation`
+/// it was computed under; a fresh ingest bumps the counter and stale entries
+/// drop on lookup. The TTL is the secondary safety net for file mutations
+/// that bypass the watcher (e.g. external `git checkout`) — agents see at
+/// most `ttl` seconds of staleness before recompute.
+struct GenerationalCacheEntry {
+    generation: u64,
+    cached_at: Instant,
+    payload: Value,
+}
+
+struct GenerationalCache<K: Eq + Hash + Clone> {
+    inner: Mutex<FxHashMap<K, GenerationalCacheEntry>>,
+    ttl: Duration,
+    cap: usize,
+}
+
+impl<K: Eq + Hash + Clone> GenerationalCache<K> {
+    fn new(ttl: Duration, cap: usize) -> Self {
+        Self {
+            inner: Mutex::new(FxHashMap::default()),
+            ttl,
+            cap,
+        }
+    }
+
+    fn lookup(&self, key: &K, current_generation: u64) -> Option<Value> {
+        let cache = self.inner.lock().ok()?;
+        let entry = cache.get(key)?;
+        if entry.generation != current_generation || entry.cached_at.elapsed() > self.ttl {
+            return None;
+        }
+        Some(entry.payload.clone())
+    }
+
+    fn store(&self, key: K, generation: u64, payload: Value) {
+        let Ok(mut cache) = self.inner.lock() else {
+            return;
+        };
+        if cache.len() >= self.cap
+            && let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, e)| e.cached_at)
+                .map(|(k, _)| k.clone())
+        {
+            cache.remove(&oldest);
+        }
+        cache.insert(
+            key,
+            GenerationalCacheEntry {
+                generation,
+                cached_at: Instant::now(),
+                payload,
+            },
+        );
+    }
+}
+
+/// `dead_code` reachability + string-dispatch detection over every file body
+/// — ~8s cold on this repo.
 const DEAD_CODE_TTL: Duration = Duration::from_secs(30);
-const DEAD_CODE_CACHE_MAX: usize = 32;
+const QUALITY_CACHE_MAX: usize = 32;
+
+/// `quality_signal` governance walk: cyclomatic complexity over every fn,
+/// dead-code redundancy contribution, blake3 over each body for dup
+/// detection — ~1.3s cold on this repo.
+const QUALITY_SIGNAL_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Eq, PartialEq, Hash, Clone)]
 struct DeadCodeCacheKey {
@@ -49,56 +110,20 @@ struct DeadCodeCacheKey {
     max_tokens: Option<u32>,
 }
 
-struct DeadCodeCacheEntry {
-    generation: u64,
-    cached_at: Instant,
-    payload: Value,
+#[derive(Eq, PartialEq, Hash, Clone)]
+struct QualitySignalCacheKey {
+    source_id: String,
+    scope: Option<String>,
 }
 
-fn dead_code_cache() -> &'static Mutex<FxHashMap<DeadCodeCacheKey, DeadCodeCacheEntry>> {
-    static CACHE: OnceLock<Mutex<FxHashMap<DeadCodeCacheKey, DeadCodeCacheEntry>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
+fn dead_code_cache() -> &'static GenerationalCache<DeadCodeCacheKey> {
+    static CACHE: OnceLock<GenerationalCache<DeadCodeCacheKey>> = OnceLock::new();
+    CACHE.get_or_init(|| GenerationalCache::new(DEAD_CODE_TTL, QUALITY_CACHE_MAX))
 }
 
-fn dead_code_cache_lookup(
-    key: &DeadCodeCacheKey,
-    current_generation: u64,
-) -> Option<Value> {
-    let cache = dead_code_cache().lock().ok()?;
-    let entry = cache.get(key)?;
-    if entry.generation != current_generation {
-        return None;
-    }
-    if entry.cached_at.elapsed() > DEAD_CODE_TTL {
-        return None;
-    }
-    Some(entry.payload.clone())
-}
-
-fn dead_code_cache_store(key: DeadCodeCacheKey, generation: u64, payload: Value) {
-    let Ok(mut cache) = dead_code_cache().lock() else {
-        return;
-    };
-    if cache.len() >= DEAD_CODE_CACHE_MAX {
-        // Evict the oldest entry. The cache is small enough that a linear
-        // scan is cheaper than maintaining a heap.
-        if let Some(oldest_key) = cache
-            .iter()
-            .min_by_key(|(_, e)| e.cached_at)
-            .map(|(k, _)| k.clone())
-        {
-            cache.remove(&oldest_key);
-        }
-    }
-    cache.insert(
-        key,
-        DeadCodeCacheEntry {
-            generation,
-            cached_at: Instant::now(),
-            payload,
-        },
-    );
+fn quality_signal_cache() -> &'static GenerationalCache<QualitySignalCacheKey> {
+    static CACHE: OnceLock<GenerationalCache<QualitySignalCacheKey>> = OnceLock::new();
+    CACHE.get_or_init(|| GenerationalCache::new(QUALITY_SIGNAL_TTL, QUALITY_CACHE_MAX))
 }
 
 impl CodeService {
@@ -324,7 +349,7 @@ impl CodeService {
             max_tokens: args.max_tokens,
         };
         let generation = self.catalog_generation();
-        let data = if let Some(cached) = dead_code_cache_lookup(&cache_key, generation) {
+        let data = if let Some(cached) = dead_code_cache().lookup(&cache_key, generation) {
             cached
         } else {
             let mut fresh = dead_code::dead_code_payload(
@@ -340,7 +365,7 @@ impl CodeService {
             if let Some(budget) = args.max_tokens {
                 dead_code::pack_dead_code_to_budget(&mut fresh, budget);
             }
-            dead_code_cache_store(cache_key, generation, fresh.clone());
+            dead_code_cache().store(cache_key, generation, fresh.clone());
             fresh
         };
         // ROADMAP P2.8: emit actionable_next hints pointing at the top-3
@@ -406,7 +431,24 @@ impl CodeService {
         // sub-metrics) — partial.
         let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
 
-        let gov = quality_signal::compute_governance_signal(&store)?;
+        // The probe is recorded on the cold path; warm hits inside the same
+        // generation re-recording it would only echo identical state.
+        let cache_key = QualitySignalCacheKey {
+            source_id: args.source_id.clone(),
+            scope: args.scope.clone(),
+        };
+        let generation = self.catalog_generation();
+        if let Some(cached) = quality_signal_cache().lookup(&cache_key, generation) {
+            return self.success_response(&timer, cached);
+        }
+
+        let adj = store.dependency_graph_strict()?;
+        let cycles = find_cycles(&adj);
+        let all_symbols = store.all_symbols_for_analysis()?;
+        let readiness_inputs =
+            AgentReadinessInputs::build(&all_symbols, &adj, store.root_path().ok().as_deref());
+        let gov =
+            quality_signal::compute_governance_signal_precomputed(&store, &cycles, &readiness_inputs)?;
         let suggestion =
             quality_signal::suggestion_for_bottleneck(gov.bottleneck, &gov.structural.coverage);
         let mut data = quality_signal::governance_signal_json(&gov, &suggestion);
@@ -439,12 +481,7 @@ impl CodeService {
             }),
         );
         if let Some(scope) = args.scope.as_deref()
-            && let Some(scoped) = compute_agent_readiness_for_scope(
-                &store.all_symbols_for_analysis()?,
-                &store.dependency_graph_strict()?,
-                store.root_path().ok().as_deref(),
-                scope,
-            )
+            && let Some(scoped) = compute_agent_readiness_for_scope(&readiness_inputs, scope)
         {
             // ROADMAP P2.5: the scoped readiness block used to share the
             // `agent_readiness` key with the global payload block, with
@@ -489,6 +526,7 @@ impl CodeService {
                 current_thresholds().agent_readiness_min,
             );
         }
+        quality_signal_cache().store(cache_key, generation, data.clone());
         self.success_response(&timer, data)
     }
 

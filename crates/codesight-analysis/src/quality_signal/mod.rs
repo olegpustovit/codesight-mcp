@@ -16,7 +16,10 @@ mod governance;
 mod graph_math;
 mod recommendations;
 
-pub use governance::{GovernanceSignal, compute_governance_signal, governance_signal_json};
+pub use governance::{
+    GovernanceSignal, compute_governance_signal, compute_governance_signal_precomputed,
+    governance_signal_json,
+};
 pub use graph_math::gini_coefficient;
 pub use recommendations::suggestion_for_bottleneck;
 

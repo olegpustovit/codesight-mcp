@@ -97,36 +97,67 @@ pub fn tested_file_set(
     tested
 }
 
-pub fn compute_agent_readiness(
-    all_symbols: &[AnalysisSymbol],
-    adj: &FxHashMap<String, Vec<String>>,
-    root: Option<&Path>,
-) -> AgentReadinessSignal {
-    let churn = root.map(compute_file_churn).unwrap_or_default();
-    let graph_files = graph_files(adj);
-    let fan_in = compute_fan_in(adj);
-    let facts = build_function_facts(all_symbols, &fan_in, &graph_files, &churn);
-    agent_signal_from_inputs(all_symbols, adj, &fan_in, &graph_files, &churn, &facts)
+/// Bundle of derived inputs the readiness scorers need. Built once via
+/// [`AgentReadinessInputs::build`] so callers running both global and scoped
+/// readiness in the same request share the heavy `build_function_facts`
+/// walk (~hundred ms over thousands of symbol bodies) instead of paying it
+/// twice.
+pub struct AgentReadinessInputs<'a> {
+    pub adj: &'a FxHashMap<String, Vec<String>>,
+    pub all_symbols: &'a [AnalysisSymbol],
+    fan_in: FxHashMap<String, usize>,
+    graph_files: FxHashSet<String>,
+    churn: FxHashMap<String, u64>,
+    facts: Vec<FunctionFacts<'a>>,
+}
+
+impl<'a> AgentReadinessInputs<'a> {
+    pub fn build(
+        all_symbols: &'a [AnalysisSymbol],
+        adj: &'a FxHashMap<String, Vec<String>>,
+        root: Option<&Path>,
+    ) -> Self {
+        let churn = root.map(compute_file_churn).unwrap_or_default();
+        let graph_files = graph_files(adj);
+        let fan_in = compute_fan_in(adj);
+        let facts = build_function_facts(all_symbols, &fan_in, &graph_files, &churn);
+        Self {
+            adj,
+            all_symbols,
+            fan_in,
+            graph_files,
+            churn,
+            facts,
+        }
+    }
+}
+
+pub fn compute_agent_readiness(inputs: &AgentReadinessInputs<'_>) -> AgentReadinessSignal {
+    agent_signal_from_inputs(
+        inputs.all_symbols,
+        inputs.adj,
+        &inputs.fan_in,
+        &inputs.graph_files,
+        &inputs.churn,
+        &inputs.facts,
+    )
 }
 
 pub fn compute_agent_readiness_for_scope(
-    all_symbols: &[AnalysisSymbol],
-    adj: &FxHashMap<String, Vec<String>>,
-    root: Option<&Path>,
+    inputs: &AgentReadinessInputs<'_>,
     scope: &str,
 ) -> Option<ScopedAgentReadiness> {
-    let churn = root.map(compute_file_churn).unwrap_or_default();
-    let graph_files = graph_files(adj);
-    let fan_in = compute_fan_in(adj);
-    let facts = build_function_facts(all_symbols, &fan_in, &graph_files, &churn);
-    let filtered_symbols: Vec<AnalysisSymbol> = all_symbols
+    let filtered_symbols: Vec<AnalysisSymbol> = inputs
+        .all_symbols
         .iter()
         .filter(|sym| path_matches_scope(&sym.file_path, scope))
         .cloned()
         .collect();
-    let filtered_facts: Vec<FunctionFacts<'_>> = facts
-        .into_iter()
+    let filtered_facts: Vec<FunctionFacts<'_>> = inputs
+        .facts
+        .iter()
         .filter(|fact| path_matches_scope(&fact.sym.file_path, scope))
+        .cloned()
         .collect();
     if filtered_symbols.is_empty() || filtered_facts.is_empty() {
         return None;
@@ -134,10 +165,10 @@ pub fn compute_agent_readiness_for_scope(
 
     let signal = agent_signal_from_inputs(
         &filtered_symbols,
-        adj,
-        &fan_in,
-        &graph_files,
-        &churn,
+        inputs.adj,
+        &inputs.fan_in,
+        &inputs.graph_files,
+        &inputs.churn,
         &filtered_facts,
     );
     let thresholds = current_thresholds();

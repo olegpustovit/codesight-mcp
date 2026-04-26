@@ -10,7 +10,7 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::CatalogSourcesArgs;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::savings::{Confidence, MetaBuilder};
-use codesight_storage::storage::doc_index::{DocStore, list_doc_summaries};
+use codesight_storage::storage::doc_index::list_doc_summaries;
 use codesight_storage::storage::list_repo_summaries;
 
 fn index_metadata_staleness_warning(indexed_at: &str) -> Option<String> {
@@ -28,6 +28,7 @@ fn index_metadata_staleness_warning(indexed_at: &str) -> Option<String> {
 
 impl CodeService {
     pub(in crate::service) fn catalog_sources(&self, v: Value) -> anyhow::Result<Value> {
+        let call_start = std::time::Instant::now();
         let args: CatalogSourcesArgs = ValidatedArgs::from_validated(v)?.into_inner();
         let lightweight = args.lightweight.unwrap_or(false);
         let timer = MetaBuilder::new(0).with_confidence(Confidence::Safe);
@@ -48,6 +49,14 @@ impl CodeService {
                     .entry("_meta".to_string())
                     .or_insert_with(|| Value::Object(serde_json::Map::new()));
                 if let Value::Object(meta_map) = meta {
+                    // Re-stamp the timing field so the client sees the actual
+                    // cache-hit latency (sub-ms) instead of the original cold
+                    // call's ms baked into the cached payload.
+                    let elapsed_ms = call_start.elapsed().as_secs_f64() * 1000.0;
+                    meta_map.insert(
+                        "timing_ms".to_string(),
+                        serde_json::json!((elapsed_ms * 100.0).round() / 100.0),
+                    );
                     meta_map.insert("cache_hit".to_string(), Value::Bool(true));
                 }
             }
@@ -117,12 +126,11 @@ impl CodeService {
 
         for d in doc_values {
             let repo = d.get("source_id").and_then(|x| x.as_str()).unwrap_or("");
-            let raw_doc_root = DocStore::open(self.config.doc_db_path(repo))
-                .ok()
-                .and_then(|s| s.root_path().ok())
-                .map(|p| p.to_string_lossy().to_string())
+            let raw_doc_root = d
+                .get("root_path")
+                .and_then(|x| x.as_str())
                 .unwrap_or_default();
-            let root_hint = path_map::remap(&raw_doc_root, &self.config.path_map, false);
+            let root_hint = path_map::remap(raw_doc_root, &self.config.path_map, false);
 
             sources.push(json!({
                 "source_id": repo,
