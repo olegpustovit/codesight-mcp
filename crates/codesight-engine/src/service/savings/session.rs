@@ -39,7 +39,7 @@ pub struct SessionState {
     #[serde(default)]
     pub blocked_grep_bash_attempts: u64,
     #[serde(default)]
-    pub evaluate_impact_usage: FxHashMap<String, u64>,
+    pub impact_usage: FxHashMap<String, u64>,
     #[serde(default)]
     pub stale_warnings_in_flight: Vec<StaleWarningRecord>,
     #[serde(default)]

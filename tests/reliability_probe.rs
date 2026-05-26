@@ -92,7 +92,12 @@ fn build_env() -> ProbeEnv {
     )
     .unwrap();
 
-    ProbeEnv { svc, _ws: ws, _repo: repo, _saved_cwd: saved_cwd }
+    ProbeEnv {
+        svc,
+        _ws: ws,
+        _repo: repo,
+        _saved_cwd: saved_cwd,
+    }
 }
 
 impl Drop for ProbeEnv {
@@ -144,7 +149,7 @@ fn assert_tier(label: &str, response: &Value, budget_ms: f64) {
     );
 }
 
-fn data<'a>(response: &'a Value) -> &'a Value {
+fn data(response: &Value) -> &Value {
     response.get("data").unwrap_or(&Value::Null)
 }
 
@@ -172,10 +177,7 @@ fn probe_search_fuzzy_merges_into_items() {
     let env = build_env();
     let r = env
         .svc
-        .dispatch(
-            "search",
-            json!({ "query": "FactQwality", "fuzzy": true }),
-        )
+        .dispatch("search", json!({ "query": "FactQwality", "fuzzy": true }))
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "search fuzzy failed: {r:?}");
     assert_envelope_frozen("search.fuzzy", &r);
@@ -190,11 +192,17 @@ fn probe_search_fuzzy_merges_into_items() {
 fn probe_outline_repo_meets_perf_budget() {
     let env = build_env();
     // Cold call.
-    let r1 = env.svc.dispatch("outline", json!({ "view": "repo" })).unwrap();
+    let r1 = env
+        .svc
+        .dispatch("outline", json!({ "view": "repo" }))
+        .unwrap();
     assert!(r1["ok"].as_bool().unwrap(), "outline cold failed: {r1:?}");
     assert_envelope_frozen("outline.repo.cold", &r1);
     // Warm call — must hit the cache (P2.4).
-    let r2 = env.svc.dispatch("outline", json!({ "view": "repo" })).unwrap();
+    let r2 = env
+        .svc
+        .dispatch("outline", json!({ "view": "repo" }))
+        .unwrap();
     assert!(r2["ok"].as_bool().unwrap(), "outline warm failed: {r2:?}");
     let t = r2
         .pointer("/_meta/timing_ms")
@@ -281,7 +289,10 @@ fn probe_impact_blast_radius_is_symbol_scoped() {
             json!({ "analysis": "blast_radius", "ref": "src/lib.rs::FactQuality#enum" }),
         )
         .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "impact.blast_radius failed: {r:?}");
+    assert!(
+        r["ok"].as_bool().unwrap(),
+        "impact.blast_radius failed: {r:?}"
+    );
     assert_envelope_frozen("impact.blast_radius", &r);
     assert_tier("impact.blast_radius", &r, TIER_HEAVY_COLD_MS);
     // P2.2: walks symbol references, not file importers.
@@ -309,9 +320,15 @@ fn probe_impact_rename_safety_invariants() {
             }),
         )
         .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "impact.rename_safety failed: {r:?}");
+    assert!(
+        r["ok"].as_bool().unwrap(),
+        "impact.rename_safety failed: {r:?}"
+    );
     assert_envelope_frozen("impact.rename_safety", &r);
-    let complete = data(&r).get("complete").and_then(Value::as_bool).unwrap_or(true);
+    let complete = data(&r)
+        .get("complete")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let safe = data(&r).get("safe");
     let cov = data(&r).get("coverage_pct").and_then(Value::as_f64);
     assert!(
@@ -335,7 +352,10 @@ fn probe_health_repo_health_returns_aggregate() {
         .svc
         .dispatch("health", json!({ "analysis": "repo_health" }))
         .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "health.repo_health failed: {r:?}");
+    assert!(
+        r["ok"].as_bool().unwrap(),
+        "health.repo_health failed: {r:?}"
+    );
     assert_envelope_frozen("health.repo_health", &r);
     assert_tier("health.repo_health", &r, TIER_HEAVY_COLD_MS);
 }
@@ -352,10 +372,17 @@ fn probe_no_legacy_tools_in_public_list() {
         .filter_map(|t| t.get("name").and_then(Value::as_str))
         .map(str::to_string)
         .collect();
-    let expected: BTreeSet<String> = ["search", "outline", "read", "references", "impact", "health"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let expected: BTreeSet<String> = [
+        "search",
+        "outline",
+        "read",
+        "references",
+        "impact",
+        "health",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
     assert_eq!(
         names, expected,
         "tools.json must list exactly: search, outline, read, references, impact, health"

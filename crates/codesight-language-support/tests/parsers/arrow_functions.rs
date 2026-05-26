@@ -1,8 +1,8 @@
 //! Integration tests: arrow functions.
 
-use rustc_hash::FxHashSet;
 use codesight_core::SymbolKind;
 use codesight_language_support::scm_engine::{ScmExtractor, parse_scm_header, query_files_slice};
+use rustc_hash::FxHashSet;
 
 fn scm_extractor(lang_key: &str) -> ScmExtractor {
     let source = query_files_slice()

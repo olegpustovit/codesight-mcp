@@ -170,11 +170,8 @@ impl CodeService {
             .as_ref()
             .map(|c| c.files_reindexed > 0 || c.files_removed > 0)
             .unwrap_or(false);
-        let docs_changed = last_doc
-            .as_ref()
-            .map(|d| d.file_count > 0)
-            .unwrap_or(false)
-            && !args.incremental;
+        let docs_changed =
+            last_doc.as_ref().map(|d| d.file_count > 0).unwrap_or(false) && !args.incremental;
         let any_change = code_changed || docs_changed || !args.incremental;
 
         let indexed_docs = last_doc.is_some();

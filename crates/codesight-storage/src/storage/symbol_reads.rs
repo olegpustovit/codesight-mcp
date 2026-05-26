@@ -13,6 +13,63 @@ use crate::storage::{SymbolMetadata, SymbolRecord};
 use super::IndexStore;
 use super::row_utils::symbol_record_from_row;
 
+/// Tier 1.4: drop function-local symbols (e.g. `let` constants inside a
+/// test function) from an outline. Treats `function` and `method` symbols
+/// in the same file as scopes; any symbol whose dotted-path id has one of
+/// those as an ancestor is filtered out. Operates on the JSON shape emitted
+/// by [`IndexStore::file_outline`].
+///
+/// Symbol id format: `<file_path>::<segment>(.<segment>)*#<kind>`. The
+/// segments encode nesting; we walk parent prefixes and drop the row when
+/// any ancestor matches a known function/method in this file.
+fn filter_function_local(rows: Vec<Value>) -> Vec<Value> {
+    use std::collections::HashSet;
+
+    let function_paths: HashSet<String> = rows
+        .iter()
+        .filter_map(|s| {
+            let kind = s.get("kind").and_then(Value::as_str)?;
+            if kind != "function" && kind != "method" {
+                return None;
+            }
+            let id = s.get("id").and_then(Value::as_str)?;
+            // strip `<file>::` and `#<kind>` to get the dotted path
+            let after_file = id.split_once("::").map(|(_, t)| t).unwrap_or(id);
+            let dotted = after_file
+                .rsplit_once('#')
+                .map(|(d, _)| d)
+                .unwrap_or(after_file);
+            Some(dotted.to_string())
+        })
+        .collect();
+
+    if function_paths.is_empty() {
+        return rows;
+    }
+
+    rows.into_iter()
+        .filter(|s| {
+            let Some(id) = s.get("id").and_then(Value::as_str) else {
+                return true;
+            };
+            let after_file = id.split_once("::").map(|(_, t)| t).unwrap_or(id);
+            let dotted = after_file
+                .rsplit_once('#')
+                .map(|(d, _)| d)
+                .unwrap_or(after_file);
+            // Walk *strict* ancestors only (skip the symbol's own path).
+            let parts: Vec<&str> = dotted.split('.').collect();
+            for i in 0..parts.len().saturating_sub(1) {
+                let prefix = parts[..=i].join(".");
+                if function_paths.contains(&prefix) {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect()
+}
+
 /// Paths under a `SKIP_DIRS` top-level directory (e.g. `target/`, `.git/`).
 /// Storage-only filter: belt-and-suspenders layer on top of the walker.
 /// Per-language manifest / build-script noise (`build.rs`, `package.json`, …)
@@ -238,17 +295,19 @@ impl IndexStore {
         let mut stmt = conn.prepare_cached(
             "SELECT id, kind, name, signature, start_line, end_line FROM symbols WHERE file_path = ?1 ORDER BY start_line",
         )?;
-        let rows = stmt.query_map([file_path], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, String>(0)?,
-                "kind": row.get::<_, String>(1)?,
-                "name": row.get::<_, String>(2)?,
-                "signature": row.get::<_, String>(3)?,
-                "line": row.get::<_, u32>(4)?,
-                "end_line": row.get::<_, u32>(5)?,
-            }))
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        let rows: Vec<Value> = stmt
+            .query_map([file_path], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, String>(0)?,
+                    "kind": row.get::<_, String>(1)?,
+                    "name": row.get::<_, String>(2)?,
+                    "signature": row.get::<_, String>(3)?,
+                    "line": row.get::<_, u32>(4)?,
+                    "end_line": row.get::<_, u32>(5)?,
+                }))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(filter_function_local(rows))
     }
 
     /// Heuristic reference search: symbols whose stored `source_text` contains `needle`.

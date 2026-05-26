@@ -56,11 +56,13 @@ static GENERIC_VERB_STOPLIST: phf::Set<&'static str> = phf::phf_set! {
     "data", "meta", "state", "status", "result", "error", "option",
 };
 
-static IDENT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[A-Za-z_][A-Za-z0-9_]*").unwrap());
+static IDENT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z_][A-Za-z0-9_]*").unwrap());
 
 fn build_identifier_stoplist() -> FxHashSet<String> {
-    let mut set: FxHashSet<String> = GENERIC_VERB_STOPLIST.iter().map(|s| (*s).to_string()).collect();
+    let mut set: FxHashSet<String> = GENERIC_VERB_STOPLIST
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
     for kw in codesight_language_support::all_reserved_identifiers() {
         set.insert(kw.to_ascii_lowercase());
     }
@@ -288,7 +290,10 @@ mod tests {
         assert!(is_edge_target_kind("enum", "FileClass"));
         assert!(is_edge_target_kind("type", "SymbolId"));
         // Top-level free functions
-        assert!(is_edge_target_kind("function", "adjacency_with_usage_edges"));
+        assert!(is_edge_target_kind(
+            "function",
+            "adjacency_with_usage_edges"
+        ));
         assert!(is_edge_target_kind("fn", "build_symbol_usage_adjacency"));
     }
 

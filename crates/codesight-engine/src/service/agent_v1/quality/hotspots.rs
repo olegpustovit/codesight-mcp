@@ -24,10 +24,11 @@ impl CodeService {
         let timer = MetaBuilder::new(0).with_confidence(Confidence::Partial);
         let data = quality::hotspots_payload(&store, min_complexity, top_n, include_conventional)?;
 
-        // FIXUP T1.2: point the agent at a split-planning follow-up.
-        // Previously this emitted `rename_safety` with `new_name == name`
-        // (a semantic no-op); `refactor_targets` actually helps identify
-        // what inside the hotspot file to split.
+        // Tier 6.1: point the agent at a real follow-up tool. Previously this
+        // emitted `evaluate_quality analysis=refactor_targets`, neither of
+        // which exist on the public surface. Use `impact analysis=blast_radius`
+        // — that tells the caller how disruptive a refactor of the hotspot
+        // function will be before they touch it.
         let top = data.pointer("/hotspots").and_then(Value::as_array);
         let actionable_next = top
             .map(|rows| {
@@ -36,15 +37,14 @@ impl CodeService {
                     .filter_map(|row| {
                         let name = row.get("name").and_then(Value::as_str)?;
                         let file = row.get("file").and_then(Value::as_str)?;
+                        let kind = row.get("kind").and_then(Value::as_str).unwrap_or("function");
                         Some(json!({
-                            "tool": "evaluate_quality",
+                            "tool": "impact",
                             "args": {
-                                "source_id": args.source_id,
-                                "analysis": "refactor_targets",
-                                "file_path": file,
-                                "top_caller_files": 5,
+                                "analysis": "blast_radius",
+                                "ref": format!("{file}::{name}#{kind}"),
                             },
-                            "reason": format!("Identify split candidates inside `{name}` ({file}) before refactoring."),
+                            "reason": format!("Blast radius for `{name}` ({file}) — gauge cost before refactoring this hotspot."),
                         }))
                     })
                     .collect::<Vec<_>>()

@@ -118,9 +118,7 @@ impl IndexStore {
                 .score
                 .partial_cmp(&left.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    path_depth(&left.file).cmp(&path_depth(&right.file))
-                })
+                .then_with(|| path_depth(&left.file).cmp(&path_depth(&right.file)))
                 .then_with(|| left.name.len().cmp(&right.name.len()))
                 .then_with(|| left.id.cmp(&right.id))
         });
@@ -330,14 +328,12 @@ fn rerank_candidate(
     } else {
         0.0
     };
-    let name_substring = if !trimmed_query.is_empty()
-        && name_prefix == 0.0
-        && name_lower.contains(trimmed_query)
-    {
-        0.4
-    } else {
-        0.0
-    };
+    let name_substring =
+        if !trimmed_query.is_empty() && name_prefix == 0.0 && name_lower.contains(trimmed_query) {
+            0.4
+        } else {
+            0.0
+        };
 
     let exact_phrase = if format!(
         "{} {} {} {}",

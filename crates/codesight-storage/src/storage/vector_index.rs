@@ -107,7 +107,7 @@ pub fn delete_vectors(
     let mut n = 0usize;
     for sid in stable_ids {
         if let Ok(row_id) = id_stmt.query_row(params![*sid], |r| r.get::<_, i64>(0)) {
-            n += del_stmt.execute(params![row_id])? as usize;
+            n += del_stmt.execute(params![row_id])?;
         }
     }
     Ok(n)

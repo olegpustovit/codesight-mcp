@@ -101,18 +101,22 @@ pub struct HealthArgs {
 /// Auto-indexes the cwd if it isn't already known. Returns the canonical
 /// `source_id` ready to feed to underlying handlers.
 fn resolve_implicit_source_id(svc: &CodeService) -> Result<(String, String), ToolError> {
-    let cwd = std::env::current_dir().map_err(|e| ToolError::new(
-        ToolErrorCategory::Internal,
-        "CWD_UNREADABLE",
-        format!("could not read current working directory: {e}"),
-        json!({}),
-    ))?;
-    let canonical = cwd.canonicalize().map_err(|e| ToolError::new(
-        ToolErrorCategory::Internal,
-        "CWD_UNREADABLE",
-        format!("could not canonicalize cwd: {e}"),
-        json!({ "cwd": cwd.display().to_string() }),
-    ))?;
+    let cwd = std::env::current_dir().map_err(|e| {
+        ToolError::new(
+            ToolErrorCategory::Internal,
+            "CWD_UNREADABLE",
+            format!("could not read current working directory: {e}"),
+            json!({}),
+        )
+    })?;
+    let canonical = cwd.canonicalize().map_err(|e| {
+        ToolError::new(
+            ToolErrorCategory::Internal,
+            "CWD_UNREADABLE",
+            format!("could not canonicalize cwd: {e}"),
+            json!({ "cwd": cwd.display().to_string() }),
+        )
+    })?;
     let source_id = normalize_repo_id(&canonical);
     let path_str = canonical.to_string_lossy().to_string();
     // Touch ensure_repo_store to lazily auto-index when missing. We discard
@@ -149,15 +153,17 @@ impl CodeService {
     pub(in crate::service) fn cutplan_search(&self, v: Value) -> anyhow::Result<Value> {
         let args: SearchArgs = match serde_json::from_value(v) {
             Ok(a) => a,
-            Err(e) => return self.error_response(
-                &MetaBuilder::new(0),
-                ToolError::new(
-                    ToolErrorCategory::InvalidArgument,
-                    "INVALID_ARGUMENT",
-                    format!("invalid search args: {e}"),
-                    json!({}),
-                ),
-            ),
+            Err(e) => {
+                return self.error_response(
+                    &MetaBuilder::new(0),
+                    ToolError::new(
+                        ToolErrorCategory::InvalidArgument,
+                        "INVALID_ARGUMENT",
+                        format!("invalid search args: {e}"),
+                        json!({}),
+                    ),
+                );
+            }
         };
 
         let (sid, _) = match resolve_implicit_source_id(self) {
@@ -182,7 +188,11 @@ impl CodeService {
             _ => (
                 "keyword",
                 if scope_is_markdown { "docs" } else { "code" },
-                if scope_is_markdown { Some(vec!["section"]) } else { None },
+                if scope_is_markdown {
+                    Some(vec!["section"])
+                } else {
+                    None
+                },
             ),
         };
 
@@ -215,21 +225,18 @@ impl CodeService {
         // P2.6: fuzzy hits already merge into items[] in the underlying
         // handler when `fuzzy=true`, but defensive: if a side-channel
         // `data.fuzzy` lane is present, fold it in and drop the lane.
-        if let Value::Object(ref mut body) = result {
-            if let Some(Value::Object(data)) = body.get_mut("data") {
-                if let Some(fuzzy_lane) = data.remove("fuzzy") {
-                    if let Some(Value::Array(items)) = data.get_mut("items") {
-                        if let Some(arr) = fuzzy_lane.as_array() {
-                            for hit in arr {
-                                let mut tagged = hit.clone();
-                                if let Some(o) = tagged.as_object_mut() {
-                                    o.insert("match_type".to_string(), json!("fuzzy"));
-                                }
-                                items.push(tagged);
-                            }
-                        }
-                    }
+        if let Value::Object(ref mut body) = result
+            && let Some(Value::Object(data)) = body.get_mut("data")
+            && let Some(fuzzy_lane) = data.remove("fuzzy")
+            && let Some(Value::Array(items)) = data.get_mut("items")
+            && let Some(arr) = fuzzy_lane.as_array()
+        {
+            for hit in arr {
+                let mut tagged = hit.clone();
+                if let Some(o) = tagged.as_object_mut() {
+                    o.insert("match_type".to_string(), json!("fuzzy"));
                 }
+                items.push(tagged);
             }
         }
         Ok(result)
@@ -240,15 +247,17 @@ impl CodeService {
     pub(in crate::service) fn cutplan_outline(&self, v: Value) -> anyhow::Result<Value> {
         let args: OutlineArgs = match serde_json::from_value(v) {
             Ok(a) => a,
-            Err(e) => return self.error_response(
-                &MetaBuilder::new(0),
-                ToolError::new(
-                    ToolErrorCategory::InvalidArgument,
-                    "INVALID_ARGUMENT",
-                    format!("invalid outline args: {e}"),
-                    json!({}),
-                ),
-            ),
+            Err(e) => {
+                return self.error_response(
+                    &MetaBuilder::new(0),
+                    ToolError::new(
+                        ToolErrorCategory::InvalidArgument,
+                        "INVALID_ARGUMENT",
+                        format!("invalid outline args: {e}"),
+                        json!({}),
+                    ),
+                );
+            }
         };
 
         let (sid, _) = match resolve_implicit_source_id(self) {
@@ -273,9 +282,15 @@ impl CodeService {
         };
 
         let mut translated = json!({ "source_id": sid, "view": view });
-        if let Some(p) = args.path { translated["file_path"] = json!(p); }
-        if let Some(ps) = args.paths { translated["file_paths"] = json!(ps); }
-        if let Some(t) = args.max_tokens { translated["max_tokens"] = json!(t); }
+        if let Some(p) = args.path {
+            translated["file_path"] = json!(p);
+        }
+        if let Some(ps) = args.paths {
+            translated["file_paths"] = json!(ps);
+        }
+        if let Some(t) = args.max_tokens {
+            translated["max_tokens"] = json!(t);
+        }
 
         let mut result = self.inspect_structure(translated)?;
         freeze_envelope(&mut result);
@@ -287,15 +302,17 @@ impl CodeService {
     pub(in crate::service) fn cutplan_read(&self, v: Value) -> anyhow::Result<Value> {
         let args: ReadArgs = match serde_json::from_value(v) {
             Ok(a) => a,
-            Err(e) => return self.error_response(
-                &MetaBuilder::new(0),
-                ToolError::new(
-                    ToolErrorCategory::InvalidArgument,
-                    "INVALID_ARGUMENT",
-                    format!("invalid read args: {e}"),
-                    json!({}),
-                ),
-            ),
+            Err(e) => {
+                return self.error_response(
+                    &MetaBuilder::new(0),
+                    ToolError::new(
+                        ToolErrorCategory::InvalidArgument,
+                        "INVALID_ARGUMENT",
+                        format!("invalid read args: {e}"),
+                        json!({}),
+                    ),
+                );
+            }
         };
 
         let (sid, _) = match resolve_implicit_source_id(self) {
@@ -315,8 +332,12 @@ impl CodeService {
             "source_id": sid,
             "refs": object_refs,
         });
-        if let Some(c) = args.context_lines { translated["context_lines"] = json!(c); }
-        if let Some(t) = args.max_tokens { translated["max_tokens"] = json!(t); }
+        if let Some(c) = args.context_lines {
+            translated["context_lines"] = json!(c);
+        }
+        if let Some(t) = args.max_tokens {
+            translated["max_tokens"] = json!(t);
+        }
 
         let mut result = self.read_content(translated)?;
 
@@ -332,28 +353,37 @@ impl CodeService {
         // contract): downgrade overall to "partial" when a ref is a bare path
         // with no slice or symbol, so callers know to outline first.
         let any_full_file = args.refs.iter().any(|r| !r.contains(':'));
-        if any_full_file {
-            if let Value::Object(ref mut body) = result {
-                if let Some(Value::Object(meta)) = body.get_mut("_meta") {
-                    meta.insert("confidence".to_string(), json!("partial"));
-                }
-                if let Some(Value::Array(warnings)) = body.get_mut("warnings") {
-                    warnings.push(json!({
-                        "code": "OUTLINE_FIRST",
-                        "message": "whole-file read — call outline view=file path=… first then read specific symbols.",
-                    }));
-                }
+        if any_full_file && let Value::Object(ref mut body) = result {
+            if let Some(Value::Object(meta)) = body.get_mut("_meta") {
+                meta.insert("confidence".to_string(), json!("partial"));
+            }
+            if let Some(Value::Array(warnings)) = body.get_mut("warnings") {
+                warnings.push(json!({
+                    "code": "OUTLINE_FIRST",
+                    "message": "whole-file read — call outline view=file path=… first then read specific symbols.",
+                }));
             }
         }
         Ok(result)
     }
 
+    /// Tier 3.2: append structural neighbors (import + reference graph) for
+    /// `read` requests with `with_neighbors=true`. Dispatches by ref form so
+    /// symbol and range refs no longer silently no-op:
+    /// - `path::Name#kind` / `id:<sid>` → file imports + symbol references
+    /// - `path:N-M` / `path:N` / `path` → file imports
+    /// - `section:…` → no neighbors (documented in `tools.json`)
     fn attach_structural_neighbors(&self, response: &mut Value, refs: &[String]) {
-        let Value::Object(body) = response else { return; };
-        let Some(Value::Object(data)) = body.get_mut("data") else { return; };
+        let Value::Object(body) = response else {
+            return;
+        };
+        let Some(Value::Object(data)) = body.get_mut("data") else {
+            return;
+        };
 
         let mut neighbors: Vec<Value> = Vec::new();
-        let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        let mut seen_paths: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        let mut seen_symbols: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
 
         let (sid, _) = match resolve_implicit_source_id(self) {
             Ok(p) => p,
@@ -361,29 +391,67 @@ impl CodeService {
         };
 
         for ref_str in refs {
-            let path = match ref_str.split_once("::") {
-                Some((p, _)) => p.to_string(),
-                None => match ref_str.split_once(':') {
-                    Some((p, _)) => p.to_string(),
-                    None => ref_str.to_string(),
-                },
-            };
-            if path.is_empty() || !seen.insert(path.clone()) { continue; }
+            let parsed = parse_ref_string(ref_str);
+            let kind = parsed.get("kind").and_then(Value::as_str).unwrap_or("");
 
-            // Outgoing imports.
-            if let Ok(imp_resp) = self.inspect_graph(json!({
-                "source_id": sid,
-                "graph": "imports",
-                "file_path": path,
-            })) {
-                if let Some(items) = imp_resp.pointer("/data/edges").and_then(Value::as_array) {
-                    for item in items.iter().take(10) {
-                        neighbors.push(json!({
-                            "kind": "import",
-                            "from": path,
-                            "to": item,
-                        }));
-                    }
+            // Determine host file path for imports lookup.
+            let host_path = parsed
+                .get("path")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    parsed
+                        .get("stable_id")
+                        .and_then(Value::as_str)
+                        .and_then(|s| s.split("::").next())
+                        .map(|s| s.to_string())
+                })
+                .filter(|p| !p.is_empty());
+
+            // For symbol refs, attach reference-graph neighbors keyed by the
+            // bare identifier (last segment of the qualified name).
+            if kind == "symbol"
+                && let Some(ident) = extract_identifier_from_ref(ref_str)
+                && seen_symbols.insert(ident.clone())
+                && let Ok(refs_resp) = self.inspect_graph(json!({
+                    "source_id": sid,
+                    "graph": "find_references",
+                    "identifier": ident,
+                    "limit": 5,
+                }))
+                && let Some(items) = refs_resp
+                    .pointer("/data/semantic_references")
+                    .and_then(Value::as_array)
+            {
+                for item in items.iter().take(5) {
+                    neighbors.push(json!({
+                        "kind": "reference",
+                        "to_symbol": ident,
+                        "from": item,
+                    }));
+                }
+            }
+
+            // Outgoing imports for the host file (skip section refs — there
+            // is no host file at the symbol layer for doc sections).
+            if kind == "section" {
+                continue;
+            }
+            if let Some(path) = host_path
+                && seen_paths.insert(path.clone())
+                && let Ok(imp_resp) = self.inspect_graph(json!({
+                    "source_id": sid,
+                    "graph": "imports",
+                    "file_path": path,
+                }))
+                && let Some(items) = imp_resp.pointer("/data/edges").and_then(Value::as_array)
+            {
+                for item in items.iter().take(10) {
+                    neighbors.push(json!({
+                        "kind": "import",
+                        "from": path,
+                        "to": item,
+                    }));
                 }
             }
         }
@@ -398,15 +466,17 @@ impl CodeService {
     pub(in crate::service) fn cutplan_references(&self, v: Value) -> anyhow::Result<Value> {
         let args: ReferencesArgs = match serde_json::from_value(v) {
             Ok(a) => a,
-            Err(e) => return self.error_response(
-                &MetaBuilder::new(0),
-                ToolError::new(
-                    ToolErrorCategory::InvalidArgument,
-                    "INVALID_ARGUMENT",
-                    format!("invalid references args: {e}"),
-                    json!({}),
-                ),
-            ),
+            Err(e) => {
+                return self.error_response(
+                    &MetaBuilder::new(0),
+                    ToolError::new(
+                        ToolErrorCategory::InvalidArgument,
+                        "INVALID_ARGUMENT",
+                        format!("invalid references args: {e}"),
+                        json!({}),
+                    ),
+                );
+            }
         };
 
         let (sid, _) = match resolve_implicit_source_id(self) {
@@ -428,14 +498,19 @@ impl CodeService {
                     );
                 };
                 // Extract identifier name from ref string (path::Name#kind or id:<stable>).
-                let identifier = extract_identifier_from_ref(ref_str).unwrap_or_else(|| ref_str.to_string());
+                let identifier =
+                    extract_identifier_from_ref(ref_str).unwrap_or_else(|| ref_str.to_string());
                 let mut t = json!({
                     "source_id": sid,
                     "graph": "find_references",
                     "identifier": identifier,
                 });
-                if let Some(s) = args.scope.as_deref() { t["scope"] = json!(s); }
-                if let Some(l) = args.limit { t["limit"] = json!(l); }
+                if let Some(s) = args.scope.as_deref() {
+                    t["scope"] = json!(s);
+                }
+                if let Some(l) = args.limit {
+                    t["limit"] = json!(l);
+                }
                 t
             }
             "imports" | "importers" => {
@@ -474,7 +549,11 @@ impl CodeService {
         // P2.1: rewrite `name` → `identifier` on symbol-reference rows. Move
         // candidate text hits into `weak_hits[]` (opt-in via include_weak).
         if args.kind == "symbol" {
-            reshape_references_symbol(&mut result, args.r#ref.as_deref(), args.include_weak.unwrap_or(false));
+            reshape_references_symbol(
+                &mut result,
+                args.r#ref.as_deref(),
+                args.include_weak.unwrap_or(false),
+            );
         }
 
         freeze_envelope(&mut result);
@@ -486,15 +565,17 @@ impl CodeService {
     pub(in crate::service) fn cutplan_impact(&self, v: Value) -> anyhow::Result<Value> {
         let args: ImpactArgs = match serde_json::from_value(v) {
             Ok(a) => a,
-            Err(e) => return self.error_response(
-                &MetaBuilder::new(0),
-                ToolError::new(
-                    ToolErrorCategory::InvalidArgument,
-                    "INVALID_ARGUMENT",
-                    format!("invalid impact args: {e}"),
-                    json!({}),
-                ),
-            ),
+            Err(e) => {
+                return self.error_response(
+                    &MetaBuilder::new(0),
+                    ToolError::new(
+                        ToolErrorCategory::InvalidArgument,
+                        "INVALID_ARGUMENT",
+                        format!("invalid impact args: {e}"),
+                        json!({}),
+                    ),
+                );
+            }
         };
 
         let (sid, _) = match resolve_implicit_source_id(self) {
@@ -521,22 +602,23 @@ impl CodeService {
         }
     }
 
-    fn cutplan_impact_blast_radius(
-        &self,
-        sid: &str,
-        args: &ImpactArgs,
-    ) -> anyhow::Result<Value> {
+    fn cutplan_impact_blast_radius(&self, sid: &str, args: &ImpactArgs) -> anyhow::Result<Value> {
         let identifier = match extract_identifier_from_ref(&args.r#ref) {
             Some(id) => id,
-            None => return self.error_response(
-                &MetaBuilder::new(0),
-                ToolError::new(
-                    ToolErrorCategory::InvalidArgument,
-                    "INVALID_ARGUMENT",
-                    format!("blast_radius: could not parse identifier from ref '{}'", args.r#ref),
-                    json!({ "ref": args.r#ref }),
-                ),
-            ),
+            None => {
+                return self.error_response(
+                    &MetaBuilder::new(0),
+                    ToolError::new(
+                        ToolErrorCategory::InvalidArgument,
+                        "INVALID_ARGUMENT",
+                        format!(
+                            "blast_radius: could not parse identifier from ref '{}'",
+                            args.r#ref
+                        ),
+                        json!({ "ref": args.r#ref }),
+                    ),
+                );
+            }
         };
 
         // Walk the structural references graph and deduplicate by file.
@@ -548,14 +630,20 @@ impl CodeService {
 
         let mut files: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         let mut weak_files: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-        if let Some(arr) = refs_response.pointer("/data/semantic_references").and_then(Value::as_array) {
+        if let Some(arr) = refs_response
+            .pointer("/data/semantic_references")
+            .and_then(Value::as_array)
+        {
             for row in arr {
                 if let Some(file) = row.get("file").and_then(Value::as_str) {
                     files.insert(file.to_string());
                 }
             }
         }
-        if let Some(arr) = refs_response.pointer("/data/candidate_text_hits").and_then(Value::as_array) {
+        if let Some(arr) = refs_response
+            .pointer("/data/candidate_text_hits")
+            .and_then(Value::as_array)
+        {
             for row in arr {
                 if let Some(file) = row.get("file").and_then(Value::as_str) {
                     weak_files.insert(file.to_string());
@@ -574,7 +662,13 @@ impl CodeService {
 
         // Confidence: safe when we have semantic refs; unreliable when none
         // and only weak text mentions exist (CUTPLAN §impact contract).
-        let confidence = if count > 0 { "safe" } else if !weak_sorted.is_empty() { "unreliable" } else { "safe" };
+        let confidence = if count > 0 {
+            "safe"
+        } else if !weak_sorted.is_empty() {
+            "unreliable"
+        } else {
+            "safe"
+        };
 
         let mut body = json!({
             "analysis": "blast_radius",
@@ -595,34 +689,37 @@ impl CodeService {
         Ok(response)
     }
 
-    fn cutplan_impact_rename_safety(
-        &self,
-        sid: &str,
-        args: &ImpactArgs,
-    ) -> anyhow::Result<Value> {
+    fn cutplan_impact_rename_safety(&self, sid: &str, args: &ImpactArgs) -> anyhow::Result<Value> {
         let new_name = match args.new_name.as_deref() {
             Some(n) if !n.is_empty() => n,
-            _ => return self.error_response(
-                &MetaBuilder::new(0),
-                ToolError::new(
-                    ToolErrorCategory::InvalidArgument,
-                    "INVALID_ARGUMENT",
-                    "rename_safety requires `new_name`",
-                    json!({}),
-                ),
-            ),
+            _ => {
+                return self.error_response(
+                    &MetaBuilder::new(0),
+                    ToolError::new(
+                        ToolErrorCategory::InvalidArgument,
+                        "INVALID_ARGUMENT",
+                        "rename_safety requires `new_name`",
+                        json!({}),
+                    ),
+                );
+            }
         };
         let identifier = match extract_identifier_from_ref(&args.r#ref) {
             Some(id) => id,
-            None => return self.error_response(
-                &MetaBuilder::new(0),
-                ToolError::new(
-                    ToolErrorCategory::InvalidArgument,
-                    "INVALID_ARGUMENT",
-                    format!("rename_safety: could not parse identifier from ref '{}'", args.r#ref),
-                    json!({ "ref": args.r#ref }),
-                ),
-            ),
+            None => {
+                return self.error_response(
+                    &MetaBuilder::new(0),
+                    ToolError::new(
+                        ToolErrorCategory::InvalidArgument,
+                        "INVALID_ARGUMENT",
+                        format!(
+                            "rename_safety: could not parse identifier from ref '{}'",
+                            args.r#ref
+                        ),
+                        json!({ "ref": args.r#ref }),
+                    ),
+                );
+            }
         };
 
         // Walk the references graph for both the old and new names.
@@ -672,9 +769,13 @@ impl CodeService {
         } else {
             json!(true)
         };
-        let confidence = if complete && collisions == 0 { "safe" }
-                         else if !complete { "partial" }
-                         else { "safe" };
+        let confidence = if complete && collisions == 0 {
+            "safe"
+        } else if !complete {
+            "partial"
+        } else {
+            "safe"
+        };
 
         let body = json!({
             "analysis": "rename_safety",
@@ -702,15 +803,17 @@ impl CodeService {
     pub(in crate::service) fn cutplan_health(&self, v: Value) -> anyhow::Result<Value> {
         let args: HealthArgs = match serde_json::from_value(v) {
             Ok(a) => a,
-            Err(e) => return self.error_response(
-                &MetaBuilder::new(0),
-                ToolError::new(
-                    ToolErrorCategory::InvalidArgument,
-                    "INVALID_ARGUMENT",
-                    format!("invalid health args: {e}"),
-                    json!({}),
-                ),
-            ),
+            Err(e) => {
+                return self.error_response(
+                    &MetaBuilder::new(0),
+                    ToolError::new(
+                        ToolErrorCategory::InvalidArgument,
+                        "INVALID_ARGUMENT",
+                        format!("invalid health args: {e}"),
+                        json!({}),
+                    ),
+                );
+            }
         };
 
         let (sid, _) = match resolve_implicit_source_id(self) {
@@ -719,14 +822,16 @@ impl CodeService {
         };
 
         let analysis = match args.analysis.as_str() {
-            "quality_signal" | "hotspots" | "dead_code" | "repo_health" => &args.analysis,
+            "quality_signal" | "hotspots" | "dead_code" | "repo_health" | "test_gaps" => {
+                &args.analysis
+            }
             other => {
                 return self.error_response(
                     &MetaBuilder::new(0),
                     ToolError::new(
                         ToolErrorCategory::InvalidArgument,
                         "INVALID_ARGUMENT",
-                        format!("analysis must be 'quality_signal', 'hotspots', 'dead_code', or 'repo_health', got '{other}'"),
+                        format!("analysis must be 'quality_signal', 'hotspots', 'dead_code', 'repo_health', or 'test_gaps', got '{other}'"),
                         json!({ "analysis": other }),
                     ),
                 );
@@ -734,11 +839,21 @@ impl CodeService {
         };
 
         let mut translated = json!({ "source_id": sid, "analysis": analysis });
-        if let Some(s) = args.scope { translated["scope"] = json!(s); }
-        if let Some(t) = args.top_n { translated["top_n"] = json!(t); }
-        if let Some(c) = args.min_confidence { translated["min_confidence"] = json!(c); }
-        if let Some(t) = args.include_tests { translated["include_tests"] = json!(t); }
-        if let Some(t) = args.max_tokens { translated["max_tokens"] = json!(t); }
+        if let Some(s) = args.scope {
+            translated["scope"] = json!(s);
+        }
+        if let Some(t) = args.top_n {
+            translated["top_n"] = json!(t);
+        }
+        if let Some(c) = args.min_confidence {
+            translated["min_confidence"] = json!(c);
+        }
+        if let Some(t) = args.include_tests {
+            translated["include_tests"] = json!(t);
+        }
+        if let Some(t) = args.max_tokens {
+            translated["max_tokens"] = json!(t);
+        }
 
         let mut result = self.evaluate_quality(translated)?;
         freeze_envelope(&mut result);
@@ -762,27 +877,27 @@ fn parse_ref_string(s: &str) -> Value {
     if let Some(rest) = trimmed.strip_prefix("section:") {
         return json!({ "kind": "section", "stable_id": rest });
     }
-    if let Some((path, _name_kind)) = trimmed.split_once("::") {
-        if !path.is_empty() {
-            return json!({ "kind": "symbol", "path": path, "stable_id": trimmed });
-        }
+    if let Some((path, _name_kind)) = trimmed.split_once("::")
+        && !path.is_empty()
+    {
+        return json!({ "kind": "symbol", "path": path, "stable_id": trimmed });
     }
-    if let Some((path, range)) = trimmed.rsplit_once(':') {
-        if !path.is_empty() {
-            let (start, end) = if let Some((a, b)) = range.split_once('-') {
-                (a.parse::<u32>().ok(), b.parse::<u32>().ok())
-            } else {
-                let n = range.parse::<u32>().ok();
-                (n, n)
-            };
-            if let (Some(s_line), Some(e_line)) = (start, end) {
-                return json!({
-                    "kind": "file",
-                    "path": path,
-                    "start_line": s_line,
-                    "end_line": e_line,
-                });
-            }
+    if let Some((path, range)) = trimmed.rsplit_once(':')
+        && !path.is_empty()
+    {
+        let (start, end) = if let Some((a, b)) = range.split_once('-') {
+            (a.parse::<u32>().ok(), b.parse::<u32>().ok())
+        } else {
+            let n = range.parse::<u32>().ok();
+            (n, n)
+        };
+        if let (Some(s_line), Some(e_line)) = (start, end) {
+            return json!({
+                "kind": "file",
+                "path": path,
+                "start_line": s_line,
+                "end_line": e_line,
+            });
         }
     }
     // Bare path — whole file read. The adapter will downgrade confidence.
@@ -829,8 +944,12 @@ fn reshape_references_symbol(value: &mut Value, ref_str: Option<&str>, include_w
         .and_then(extract_identifier_from_ref)
         .unwrap_or_default();
 
-    let Value::Object(body) = value else { return; };
-    let Some(Value::Object(data)) = body.get_mut("data") else { return; };
+    let Value::Object(body) = value else {
+        return;
+    };
+    let Some(Value::Object(data)) = body.get_mut("data") else {
+        return;
+    };
 
     // Rewrite semantic_references rows: name → identifier (= searched name).
     if let Some(Value::Array(items)) = data.get_mut("semantic_references") {
@@ -845,20 +964,20 @@ fn reshape_references_symbol(value: &mut Value, ref_str: Option<&str>, include_w
     }
 
     // Move candidate_text_hits to weak_hits[] (opt-in only).
-    if let Some(weak) = data.remove("candidate_text_hits") {
-        if include_weak {
-            // Tag each weak hit with identifier too.
-            let mut tagged = weak;
-            if let Value::Array(arr) = &mut tagged {
-                for item in arr.iter_mut() {
-                    if let Some(o) = item.as_object_mut() {
-                        o.insert("identifier".to_string(), json!(identifier));
-                        o.remove("name");
-                    }
+    if let Some(weak) = data.remove("candidate_text_hits")
+        && include_weak
+    {
+        // Tag each weak hit with identifier too.
+        let mut tagged = weak;
+        if let Value::Array(arr) = &mut tagged {
+            for item in arr.iter_mut() {
+                if let Some(o) = item.as_object_mut() {
+                    o.insert("identifier".to_string(), json!(identifier));
+                    o.remove("name");
                 }
             }
-            data.insert("weak_hits".to_string(), tagged);
         }
+        data.insert("weak_hits".to_string(), tagged);
     }
     data.remove("definitions");
     data.remove("definition_count");

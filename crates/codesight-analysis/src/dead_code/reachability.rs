@@ -47,8 +47,8 @@
 //!    so the default `min_confidence=0.5` filter hides it but `paranoid`
 //!    surfaces it.
 
-use std::collections::VecDeque;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
 use std::path::Path;
 
 use codesight_core::reachability::EdgeKind;
@@ -166,12 +166,10 @@ pub(crate) fn build_repo_reachability(
         detect_string_dispatch_signals(all_symbols, file_contents, include_tests)
     } else {
         match store.dispatch_root_file_sets() {
-            Ok((strong, weak)) if !strong.is_empty() || !weak.is_empty() => {
-                StringDispatchSignals {
-                    strong_roots: strong,
-                    weak_roots: weak,
-                }
-            }
+            Ok((strong, weak)) if !strong.is_empty() || !weak.is_empty() => StringDispatchSignals {
+                strong_roots: strong,
+                weak_roots: weak,
+            },
             _ => detect_string_dispatch_signals(all_symbols, file_contents, include_tests),
         }
     };
@@ -253,7 +251,13 @@ pub(crate) fn build_repo_reachability(
     let test_only_alive = if include_tests {
         FxHashSet::default()
     } else {
-        compute_test_only_alive(all_files, dep_graph, &extra_edges, &live_roots, &reachable_files)
+        compute_test_only_alive(
+            all_files,
+            dep_graph,
+            &extra_edges,
+            &live_roots,
+            &reachable_files,
+        )
     };
 
     let framework_warning = if explicit_roots_found || language_entry_contributed {
@@ -517,7 +521,7 @@ fn compute_test_only_alive(
 ) -> FxHashSet<String> {
     let mut test_seeds: FxHashSet<String> = FxHashSet::default();
     for file in all_files {
-        if is_test_target_root(file) {
+        if codesight_language_support::is_test_target_root(file) {
             test_seeds.insert(file.clone());
         }
     }
@@ -526,10 +530,16 @@ fn compute_test_only_alive(
     }
     let mut graph: FxHashMap<String, Vec<String>> = FxHashMap::default();
     for (s, ts) in dep_graph {
-        graph.entry(s.clone()).or_default().extend(ts.iter().cloned());
+        graph
+            .entry(s.clone())
+            .or_default()
+            .extend(ts.iter().cloned());
     }
     for (s, ts) in extra_edges {
-        graph.entry(s.clone()).or_default().extend(ts.iter().cloned());
+        graph
+            .entry(s.clone())
+            .or_default()
+            .extend(ts.iter().cloned());
     }
     let mut seeds = prod_live_roots.clone();
     for t in &test_seeds {
@@ -537,18 +547,4 @@ fn compute_test_only_alive(
     }
     let test_reachable = traverse_reachable_files(&graph, &seeds);
     test_reachable.difference(prod_reachable).cloned().collect()
-}
-
-fn is_test_target_root(file: &str) -> bool {
-    if !file.ends_with(".rs") {
-        return false;
-    }
-    if let Some(rest) = file.strip_prefix("tests/") {
-        return rest.matches('/').count() == 0;
-    }
-    if let Some(idx) = file.rfind("/tests/") {
-        let rest = &file[idx + 7..];
-        return !rest.contains('/');
-    }
-    false
 }

@@ -2,7 +2,7 @@
   {
     "name": "search",
     "capabilities_version": "v3",
-    "description": "Ranked search over symbols, doc sections, and raw file text — preferred over native Grep. `mode=keyword` (default) is the fastest path for identifiers; `mode=regex` scans file text; `mode=nl` is a question-shaped query that defaults to code-only and falls back to BM25 when embeddings are unavailable. `scope` is a glob (`*.md`, `crates/foo/**`) that narrows both file paths and unit kinds in one knob — there is no separate `unit_kinds`/`file_pattern`. With `fuzzy=true`, fuzzy hits are merged into `items[]` with `match_type: \"fuzzy\"` (no side-channel). Frozen envelope: `{ok, data, _meta:{confidence, timing_ms, tokens_saved}, warnings}`.",
+    "description": "Ranked search over symbols, doc sections, and raw file text — preferred over native Grep. `mode=keyword` (default) is the fastest path for identifiers; `mode=regex` scans file text; `mode=nl` is a question-shaped query that defaults to code-only and falls back to BM25 when embeddings are unavailable. `scope` is a glob (`*.md`, `crates/foo/**`) that narrows both file paths and unit kinds in one knob — there is no separate `unit_kinds`/`file_pattern`. With `fuzzy=true`, fuzzy hits are labeled in `items[]` with `match_type: \"exact\"` (literal-equal), `\"prefix\"` (case-insensitive prefix), `\"partial\"` (BM25 token-overlap), or `\"fuzzy\"` (nucleo-matcher). Calibration warnings (`NO_EXACT_MATCH`, `AMBIGUOUS_IDENTIFIER`, `OVERBROAD_QUERY`) demote `confidence` to `partial` when results are suggestive rather than authoritative. Mode-conditional meta: `mode=keyword|nl` emits `_meta.tokens_saved`; `mode=regex` emits `_meta.bytes_scanned` and `_meta.files_scanned` instead — regex inherently can't beat raw `rg` on tokens, so the savings field is meaningless there. Frozen envelope: `{ok, data, _meta:{confidence, timing_ms, …}, warnings}`.",
     "inputSchema": {
       "type": "object",
       "required": ["query"],
@@ -18,9 +18,10 @@
           "type": "string",
           "description": "Glob narrowing path *and* unit kind in one knob. `*.md` → docs only; `crates/foo/**` → that crate; omit for the whole repo."
         },
-        "limit": { "type": "integer", "default": 25, "description": "Max items returned." },
+        "limit": { "type": "integer", "default": 25, "description": "Global cap on items returned (across all files)." },
+        "per_file_limit": { "type": "integer", "description": "`mode=regex` only: optional ripgrep-style per-file cap on hits. When set, no single file contributes more than this many hits even if `limit` would allow it. Ignored for keyword/NL." },
         "max_tokens": { "type": "integer", "description": "Soft cap on serialized item bytes (~4 bytes/token)." },
-        "fuzzy": { "type": "boolean", "default": false, "description": "Merge nucleo-matcher fuzzy hits into `items[]` with `match_type: \"fuzzy\"`." }
+        "fuzzy": { "type": "boolean", "default": false, "description": "Merge nucleo-matcher fuzzy hits into `items[]` with `match_type: \"fuzzy\"` / `\"prefix\"` / `\"partial\"`." }
       }
     },
     "examples": [
@@ -114,12 +115,12 @@
   {
     "name": "health",
     "capabilities_version": "v3",
-    "description": "Quality signals. `quality_signal` reports the four agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) plus structural root causes. `hotspots` returns top-N files by churn × cyclomatic. `dead_code` walks reachability + a string-literal-dispatch heuristic with a confidence floor of 0.5. `repo_health` aggregates the three plus cycle count.",
+    "description": "Quality signals. `quality_signal` reports the four agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) plus structural root causes. `hotspots` returns top-N functions by churn × cyclomatic. `dead_code` walks reachability + a string-literal-dispatch heuristic; cli/bin/hooks/main paths are capped at confidence < 0.5 with a `MANUAL_REVIEW_REQUIRED` warning since externally-invoked entry points can't be statically reached. `repo_health` aggregates the others plus cycle count, using cached dead-code output to stay under the warm SLA. `test_gaps` ranks untested high-risk symbols by `cyclomatic × (1 + fan_in) × (1 + ln(1 + churn))`.",
     "inputSchema": {
       "type": "object",
       "required": ["analysis"],
       "properties": {
-        "analysis": { "type": "string", "enum": ["quality_signal", "hotspots", "dead_code", "repo_health"], "description": "Which analysis to run." },
+        "analysis": { "type": "string", "enum": ["quality_signal", "hotspots", "dead_code", "repo_health", "test_gaps"], "description": "Which analysis to run." },
         "scope": { "type": "string", "description": "Optional path prefix to scope the analysis." },
         "top_n": { "type": "integer", "description": "`hotspots` / `dead_code`: cap returned list." },
         "min_confidence": { "type": "number", "description": "`dead_code`: minimum confidence threshold (default 0.5)." },
@@ -131,7 +132,8 @@
       { "name": "agent-readiness for a slice", "args": { "analysis": "quality_signal", "scope": "crates/codesight-engine/src/" } },
       { "name": "hotspots", "args": { "analysis": "hotspots", "top_n": 25 } },
       { "name": "dead code", "args": { "analysis": "dead_code", "top_n": 25 } },
-      { "name": "repo health", "args": { "analysis": "repo_health" } }
+      { "name": "repo health", "args": { "analysis": "repo_health" } },
+      { "name": "test gaps", "args": { "analysis": "test_gaps", "top_n": 25 } }
     ]
   }
 ]

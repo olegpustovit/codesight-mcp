@@ -52,10 +52,7 @@ impl CodeService {
             "imports": imports,
             "has_imports": !imports.is_empty(),
         });
-        self.success_response(
-            &MetaBuilder::new(0).with_confidence(Confidence::Safe),
-            data,
-        )
+        self.success_response(&MetaBuilder::new(0).with_confidence(Confidence::Safe), data)
     }
 
     pub(super) fn graph_importers(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {

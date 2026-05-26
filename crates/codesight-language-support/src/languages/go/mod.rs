@@ -292,10 +292,34 @@ impl Language for Go {
     }
     fn reserved_identifiers(&self) -> &'static [&'static str] {
         &[
-            "break", "case", "chan", "const", "continue", "default", "defer", "else",
-            "fallthrough", "for", "func", "go", "goto", "if", "import", "interface", "map",
-            "package", "range", "return", "select", "struct", "switch", "type", "var", "nil",
-            "true", "false",
+            "break",
+            "case",
+            "chan",
+            "const",
+            "continue",
+            "default",
+            "defer",
+            "else",
+            "fallthrough",
+            "for",
+            "func",
+            "go",
+            "goto",
+            "if",
+            "import",
+            "interface",
+            "map",
+            "package",
+            "range",
+            "return",
+            "select",
+            "struct",
+            "switch",
+            "type",
+            "var",
+            "nil",
+            "true",
+            "false",
         ]
     }
 }

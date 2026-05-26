@@ -177,12 +177,12 @@ impl CodeService {
 
         let mut anti_patterns = Vec::new();
         let blast_radius_calls = session
-            .evaluate_impact_usage
+            .impact_usage
             .get("blast_radius")
             .copied()
             .unwrap_or(0);
         let path_rename_calls = session
-            .evaluate_impact_usage
+            .impact_usage
             .get("path_rename")
             .copied()
             .unwrap_or(0);
@@ -201,7 +201,7 @@ impl CodeService {
         {
             anti_patterns.push(json!({
                 "code": "HAND_ROLLED_PATH_RENAME",
-                "message": "Edit/Write hand-rewrote use-prefix imports across 5+ files with no blast_radius call. Prefer evaluate_impact analysis=path_rename.",
+                "message": "Edit/Write hand-rewrote use-prefix imports across 5+ files with no blast_radius call. Run `impact analysis=blast_radius` first.",
                 "use_prefix_edits": session.use_prefix_edits,
             }));
         }
@@ -215,7 +215,7 @@ impl CodeService {
             "per_tool": per_tool,
             "tokens_saved_total": session.tokens_saved_total,
             "blocked_grep_bash_attempts": session.blocked_grep_bash_attempts,
-            "evaluate_impact_usage": session.evaluate_impact_usage,
+            "impact_usage": session.impact_usage,
             "stale_warnings_in_flight": session.stale_warnings_in_flight,
             "primary_source_id": session.primary_source_id,
             "use_prefix_edits": session.use_prefix_edits,

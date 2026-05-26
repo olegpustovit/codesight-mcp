@@ -8,7 +8,11 @@ use codesight_engine::config::AppConfig;
 use serde_json::json;
 use tempfile::tempdir;
 
-fn build_doc_only_repo() -> (tempfile::TempDir, codesight_engine::service::CodeService, String) {
+fn build_doc_only_repo() -> (
+    tempfile::TempDir,
+    codesight_engine::service::CodeService,
+    String,
+) {
     let ws = tempdir().unwrap();
     let repo = ws.path().join("repo");
     let src = repo.join("src");
@@ -58,9 +62,9 @@ fn hybrid_search_warns_when_all_hits_are_doc_only() {
         .unwrap();
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
     let warnings = r["warnings"].as_array().cloned().unwrap_or_default();
-    let has_warning = warnings.iter().any(|w| {
-        w.get("code").and_then(|c| c.as_str()) == Some("SYMBOL_NOT_FOUND_IN_CODE")
-    });
+    let has_warning = warnings
+        .iter()
+        .any(|w| w.get("code").and_then(|c| c.as_str()) == Some("SYMBOL_NOT_FOUND_IN_CODE"));
     assert!(
         has_warning,
         "doc-only hits must emit SYMBOL_NOT_FOUND_IN_CODE: {r:?}"

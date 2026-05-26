@@ -58,7 +58,7 @@ fn warnings(r: &Value) -> Vec<&Value> {
 }
 
 fn has_fallback_warning(r: &Value) -> bool {
-    warnings(r).iter().any(|w| w["code"] == "SEMANTIC_FALLBACK")
+    warnings(r).iter().any(|w| w["code"] == "NL_DEGRADED")
 }
 
 #[test]
@@ -165,23 +165,7 @@ fn file_only_semantic_request_warns_but_succeeds() {
     assert!(
         warnings
             .iter()
-            .any(|w| { w["code"] == "SEMANTIC_FALLBACK" && w["detail"]["reason"] == "files_only" }),
+            .any(|w| { w["code"] == "NL_DEGRADED" && w["detail"]["reason"] == "files_only" }),
         "file-only semantic path must warn with files_only fallback: {warnings:?}"
-    );
-}
-
-#[test]
-fn tools_json_exposes_semantic_flag() {
-    let tools: Value =
-        serde_json::from_str(include_str!("../crates/codesight-engine/src/tools.json")).unwrap();
-    let search_catalog = tools
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|tool| tool["name"] == "search_catalog")
-        .unwrap();
-    assert!(
-        search_catalog["inputSchema"]["properties"]["semantic"].is_object(),
-        "search_catalog schema must expose the semantic flag"
     );
 }

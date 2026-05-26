@@ -102,6 +102,12 @@ pub(in crate::service) struct FileTextSearchResult {
     /// True when we observed more file-level hits than the caller's cap.
     /// Used to annotate `truncated_by=limit` without a second pass.
     pub more_file_hits: bool,
+    /// Tier 1.3: total bytes of file content actually read for matching
+    /// (sum of `content.len()` across files that survived all filters).
+    pub bytes_scanned: u64,
+    /// Tier 1.3: number of files whose content was actually scanned (after
+    /// scope/exclude/binary-sniff/size filters).
+    pub files_scanned: usize,
 }
 
 fn push_hit(
@@ -151,6 +157,10 @@ impl CodeService {
     /// pre-cap match totals the caller needs for
     /// `total_matches` / `total_files_with_matches` without a second pass
     /// over the filesystem.
+    ///
+    /// Tier 2.1: `per_file_limit` is an optional ripgrep-style per-file cap
+    /// applied *before* `max` (the global item cap). When `None`, the global
+    /// cap behaves as a flat top-N over all matches.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::service) fn search_code_files_text(
         &self,
@@ -162,10 +172,12 @@ impl CodeService {
         max_results: usize,
         query_mode: &str,
         context_lines: usize,
+        per_file_limit: Option<usize>,
     ) -> anyhow::Result<FileTextSearchResult> {
         let root = store.root_path()?;
         let max = max_results.clamp(1, 50);
         let ctx = context_lines.min(50);
+        let per_file = per_file_limit.unwrap_or(usize::MAX);
 
         let regex = if query_mode == "regex" {
             match Regex::new(query) {
@@ -195,6 +207,8 @@ impl CodeService {
                         total_matches: 1,
                         files_with_matches: 1,
                         more_file_hits: false,
+                        bytes_scanned: 0,
+                        files_scanned: 0,
                     });
                 }
             }
@@ -207,6 +221,8 @@ impl CodeService {
         let mut total_matches = 0usize;
         let mut files_with_matches = 0usize;
         let mut more_file_hits = false;
+        let mut bytes_scanned: u64 = 0;
+        let mut files_scanned: usize = 0;
         let scope_ref = scope.as_deref();
 
         // Deterministic path order — matches prior retrieval-test ordering
@@ -236,16 +252,23 @@ impl CodeService {
             let Some(content) = read_text_file(&path) else {
                 continue;
             };
+            bytes_scanned = bytes_scanned.saturating_add(content.len() as u64);
+            files_scanned += 1;
             let lines: Vec<&str> = content.lines().collect();
             let mut file_hits = 0usize;
+            let mut file_pushed = 0usize;
             for (idx, line) in lines.iter().enumerate() {
                 if !line_matches(query_mode, regex.as_ref(), &query_lower, line) {
                     continue;
                 }
                 file_hits += 1;
                 total_matches += 1;
-                if items.len() < max {
+                // Tier 2.1: respect both the optional per-file cap (ripgrep
+                // semantics) and the global cap. Either being hit flips
+                // `more_file_hits` so the caller surfaces a `TRUNCATED`.
+                if file_pushed < per_file && items.len() < max {
                     items.push(push_hit(&rel, source_id, &lines, idx, line, ctx));
+                    file_pushed += 1;
                 } else {
                     more_file_hits = true;
                 }
@@ -260,6 +283,8 @@ impl CodeService {
             total_matches,
             files_with_matches,
             more_file_hits,
+            bytes_scanned,
+            files_scanned,
         })
     }
 }

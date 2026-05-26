@@ -39,36 +39,25 @@ static AGENT_V1_HANDLERS: &[(&str, AgentV1Handler, TimeoutClass)] = &[
     // CUTPLAN: 6-tool MCP surface. Public adapters live in `cutplan.rs`;
     // legacy handler names below remain wired so internal tests and the
     // adapters themselves can still dispatch by old name during P1→P2.
+    ("search", CodeService::cutplan_search, TimeoutClass::Default),
     (
-        "search",
-        CodeService::cutplan_search,
-        TimeoutClass::Default,
-    ),
-    (
+        // Tier 5.3: cold `outline view=repo` runs PageRank over the full
+        // dependency graph and partitions the workspace; on large repos
+        // that legitimately takes 3-5 s, then the body cache makes
+        // subsequent calls < 50 ms. `Default` (5 s) gives the cold path
+        // headroom while still keeping warm calls bound by the SLA tier.
         "outline",
         CodeService::cutplan_outline,
-        TimeoutClass::FastRead,
+        TimeoutClass::Default,
     ),
-    (
-        "read",
-        CodeService::cutplan_read,
-        TimeoutClass::FastRead,
-    ),
+    ("read", CodeService::cutplan_read, TimeoutClass::FastRead),
     (
         "references",
         CodeService::cutplan_references,
         TimeoutClass::Default,
     ),
-    (
-        "impact",
-        CodeService::cutplan_impact,
-        TimeoutClass::Heavy,
-    ),
-    (
-        "health",
-        CodeService::cutplan_health,
-        TimeoutClass::Heavy,
-    ),
+    ("impact", CodeService::cutplan_impact, TimeoutClass::Heavy),
+    ("health", CodeService::cutplan_health, TimeoutClass::Heavy),
     // ── Legacy handlers — internal-only. Not in the public tools.json.
     //    Adapters above call into these to reuse the existing analysis
     //    backends. They are NOT exposed to MCP clients.
@@ -103,18 +92,8 @@ static AGENT_V1_HANDLERS: &[(&str, AgentV1Handler, TimeoutClass)] = &[
         TimeoutClass::Default,
     ),
     (
-        "evaluate_impact",
-        CodeService::evaluate_impact,
-        TimeoutClass::Heavy,
-    ),
-    (
         "evaluate_quality",
         CodeService::evaluate_quality,
-        TimeoutClass::Heavy,
-    ),
-    (
-        "assemble_context",
-        CodeService::assemble_context,
         TimeoutClass::Heavy,
     ),
     (

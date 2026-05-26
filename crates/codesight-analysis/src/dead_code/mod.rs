@@ -16,6 +16,36 @@ use crate::evidence::EvidenceNote;
 
 use self::reachability::build_repo_reachability;
 
+/// Tier 4.2: paths that typically host externally-invoked entry points the
+/// reachability analyzer can't statically reach. Anything matching one of
+/// these gets a confidence floor of 0.4 (below the default
+/// `min_confidence=0.5`) plus a `manual_review_required` flag on the row.
+///
+/// Patterns are intentionally simple substring / basename checks against
+/// the repo-relative path — language-agnostic so this stays in the
+/// analysis crate (Rust-specific entry-file detection lives in
+/// `Language::additional_live_roots`). The structural fix is the
+/// per-language hook; this function is the safety net for whatever slips
+/// through (e.g. `src/cli/hooks.rs` reachable only via clap subcommand
+/// dispatch from `fn main`).
+fn is_externally_invoked_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let has_segment = |needle: &str| -> bool { lower.split(['/', '\\']).any(|seg| seg == needle) };
+    if has_segment("cli") || has_segment("bin") || has_segment("bins") {
+        return true;
+    }
+    // Compare basenames without their extension — `.rs`, `.py`, `.go`,
+    // `.ts`, etc. all use the same `main` / `lib` / `hooks` conventions
+    // for entry files, and pinning to one extension would constitute a
+    // per-language branch.
+    let last = lower.rsplit(['/', '\\']).next().unwrap_or(&lower);
+    let stem = last.rsplit_once('.').map(|(s, _)| s).unwrap_or(last);
+    matches!(stem, "main" | "lib" | "hook" | "hooks" | "entry")
+        || stem.starts_with("hooks_")
+        || stem.starts_with("hook_")
+        || stem.starts_with("entry_")
+}
+
 /// Build the `data` object for `evaluate_quality` with `analysis: "dead_code"`.
 ///
 /// `limit` caps the `dead_files` / `dead_symbols` arrays in the response
@@ -136,11 +166,23 @@ pub fn dead_code_payload(
         // file being alive — keeps the default `min_confidence >= 0.5`
         // filter from surfacing them while still letting probes find
         // them.
-        let confidence = if weakly_rooted || test_only {
+        let mut confidence = if weakly_rooted || test_only {
             base_confidence.min(0.3)
         } else {
             base_confidence
         };
+        // Tier 4.2: defence-in-depth confidence floor for paths that
+        // typically host externally-invoked entry points the analyzer
+        // can't statically reach (CLI subcommands, hook binaries,
+        // additional `[[bin]]` targets, library facades). The structural
+        // fix lives in `additional_live_roots` per language; this floor
+        // catches whatever falls through. Cap at 0.4 — below the default
+        // `min_confidence=0.5`, so these files don't show up unless the
+        // caller explicitly drops the threshold.
+        let externally_invoked = is_externally_invoked_path(file);
+        if externally_invoked {
+            confidence = confidence.min(0.4);
+        }
         if confidence < effective_min_confidence {
             continue;
         }
@@ -152,11 +194,19 @@ pub fn dead_code_payload(
         } else {
             "unreachable_from_live_roots"
         };
-        dead_files.push(json!({
+        let mut row = json!({
             "file": file,
             "confidence": confidence,
             "signal": signal,
-        }));
+        });
+        if externally_invoked && let Value::Object(obj) = &mut row {
+            obj.insert("manual_review_required".to_string(), json!(true));
+            obj.insert(
+                "manual_review_reason".to_string(),
+                json!("file path matches an entry-point pattern (cli/, bin/, main.rs, hooks*.rs, lib.rs); externally-invoked code may not be statically reachable from `fn main`."),
+            );
+        }
+        dead_files.push(row);
         new_dead_set.insert(file.as_str());
     }
 
@@ -231,7 +281,8 @@ pub fn dead_code_payload(
             .unwrap_or_default();
 
         for symbol in &all_symbols {
-            if !include_vendored && codesight_language_support::is_vendored_path(&symbol.file_path) {
+            if !include_vendored && codesight_language_support::is_vendored_path(&symbol.file_path)
+            {
                 continue;
             }
             if is_test_fixture(&symbol.file_path) {
@@ -307,8 +358,20 @@ pub fn dead_code_payload(
         }
         None => false,
     };
-    let dead_symbols_out = if symbol_pass { json!(dead_symbols) } else { json!([]) };
+    let dead_symbols_out = if symbol_pass {
+        json!(dead_symbols)
+    } else {
+        json!([])
+    };
     let dead_symbol_count_out = if symbol_pass { dead_symbol_count } else { 0 };
+    // Tier 4.2: caller-visible count of files that landed in dead_files with
+    // a `manual_review_required` flag. The engine handler translates a
+    // non-zero count into a top-level `MANUAL_REVIEW_REQUIRED` warning so
+    // human reviewers don't auto-act on these.
+    let manual_review_required_count = dead_files
+        .iter()
+        .filter(|f| f.get("manual_review_required").and_then(Value::as_bool) == Some(true))
+        .count();
     let mut data = json!({
         "analysis": "dead_code",
         "dead_files": dead_files,
@@ -317,7 +380,8 @@ pub fn dead_code_payload(
         "dead_symbol_count": dead_symbol_count_out,
         "live_root_count": reachability.live_roots.len(),
         "truncated": truncated,
-        "analysis_notes": "dead code detection uses dependency-graph reachability plus labeled entry-root heuristics",
+        "manual_review_required_count": manual_review_required_count,
+        "analysis_notes": "dead code detection uses dependency-graph reachability plus labeled entry-root heuristics; cli/bin/main/hooks paths are capped at confidence < 0.5 with a manual_review_required flag.",
     });
 
     if paranoid {

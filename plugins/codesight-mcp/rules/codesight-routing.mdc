@@ -11,169 +11,126 @@ exploration. Never fall back to Read, Grep, Glob, or Bash for code discovery.**
 Exception: use native `Read` only when your client requires a Read-before-Edit
 acknowledgement. That is a client quirk, not the normal discovery path.
 
-### Session start
+## The 6-tool surface
 
-1. `catalog_sources` — get `source_id`; response includes the session block
-   (`id`, `started_at`, `build_sha`, …). Auto-captures a `session_start` quality
-   snapshot when the active source is unambiguous.
-2. `manage_indexes action=session_stats` — optional baseline snapshot.
+The MCP server ships exactly six tools. Every analysis is a variant on one of
+them, dispatched by a `mode` / `view` / `kind` / `analysis` enum. The
+authoritative schema lives in `crates/codesight-engine/src/tools.json`; the
+test `tests/routing_drift.rs` enforces that this skill stays in sync with it.
 
-If `catalog_sources` returns nothing for the repo you need, index it first:
-`ingest_sources path=<abs-path>`.
+| Tool | Variants | Required args | What it does |
+|---|---|---|---|
+| `search` | `mode=keyword` (default) / `regex` / `nl` | `query` | Ranked search over symbols, doc sections, and raw file text. |
+| `outline` | `view=file` / `view=repo` | `view` | Structural views — call before reading any whole file. |
+| `read` | (ref form) | `refs` | Batch-read symbols, doc sections, or bounded file ranges. |
+| `references` | `kind=symbol` / `imports` / `importers` | `kind` | Reference and import-edge queries with structural resolution. |
+| `impact` | `analysis=blast_radius` / `rename_safety` | `analysis`, `ref` | Pre-refactor change-impact analyses. |
+| `health` | `analysis=quality_signal` / `hotspots` / `dead_code` / `repo_health` / `test_gaps` | `analysis` | Quality / dead-code / repo health signals. |
 
-**Deferred tools handshake.** If your harness lazy-loads tool schemas, pre-fetch
-them in one call before session start:
+### `read` ref forms (strings)
 
-```
-ToolSearch query="select:catalog_sources,search_catalog,inspect_structure,read_content,evaluate_impact,evaluate_quality,manage_indexes,inspect_graph,assemble_context,ingest_sources"
-```
+- `"path:N-M"` — line range
+- `"path:N"` — single line
+- `"path::Name#kind"` — symbol by qualified name (e.g. `"src/lib.rs::main#function"`)
+- `"id:<stable_id>"` — symbol by stable id (returned in earlier search/outline output)
+- `"section:path::heading"` — doc section by heading text
 
-### Before a refactor (module move, rename, API change)
+## Default → codesight mapping
 
-1. `evaluate_impact analysis=blast_radius refs=[{…}]` — preview what breaks if
-   this symbol changes. Do this *before* touching the editor.
-2. For cross-module path renames, `evaluate_impact analysis=path_rename
-   from="…" to="…" apply=false` — dry-run diff. Inspect `summary.files`,
-   `summary.changes`, `summary.unhandled`, and `summary.collisions`.
-3. If dry-run is clean, re-run with `apply=true`. Apply refuses on collisions;
-   the response carries a `complexity_budget` (before/after `total_cyclomatic`
-   and `max_per_fn`) so you see mechanical drift instantly.
-4. Trust the in-process file watcher to reindex. Verify the rewrite landed
-   with a `search_catalog` call whose results should reflect the new paths.
-
-Skipping `blast_radius` before `path_rename` shows up as an
-`anti_patterns[REFACTOR_WITHOUT_BLAST_RADIUS]` entry on `session_stats`.
-
-### Quality-driven editing recipe
-
-Before editing `<file>`:
-
-1. `evaluate_quality analysis=quality_signal scope=<file>` — returns per-file
-   dimensions, weakest dimension, top offenders, and `thresholds_failed`.
-2. If `agent_readiness.score < 0.70` or any dimension misses the threshold
-   below, consider restructuring before adding code. The PreToolUse probe hook
-   surfaces the same hint automatically on Edit/Write.
-
-While editing:
-
-- Keep per-fn cyclomatic ≤ 20.
-- Don't silently drop any dimension; note any deliberate regressions in
-  `REFACTOR_WORKLOG.md`.
-
-After a ≥3-file change:
-
-1. `manage_indexes action=snapshot_quality snapshot_name=mid_session`.
-2. `evaluate_quality analysis=regression_check` — compares against the
-   auto-captured `session_start` snapshot. A `regressed` verdict means stop and
-   look at `quality_delta` before moving on.
-
-### After edits — staleness trust rule
-
-After editing, the in-process file watcher (notify-based, 500ms debounce)
-auto-reindexes touched files. PostToolUse only updates session-level
-metadata (savings ledger, refactor hints). The watcher activates after the
-first `ingest_sources` call for a workspace and runs for the lifetime of
-the MCP server.
-
-Within ~1 s after Edit/Write, `search_catalog` / `inspect_structure` /
-`read_content` may reflect the previous index. Top-level `warnings`
-includes a `STALE_DATA_WARNING` with `indexing_repo`,
-`indexing_started_ago_ms`, and `files_in_flight` when that is the case.
-Options:
-
-- wait one more retrieval call (reindex is usually <100 ms), or
-- `manage_indexes action=status source_id=<sid>` to confirm freshness.
-
-### Session end
-
-`manage_indexes action=session_end` captures the `session_end` quality snapshot,
-closes the ledger, and returns the rollup (per-tool counters, token totals,
-`stale_warnings_in_flight`, `evaluate_impact_usage`,
-`anti_patterns[]`, and `quality_delta`).
-
-A regressed verdict emits a top-level `QUALITY_REGRESSION` warning —
-paste the delta into `REFACTOR_WORKLOG.md` before signing off.
-
-### Tool routing
-
-| Task | Tool | Key args |
-|------|------|----------|
-| Find a symbol/function/type | `search_catalog` | `query_mode=keyword` |
-| Search for a string/pattern | `search_catalog` | `query_mode=regex` |
-| Fuzzy / unsure of name | `search_catalog` | `fuzzy=true` |
-| Natural language question | `search_catalog` | `query_mode=natural_language`, `domain=hybrid` |
-| What's in this file? | `inspect_structure` | `view=file_outline` |
-| File tree / project structure | `inspect_structure` | `view=file_tree` |
-| Repo overview | `inspect_structure` | `view=repo_outline` |
-| Read a specific symbol body | `read_content` | `refs=[{kind:"symbol", ...}]` |
-| Read a file range | `read_content` | `refs=[{kind:"file", start_line:N, end_line:M}]` |
-| Batch read N items | `read_content` | pass N items in `refs` array — one call, not N |
-| Who imports this file? | `inspect_graph` | `graph=importers` |
-| What does this file import? | `inspect_graph` | `graph=imports` |
-| Where is X referenced? | `inspect_graph` | `graph=references` |
-| What does this function call? | `inspect_graph` | `graph=calls` |
-| Edit across N callers (rename sym) | `evaluate_impact` | `analysis=rename_safety` |
-| Edit across N callers (rename mod) | `evaluate_impact` | `analysis=path_rename` (dry-run, then `apply=true`) |
-| Pre-refactor blast radius | `evaluate_impact` | `analysis=blast_radius` |
-| Per-file agent readiness | `evaluate_quality` | `analysis=quality_signal scope=<file>` |
-| Regression gate vs. snapshot | `evaluate_quality` | `analysis=regression_check` |
-| Hotspots / complexity | `evaluate_quality` | `analysis=hotspots min_complexity=20` |
-| Dead code | `evaluate_quality` | `analysis=dead_code granularity=symbol` |
-| Repo health / doc coverage | `evaluate_quality` | `analysis=repo_health` / `analysis=doc_coverage` |
-| Untested entry points | `evaluate_quality` | `analysis=test_gaps` |
-| Context bundle for a ticket | `assemble_context` | `mode=context_bundle` |
-| Snapshot quality for later diff | `manage_indexes` | `action=snapshot_quality snapshot_name=…` |
-| End session / get rollup | `manage_indexes` | `action=session_end` |
-| List indexed sources | `catalog_sources` | (no args) |
-
-### Thresholds (single source of truth)
-
-These live in `crates/codesight-analysis/src/thresholds.rs` and surface as
-`_meta.thresholds` on `evaluate_quality` responses when `_meta_verbose=true`.
-Override with `CODESIGHT_THRESHOLD_*` env vars; defaults:
-
-| Signal | Target | Action when missed |
+| Default (don't) | Codesight (do) | Args |
 |---|---|---|
-| Cyclomatic complexity (per fn) | ≤ 20 | Split symbols and extract helpers |
-| File LoC | ≤ 500 soft | Split only on mixed responsibility |
-| `navigability` | ≥ 0.70 | Add re-exports and flatten module edges |
-| `comprehensibility` | ≥ 0.70 | Rename for clarity and cut nesting |
-| `verifiability` | ≥ 0.70 | Add targeted tests or type annotations |
-| `change_safety` | ≥ 0.70 | Reduce fan-in and tighten visibility |
-| `agent_readiness_score` | ≥ 0.70 | Fix the weakest dimension first |
-| Doc coverage (public API) | ≥ 60% | Document public surfaces |
-| Untested entry points (`test_gaps`) | 0 | Add a nextest case or remove `pub` |
-| `structural_score` | ≥ 0.60 | Follow `quality_signal.root_causes` |
-| Per-file blast radius | ≤ 10 files | Extract code and narrow visibility |
+| `Grep` a symbol/fn/type name | `search` | `mode=keyword`, opt. `scope=` / `fuzzy=true` |
+| `Grep` substring across files | `search` | `mode=keyword`, opt. `scope=*.md` to narrow |
+| `Grep -E` regex over files | `search` | `mode=regex` |
+| Natural-language question | `search` | `mode=nl` |
+| Unsure of the exact name | `search` | `fuzzy=true` |
+| `Glob` / `find` / `ls -R` | `outline` | `view=repo` |
+| File outline before reading | `outline` | `view=file path=…` (batch via `paths`) |
+| `Read` a known file range | `read` | `refs=["path:N-M"]` |
+| `Read` a function/class body | `read` | `refs=["path::Name#kind"]` or `["id:<sid>"]` |
+| Batch read N files/symbols | `read` | one call with N refs — never N calls |
+| `Read` a markdown section | `read` | `refs=["section:path::Heading"]` |
+| File's outgoing imports | `references` | `kind=imports path=…` |
+| Incoming imports | `references` | `kind=importers path=…` |
+| Where is X referenced | `references` | `kind=symbol ref="path::Name#kind"` |
+| Pre-refactor: who breaks? | `impact` | `analysis=blast_radius ref=…` |
+| Rename safety check | `impact` | `analysis=rename_safety ref=… new_name=…` |
+| Hotspots / complexity | `health` | `analysis=hotspots top_n=N` |
+| Dead code | `health` | `analysis=dead_code top_n=N` |
+| Per-slice agent readiness | `health` | `analysis=quality_signal scope=…` |
+| Repo health summary | `health` | `analysis=repo_health` |
+| Untested entry points | `health` | `analysis=test_gaps top_n=N` |
 
-### Cross-skill composition
+## Reading code
 
-When `quality_signal` reports a weak dimension on a Rust file, defer to the
-sibling skill that owns the cure rather than reasoning about module layout
-inline:
+1. **Outline before reading.** `outline view=file path=<path>` first. Pick
+   the symbols you need; then read only those.
+2. **Batch reads.** `read` takes an array of `refs` — one call, not N.
+3. **Whole-file reads emit warnings.** Reading `path` (no slice, no symbol)
+   returns `confidence: "partial"` plus `OUTLINE_FIRST` and (if large)
+   `TOKEN_HEAVY_READ`. Heed those before re-reading the same file.
+
+## Searching
+
+- **Pick `mode`**: `keyword` for identifiers (fastest), `regex` for patterns,
+  `nl` for question-shaped queries.
+- **Narrow with `scope`**: glob narrowing path *and* unit kind in one knob
+  (`*.md` → docs only; `crates/foo/**` → that crate). There is no separate
+  `unit_kinds` / `file_pattern`.
+- **Limits**: `limit` is a *global* item cap (not per-file). For regex with
+  many hits per file, also pass `per_file_limit=N` if you need ripgrep-style
+  semantics.
+
+## After editing
+
+The PostToolUse hook fires on Edit/Write and spawns an incremental reingest
+of the touched file in the background. Your next `search` / `outline` /
+`read` call will see the updated source. If reindex is mid-flight and your
+query touches an in-flight file, the response carries a
+`STALE_DATA_WARNING` — wait one more retrieval call (~100 ms) and re-query.
+
+## Trust calibration
+
+Read the response envelope, not just the items.
+
+- **`_meta.confidence: "safe"`** — result is authoritative.
+- **`_meta.confidence: "partial"`** — calibration signal (see warnings).
+- **`_meta.confidence: "unreliable"`** — language has no scope analyzer or
+  the analysis can't prove safety. Treat as a hint, not a fact.
+
+Common warning codes (full taxonomy in
+`crates/codesight-engine/src/service/agent_v1/warnings.rs`):
+
+- `NO_EXACT_MATCH` — no item literally matched the query identifier.
+- `AMBIGUOUS_IDENTIFIER` — top-K scores cluster; ranker can't distinguish.
+- `OVERBROAD_QUERY` — `total_matches > limit × 10`; narrow the query.
+- `NL_DEGRADED` — NL fell back to BM25 because the dense lane timed out.
+- `TRUNCATED` — result list was capped by `limit`.
+- `REGEX_OVERFLOW` — regex dropped per-file matches at the global limit.
+- `OUTLINE_FIRST` / `SUGGEST_OUTLINE` / `TOKEN_HEAVY_READ` — read-time nudges.
+- `PARTIAL_BATCH` — at least one ref in a `read` batch errored.
+- `MANUAL_REVIEW_REQUIRED` — dead-code finding under cli/bin/main/hooks paths.
+- `GRAPH_USAGE_HEURISTIC` — importers result mixes structural + heuristic edges.
+- `STALE_DATA_WARNING` — reindex in flight for a touched file.
+
+## Efficiency rules
+
+- **Outline first**, then read targeted symbols.
+- **Batch reads.** N refs in one call.
+- **Narrow scope.** A `scope=` glob is the cheapest token saver.
+- **Budget tokens**: `max_tokens=4000` for browsing, `8000` for deep reads.
+- **`_meta.tokens_saved` is the scoreboard for `mode=keyword|nl`**. For
+  `mode=regex`, the response carries `_meta.bytes_scanned` instead — regex
+  inherently can't beat raw grep on tokens.
+- **Don't paginate hundreds of matches.** Re-shape the query: tighter
+  `query`, narrower `scope`, drop file-text hits via `mode=keyword`.
+
+## Cross-skill composition
+
+When `health analysis=quality_signal` reports a weak dimension on a Rust
+file, defer to the sibling skill that owns the cure rather than reasoning
+about module layout inline:
 
 - Low `comprehensibility` / tangled module tree → `agentpack-bundle:rust-modularity`.
 - Ambiguous enum-vs-trait / pattern choice → `agentpack-bundle:rust-design-patterns`.
 - Performance regressions / hot paths → `agentpack-bundle:rust-perf-analyzer`.
-
-### Efficiency rules
-
-- **Always start with `catalog_sources`.** Gets the `source_id` every tool needs.
-- **Outline first.** Use `inspect_structure view=file_outline` before reading a
-  whole file. Decide which symbols you need, then read those.
-- **Batch reads.** `read_content` takes an array of `refs` — one call, not N.
-- **Narrow scope.** Pass `scope=`, `file_pattern=`, or `unit_kinds=` to
-  `search_catalog` to reduce result size.
-- **Budget tokens.** Set `max_tokens=4000` for browsing, `8000` for deep reads.
-- **Check `_meta.tokens_saved`.** If zero or negative, rethink the query.
-- **Pick the right `query_mode`.** `keyword` for identifiers (fastest), `regex`
-  for patterns, `natural_language` for questions.
-- **Slim envelope by default.** `_meta` carries only `timing_ms`, `tokens_saved`,
-  and applied-mode hints. Pass `_meta_verbose=true` on any call to also receive
-  `build_sha`, `total_tokens_saved`, `thresholds`, etc.
-- **Recover from too-broad queries.** When `search_catalog` returns
-  `truncated_by=["byte_budget"]` or the harness pops up an overflow-to-file
-  prompt, the first try was too wide. Narrow via `scope=` (prefix),
-  `file_pattern=` (glob), `unit_kinds=["symbol"]` (drop file-text hits), or a
-  tighter `query`. Do not try to paginate through hundreds of matches — shape
-  the query instead.

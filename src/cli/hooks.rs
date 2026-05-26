@@ -111,8 +111,8 @@ pub fn run_posttooluse() -> i32 {
     {
         emit_additional_context(&format!(
             "PostToolUse: this edit rewrote `use {prefix}::…` imports across 5+ files. \
-             Consider `evaluate_impact analysis=path_rename from=\"{prefix}::…\" to=\"…\" apply=false` \
-             (or `analysis=blast_radius` to preview impact) to avoid hand-editing every caller."
+             Run `impact analysis=blast_radius ref=\"{prefix}::…\"` to preview the change \
+             surface before hand-editing every caller."
         ));
     }
 
@@ -272,8 +272,8 @@ fn handle_edit_probe(tool_input: &Value) -> i32 {
     {
         emit_allow(&format!(
             "PreToolUse: `use {prefix}::…` has already been rewritten by hand 3+ times this session. \
-             Run `evaluate_impact analysis=path_rename from=\"{prefix}::…\" to=\"…\" apply=false` \
-             to see the full impact (and get a scripted rewrite) before editing more files."
+             Run `impact analysis=blast_radius ref=\"{prefix}::…\"` to scope the change before \
+             editing more files."
         ));
         // Intentionally fall through: the nudge is advisory, not a block.
     }

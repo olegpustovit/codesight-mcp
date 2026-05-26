@@ -5,7 +5,6 @@
       "args": [
         "run",
         "--quiet",
-        "--manifest-path", "/Users/snowbear/WORK/GIT/mcp-impl/Cargo.toml",
         "--",
         "serve"
       ]

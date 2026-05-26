@@ -30,8 +30,7 @@ pub fn compute_governance_signal(store: &IndexStore) -> anyhow::Result<Governanc
     let adj = store.dependency_graph_strict()?;
     let cycles = find_cycles(&adj);
     let all_symbols = store.all_symbols_for_analysis()?;
-    let inputs =
-        AgentReadinessInputs::build(&all_symbols, &adj, store.root_path().ok().as_deref());
+    let inputs = AgentReadinessInputs::build(&all_symbols, &adj, store.root_path().ok().as_deref());
     compute_governance_signal_precomputed(store, &cycles, &inputs)
 }
 

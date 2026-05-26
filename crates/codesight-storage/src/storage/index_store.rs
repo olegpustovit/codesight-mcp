@@ -107,9 +107,7 @@ impl IndexStore {
             .unwrap_or_default())
     }
 
-    pub fn file_fingerprints(
-        &self,
-    ) -> anyhow::Result<FxHashMap<String, FileFingerprint>> {
+    pub fn file_fingerprints(&self) -> anyhow::Result<FxHashMap<String, FileFingerprint>> {
         let conn = self.open_connection()?;
         let mut stmt = conn.prepare_cached(
             "SELECT file_path, language, size_bytes, modified_ns, content_hash FROM files",

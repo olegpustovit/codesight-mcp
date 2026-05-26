@@ -75,6 +75,11 @@ pub(super) fn build_recommendations(gov: &GovernanceSignal) -> Vec<serde_json::V
 
     let mut out: Vec<serde_json::Value> = Vec::new();
     let sm = &gov.agent.submetrics;
+    // Tier 6.1: every `first_step` must point at a real tool + analysis
+    // declared in `crates/codesight-engine/src/tools.json`. The wrapper
+    // surface is 6 tools; `evaluate_quality` and `analysis=refactor_targets`
+    // never existed. `hotspots` is the closest real analysis for
+    // refactor-target suggestions.
     let rules: &[(&str, &str, f64, &str, serde_json::Value)] = &[
         (
             "change_safety",
@@ -82,8 +87,8 @@ pub(super) fn build_recommendations(gov: &GovernanceSignal) -> Vec<serde_json::V
             sm.change_locality,
             "Reduce fan-in on hot files and split high-CC functions.",
             serde_json::json!({
-                "tool": "evaluate_quality",
-                "args": { "analysis": "refactor_targets" }
+                "tool": "health",
+                "args": { "analysis": "hotspots" }
             }),
         ),
         (
@@ -92,7 +97,7 @@ pub(super) fn build_recommendations(gov: &GovernanceSignal) -> Vec<serde_json::V
             sm.hotspot_containment,
             "Shrink the churn-weighted complexity of the hottest files.",
             serde_json::json!({
-                "tool": "evaluate_quality",
+                "tool": "health",
                 "args": { "analysis": "hotspots" }
             }),
         ),
@@ -102,7 +107,7 @@ pub(super) fn build_recommendations(gov: &GovernanceSignal) -> Vec<serde_json::V
             sm.test_oracle_quality,
             "Add focused tests where coverage is thinnest.",
             serde_json::json!({
-                "tool": "evaluate_quality",
+                "tool": "health",
                 "args": { "analysis": "test_gaps" }
             }),
         ),
@@ -122,8 +127,8 @@ pub(super) fn build_recommendations(gov: &GovernanceSignal) -> Vec<serde_json::V
             sm.nesting_depth_health,
             "Flatten deeply nested blocks; split long functions.",
             serde_json::json!({
-                "tool": "evaluate_quality",
-                "args": { "analysis": "refactor_targets" }
+                "tool": "health",
+                "args": { "analysis": "hotspots" }
             }),
         ),
     ];

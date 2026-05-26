@@ -30,9 +30,8 @@ impl KindFlags {
         let matches = |want: &str| -> bool {
             kinds
                 .map(|k| {
-                    k.iter().any(|x| {
-                        x == want || (want == "section" && x == "doc_section")
-                    })
+                    k.iter()
+                        .any(|x| x == want || (want == "section" && x == "doc_section"))
                 })
                 .unwrap_or(false)
         };
@@ -55,6 +54,11 @@ pub(super) struct CodeSideStats {
     pub(super) more_file_hits: bool,
     pub(super) fuzzy_applied: bool,
     pub(super) name_only_applied: bool,
+    /// Tier 1.3: bytes of file content scanned during this code-side pass
+    /// (only meaningful for `query_mode=regex`, which routes to file text).
+    pub(super) regex_bytes_scanned: u64,
+    /// Tier 1.3: file count actually scanned (post scope/exclude filters).
+    pub(super) regex_files_scanned: usize,
 }
 
 pub(super) struct SearchPlan {
@@ -132,6 +136,11 @@ pub(super) struct LexicalStats {
     pub(super) more_file_hits_exist: bool,
     pub(super) fuzzy_applied: bool,
     pub(super) name_only_applied: bool,
+    /// Total bytes of file content scanned during a regex pass. 0 for
+    /// keyword/NL (not meaningful — those hit indexed FTS).
+    pub(super) regex_bytes_scanned: u64,
+    /// Number of files that ended up actually being read during a regex pass.
+    pub(super) regex_files_scanned: usize,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -207,14 +216,30 @@ fn coerce_search_args(args: &mut SearchCatalogArgs) -> Result<String, ToolError>
     Ok(output_mode)
 }
 
-pub(super) fn build_meta_extras(
-    plan: &SearchPlan,
-    fuzzy_applied: bool,
-    semantic_requested: bool,
-    name_only_applied: bool,
-    doc_section_penalty: f64,
-    doc_section_rank_demotion: usize,
-) -> Vec<(String, Value)> {
+/// Inputs to [`build_meta_extras`]. Keeps the signature flat without
+/// blowing past clippy's `too_many_arguments` ceiling.
+pub(super) struct MetaExtras<'a> {
+    pub plan: &'a SearchPlan,
+    pub fuzzy_applied: bool,
+    pub semantic_requested: bool,
+    pub name_only_applied: bool,
+    pub doc_section_penalty: f64,
+    pub doc_section_rank_demotion: usize,
+    pub regex_bytes_scanned: u64,
+    pub regex_files_scanned: usize,
+}
+
+pub(super) fn build_meta_extras(input: MetaExtras<'_>) -> Vec<(String, Value)> {
+    let MetaExtras {
+        plan,
+        fuzzy_applied,
+        semantic_requested,
+        name_only_applied,
+        doc_section_penalty,
+        doc_section_rank_demotion,
+        regex_bytes_scanned,
+        regex_files_scanned,
+    } = input;
     let mut extras: Vec<(String, Value)> = vec![
         ("domain_effective".to_string(), json!(plan.domain)),
         (
@@ -248,6 +273,15 @@ pub(super) fn build_meta_extras(
                 "file": plan.flags.want_file,
             }),
         ));
+    } else {
+        // Tier 1.3: regex-mode meta. `tokens_saved` is meaningless here
+        // (regex returns the same `path:line:snippet` rows `rg` would, so
+        // the savings baseline equals the response). The honest signal is
+        // *what we read*: bytes / files scanned. Both are 0 when the
+        // pattern failed to compile (the synthetic `regex_error` early
+        // return).
+        extras.push(("bytes_scanned".to_string(), json!(regex_bytes_scanned)));
+        extras.push(("files_scanned".to_string(), json!(regex_files_scanned)));
     }
     extras.extend([
         ("fuzzy_applied".to_string(), json!(fuzzy_applied)),
@@ -279,4 +313,3 @@ pub(super) fn build_meta_extras(
     ]);
     extras
 }
-

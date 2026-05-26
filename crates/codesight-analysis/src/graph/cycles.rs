@@ -39,7 +39,8 @@ pub fn find_cycles(adj: &FxHashMap<String, Vec<String>>) -> Vec<Vec<String>> {
     nodes.sort();
 
     let mut graph: DiGraph<&str, ()> = DiGraph::new();
-    let mut idx: FxHashMap<&str, _> = FxHashMap::with_capacity_and_hasher(nodes.len(), Default::default());
+    let mut idx: FxHashMap<&str, _> =
+        FxHashMap::with_capacity_and_hasher(nodes.len(), Default::default());
     for node in &nodes {
         idx.insert(*node, graph.add_node(*node));
     }

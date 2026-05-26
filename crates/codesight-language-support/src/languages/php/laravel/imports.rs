@@ -158,7 +158,11 @@ fn collect_facade_imports(root: &Path, imports: &mut FxHashMap<String, Vec<Extra
     }
 }
 
-fn scan_php_for_facades(dir: &Path, root: &Path, imports: &mut FxHashMap<String, Vec<ExtraImport>>) {
+fn scan_php_for_facades(
+    dir: &Path,
+    root: &Path,
+    imports: &mut FxHashMap<String, Vec<ExtraImport>>,
+) {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return,

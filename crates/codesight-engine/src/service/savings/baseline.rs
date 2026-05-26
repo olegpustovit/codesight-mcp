@@ -1,57 +1,19 @@
-//! Per-call counterfactual baselines for `tokens_saved` (ROADMAP P1.1).
+//! Per-call counterfactual baselines for `tokens_saved`.
 //!
 //! `tokens_saved = naive_bytes_for_equivalent_work / BYTES_PER_TOKEN - response_tokens`.
-//! The naive baseline varies by tool class:
 //!
-//! - **Structural / targeted reads** — baseline = full-file size of the file
-//!   the target lives in. Used by `read_content`, `inspect_structure
-//!   view=file_outline`, `assemble_context` bundle/ranked/context_bundle/
-//!   section_context, and rename/diff helpers that return a single symbol.
 //! - **Search** — baseline = `rg -n`-equivalent output: one
 //!   `path:line:snippet\n` row per returned item, capped by the same limit
 //!   the agent asked for. Not the sum of file sizes of every matched file —
 //!   that's the "index dump" fantasy baseline the ROADMAP explicitly banned.
 //! - **Overview / metadata** — no sensible baseline; pass `raw_bytes = 0` to
 //!   `MetaBuilder::new` so the response surfaces `tokens_saved: null`
-//!   (omitted key) instead of a fabricated number. Applies to
-//!   `catalog_sources`, `manage_indexes`, `inspect_structure`
-//!   view=repo_outline / repository_rollup / file_tree / toc*, most of
-//!   `inspect_graph`, and `assemble_context` query_suggestions.
+//!   (omitted key) instead of a fabricated number.
 //!
-//! Every baseline here is a lower bound on what the equivalent native tool
-//! workflow would have cost. Overestimating inflates `tokens_saved_total` and
-//! erodes agent trust; we'd rather ship an honest 15M/session than a
-//! bullshit 150M.
+//! Overestimating inflates `tokens_saved_total` and erodes agent trust;
+//! we'd rather ship an honest 15M/session than a bullshit 150M.
 
 use serde_json::Value;
-
-use codesight_storage::storage::IndexStore;
-
-use crate::service::helpers::{ToolError, index_error};
-
-/// Sum of full-file sizes for every distinct code path in `refs` (one lookup
-/// per path, batched). Use when the naive alternative is "read each of these
-/// files in full". Missing / zero-size files contribute 0.
-pub(in crate::service) fn sum_code_file_sizes<I, S>(
-    store: &IndexStore,
-    paths: I,
-) -> Result<u64, ToolError>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    let mut dedup: Vec<String> = paths
-        .into_iter()
-        .map(|p| p.as_ref().to_string())
-        .filter(|p| !p.is_empty())
-        .collect();
-    dedup.sort();
-    dedup.dedup();
-    if dedup.is_empty() {
-        return Ok(0);
-    }
-    store.sum_file_sizes_for_paths(&dedup).map_err(index_error)
-}
 
 /// Approximate the bytes a real "grep then read context" workflow would have
 /// cost the agent for the same hit set.

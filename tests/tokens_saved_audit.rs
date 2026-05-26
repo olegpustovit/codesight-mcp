@@ -16,7 +16,11 @@ use codesight_engine::config::AppConfig;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-fn build_fixture() -> (tempfile::TempDir, codesight_engine::service::CodeService, String) {
+fn build_fixture() -> (
+    tempfile::TempDir,
+    codesight_engine::service::CodeService,
+    String,
+) {
     let ws = tempdir().unwrap();
     let src = ws.path().join("repo").join("src");
     fs::create_dir_all(&src).unwrap();
@@ -86,7 +90,10 @@ fn read_content_symbol_savings_bounded_by_full_file() {
         )
         .unwrap();
     let saved = tokens_saved(&read).expect("symbol read should carry tokens_saved");
-    assert!(saved > 0, "read_content symbol expected positive savings: {read:?}");
+    assert!(
+        saved > 0,
+        "read_content symbol expected positive savings: {read:?}"
+    );
     let naive = read["_meta"]["naive_tokens"]
         .as_u64()
         .expect("verbose meta exposes naive_tokens");

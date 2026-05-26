@@ -85,9 +85,7 @@ impl Language for Ruby {
     fn line_comment_prefixes(&self) -> &'static [&'static str] {
         &["#"]
     }
-    fn regex_reachability_patterns(
-        &self,
-    ) -> &'static [(codesight_core::EdgeKind, &'static str)] {
+    fn regex_reachability_patterns(&self) -> &'static [(codesight_core::EdgeKind, &'static str)] {
         // Ruby: `require 'foo'`, `require_relative 'foo'`, `load 'foo'`,
         // `autoload :Foo, 'foo'`. Capture the symbol/path string.
         &[

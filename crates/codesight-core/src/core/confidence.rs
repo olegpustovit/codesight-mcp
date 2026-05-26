@@ -59,7 +59,10 @@ mod tests {
 
     #[test]
     fn serializes_lowercase() {
-        assert_eq!(serde_json::to_string(&Confidence::Safe).unwrap(), "\"safe\"");
+        assert_eq!(
+            serde_json::to_string(&Confidence::Safe).unwrap(),
+            "\"safe\""
+        );
         assert_eq!(
             serde_json::to_string(&Confidence::Partial).unwrap(),
             "\"partial\""
@@ -84,11 +87,7 @@ mod tests {
             Some(Confidence::Partial)
         );
         assert_eq!(
-            Confidence::worst_of([
-                Confidence::Safe,
-                Confidence::Partial,
-                Confidence::Heuristic,
-            ]),
+            Confidence::worst_of([Confidence::Safe, Confidence::Partial, Confidence::Heuristic,]),
             Some(Confidence::Heuristic)
         );
         assert_eq!(

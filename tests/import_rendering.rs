@@ -81,7 +81,10 @@ fn python_render_emits_native_syntax() {
     assert_eq!(rendered[1], "from collections import OrderedDict, deque");
     assert_eq!(rendered[2], "from foo.bar import baz");
     for line in &rendered {
-        assert!(!line.contains("{"), "python render leaked ESM braces: {line}");
+        assert!(
+            !line.contains("{"),
+            "python render leaked ESM braces: {line}"
+        );
     }
 }
 

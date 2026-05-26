@@ -96,10 +96,8 @@ pub(super) fn merge_dense_ranked_items(
 ) -> Vec<Value> {
     let mut lex_symbols: Vec<String> = Vec::new();
     let mut lex_sections: Vec<String> = Vec::new();
-    let mut symbol_items: FxHashMap<String, Value> =
-        FxHashMap::default();
-    let mut section_items: FxHashMap<String, Value> =
-        FxHashMap::default();
+    let mut symbol_items: FxHashMap<String, Value> = FxHashMap::default();
+    let mut section_items: FxHashMap<String, Value> = FxHashMap::default();
     let mut others: Vec<Value> = Vec::new();
     for item in items {
         let id = item
@@ -157,4 +155,132 @@ pub(super) fn merge_dense_ranked_items(
     }
     out.extend(others);
     out
+}
+
+/// Tier 7.1: rule-based post-RRF rerank for natural-language search.
+///
+/// RRF is rank-only — it discards score information, so a
+/// setter / getter / record_* helper that ranks well in BM25 *and* dense
+/// can outrank the actual answer the caller is asking about. This pass
+/// applies three deterministic adjustments inspired by Sourcegraph's
+/// BM25F field weighting and standard hybrid-search post-rerank:
+///
+/// - **+0.15** when the item's symbol name (the last segment) matches one
+///   of the query tokens — Sourcegraph found symbol-definition matches
+///   are ~20% more meaningful than body matches.
+/// - **−0.10** for setter/getter shape names (`set_*`, `get_*`,
+///   `record_*`, `with_*`, `*_set_*`, `*_record_*`) when a non-prefixed
+///   candidate (the bare root) also appears in this response — those
+///   helpers are usually noise relative to the canonical accessor.
+/// - **−0.05** for test/internal symbols (path contains `tests::`, name
+///   ends in `_test`) when the query doesn't mention "test".
+///
+/// **Caveat (acknowledged):** the proper hybrid-search lift is a
+/// cross-encoder reranker on the top-50 candidates. This rule-based pass
+/// is the deterministic stopgap until the cross-encoder slot is wired
+/// (see worklog: "Tier 7 follow-up — cross-encoder reranker"). Callers
+/// who care about strict ranking quality should still verify against
+/// `confidence: "partial"` and the warning codes.
+pub(super) fn apply_nl_rerank(items: &mut Vec<Value>, query: &str) {
+    if items.len() < 2 {
+        return;
+    }
+    let query_lower = query.to_ascii_lowercase();
+    let query_tokens: Vec<String> = query_lower
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+        .collect();
+    let query_mentions_test = query_lower.contains("test");
+
+    // Collect bare roots: if `record_x` exists alongside `x`, keep the bare
+    // `x` as a "non-prefixed candidate" reference for the setter penalty.
+    let bare_roots: rustc_hash::FxHashSet<String> = items
+        .iter()
+        .filter_map(|item| name_of(item).map(|n| n.to_ascii_lowercase()))
+        .filter(|n| {
+            !n.starts_with("set_")
+                && !n.starts_with("get_")
+                && !n.starts_with("record_")
+                && !n.starts_with("with_")
+        })
+        .collect();
+
+    let scores: Vec<f64> = items
+        .iter()
+        .map(|item| score_one(item, &query_tokens, query_mentions_test, &bare_roots))
+        .collect();
+
+    // Stable-sort: ties preserve RRF order. Only re-sort when any score
+    // is non-zero — pure rank passthrough otherwise.
+    if scores.iter().all(|s| s.abs() < f64::EPSILON) {
+        return;
+    }
+    let mut indexed: Vec<(usize, f64)> = scores.into_iter().enumerate().collect();
+    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let reordered: Vec<Value> = indexed
+        .into_iter()
+        .map(|(idx, _)| std::mem::take(&mut items[idx]))
+        .collect();
+    *items = reordered;
+}
+
+fn name_of(item: &Value) -> Option<&str> {
+    item.pointer("/ref/title")
+        .and_then(Value::as_str)
+        .or_else(|| item.get("name").and_then(Value::as_str))
+        .or_else(|| {
+            item.pointer("/ref/id")
+                .and_then(Value::as_str)
+                .map(|id| id.rsplit_once("::").map(|(_, t)| t).unwrap_or(id))
+                .map(|t| t.split('#').next().unwrap_or(t))
+                .map(|t| t.rsplit_once('.').map(|(_, n)| n).unwrap_or(t))
+        })
+}
+
+fn score_one(
+    item: &Value,
+    query_tokens: &[String],
+    query_mentions_test: bool,
+    bare_roots: &rustc_hash::FxHashSet<String>,
+) -> f64 {
+    let mut delta = 0.0_f64;
+    let Some(name) = name_of(item) else {
+        return 0.0;
+    };
+    let lower = name.to_ascii_lowercase();
+
+    // (a) Symbol-name token match.
+    if query_tokens.iter().any(|t| t == &lower) {
+        delta += 0.15;
+    }
+
+    // (b) Setter/getter/record/with penalty when a bare root exists.
+    let prefixes: &[&str] = &["set_", "get_", "record_", "with_"];
+    for p in prefixes {
+        if let Some(stripped) = lower.strip_prefix(p)
+            && bare_roots.contains(stripped)
+        {
+            delta -= 0.10;
+            break;
+        }
+    }
+
+    // (c) Test-symbol penalty.
+    if !query_mentions_test {
+        let id = item
+            .pointer("/ref/id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_ascii_lowercase());
+        let in_tests = id
+            .as_deref()
+            .map(|s| s.contains("tests::") || s.contains(".tests.") || s.contains("/tests/"))
+            .unwrap_or(false);
+        let test_suffix = lower.ends_with("_test") || lower.ends_with("_tests");
+        if in_tests || test_suffix {
+            delta -= 0.05;
+        }
+    }
+
+    delta
 }

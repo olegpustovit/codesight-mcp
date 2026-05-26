@@ -151,16 +151,10 @@ mod tests {
     fn replace_then_query() {
         let conn = open_in_memory();
         // files table needs entries because of FK.
-        conn.execute(
-            "INSERT INTO files VALUES ('a.rs','rust',0,0,'x')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO files VALUES ('b.rs','rust',0,0,'x')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO files VALUES ('a.rs','rust',0,0,'x')", [])
+            .unwrap();
+        conn.execute("INSERT INTO files VALUES ('b.rs','rust',0,0,'x')", [])
+            .unwrap();
 
         let edges = vec![
             StructuralEdge::new_file("a.rs", "b.rs", EdgeKind::ImportStatement),
@@ -183,11 +177,8 @@ mod tests {
     #[test]
     fn replace_overwrites_previous_set() {
         let conn = open_in_memory();
-        conn.execute(
-            "INSERT INTO files VALUES ('a.rs','rust',0,0,'x')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO files VALUES ('a.rs','rust',0,0,'x')", [])
+            .unwrap();
         replace_edges_for_file(
             &conn,
             "a.rs",

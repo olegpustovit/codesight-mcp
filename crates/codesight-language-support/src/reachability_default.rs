@@ -121,8 +121,10 @@ mod tests {
 
     #[test]
     fn ruby_style_require_emits_symbol_edge() {
-        let patterns: &[(EdgeKind, &str)] =
-            &[(EdgeKind::ImportStatement, r#"^\s*require\s+['"]([^'"]+)['"]"#)];
+        let patterns: &[(EdgeKind, &str)] = &[(
+            EdgeKind::ImportStatement,
+            r#"^\s*require\s+['"]([^'"]+)['"]"#,
+        )];
         let edges = extract_with_patterns("a.rb", "require 'foo/bar'\n", patterns);
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].target_symbol.as_deref(), Some("foo/bar"));

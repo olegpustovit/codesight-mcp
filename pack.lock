@@ -8,12 +8,12 @@ version = "0.0.1"
 module = "codesight-mcp-dev"
 direct = true
 kind = "plugin"
-url = "file:///Users/snowbear/WORK/GIT/mcp-impl/plugins/codesight-mcp-dev"
+url = "file:///home/snowbear/projects/codesight-mcp/plugins/codesight-mcp-dev"
 owner = "path"
 repo = "codesight-mcp-dev"
 path = ""
-commit = "81bd0c2eb66d8d556a171badba3654f56765dfbf"
-cache_key = "3d39f4222793a3a259b317947b4331d1a8360e5d230fd9e79a02ff1fc3b1038d"
+commit = "440422f15a79b3ed0f0f98e35dc64165d5d918fb"
+cache_key = "c6d82d1bba9682ee1336a2574dd7e1af58b7d3abaeec63b5794219ea7699d403"
 name = ""
 
 [[packages]]

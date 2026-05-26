@@ -57,9 +57,7 @@ fn extract_pub_use_reexports(content: &str, source_file: &str, out: &mut Vec<Str
                 .map(|s| s.trim().split(" as ").next().unwrap_or("").trim())
                 .filter(|s| !s.is_empty() && *s != "self" && *s != "*")
                 .collect()
-        } else if prefix_segments.len() >= 2
-            && prefix_segments.last().is_none_or(|s| *s != "*")
-        {
+        } else if prefix_segments.len() >= 2 && prefix_segments.last().is_none_or(|s| *s != "*") {
             vec![prefix_segments[prefix_segments.len() - 1]]
         } else if prefix_segments.last().is_some_and(|s| *s == "*") {
             // `pub use mod::*` — fold the module segment as a symbol edge so
@@ -234,7 +232,9 @@ fn extract_imports_as_symbol_edges(
         // Trailing leaf when no brace (`use foo::Bar;`)
         if e.names.is_empty()
             && let Some(leaf) = e.specifier.rsplit("::").next()
-            && !leaf.is_empty() && leaf != "*" && leaf != root
+            && !leaf.is_empty()
+            && leaf != "*"
+            && leaf != root
         {
             out.push(StructuralEdge::new_symbol(
                 source_file,

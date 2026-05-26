@@ -1,7 +1,7 @@
 //! Shared tree-sitter helpers for language extractors (Strategy implementations).
 
-use std::cell::RefCell;
 use rustc_hash::FxHashMap;
+use std::cell::RefCell;
 
 use tree_sitter::{Node, Parser, Tree};
 

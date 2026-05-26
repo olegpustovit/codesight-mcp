@@ -413,6 +413,17 @@ pub trait Language: Send + Sync {
             .any(|d| anchored.contains(d))
     }
 
+    /// Whether `path` is a top-level test-binary entry point — the root of an
+    /// integration test target the build system links separately from the
+    /// production binary (e.g. Rust's `tests/foo.rs`,
+    /// `crates/X/tests/foo.rs`). Languages with no equivalent return `false`;
+    /// the dead-code analyzer uses this to seed reachability from test
+    /// binaries without dragging in nested `tests/foo/helper.rs` modules.
+    /// Default false (most languages don't separate test binaries this way).
+    fn is_test_target_root(&self, _path: &str) -> bool {
+        false
+    }
+
     /// Whether `path` is a conventional non-production directory whose files
     /// should be default-excluded from hotspot ranking (scripts/, examples/,
     /// benches/, …).

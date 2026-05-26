@@ -6,7 +6,7 @@ mod meta_builder;
 mod pricing;
 mod session;
 
-pub(in crate::service) use baseline::{search_rg_equivalent_bytes, sum_code_file_sizes};
+pub(in crate::service) use baseline::search_rg_equivalent_bytes;
 pub use codesight_core::Confidence;
 pub use ledger::{SavingsLedger, ToolCallRecord};
 pub use meta_builder::{Meta, MetaBuilder, RetrievalClass};

@@ -19,8 +19,7 @@ use super::IndexStore;
 type PagerankKey = (PathBuf, u32);
 type PagerankCache = Mutex<FxHashMap<PagerankKey, Arc<FxHashMap<String, f64>>>>;
 type SymbolsKey = (PathBuf, u32);
-type SymbolsCache =
-    Mutex<FxHashMap<SymbolsKey, Arc<Vec<crate::storage::SymbolSourceRecord>>>>;
+type SymbolsCache = Mutex<FxHashMap<SymbolsKey, Arc<Vec<crate::storage::SymbolSourceRecord>>>>;
 
 fn pagerank_cache() -> &'static PagerankCache {
     static CACHE: OnceLock<PagerankCache> = OnceLock::new();
@@ -38,9 +37,7 @@ impl IndexStore {
     }
 
     /// Return the file-level dependency adjacency list from stored edges (all import tiers).
-    pub fn dependency_graph(
-        &self,
-    ) -> anyhow::Result<FxHashMap<String, Vec<String>>> {
+    pub fn dependency_graph(&self) -> anyhow::Result<FxHashMap<String, Vec<String>>> {
         Ok(self
             .dependency_graph_with_import_quality()?
             .into_iter()
@@ -55,8 +52,7 @@ impl IndexStore {
         // RW connection so schema migration runs before reads on older indexes.
         let conn = self.open_connection()?;
 
-        let mut adj: FxHashMap<String, Vec<(String, FactQuality)>> =
-            FxHashMap::default();
+        let mut adj: FxHashMap<String, Vec<(String, FactQuality)>> = FxHashMap::default();
         {
             let mut stmt = conn.prepare_cached("SELECT file_path FROM files")?;
             let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
@@ -84,12 +80,9 @@ impl IndexStore {
     }
 
     /// Adjacency built only from import edges marked suitable for strict graph analysis.
-    pub fn dependency_graph_strict(
-        &self,
-    ) -> anyhow::Result<FxHashMap<String, Vec<String>>> {
+    pub fn dependency_graph_strict(&self) -> anyhow::Result<FxHashMap<String, Vec<String>>> {
         let detailed = self.dependency_graph_with_import_quality()?;
-        let mut out: FxHashMap<String, Vec<String>> =
-            FxHashMap::default();
+        let mut out: FxHashMap<String, Vec<String>> = FxHashMap::default();
         for (src, targets) in detailed {
             let keep: Vec<String> = targets
                 .into_iter()

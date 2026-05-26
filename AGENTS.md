@@ -7,8 +7,10 @@ retrieval. Rust workspace at the repo root. Onboarding: [`README.md`](README.md)
 
 Three rules are non-negotiable:
 
-- **Consolidated tools.** 10 tools, dispatched by `view` / `analysis` / `graph`
-  enums. Never split a consolidated tool into parallel names.
+- **Consolidated tools.** Six tools (`search`, `outline`, `read`, `references`,
+  `impact`, `health`), dispatched by `mode` / `view` / `kind` / `analysis`
+  enums. Never split a consolidated tool into parallel names. Authoritative
+  schema: [`crates/codesight-engine/src/tools.json`](crates/codesight-engine/src/tools.json).
 - **Stateless per-request.** The agent owns session state. Any session
   awareness we add is opt-in, never a mandatory protocol.
 - **No LLM calls from inside the server.** The agent *is* the LLM; summaries
@@ -54,55 +56,63 @@ Three rules are non-negotiable:
 If we don't use it on ourselves we won't notice when it breaks.
 
 **Default → codesight mapping.** Every row is a *reach*: if you catch
-yourself typing the left column, stop and use the right column.
+yourself typing the left column, stop and use the right column. The 6-tool
+surface is authoritative — see [`tools.json`](crates/codesight-engine/src/tools.json).
 
 | Default (don't) | Codesight (do) | Args |
 |---|---|---|
-| `Grep` a symbol/fn/type name | `search_catalog` | `query_mode=keyword`, `unit_kinds=["symbol"]`, opt. `kind=` / `fuzzy=true` |
-| `Grep` substring across files | `search_catalog` | `query_mode=keyword`, `unit_kinds=["file"]`, opt. `file_pattern` / `scope` |
-| `Grep -E` regex over files | `search_catalog` | `query_mode=regex`, `context_lines=N` |
-| `Grep … \| wc -l` / count scope | `search_catalog` | `output_mode=count` (or `files_with_matches`) |
-| Natural-language question | `search_catalog` | `query_mode=natural_language`, `domain=hybrid` |
-| `Glob` / `find` / `ls -R` | `inspect_structure` | `view=file_tree` (opt. `path=`) |
-| "What's in this repo" | `inspect_structure` | `view=repo_outline` / `repository_rollup` |
-| File outline before reading | `inspect_structure` | `view=file_outline`, `file_path=…` (batch via `file_paths`) |
-| `Read` a known file range | `read_content` | `refs=["path:start-end"]` or object form |
-| `Read` a function/class body | `read_content` | `refs=[{kind:"symbol", path, start_line}]` or `stable_id` |
-| Batch read N files/symbols | `read_content` | one call with N refs — never N calls |
-| File's outgoing imports | `inspect_graph` | `graph=imports`, `file_path=…` |
-| Incoming imports | `inspect_graph` | `graph=importers`, `file_path=…` |
-| Symbol references | `inspect_graph` | `graph=references` or `find_references identifier=…` |
-| Function call graph | `inspect_graph` | `graph=calls`, `symbol_id=…` |
-| Cross-module deps / cycles | `inspect_graph` | `graph=dependencies` / `dependency_cycles` / `layer_violations` |
-| Pre-refactor: who breaks? | `evaluate_impact` | `analysis=blast_radius`, `refs=[…]` |
-| Rename safety | `evaluate_impact` | `analysis=rename_safety`, `refs[0].new_name="…"` |
-| Symbol diff | `evaluate_impact` | `analysis=diff`, 2 refs in same file |
-| Hotspots / complexity | `evaluate_quality` | `analysis=hotspots` |
-| Dead code | `evaluate_quality` | `analysis=dead_code` |
-| Repo health / doc coverage | `evaluate_quality` | `analysis=repo_health` / `doc_coverage` |
-| Ticket kickoff bundle | `assemble_context` | `mode=context_bundle`, `refs=[…]`, `max_tokens=N` |
-| Section summary | `assemble_context` | `mode=section_context` |
-| Opening-move suggestions | `assemble_context` | `mode=ranked` / `query_suggestions` |
-| Freshness / list sources | `catalog_sources`, `manage_indexes action=status`, `ingest_sources incremental=true` | — |
+| `Grep` a symbol/fn/type name | `search` | `mode=keyword`, opt. `scope=` / `fuzzy=true` |
+| `Grep` substring across files | `search` | `mode=keyword`, opt. `scope=*.md` to narrow |
+| `Grep -E` regex over files | `search` | `mode=regex`, opt. `per_file_limit=N` |
+| Natural-language question | `search` | `mode=nl` |
+| Unsure of the exact name | `search` | `fuzzy=true` |
+| `Glob` / `find` / `ls -R` | `outline` | `view=repo` |
+| "What's in this repo" | `outline` | `view=repo` |
+| File outline before reading | `outline` | `view=file path=…` (batch via `paths`) |
+| `Read` a known file range | `read` | `refs=["path:N-M"]` |
+| `Read` a function/class body | `read` | `refs=["path::Name#kind"]` or `["id:<sid>"]` |
+| Batch read N files/symbols | `read` | one call with N refs — never N calls |
+| `Read` a markdown section | `read` | `refs=["section:path::Heading"]` |
+| File's outgoing imports | `references` | `kind=imports path=…` |
+| Incoming imports | `references` | `kind=importers path=…` |
+| Where is X referenced | `references` | `kind=symbol ref="path::Name#kind"` |
+| Pre-refactor: who breaks? | `impact` | `analysis=blast_radius ref=…` |
+| Rename safety | `impact` | `analysis=rename_safety ref=… new_name=…` |
+| Hotspots / complexity | `health` | `analysis=hotspots top_n=N` |
+| Dead code | `health` | `analysis=dead_code top_n=N` |
+| Per-slice agent readiness | `health` | `analysis=quality_signal scope=…` |
+| Repo health summary | `health` | `analysis=repo_health` |
+| Untested entry points | `health` | `analysis=test_gaps top_n=N` |
 
 #### Effective use
 
-- **Start every session with `catalog_sources`** — you need a `source_id`.
-  If stale: `ingest_sources path=. incremental=true`.
-- **Pick `query_mode`**: `keyword` for identifiers (fastest), `regex` for
-  patterns (auto-routes to file text, *ignores* `unit_kinds`),
-  `natural_language` for questions.
-- **Narrow aggressively** with `unit_kinds`, `scope="src/service/"`,
-  `file_pattern` — cheap token savers.
-- **Batch reads.** `read_content` takes N refs; never N calls.
-- **Prefer `inspect_graph` over mental graph walking.** "Let me grep every
-  usage of X" = `graph=references`.
-- **Budget tokens**: `max_tokens=4000` for browsing, `8000` for deep reads.
-- **Quality loop on risky edits**: `evaluate_quality analysis=quality_signal
-  scope="…"` before; `manage_indexes action=session_end` before sign-off
-  (check `quality_delta`, watch for `QUALITY_REGRESSION`).
-- **`_meta.tokens_saved` is the scoreboard.** Zero or negative = wrong tool
-  or too-broad query. Re-shape.
+- **Outline first.** `outline view=file path=<path>` before reading any
+  whole file. Then `read` the specific symbols you need.
+- **Batch reads.** `read` takes N refs — one call, not N. Failures are
+  per-ref (`data.errors[]`), not atomic — successes still land in
+  `data.items[]` with a top-level `PARTIAL_BATCH` warning.
+- **Pick `mode`**: `keyword` for identifiers (fastest), `regex` for
+  patterns (file-text scan), `nl` for question-shaped queries.
+- **Narrow with `scope`**: glob narrowing path *and* unit kind in one knob
+  (`*.md` → docs only; `crates/foo/**` → that crate). There is no separate
+  `unit_kinds` / `file_pattern`.
+- **`limit` is a global cap** on items returned. For regex with many
+  matches per file, also pass `per_file_limit=N` if you want ripgrep
+  semantics; otherwise the global cap may drop later files'
+  matches and you'll see a `REGEX_OVERFLOW` warning.
+- **`references` graph over mental graph walking.** "Let me grep every
+  usage of X" = `references kind=symbol`. "Who imports this file" =
+  `references kind=importers`.
+- **Read the warnings.** `confidence: "partial"` always carries a code:
+  `NO_EXACT_MATCH`, `AMBIGUOUS_IDENTIFIER`, `OVERBROAD_QUERY`,
+  `NL_DEGRADED`, `TRUNCATED`, etc. Full taxonomy in
+  [`warnings.rs`](crates/codesight-engine/src/service/agent_v1/warnings.rs).
+- **`_meta.tokens_saved` is the scoreboard for `mode=keyword|nl`.** For
+  `mode=regex`, the meta carries `bytes_scanned` + `files_scanned` instead
+  — regex inherently can't beat raw grep on tokens, so the metric is
+  mode-conditional.
+- **Quality loop on risky edits**: `health analysis=quality_signal
+  scope="…"` before; check `agent_readiness_score` and `weakest_dimension`.
 - **Fallback only when codesight can't answer** (missing grammar, tool
   under repair). Native `Grep`/`Read` remain correct for writing,
   running tests, and editing — not for read/search.
@@ -121,25 +131,20 @@ hold each to its own bar instead of one global threshold.
 
 | Tool / variant | Warm | Cold | Notes |
 |---|---|---|---|
-| `catalog_sources` | < 30 ms | < 200 ms | Body cache; no-op ingest doesn't bump generation. |
-| `search_catalog query_mode=keyword` | < 20 ms | < 100 ms | FTS5 + BM25. |
-| `search_catalog query_mode=regex` | < 30 ms | < 150 ms | File-text scan, capped by `limit`. |
-| `search_catalog query_mode=natural_language` | < 100 ms | < 400 ms | Dense embedder warmup on cold. |
-| `inspect_structure view=file_outline` | < 10 ms | < 50 ms | Single-table SELECT. |
-| `inspect_structure view=file_tree` | < 50 ms | < 200 ms | Repo-wide; honors `max_files`. |
-| `inspect_structure view=repo_outline` | < 50 ms | < 200 ms | Centrality precomputed. |
-| `read_content` (symbol/section/range) | < 30 ms | < 150 ms | Per-ref ≤ 5 ms warm. |
-| `inspect_graph graph=imports/importers/calls` | < 20 ms | < 100 ms | Indexed lookups. |
-| `inspect_graph graph=dependency_cycles` | < 100 ms | < 500 ms | O(V+E) Tarjan. |
-| `evaluate_impact blast_radius` | < 50 ms | < 250 ms | Reverse-BFS, depth ≤ 2. |
-| `evaluate_impact rename_safety` | < 100 ms | < 500 ms | File-text scan over importers. |
-| `evaluate_quality hotspots` | < 500 ms | < 2 s | Whole-repo cyclomatic walk. |
-| `evaluate_quality dead_code` | < 100 ms (cached) | < 5 s | 30 s in-process memo + persisted dispatch_roots cache. |
-| `evaluate_quality repo_health` | < 1 s | < 3 s | Aggregates multiple analyses. |
-| `assemble_context context_bundle` | < 100 ms | < 500 ms | Caller/callee depth-2 expansion. |
-| `manage_indexes session_stats` | < 10 ms | < 30 ms | Reads ledger JSON. |
-| `ingest_sources` (incremental, no-op) | < 200 ms | — | Fingerprint comparison only. |
-| `ingest_sources` (incremental, edit) | — | < 1 s/changed file | Full extractor pipeline. |
+| `search mode=keyword` | < 20 ms | < 100 ms | FTS5 + BM25. |
+| `search mode=regex` | < 30 ms | < 150 ms | File-text scan, capped by `limit` (and optional `per_file_limit`). |
+| `search mode=nl` | < 100 ms | < 400 ms | Dense embedder warmup on cold; falls back to BM25 with `NL_DEGRADED` on timeout. |
+| `outline view=file` | < 10 ms | < 50 ms | Single-table SELECT, function-local items filtered. |
+| `outline view=repo` | < 50 ms | < 200 ms | Centrality precomputed, body prewarmed at server start. |
+| `read` (symbol/section/range) | < 30 ms | < 150 ms | Per-ref ≤ 5 ms warm; per-ref errors land in `data.errors[]`. |
+| `references kind=imports` / `importers` / `symbol` | < 20 ms | < 100 ms | Indexed lookups; `limit` is a global cap. |
+| `impact analysis=blast_radius` | < 50 ms | < 250 ms | Reverse-BFS, depth ≤ 2. |
+| `impact analysis=rename_safety` | < 100 ms | < 500 ms | File-text scan over importers. |
+| `health analysis=hotspots` | < 500 ms | < 2 s | Whole-repo cyclomatic walk. |
+| `health analysis=dead_code` | < 100 ms (cached) | < 5 s | 30 s in-process memo + persisted `dispatch_roots` cache. CLI/bin/main/hooks paths emit `MANUAL_REVIEW_REQUIRED`. |
+| `health analysis=quality_signal` | < 500 ms (scoped) | < 1 s | Per-slice agent-readiness dimensions. |
+| `health analysis=repo_health` | < 1 s | < 3 s | Aggregates the others; uses cached dead-code summary, never blocks on a cold dead-code walk. |
+| `health analysis=test_gaps` | < 200 ms | < 500 ms | Untested high-risk symbols ranked by churn × cyclomatic × fan_in. |
 
 A tool exceeding its tier in a real workload is a regression — log it and
 investigate. The tier is the bar; "but it's better than before" is not.

@@ -151,7 +151,10 @@ pub fn coerce_and_validate(tool: &str, mut arguments: Value) -> Result<Value, To
     // CUTPLAN: the new 6-tool surface uses string-only refs and handles
     // expansion inside its adapters. Skip the legacy `expand_shorthand_refs`
     // path for those tools so the schema can enforce the contract.
-    if !matches!(tool, "search" | "outline" | "read" | "references" | "impact" | "health") {
+    if !matches!(
+        tool,
+        "search" | "outline" | "read" | "references" | "impact" | "health"
+    ) {
         expand_shorthand_refs(&mut arguments);
     }
     coerce(&mut arguments, &tool_schema.schema);
@@ -336,16 +339,17 @@ mod tests {
 
     #[test]
     fn coerces_stringified_array() {
+        // `outline view=file paths=[…]` accepts a JSON-stringified array as a
+        // common MCP-client quirk; coercion promotes it before validation.
         let out = coerce_and_validate(
-            "inspect_structure",
+            "outline",
             json!({
-                "source_id": "r",
-                "view": "file_outline",
-                "file_paths": "[\"src/a.py\", \"src/b.py\"]",
+                "view": "file",
+                "paths": "[\"src/a.py\", \"src/b.py\"]",
             }),
         )
         .unwrap();
-        assert_eq!(out["file_paths"], json!(["src/a.py", "src/b.py"]));
+        assert_eq!(out["paths"], json!(["src/a.py", "src/b.py"]));
     }
 
     #[test]
@@ -363,19 +367,16 @@ mod tests {
 
     #[test]
     fn rejects_missing_required_field() {
-        // search_catalog requires source_id + query.
-        let err = coerce_and_validate("search_catalog", json!({ "query": "hi" })).unwrap_err();
+        // `outline` requires `view`; missing it must surface as
+        // InvalidArgument, not pass through.
+        let err = coerce_and_validate("outline", json!({ "path": "src/lib.rs" })).unwrap_err();
         assert_eq!(err.category, ToolErrorCategory::InvalidArgument);
     }
 
     #[test]
     fn allows_well_formed_args() {
-        let ok = coerce_and_validate(
-            "search_catalog",
-            json!({ "source_id": "repo-abc", "query": "needle" }),
-        )
-        .unwrap();
-        assert_eq!(ok["source_id"], "repo-abc");
+        let ok = coerce_and_validate("search", json!({ "query": "needle" })).unwrap();
+        assert_eq!(ok["query"], "needle");
     }
 
     #[test]
@@ -416,19 +417,19 @@ mod tests {
     }
 
     #[test]
-    fn read_content_accepts_string_refs() {
+    fn read_accepts_string_refs() {
+        // The 6-tool `read` schema mandates string-only refs; the adapter
+        // (`cutplan_read`) parses them into objects, so the validator must
+        // pass them through unchanged.
         let out = coerce_and_validate(
-            "read_content",
+            "read",
             json!({
-                "source_id": "r",
                 "refs": ["src/foo.rs:40-120", "src/bar.rs::X#function"],
             }),
         )
         .unwrap();
         let refs = out["refs"].as_array().unwrap();
-        assert_eq!(refs[0]["kind"], "file");
-        assert_eq!(refs[0]["start_line"], 40);
-        assert_eq!(refs[1]["kind"], "symbol");
-        assert_eq!(refs[1]["stable_id"], "src/bar.rs::X#function");
+        assert_eq!(refs[0], "src/foo.rs:40-120");
+        assert_eq!(refs[1], "src/bar.rs::X#function");
     }
 }

@@ -311,4 +311,3 @@ fn render_json_value(value: &serde_json::Value) -> String {
             .join(", "),
     }
 }
-

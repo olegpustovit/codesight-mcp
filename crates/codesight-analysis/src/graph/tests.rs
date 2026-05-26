@@ -17,7 +17,10 @@ fn set_refs<'a, I: IntoIterator<Item = &'a String>>(items: I) -> FxHashSet<&'a S
 
 #[test]
 fn empty_graph_returns_no_cycles() {
-    assert_eq!(find_cycles(&FxHashMap::default()), Vec::<Vec<String>>::new());
+    assert_eq!(
+        find_cycles(&FxHashMap::default()),
+        Vec::<Vec<String>>::new()
+    );
 }
 
 #[test]

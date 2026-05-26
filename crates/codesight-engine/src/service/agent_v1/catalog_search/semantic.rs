@@ -22,10 +22,17 @@ pub(super) struct DenseHits {
     pub(super) warning: Option<Value>,
 }
 
+/// Tier 5.2: surface dense-lane failures (model load, encode error,
+/// missing vec table) as `NL_DEGRADED` so the caller can see they got
+/// BM25-only results — not nothing — and the confidence drops to
+/// `partial` automatically (NL mode is already partial regardless).
+///
+/// `reason` is one of: `model_load_failed`, `encoder_error`, `knn_error`,
+/// `vectors_missing`, `dense_timeout`.
 pub(super) fn semantic_fallback_warning(reason: &'static str, detail: String) -> Value {
     json!({
-        "code": "SEMANTIC_FALLBACK",
-        "message": "Semantic retrieval unavailable; returning lexical results only.",
+        "code": "NL_DEGRADED",
+        "message": "Dense (semantic) retrieval unavailable; returning BM25-only results.",
         "detail": { "reason": reason, "error": detail },
     })
 }

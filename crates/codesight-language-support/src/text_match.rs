@@ -109,11 +109,7 @@ pub fn strip_strings_before(s: &str) -> String {
 /// "other"`. Language-agnostic heuristics good enough for rename-safety
 /// gating and `find_references` classification.
 #[must_use]
-pub fn classify_body_match(
-    line_text: &str,
-    ident_col: usize,
-    ident_len: usize,
-) -> &'static str {
+pub fn classify_body_match(line_text: &str, ident_col: usize, ident_len: usize) -> &'static str {
     let trimmed = line_text.trim_start();
     let leading_ws = line_text.len() - trimmed.len();
     let col = ident_col.min(line_text.len());

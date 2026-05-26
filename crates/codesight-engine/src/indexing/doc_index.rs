@@ -181,4 +181,3 @@ fn modified_ns(time: &SystemTime) -> u64 {
         .map(|duration| duration.as_nanos() as u64)
         .unwrap_or_default()
 }
-

@@ -4,12 +4,9 @@ mod args;
 mod catalog;
 mod catalog_search;
 mod content;
-mod context;
 mod cutplan;
-mod file_tree;
 mod freshness;
 mod graph;
-mod impact;
 mod index_admin;
 mod ingest;
 pub mod quality;
@@ -18,6 +15,7 @@ mod session_admin;
 mod structure;
 mod util;
 pub mod validate;
+pub mod warnings;
 
 use serde_json::Value;
 

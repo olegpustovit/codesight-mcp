@@ -58,12 +58,21 @@ impl<'a> From<&'a str> for FuzzyCandidate<'a> {
     }
 }
 
-/// Rank a batch of candidates. Returns `(index, normalized_score)` pairs,
-/// sorted by score descending. Ties on score break on shorter name first
-/// (intent: typo closer to shorter symbol), then on higher `kind_priority`,
-/// then on original index ascending. Normalized against the best raw score
-/// in the batch. Candidates scoring below 20% of the best are dropped so
-/// long-range subsequence matches don't pollute the lane.
+/// Rank a batch of candidates. Returns `(index, score)` pairs sorted by
+/// score descending. The reported score blends two signals:
+///
+/// * `nucleo_norm` — subsequence/word-boundary score normalized to the
+///   batch best, what `nucleo-matcher` returns.
+/// * `edit_similarity` — Jaro-Winkler between query and candidate name,
+///   the "is this actually a typo?" signal.
+///
+/// For symbol-name typos we want `SavingLedger → SavingsLedger` (a one-char
+/// insertion) to beat `savings_ledger_end_session` (a clean word-boundary
+/// subsequence match that nucleo loves). Blending picks the spelling-near
+/// candidate without losing nucleo's word-boundary intuition. Final score =
+/// `0.5 * nucleo_norm + 0.5 * edit_similarity`. Ties break on shorter name →
+/// higher `kind_priority` → original index. Candidates whose blended score
+/// falls below 20% of the best are dropped.
 pub fn fuzzy_rank<'a, I>(query: &str, candidates: I) -> Vec<(usize, f32)>
 where
     I: IntoIterator,
@@ -72,28 +81,36 @@ where
     const FLOOR_FRAC: f32 = 0.2;
     let mut matcher = new_matcher();
     let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
-    // Carry name length + kind priority through the sort without re-reading
-    // candidates after the nucleo pass.
-    let mut raw: Vec<(usize, u32, usize, u8)> = Vec::new();
+    let mut raw: Vec<(usize, u32, f32, usize, u8)> = Vec::new();
     let mut buf: Vec<char> = Vec::new();
     for (i, cand) in candidates.into_iter().enumerate() {
         let c: FuzzyCandidate<'a> = cand.into();
-        if let Some(score) = pattern.score(Utf32Str::new(c.name, &mut buf), &mut matcher) {
-            raw.push((i, score, c.name.len(), c.kind_priority));
+        if let Some(nucleo) = pattern.score(Utf32Str::new(c.name, &mut buf), &mut matcher) {
+            let edit = edit_similarity(query, c.name) as f32;
+            raw.push((i, nucleo, edit, c.name.len(), c.kind_priority));
         }
     }
-    let Some(&(_, best, _, _)) = raw.iter().max_by_key(|(_, s, _, _)| *s) else {
+    let Some(&(_, best_nucleo, _, _, _)) = raw.iter().max_by_key(|(_, s, _, _, _)| *s) else {
         return Vec::new();
     };
-    let best_f = best.max(1) as f32;
-    let floor = best_f * FLOOR_FRAC;
-    let mut kept: Vec<(usize, u32, usize, u8)> = raw
+    let best_nucleo_f = best_nucleo.max(1) as f32;
+    let mut blended: Vec<(usize, f32, usize, u8)> = raw
         .into_iter()
-        .filter(|(_, s, _, _)| (*s as f32) >= floor)
+        .map(|(i, n, e, len, kp)| {
+            let n_norm = (n as f32 / best_nucleo_f).clamp(0.0, 1.0);
+            let blend = 0.5 * n_norm + 0.5 * e;
+            (i, blend, len, kp)
+        })
         .collect();
-    kept.sort_by(|a, b| {
-        // Primary: higher raw nucleo score wins.
-        b.1.cmp(&a.1)
+    let best_blend = blended
+        .iter()
+        .map(|(_, b, _, _)| *b)
+        .fold(0.0_f32, f32::max);
+    let floor = best_blend * FLOOR_FRAC;
+    blended.retain(|(_, b, _, _)| *b >= floor);
+    blended.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
             // Tie #1: shorter candidate name wins.
             .then_with(|| a.2.cmp(&b.2))
             // Tie #2: higher kind_priority wins.
@@ -101,8 +118,9 @@ where
             // Final: stable by original index.
             .then_with(|| a.0.cmp(&b.0))
     });
-    kept.into_iter()
-        .map(|(i, s, _, _)| (i, (s as f32 / best_f).clamp(0.0, 1.0)))
+    blended
+        .into_iter()
+        .map(|(i, b, _, _)| (i, b.clamp(0.0, 1.0)))
         .collect()
 }
 
@@ -148,26 +166,27 @@ mod tests {
     #[test]
     fn typo_ranks_nearest_name_first() {
         // The regression that motivated the nucleo swap.
-        let names = ["savings_file", "savings_entry", "SavingsLedger", "unrelated"];
+        let names = [
+            "savings_file",
+            "savings_entry",
+            "SavingsLedger",
+            "unrelated",
+        ];
         let ranked = fuzzy_rank("SavingLedger", names.iter().copied());
         let first = ranked.first().expect("at least one match");
         assert_eq!(names[first.0], "SavingsLedger");
     }
 
     #[test]
-    fn tie_break_shorter_name_wins() {
-        // Both candidates are exact subsequence matches of the query and
-        // score identically. The shorter name should rank first — a
-        // 13-char typo is closer to `SavingsLedger` than to a 40-char
-        // method sharing the same subsequence.
-        let names = [
-            "savings_ledger_set_quality_session_start",
-            "SavingsLedger",
-        ];
+    fn shorter_typo_neighbour_outranks_long_subsequence_match() {
+        // A 13-char typo (`SavingLedger`) is closer to `SavingsLedger`
+        // (one-char insertion) than to a 40-char method that happens to
+        // contain the same subsequence. The blend of nucleo subsequence
+        // + Jaro-Winkler edit similarity favours the shorter, spelling-near
+        // candidate even though both score identically on raw nucleo.
+        let names = ["savings_ledger_set_quality_session_start", "SavingsLedger"];
         let ranked = fuzzy_rank("SavingLedger", names.iter().copied());
         assert!(ranked.len() >= 2, "expected both to rank, got {ranked:?}");
-        // Equal scores → shorter wins.
-        assert!((ranked[0].1 - ranked[1].1).abs() < f32::EPSILON);
         assert_eq!(names[ranked[0].0], "SavingsLedger");
     }
 
@@ -175,12 +194,21 @@ mod tests {
     fn tie_break_kind_priority_wins_on_equal_length() {
         // Equal query match and equal name length → higher kind_priority wins.
         let cands = [
-            FuzzyCandidate { name: "aB", kind_priority: 1 },
-            FuzzyCandidate { name: "aC", kind_priority: 9 },
+            FuzzyCandidate {
+                name: "aB",
+                kind_priority: 1,
+            },
+            FuzzyCandidate {
+                name: "aC",
+                kind_priority: 9,
+            },
         ];
         let ranked = fuzzy_rank("a", cands);
         assert!(ranked.len() >= 2, "{ranked:?}");
-        assert_eq!(ranked[0].0, 1, "expected higher kind_priority first; {ranked:?}");
+        assert_eq!(
+            ranked[0].0, 1,
+            "expected higher kind_priority first; {ranked:?}"
+        );
     }
 
     #[test]

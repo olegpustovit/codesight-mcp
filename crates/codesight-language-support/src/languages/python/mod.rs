@@ -269,9 +269,9 @@ impl Language for Python {
     fn reserved_identifiers(&self) -> &'static [&'static str] {
         &[
             "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
-            "continue", "def", "del", "elif", "else", "except", "finally", "for", "from",
-            "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass",
-            "raise", "return", "try", "while", "with", "yield", "match", "case",
+            "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global",
+            "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
+            "return", "try", "while", "with", "yield", "match", "case",
         ]
     }
 

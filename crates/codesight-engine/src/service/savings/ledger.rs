@@ -87,11 +87,11 @@ impl SavingsLedger {
             session.primary_source_id = Some(source_id.to_string());
         }
         session.tokens_saved_total = session.tokens_saved_total.saturating_add(call.tokens_saved);
-        if call.tool == "evaluate_impact"
+        if call.tool == "impact"
             && let Some(analysis) = call.impact_analysis.filter(|value| !value.is_empty())
         {
             *session
-                .evaluate_impact_usage
+                .impact_usage
                 .entry(analysis.to_string())
                 .or_default() += 1;
         }
@@ -267,21 +267,19 @@ impl SavingsLedger {
         // Dedup ignores `recorded_at` so a re-record of the same in-flight
         // set doesn't bloat the ledger; the pre-TTL prune above handles
         // cleanup of *truly* stale entries.
-        let already_present = state
-            .current_session
-            .stale_warnings_in_flight
-            .iter()
-            .any(|existing| {
-                existing.repo == record.repo
-                    && existing.files_in_flight == record.files_in_flight
-            });
+        let already_present =
+            state
+                .current_session
+                .stale_warnings_in_flight
+                .iter()
+                .any(|existing| {
+                    existing.repo == record.repo
+                        && existing.files_in_flight == record.files_in_flight
+                });
         if already_present {
             return self.store(&state);
         }
-        state
-            .current_session
-            .stale_warnings_in_flight
-            .push(record);
+        state.current_session.stale_warnings_in_flight.push(record);
         self.store(&state)
     }
 
@@ -333,7 +331,7 @@ fn ensure_active_session(state: &mut SavingsState) -> bool {
             tokens_saved_total: 0,
             per_tool: FxHashMap::default(),
             blocked_grep_bash_attempts: 0,
-            evaluate_impact_usage: FxHashMap::default(),
+            impact_usage: FxHashMap::default(),
             stale_warnings_in_flight: Vec::new(),
             primary_source_id: None,
             quality_session_start: None,

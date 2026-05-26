@@ -13,7 +13,16 @@ use super::plan::SearchCounts;
 /// below the MCP client's overflow-to-file guard so broad queries trim on
 /// the server side with a `truncated_by=["byte_budget"]` hint instead of
 /// returning a giant `.txt` pointer.
-const MAX_RESPONSE_BYTES: usize = 12_000;
+///
+/// Tier 2.1: bumped from 12 KB → 24 KB so regex hits with line-context
+/// don't get pinched down to 1 item before the caller's `limit` is honored.
+const MAX_RESPONSE_BYTES: usize = 24_000;
+
+/// Tier 2.1: never byte-cap the response below this many items. `limit` is
+/// the caller's contract; if it can't fit at the requested context width,
+/// we'd rather return the count and let the caller drop `context_lines` or
+/// pass `max_tokens` than silently shrink to 1 hit.
+const BYTE_CAP_ITEM_FLOOR: usize = 3;
 
 pub(super) struct FormatCtx<'a> {
     pub(super) output_mode: &'a str,
@@ -96,9 +105,7 @@ pub(super) fn format_output(
                 "total_matches": total_matches,
                 "total_files_with_matches": known_total,
             });
-            if is_truncated
-                && let Value::Object(ref mut map) = data
-            {
+            if is_truncated && let Value::Object(ref mut map) = data {
                 map.insert("truncated".to_string(), json!(true));
                 map.insert("truncated_by".to_string(), json!(truncated_by.clone()));
             }
@@ -138,8 +145,14 @@ pub(super) fn format_output(
                 truncated_by.push("limit");
             }
 
+            // Tier 2.1: byte-cap pops items only down to the floor — never
+            // below `limit` (or `BYTE_CAP_ITEM_FLOOR`, whichever is smaller).
+            // Keeping a floor preserves the caller's `limit` contract; the
+            // byte cap is a server-side guard against giant responses, not a
+            // way to silently narrow to 1 hit.
             let mut byte_budgeted = false;
-            while items.len() > 1
+            let floor = ctx.lim.min(items.len()).clamp(1, BYTE_CAP_ITEM_FLOOR);
+            while items.len() > floor
                 && serde_json::to_vec(&items).map(|v| v.len()).unwrap_or(0) > MAX_RESPONSE_BYTES
             {
                 items.pop();
@@ -150,7 +163,7 @@ pub(super) fn format_output(
                 warnings.push(json!({
                     "code": "TRUNCATED",
                     "message": format!(
-                        "result trimmed to stay under {MAX_RESPONSE_BYTES}-byte server cap; narrow via scope=, file_pattern=, or a tighter query."
+                        "result trimmed to stay under {MAX_RESPONSE_BYTES}-byte server cap; pass `max_tokens=`, drop `context_lines=`, or narrow via `scope=` to keep more items."
                     ),
                 }));
             }

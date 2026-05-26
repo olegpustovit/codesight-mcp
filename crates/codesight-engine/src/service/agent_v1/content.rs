@@ -96,11 +96,19 @@ impl CodeService {
         &self,
         sec_id: &str,
         opts: &ReadOpts<'_>,
+        repo_store: Option<&IndexStore>,
         raw_bytes: &mut u64,
     ) -> anyhow::Result<Value> {
-        let store = self
-            .ensure_doc_store(opts.sid, opts.repo_path)
-            .map_err(|e| anyhow::anyhow!("{}", e.message))?;
+        let store = match self.ensure_doc_store(opts.sid, opts.repo_path) {
+            Ok(s) => s,
+            // Tier 3.1: doc index unavailable → parse the file directly using
+            // codesight_retrieval's section extractor. The section ref form
+            // already encodes the path, so we don't need a doc index for this.
+            Err(e) if e.code == "NOT_INDEXED" => {
+                return self.read_section_from_file_fallback(sec_id, repo_store, raw_bytes, opts);
+            }
+            Err(e) => return Err(anyhow::anyhow!("{}", e.message)),
+        };
         *raw_bytes += store.section_file_size(sec_id)?.unwrap_or(0);
         let get = GetSectionArgs {
             source_id: opts.sid.to_string(),
@@ -137,6 +145,83 @@ impl CodeService {
             }
             Err(e) => Ok(err_item("INTERNAL", &e.to_string())),
         }
+    }
+
+    /// Tier 3.1: parse a `section:path::heading` ref directly off disk when
+    /// no doc index exists. Reuses
+    /// [`codesight_retrieval::sections::extract_sections`] so the heading
+    /// resolution rules match what the indexed path would have done.
+    fn read_section_from_file_fallback(
+        &self,
+        sec_id: &str,
+        repo_store: Option<&IndexStore>,
+        raw_bytes: &mut u64,
+        opts: &ReadOpts<'_>,
+    ) -> anyhow::Result<Value> {
+        let Some((path, heading)) = sec_id.split_once("::") else {
+            return Ok(err_item(
+                "MISSING_REF",
+                "section id must be 'path::heading'",
+            ));
+        };
+        let Some(store) = repo_store else {
+            return Ok(err_item(
+                "NOT_INDEXED",
+                &format!(
+                    "neither code nor doc source '{}' is indexed; cannot resolve `section:{path}::{heading}`.",
+                    opts.sid,
+                ),
+            ));
+        };
+        let root = match store.root_path() {
+            Ok(r) => r,
+            Err(e) => return Ok(err_item("INTERNAL", &format!("root_path: {e}"))),
+        };
+        let abs = root.join(path);
+        let source = match std::fs::read_to_string(&abs) {
+            Ok(s) => s,
+            Err(e) => {
+                return Ok(err_item("READ_FAILED", &format!("read {path}: {e}")));
+            }
+        };
+        *raw_bytes += source.len() as u64;
+        let sections = codesight_retrieval::sections::extract_sections(path, &source);
+        let target = sections.into_iter().find(|s| {
+            s.heading.eq_ignore_ascii_case(heading) || s.heading_path.eq_ignore_ascii_case(heading)
+        });
+        let Some(section) = target else {
+            return Ok(err_item(
+                crate::service::agent_v1::warnings::SECTION_NOT_FOUND,
+                &format!("heading '{heading}' not found in {path}"),
+            ));
+        };
+        let content = source
+            .get(section.start_byte..section.end_byte)
+            .unwrap_or("")
+            .to_string();
+        let mut item = json!({
+            "ref": {
+                "id": sec_id,
+                "stable_id": sec_id,
+                "source_id": opts.sid,
+                "domain": "docs",
+                "kind": "section",
+                "path": path,
+                "heading": section.heading,
+                "heading_path": section.heading_path,
+                "level": section.level,
+                "start_line": section.start_line,
+                "end_line": section.end_line,
+            },
+            "summary": section.summary,
+            "fallback_source": "file_parse",
+        });
+        if opts.want_body
+            && let Value::Object(obj) = &mut item
+        {
+            obj.insert("content".to_string(), json!(content));
+        }
+        Ok(item)
     }
 
     fn read_file_item(
@@ -219,6 +304,10 @@ impl CodeService {
         });
 
         let mut items = Vec::new();
+        // Tier 2.2: per-ref errors land here, separated from `items[]` so
+        // callers can iterate successes without filtering. Surfaced as
+        // `data.errors[]` in the response with a `PARTIAL_BATCH` warning.
+        let mut errors: Vec<Value> = Vec::new();
         let mut raw_bytes_total = 0u64;
         let mut warnings = Vec::new();
         let mut scopes = ReadScopeCounters::default();
@@ -275,7 +364,20 @@ impl CodeService {
                 &mut scopes,
                 &mut raw_bytes_total,
             )? {
-                RefReadResult::Err(e) => items.push(e),
+                RefReadResult::Err(mut e) => {
+                    // Tag the failing ref so callers can correlate without
+                    // re-parsing the message. `pref.path` and `pref.id` are
+                    // the two stable identifiers we expose on input.
+                    if let Value::Object(obj) = &mut e {
+                        if let Some(p) = pref.path.as_deref() {
+                            obj.insert("ref_path".to_string(), json!(p));
+                        }
+                        if let Some(id) = pref.stable_id.as_deref().or(pref.id.as_deref()) {
+                            obj.insert("ref_id".to_string(), json!(id));
+                        }
+                    }
+                    errors.push(e);
+                }
                 RefReadResult::Ok { mut item, scope } => {
                     let item_bytes = extract_item_bytes(&item);
                     returned_bytes += item_bytes;
@@ -318,6 +420,23 @@ impl CodeService {
         } else {
             RetrievalClass::WholeFileRead
         };
+        // Tier 2.2: when any per-ref errored, demote confidence and surface
+        // a top-level `PARTIAL_BATCH` warning. `data.errors[]` carries the
+        // per-ref error envelopes; successful reads still land in
+        // `data.items[]` so the caller never loses good work to one bad ref.
+        let confidence = if errors.is_empty() {
+            Confidence::Safe
+        } else {
+            warnings.push(crate::service::agent_v1::warnings::warning(
+                crate::service::agent_v1::warnings::PARTIAL_BATCH,
+                format!(
+                    "{} of {} ref(s) failed; successful reads are in `data.items[]`, errors in `data.errors[]`.",
+                    errors.len(),
+                    args.refs.len(),
+                ),
+            ));
+            Confidence::Partial
+        };
         // ROADMAP P1.1: baseline is the honest sum of full-file sizes
         // the agent would have read without codesight; a whole-file read
         // yields savings=0 (response≈baseline), a symbol/range read yields
@@ -325,7 +444,7 @@ impl CodeService {
         // legitimately 0 we want `tokens_saved: null`, not a fabricated 1.
         let timer = MetaBuilder::new(raw_bytes_total)
             .with_class(class)
-            .with_confidence(Confidence::Safe);
+            .with_confidence(confidence);
         let extra = build_read_meta_extras(
             &scopes,
             returned_bytes,
@@ -334,9 +453,20 @@ impl CodeService {
             want_hash,
             actually_stubbed,
         );
-        self.success_response_with_meta_extra(&timer, json!({ "items": items }), warnings, extra)
+        let mut data = json!({ "items": items });
+        if !errors.is_empty()
+            && let Value::Object(obj) = &mut data
+        {
+            obj.insert("errors".to_string(), json!(errors));
+        }
+        self.success_response_with_meta_extra(&timer, data, warnings, extra)
     }
 
+    /// Tier 2.2: best-effort per-ref reader. Any `read_*_item` failure is
+    /// caught and surfaced as `RefReadResult::Err(err_item(...))` so a single
+    /// bad ref never aborts the whole batch. The outer `read_content` loop
+    /// translates `Err` items into `data.errors[]` and pushes a
+    /// `PARTIAL_BATCH` warning so callers see exactly which refs failed.
     fn read_one_ref(
         &self,
         pref: &ContentRef,
@@ -355,11 +485,16 @@ impl CodeService {
                         &format!("Code source '{}' has not been indexed.", opts.sid),
                     )));
                 };
-                let item = self.read_symbol_item(pref, store, opts, raw_bytes)?;
-                Ok(RefReadResult::Ok {
-                    item,
-                    scope: "symbol",
-                })
+                match self.read_symbol_item(pref, store, opts, raw_bytes) {
+                    Ok(item) => Ok(RefReadResult::Ok {
+                        item,
+                        scope: "symbol",
+                    }),
+                    Err(e) => Ok(RefReadResult::Err(err_item(
+                        "READ_FAILED",
+                        &format!("symbol read failed: {e}"),
+                    ))),
+                }
             }
             "section" => {
                 scopes.section += 1;
@@ -369,11 +504,16 @@ impl CodeService {
                         "section ref needs id/stable_id",
                     )));
                 };
-                let item = self.read_section_item(sec_id, opts, raw_bytes)?;
-                Ok(RefReadResult::Ok {
-                    item,
-                    scope: "section",
-                })
+                match self.read_section_item(sec_id, opts, repo_store, raw_bytes) {
+                    Ok(item) => Ok(RefReadResult::Ok {
+                        item,
+                        scope: "section",
+                    }),
+                    Err(e) => Ok(RefReadResult::Err(err_item(
+                        "SECTION_NOT_FOUND",
+                        &format!("section read failed: {e}"),
+                    ))),
+                }
             }
             "file" => {
                 let Some(file_path) = pref.path.as_deref().or(id.as_deref()) else {
@@ -389,8 +529,13 @@ impl CodeService {
                     scopes.file_full += 1;
                     "file_full"
                 };
-                let item = self.read_file_item(pref, file_path, opts, raw_bytes)?;
-                Ok(RefReadResult::Ok { item, scope })
+                match self.read_file_item(pref, file_path, opts, raw_bytes) {
+                    Ok(item) => Ok(RefReadResult::Ok { item, scope }),
+                    Err(e) => Ok(RefReadResult::Err(err_item(
+                        "READ_FAILED",
+                        &format!("file read failed: {e}"),
+                    ))),
+                }
             }
             other => Ok(RefReadResult::Err(err_item(
                 "UNSUPPORTED_KIND",
@@ -456,9 +601,14 @@ fn try_preflight_oversized_file(
     if returned_bytes.saturating_add(file_size) <= budget {
         return None;
     }
+    // Always honor the first ref in full — even when its size alone exceeds
+    // the budget. Stubbing the first ref returns nothing useful; subsequent
+    // oversize refs get the running-budget stub via `oversized_ref_stub`.
+    if returned_bytes == 0 {
+        return None;
+    }
     let outline = store.file_outline(path).ok().unwrap_or_default();
-    let outline_json =
-        serde_json::to_value(&outline).unwrap_or_else(|_| Value::Array(Vec::new()));
+    let outline_json = serde_json::to_value(&outline).unwrap_or_else(|_| Value::Array(Vec::new()));
     let stub = json!({
         "ref": {
             "kind": pref.kind,

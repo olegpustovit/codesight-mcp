@@ -33,15 +33,6 @@ impl<'a> RefFilter<'a> {
         }
     }
 
-    fn new_permissive() -> Self {
-        Self {
-            scope: None,
-            exclude: &[],
-            include_non_code: false,
-            include_vendored: false,
-        }
-    }
-
     fn admits(&self, path: &str) -> bool {
         if !self.include_non_code && is_non_code_reference_path(path) {
             return false;
@@ -62,15 +53,6 @@ impl<'a> RefFilter<'a> {
         }
         true
     }
-}
-
-/// Pure reference match — no MCP envelope, usable from other tools.
-#[derive(Debug, Clone)]
-pub(crate) struct RefMatch {
-    pub file: String,
-    pub line: u32,
-    pub kind: &'static str,
-    pub preview: String,
 }
 
 /// Return true when `c` is part of a Rust-shaped identifier token. Used for
@@ -104,65 +86,6 @@ fn locate_identifier_ci(source: &str, identifier: &str) -> Option<(u32, u32)> {
         }
     }
     None
-}
-
-fn first_identifier_line(file: &str, content: &str, identifier: &str) -> Option<(u32, String)> {
-    content.lines().enumerate().find_map(|(idx, line)| {
-        mentions_identifier_ci_in_file(file, line, identifier)
-            .then(|| (idx as u32 + 1, line.trim().to_string()))
-    })
-}
-
-/// Collect whole-word references to `name` in the indexed workspace.
-/// `definition_id` (optional) is excluded from symbol-body matches.
-pub(crate) fn collect_references(
-    store: &codesight_storage::storage::IndexStore,
-    name: &str,
-) -> anyhow::Result<Vec<RefMatch>> {
-    let sym_infos = store.all_symbols_with_source()?;
-    let all_contents = store.all_file_contents().unwrap_or_default();
-    let filter = RefFilter::new_permissive();
-
-    let mut out: Vec<RefMatch> = Vec::new();
-    let mut seen_files: FxHashSet<String> = FxHashSet::default();
-    for sym in &sym_infos {
-        if !filter.admits(&sym.file) {
-            continue;
-        }
-        if sym.name.eq_ignore_ascii_case(name) {
-            out.push(RefMatch {
-                file: sym.file.clone(),
-                line: sym.line,
-                kind: "definition",
-                preview: sym.source.lines().next().unwrap_or("").to_string(),
-            });
-            seen_files.insert(sym.file.clone());
-            continue;
-        }
-        if mentions_identifier_ci_in_file(&sym.file, &sym.source, name) {
-            out.push(RefMatch {
-                file: sym.file.clone(),
-                line: sym.line,
-                kind: "symbol_body_match",
-                preview: sym.name.clone(),
-            });
-            seen_files.insert(sym.file.clone());
-        }
-    }
-    for (file, content) in &all_contents {
-        if seen_files.contains(file) || !filter.admits(file) {
-            continue;
-        }
-        if let Some((line, preview)) = first_identifier_line(file, content, name) {
-            out.push(RefMatch {
-                file: file.clone(),
-                line,
-                kind: "file_body_match",
-                preview,
-            });
-        }
-    }
-    Ok(out)
 }
 
 /// Fully-populated reference row. `definition` and `symbol_body_match` are
@@ -245,7 +168,9 @@ fn classify_body_match(line_text: &str, ident_col: usize, ident_len: usize) -> &
 
     // use_stmt: line begins with an import-style keyword.
     let head: &str = &line_text[leading_ws..];
-    for kw in ["use ", "import ", "from ", "require ", "require(", "pub use "] {
+    for kw in [
+        "use ", "import ", "from ", "require ", "require(", "pub use ",
+    ] {
         if head.starts_with(kw) {
             return "use_stmt";
         }
@@ -253,8 +178,7 @@ fn classify_body_match(line_text: &str, ident_col: usize, ident_len: usize) -> &
 
     // call_site: first non-space char after the identifier is `(` — this
     // also covers turbofish `foo::<T>(` because the `(` still follows.
-    let next = after_raw
-        .trim_start_matches(|c: char| c == ':' || c.is_ascii_whitespace());
+    let next = after_raw.trim_start_matches(|c: char| c == ':' || c.is_ascii_whitespace());
     if next.starts_with('(') {
         return "call_site";
     }
@@ -500,7 +424,28 @@ impl CodeService {
         let filter = RefFilter::from_args(args);
 
         let rows = collect_rows(&sym_infos, &all_contents, identifier, &filter, false);
-        let (semantic, candidate) = split_semantic_and_candidate(rows);
+        let (mut semantic, mut candidate) = split_semantic_and_candidate(rows);
+        let total_semantic = semantic.len();
+        let total_candidate = candidate.len();
+        // Tier 2.1: enforce the caller's global `limit` over the merged
+        // (semantic + candidate) result set. Definitions sort first inside
+        // `semantic` (see `collect_rows`), so we keep them.
+        let limit = args.limit.unwrap_or(50).clamp(1, 500);
+        let total_unbounded = total_semantic + total_candidate;
+        let semantic_truncated = if semantic.len() > limit {
+            semantic.truncate(limit);
+            true
+        } else {
+            false
+        };
+        let semantic_remaining = limit.saturating_sub(semantic.len());
+        let candidate_truncated = if candidate.len() > semantic_remaining {
+            candidate.truncate(semantic_remaining);
+            true
+        } else {
+            false
+        };
+        let truncated = semantic_truncated || candidate_truncated;
         let semantic_count = semantic.len();
         let candidate_count = candidate.len();
 
@@ -509,9 +454,7 @@ impl CodeService {
         // `kind: "definition"` rows.
         let definitions: Vec<Value> = semantic
             .iter()
-            .filter(|row| {
-                row.get("kind").and_then(Value::as_str) == Some("definition")
-            })
+            .filter(|row| row.get("kind").and_then(Value::as_str) == Some("definition"))
             .cloned()
             .collect();
         let definition_count = definitions.len();
@@ -571,6 +514,19 @@ impl CodeService {
                 "detail": { "definition_count": definition_count },
             }));
         }
+        if truncated {
+            warnings.push(json!({
+                "code": "TRUNCATED",
+                "message": format!(
+                    "results truncated to limit {limit} (semantic + candidate); {total_unbounded} total references exist."
+                ),
+                "detail": {
+                    "limit": limit,
+                    "total_semantic_references": total_semantic,
+                    "total_candidate_text_hits": total_candidate,
+                },
+            }));
+        }
         self.success_response_with_warnings(
             &MetaBuilder::new(0).with_confidence(Confidence::Safe),
             data,
@@ -595,32 +551,7 @@ mod tests {
 
     #[test]
     fn filter_rejects_non_code_by_default() {
-        let args = InspectGraphArgs {
-            source_id: "x".into(),
-            graph: "find_references".into(),
-            r#ref: None,
-            limit: 0,
-            repo_path: None,
-            module_path: None,
-            rules: None,
-            symbol_id: None,
-            direction: None,
-            depth: None,
-            algorithm: None,
-            top_n: None,
-            file_path: None,
-            identifier: None,
-            identifiers: None,
-            include_call_chain: None,
-            cross_repo: None,
-            fqn: None,
-            max_tokens: None,
-            scope: None,
-            exclude: None,
-            include_non_code: None,
-            file_pattern: None,
-            include_vendored: None,
-        };
+        let args = InspectGraphArgs::default();
         let f = RefFilter::from_args(&args);
         assert!(!f.admits("fixture.json"));
         assert!(f.admits("src/lib.rs"));
@@ -629,30 +560,9 @@ mod tests {
     #[test]
     fn filter_scope_and_exclude() {
         let args = InspectGraphArgs {
-            source_id: "x".into(),
-            graph: "find_references".into(),
-            r#ref: None,
-            limit: 0,
-            repo_path: None,
-            module_path: None,
-            rules: None,
-            symbol_id: None,
-            direction: None,
-            depth: None,
-            algorithm: None,
-            top_n: None,
-            file_path: None,
-            identifier: None,
-            identifiers: None,
-            include_call_chain: None,
-            cross_repo: None,
-            fqn: None,
-            max_tokens: None,
             scope: Some("src/service/".into()),
             exclude: Some(vec!["tests/".into()]),
-            include_non_code: None,
-            file_pattern: None,
-            include_vendored: None,
+            ..InspectGraphArgs::default()
         };
         let f = RefFilter::from_args(&args);
         assert!(f.admits("src/service/foo.rs"));
@@ -663,30 +573,8 @@ mod tests {
     #[test]
     fn filter_include_non_code_opts_in() {
         let args = InspectGraphArgs {
-            source_id: "x".into(),
-            graph: "find_references".into(),
-            r#ref: None,
-            limit: 0,
-            repo_path: None,
-            module_path: None,
-            rules: None,
-            symbol_id: None,
-            direction: None,
-            depth: None,
-            algorithm: None,
-            top_n: None,
-            file_path: None,
-            identifier: None,
-            identifiers: None,
-            include_call_chain: None,
-            cross_repo: None,
-            fqn: None,
-            max_tokens: None,
-            scope: None,
-            exclude: None,
             include_non_code: Some(true),
-            file_pattern: None,
-            include_vendored: None,
+            ..InspectGraphArgs::default()
         };
         let f = RefFilter::from_args(&args);
         assert!(f.admits("scripts/stress/x.json"));
@@ -695,30 +583,8 @@ mod tests {
     #[test]
     fn filter_rejects_vendored_by_default() {
         let args = InspectGraphArgs {
-            source_id: "x".into(),
-            graph: "find_references".into(),
-            r#ref: None,
-            limit: 0,
-            repo_path: None,
-            module_path: None,
-            rules: None,
-            symbol_id: None,
-            direction: None,
-            depth: None,
-            algorithm: None,
-            top_n: None,
-            file_path: None,
-            identifier: None,
-            identifiers: None,
-            include_call_chain: None,
-            cross_repo: None,
-            fqn: None,
-            max_tokens: None,
-            scope: None,
-            exclude: None,
             include_non_code: Some(true),
-            file_pattern: None,
-            include_vendored: None,
+            ..InspectGraphArgs::default()
         };
         let f = RefFilter::from_args(&args);
         assert!(!f.admits("crates/x/tests/fixtures/sample.cs"));
@@ -729,30 +595,9 @@ mod tests {
     #[test]
     fn filter_scope_into_excluded_segment_opts_in() {
         let args = InspectGraphArgs {
-            source_id: "x".into(),
-            graph: "find_references".into(),
-            r#ref: None,
-            limit: 0,
-            repo_path: None,
-            module_path: None,
-            rules: None,
-            symbol_id: None,
-            direction: None,
-            depth: None,
-            algorithm: None,
-            top_n: None,
-            file_path: None,
-            identifier: None,
-            identifiers: None,
-            include_call_chain: None,
-            cross_repo: None,
-            fqn: None,
-            max_tokens: None,
             scope: Some("crates/codesight-language-support/tests/fixtures/".into()),
-            exclude: None,
             include_non_code: Some(true),
-            file_pattern: None,
-            include_vendored: None,
+            ..InspectGraphArgs::default()
         };
         let f = RefFilter::from_args(&args);
         assert!(f.admits("crates/codesight-language-support/tests/fixtures/csharp/sample.cs"));

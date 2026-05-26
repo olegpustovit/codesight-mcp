@@ -79,20 +79,12 @@ use crate::{
 };
 use helpers::{ToolError, ToolErrorCategory, attach_meta};
 
-/// Unwrap a store-open result, returning an error response on failure.
-///
-/// Replaces the 4-line `let store = match self.ensure_*_store(...) { Ok(s) => s,
-/// Err(e) => return self.error_response(timer, e) };` pattern that appears ~35
-/// times across handler modules.
+/// Unwrap a code-store-open result, returning a categorized error response
+/// on failure. Replaces the 4-line `match self.ensure_repo_store(...)`
+/// pattern that recurs across analysis handlers.
 macro_rules! require_store {
     (repo: $self:expr, $source_id:expr, $repo_path:expr, $timer:expr) => {
         match $self.ensure_repo_store($source_id, $repo_path) {
-            Ok(s) => s,
-            Err(e) => return $self.error_response($timer, e),
-        }
-    };
-    (doc: $self:expr, $source_id:expr, $repo_path:expr, $timer:expr) => {
-        match $self.ensure_doc_store($source_id, $repo_path) {
             Ok(s) => s,
             Err(e) => return $self.error_response($timer, e),
         }
@@ -183,12 +175,7 @@ impl CodeService {
 
     /// Store a freshly-built `outline view=repo` body keyed by the on-disk
     /// fingerprint observed when the body was built.
-    pub(crate) fn store_repo_outline_body(
-        &self,
-        source_id: &str,
-        indexed_at: &str,
-        body: Value,
-    ) {
+    pub(crate) fn store_repo_outline_body(&self, source_id: &str, indexed_at: &str, body: Value) {
         if indexed_at.is_empty() {
             return;
         }
@@ -196,7 +183,6 @@ impl CodeService {
             guard.insert(source_id.to_string(), (indexed_at.to_string(), body));
         }
     }
-
 
     /// Current `catalog_sources` cache generation. Handlers compare this to
     /// the stored `(generation, body)` pair — on match, they can reuse the
@@ -593,23 +579,23 @@ impl CodeService {
                 .map(str::to_string)
         };
         let source_id = non_empty_str("source_id");
-        let impact_analysis = (tool_name == "evaluate_impact")
+        // CUTPLAN 6-tool surface uses different per-tool keys (`mode` / `view`
+        // / `kind` / `analysis`); legacy delegated handlers follow the old
+        // keying. `impact_analysis` is recorded for the new `impact` tool so
+        // the savings ledger can attribute blast_radius vs rename_safety.
+        let impact_analysis = (tool_name == "impact")
             .then(|| non_empty_str("analysis"))
             .flatten();
-        // Consolidated-tool variant: keyed at `"tool:variant"` alongside
-        // the aggregate tool row in the savings ledger. The CUTPLAN
-        // 6-tool surface uses different per-tool keys (`mode` / `view` /
-        // `kind` / `analysis`); legacy tool names follow the old keying.
         let variant = match tool_name {
             // New surface.
             "search" => non_empty_str("mode"),
             "outline" => non_empty_str("view"),
             "references" => non_empty_str("kind"),
             "impact" | "health" => non_empty_str("analysis"),
-            // Legacy.
+            // Legacy delegated handlers.
             "inspect_graph" => non_empty_str("graph"),
             "inspect_structure" => non_empty_str("view"),
-            "evaluate_quality" | "evaluate_impact" => non_empty_str("analysis"),
+            "evaluate_quality" => non_empty_str("analysis"),
             _ => None,
         };
         let result = catch_unwind(AssertUnwindSafe(|| {

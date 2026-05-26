@@ -14,14 +14,20 @@ use crate::server_support::reindex_state::{ReindexStateManager, ReindexStatus};
 use crate::service::CodeService;
 
 /// Tools that observe indexed state and should carry a staleness annotation.
+/// Includes both the public 6-tool surface and the legacy handler names that
+/// the MCP adapters delegate to.
 const READ_TOOLS: &[&str] = &[
+    "search",
+    "outline",
+    "read",
+    "references",
+    "impact",
+    "health",
     "search_catalog",
     "read_content",
     "inspect_structure",
     "inspect_graph",
-    "evaluate_impact",
     "evaluate_quality",
-    "assemble_context",
 ];
 
 pub(super) fn is_read_tool(tool: &str) -> bool {

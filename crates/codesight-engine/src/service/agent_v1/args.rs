@@ -1,9 +1,6 @@
 //! Agent-v1 tool argument types.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
-pub(crate) const DEFAULT_FILE_TREE_MAX_FILES: usize = 500;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -115,6 +112,12 @@ pub struct SearchCatalogArgs {
     /// `scope=` that starts with an excluded prefix also opts in.
     #[serde(default)]
     pub include_vendored: Option<bool>,
+    /// Tier 2.1: optional ripgrep-style per-file cap for `query_mode=regex`.
+    /// `limit` is always a global item cap; if you also want "at most N
+    /// hits per file" semantics (so one verbose file doesn't eat the whole
+    /// budget), set this. Ignored for non-regex modes.
+    #[serde(default)]
+    pub per_file_limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -178,49 +181,19 @@ pub struct InspectStructureArgs {
     pub file_path: Option<String>,
     #[serde(default)]
     pub file_paths: Option<Vec<String>>,
-    #[serde(default)]
-    pub class_path: Option<String>,
-    /// Cap the number of **files** listed (`file_tree` only; default 500).
-    #[serde(default)]
-    pub max_files: Option<usize>,
-    /// Optional token budget (~4 bytes/token) for file_tree / repo_outline.
+    /// Optional token budget (~4 bytes/token) for repo_outline.
     #[serde(default, alias = "token_budget")]
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub repo_path: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct InspectGraphArgs {
     pub source_id: String,
     pub graph: String,
     #[serde(default)]
-    pub r#ref: Option<Value>,
-    #[serde(default)]
-    pub limit: usize,
-    #[serde(default)]
     pub repo_path: Option<String>,
-    /// For `module_coupling` graph mode: file to analyze.
-    #[serde(default)]
-    pub module_path: Option<String>,
-    /// For `layer_violations` graph mode: layer rules.
-    #[serde(default)]
-    pub rules: Option<Vec<codesight_analysis::graph::LayerDef>>,
-    /// For `calls` mode: symbol to analyze.
-    #[serde(default)]
-    pub symbol_id: Option<String>,
-    /// For `calls` mode: "callers", "callees", or "both" (default).
-    #[serde(default)]
-    pub direction: Option<String>,
-    /// For `calls`/`centrality` mode: traversal depth.
-    #[serde(default)]
-    pub depth: Option<usize>,
-    /// For `centrality` mode: "pagerank" or "degree".
-    #[serde(default)]
-    pub algorithm: Option<String>,
-    /// For `centrality` mode: top N results.
-    #[serde(default)]
-    pub top_n: Option<usize>,
     /// For `importers` mode: file path to find importers for.
     #[serde(default)]
     pub file_path: Option<String>,
@@ -233,28 +206,17 @@ pub struct InspectGraphArgs {
     /// For `find_references` mode: include calling symbol chain info.
     #[serde(default)]
     pub include_call_chain: Option<bool>,
-    /// Enable cross-repo analysis for importers/dependencies.
+    /// Enable cross-repo analysis.
     #[serde(default)]
     pub cross_repo: Option<bool>,
-    /// For `resolve_fqn` mode: fully-qualified name.
-    #[serde(default)]
-    pub fqn: Option<String>,
-    /// Optional token budget for the serialized `edges`/`nodes` in
-    /// `dependencies` (≈4 bytes/token). Alias `token_budget`.
-    #[serde(default, alias = "token_budget")]
-    pub max_tokens: Option<u32>,
-    /// Path-prefix / substring inclusion filter. Applies to
-    /// `find_references`, `imports`, `importers`, `references`, `related`,
-    /// and `calls` (FEEDBACK.md §6b).
+    /// Path-prefix / substring inclusion filter.
     #[serde(default)]
     pub scope: Option<String>,
-    /// Path prefixes / substrings to skip (complements `scope`). Applies to
-    /// the same graph modes as `scope`.
+    /// Path prefixes / substrings to skip (complements `scope`).
     #[serde(default)]
     pub exclude: Option<Vec<String>>,
     /// Glob-ish pattern to filter edge endpoints by file path. Supports
-    /// `*` / `**` / `?` like a conservative gitignore. Applies to the same
-    /// graph modes as `scope` (FEEDBACK.md §6b).
+    /// `*` / `**` / `?` like a conservative gitignore.
     #[serde(default)]
     pub file_pattern: Option<String>,
     /// `find_references`: when true, include hits in data-format files
@@ -263,71 +225,14 @@ pub struct InspectGraphArgs {
     #[serde(default)]
     pub include_non_code: Option<bool>,
     /// When true, include references found under vendored / asset /
-    /// fixture paths and oversized JSON dumps. Default false — those
-    /// paths are excluded from reference scans so tokenizer vocab and
-    /// fixture files don't drown the real call sites.
+    /// fixture paths and oversized JSON dumps. Default false.
     #[serde(default)]
     pub include_vendored: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct EvaluateImpactArgs {
-    pub source_id: String,
-    pub analysis: String,
-    #[serde(default)]
-    pub refs: Option<Vec<ContentRef>>,
-    #[serde(default)]
-    pub repo_path: Option<String>,
-    #[serde(default)]
-    pub depth: Option<u64>,
-    #[serde(default)]
-    pub include_depth_scores: Option<bool>,
-    #[serde(default)]
-    pub target: Option<String>,
-    #[serde(default)]
-    pub days: Option<u64>,
-    /// Symbol name for impact_preview / blast_radius (alternative to refs).
-    #[serde(default)]
-    pub symbol_id: Option<String>,
-    /// Call hierarchy depth for blast_radius (callers lookup).
-    #[serde(default)]
-    pub call_depth: Option<usize>,
-    /// Enable cross-repo analysis.
-    #[serde(default)]
-    pub cross_repo: Option<bool>,
-    /// `path_rename`: existing fully-qualified Rust path to rewrite.
-    #[serde(default)]
-    pub from: Option<String>,
-    /// `path_rename`: replacement fully-qualified Rust path.
-    #[serde(default)]
-    pub to: Option<String>,
-    /// `path_rename`: when true, write edits to disk and reindex.
-    #[serde(default)]
-    pub apply: Option<bool>,
-    /// `path_rename`: behavior for partial grouped imports.
-    #[serde(default)]
-    pub handle_partial_group_imports: Option<String>,
-    /// `path_rename`: optional path/file prefix scope.
-    #[serde(default)]
-    pub scope: Option<String>,
-    /// When true, include matches / impacted files under vendored / asset
-    /// / fixture paths and oversized JSON dumps. Default false — those
-    /// paths are skipped in rename_safety scans and blast_radius importer
-    /// lists so fixture chains don't pollute the impact set.
-    #[serde(default)]
-    pub include_vendored: Option<bool>,
-    /// `blast_radius`: cap on per-bucket importer list. Default 25.
-    /// Totals always carry the un-truncated counts.
+    /// Tier 2.1: global cap on returned items (semantic + candidate combined).
+    /// Surfaces a `TRUNCATED` warning when the unbounded count exceeds this.
+    /// Defaults to 50 when unset (matches `references` schema default).
     #[serde(default)]
     pub limit: Option<usize>,
-    /// `blast_radius`: soft byte budget (~4 bytes/token). When the
-    /// serialized importer lists exceed this, both buckets are packed and
-    /// `truncated_by` is set in `_meta`. Totals still reflect full counts.
-    #[serde(default)]
-    pub max_tokens: Option<usize>,
-    /// Alias of `max_tokens` (matches `read_content` / `search_catalog`).
-    #[serde(default)]
-    pub token_budget: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -335,10 +240,8 @@ pub struct EvaluateQualityArgs {
     pub source_id: String,
     pub analysis: String,
     #[serde(default)]
-    pub refs: Option<Vec<ContentRef>>,
-    #[serde(default)]
     pub repo_path: Option<String>,
-    // dead_code / dead_code_v2 fields
+    // dead_code fields
     #[serde(default)]
     pub granularity: Option<String>,
     #[serde(default)]
@@ -352,116 +255,35 @@ pub struct EvaluateQualityArgs {
     pub min_complexity: Option<u64>,
     #[serde(default)]
     pub top_n: Option<usize>,
-    // refactor_targets fields
-    #[serde(default)]
-    pub file_path: Option<String>,
-    #[serde(default)]
-    pub min_callers: Option<u64>,
-    /// For repo-wide `refactor_targets`: how many hottest files to scan
-    /// when `file_path` is omitted.
-    #[serde(default)]
-    pub top_files: Option<usize>,
     /// Optional token budget for the serialized response body. Alias
     /// `token_budget`.
     #[serde(default, alias = "token_budget")]
     pub max_tokens: Option<u32>,
-    /// Max `caller_files` entries per `refactor_targets` candidate
-    /// (FEEDBACK.md Phase 4b). When truncated, `caller_files_total` carries
-    /// the untruncated count. Defaults to 10.
-    #[serde(default)]
-    pub top_caller_files: Option<usize>,
-    /// If true, `hotspots` / `refactor_targets` scan conventional dirs
-    /// (scripts/, tests/, examples/, benches/, build.rs, fixtures/, …).
-    /// Defaults to false so codegen helpers and fixture noise stop
-    /// dominating the top of the ranking (FEEDBACK.md Phase 4a).
+    /// If true, `hotspots` scans conventional dirs (scripts/, tests/,
+    /// examples/, benches/, build.rs, fixtures/, …). Defaults to false so
+    /// codegen helpers and fixture noise stop dominating the top of the
+    /// ranking (FEEDBACK.md Phase 4a).
     #[serde(default)]
     pub include_conventional: Option<bool>,
-    // regression_check fields
-    #[serde(default)]
-    pub snapshot_name: Option<String>,
     #[serde(default)]
     pub scope: Option<String>,
-    /// ROADMAP P3.6: cap wall-clock time for the analysis. Each handler
-    /// checks the deadline at its natural breakpoints and returns a
-    /// `PARTIAL_RESULT` warning when it runs out. No value = unbounded.
+    /// Cap wall-clock time for the analysis. No value = unbounded.
     #[serde(default)]
     pub max_wait_ms: Option<u64>,
-    /// ROADMAP P3.6: accept a truncated-but-well-formed envelope on
-    /// deadline expiry. When false (default) the handler prefers to error
-    /// with `DEADLINE_EXCEEDED`.
+    /// Accept a truncated-but-well-formed envelope on deadline expiry.
+    /// When false (default) the handler prefers to error with
+    /// `DEADLINE_EXCEEDED`.
     #[serde(default)]
     pub partial_ok: Option<bool>,
     /// When true, include vendored / asset / fixture files and oversized
-    /// JSON dumps in the analysis. Default false — those paths are
-    /// excluded from `dead_code` scans so fixture files don't show up as
-    /// dead by default. A `scope=` that starts with an excluded prefix
-    /// also opts in.
+    /// JSON dumps in the analysis. Default false.
     #[serde(default)]
     pub include_vendored: Option<bool>,
     /// `dead_code` only: when true, drop the confidence floor to 0,
     /// surface weak signals (`weak_string_dispatch_match`,
-    /// `test_only_alive`), always run the symbol-level pass, and emit
-    /// `heuristic_disagreements` listing files the legacy import-graph
-    /// reachability would have flagged dead but the current
-    /// string-literal-dispatch heuristic rescued. Default false.
+    /// `test_only_alive`), and always run the symbol-level pass.
     #[serde(default)]
     pub paranoid: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AssembleContextArgs {
-    pub source_id: String,
-    pub mode: String,
-    #[serde(default)]
-    pub query: Option<String>,
-    #[serde(default)]
-    pub refs: Option<Vec<ContentRef>>,
-    #[serde(default = "default_ctx_limit")]
-    pub limit: usize,
-    #[serde(default = "default_include_children")]
-    pub include_children: bool,
-    #[serde(default, alias = "token_budget")]
-    pub max_tokens: Option<u32>,
-    /// `context_bundle`: `compact`, `most_relevant`, or unset for full bodies.
-    #[serde(default)]
-    pub budget_strategy: Option<String>,
-    #[serde(default)]
-    pub include_budget_report: Option<bool>,
-    /// `ranked`: accepted strategy label (default `bm25`); stored for reporting only today.
-    #[serde(default)]
-    pub strategy: Option<String>,
-    /// `ranked`: restrict hits to these symbol kinds (`class`, `function`, …).
-    #[serde(default, alias = "include_kinds")]
-    pub kind_filter: Option<Vec<String>>,
-    /// `rename_plan`: existing name to rename. Defaults to `query`.
-    #[serde(default)]
-    pub old_name: Option<String>,
-    /// `rename_plan`: proposed new name.
-    #[serde(default)]
-    pub new_name: Option<String>,
-    #[serde(default)]
-    pub repo_path: Option<String>,
-    /// `context_bundle` depth (ROADMAP P1.5):
-    ///   0 = symbol + imports (today's behaviour),
-    ///   1 = + types referenced in the signature/body,
-    ///   2 = + a representative caller + a representative callee per direct edge.
-    /// Default is 2 when unset.
-    #[serde(default)]
-    pub depth: Option<u32>,
-    /// `context_bundle`: include the nearest test fixture. Default true.
-    #[serde(default)]
-    pub include_tests: Option<bool>,
-}
-
-/// `get_ranked_context` reference oracle caps query length at 500 chars.
-pub(crate) const RANKED_CONTEXT_MAX_QUERY_LEN: usize = 500;
-
-fn default_include_children() -> bool {
-    true
-}
-
-fn default_ctx_limit() -> usize {
-    5
 }
 
 #[derive(Debug, Deserialize)]

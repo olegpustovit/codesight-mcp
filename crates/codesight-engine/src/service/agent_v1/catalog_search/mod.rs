@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use crate::service::agent_v1::args::SearchCatalogArgs;
 use crate::service::agent_v1::util::{search_hit_section, search_hit_symbol};
 use crate::service::agent_v1::validate::ValidatedArgs;
+use crate::service::agent_v1::warnings;
 use crate::service::helpers::{ToolError, ToolErrorCategory, index_error};
 use crate::service::savings::{Confidence, MetaBuilder, search_rg_equivalent_bytes};
 use crate::service::{CodeService, MAX_QUERY_LEN};
@@ -22,9 +23,11 @@ use codesight_storage::storage::doc_index::DocStore;
 use dense::{
     materialize_dense_section_items, materialize_dense_symbol_items, merge_dense_ranked_items,
 };
+// Tier 7.1: post-RRF rerank — referenced via the `dense::` path so the
+// caller can read the explicit module qualifier for the rerank rules.
 use intent::apply_intent_doc_penalty;
 use plan::{
-    CodeSideStats, KindFlags, LexicalStats, SearchCounts, SearchPlan, build_meta_extras,
+    CodeSideStats, KindFlags, LexicalStats, MetaExtras, SearchCounts, SearchPlan, build_meta_extras,
 };
 use response::{FormatCtx, format_output};
 use semantic::{run_dense_lane, semantic_fallback_warning};
@@ -226,10 +229,7 @@ fn apply_vendor_penalty<F>(
             // hit collapses to 0.18, below any legitimate 0.20 prod hit
             // even before the bucketed re-order runs.
             if let Some(obj) = item.as_object_mut() {
-                let old = obj
-                    .get("score")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.0);
+                let old = obj.get("score").and_then(Value::as_f64).unwrap_or(0.0);
                 obj.insert("score".to_string(), json!((old * 0.2).max(0.0)));
             }
             penalized.push(item);
@@ -239,6 +239,100 @@ fn apply_vendor_penalty<F>(
     }
     keep.extend(penalized);
     *items = keep;
+}
+
+/// Calibrate the confidence of a keyword/regex search response from relative
+/// signals only (BM25 scores aren't comparable across queries — see
+/// AGENTS.md §1).
+///
+/// Returns `Partial` and a non-empty warning list when the result set is
+/// suggestive rather than authoritative. Signals:
+///
+/// - [`OVERBROAD_QUERY`](warnings::OVERBROAD_QUERY): `total_matches > limit × 10`.
+/// - [`NO_EXACT_MATCH`](warnings::NO_EXACT_MATCH): no item is `match_type=="exact"`
+///   and no item scored ≥ 0.7.
+/// - [`AMBIGUOUS_IDENTIFIER`](warnings::AMBIGUOUS_IDENTIFIER): top-3 scores cluster
+///   within 0.05 — the ranker can't distinguish the leaders.
+fn calibrate_keyword_confidence(
+    items: &[Value],
+    total_matches: usize,
+    limit: usize,
+    query: &str,
+) -> (Confidence, Vec<Value>) {
+    const OVERBROAD_FACTOR: usize = 10;
+    const HIGH_SCORE: f64 = 0.7;
+    const TOP_K_GAP: f64 = 0.05;
+
+    let mut out = Vec::new();
+    let mut downgrade = false;
+
+    if limit > 0 && total_matches > limit.saturating_mul(OVERBROAD_FACTOR) {
+        out.push(warnings::warning(
+            warnings::OVERBROAD_QUERY,
+            format!(
+                "{total_matches} matches for '{query}' exceeds {OVERBROAD_FACTOR}× limit ({limit}); narrow with `scope=` or a more specific identifier."
+            ),
+        ));
+        downgrade = true;
+    }
+
+    if items.is_empty() {
+        return (
+            if downgrade {
+                Confidence::Partial
+            } else {
+                Confidence::Safe
+            },
+            out,
+        );
+    }
+
+    let any_exact = items
+        .iter()
+        .any(|i| i.get("match_type").and_then(Value::as_str) == Some("exact"));
+    let max_score = items
+        .iter()
+        .filter_map(|i| i.get("score").and_then(Value::as_f64))
+        .fold(0.0_f64, f64::max);
+    if !any_exact && max_score < HIGH_SCORE {
+        out.push(warnings::warning(
+            warnings::NO_EXACT_MATCH,
+            format!(
+                "no item literally matches '{query}' and the top score is {max_score:.2} (< {HIGH_SCORE:.1}); results are suggestive, not authoritative."
+            ),
+        ));
+        downgrade = true;
+    }
+
+    if items.len() >= 3 {
+        let mut scores: Vec<f64> = items
+            .iter()
+            .filter_map(|i| i.get("score").and_then(Value::as_f64))
+            .collect();
+        if scores.len() >= 3 {
+            scores.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+            let gap = scores[0] - scores[2];
+            if gap < TOP_K_GAP {
+                out.push(warnings::warning(
+                    warnings::AMBIGUOUS_IDENTIFIER,
+                    format!(
+                        "top-3 scores cluster within {TOP_K_GAP} ({:.3}, {:.3}, {:.3}) — the ranker can't distinguish them.",
+                        scores[0], scores[1], scores[2],
+                    ),
+                ));
+                downgrade = true;
+            }
+        }
+    }
+
+    (
+        if downgrade {
+            Confidence::Partial
+        } else {
+            Confidence::Safe
+        },
+        out,
+    )
 }
 
 impl CodeService {
@@ -334,6 +428,8 @@ impl CodeService {
         let exclude = args.exclude.as_deref().unwrap_or(&[]);
         let mut more_file_hits = false;
         let mut fuzzy_applied = false;
+        let mut regex_bytes_scanned: u64 = 0;
+        let mut regex_files_scanned: usize = 0;
         if flags.want_file {
             let qmode = args.query_mode.as_deref().unwrap_or("keyword");
             let result = self
@@ -346,10 +442,13 @@ impl CodeService {
                     per_kind_cap,
                     qmode,
                     ctx_lines,
+                    args.per_file_limit,
                 )
                 .map_err(index_error)?;
             counts.add(result.total_matches, result.files_with_matches);
             more_file_hits = result.more_file_hits;
+            regex_bytes_scanned = result.bytes_scanned;
+            regex_files_scanned = result.files_scanned;
             items.extend(result.items);
         }
         let mut name_only_applied = false;
@@ -375,8 +474,25 @@ impl CodeService {
             // typo'd identifier searches still surface the nearest name.
             let auto_fuzzy = !fuzzy_explicit && symbols.is_empty();
             if fuzzy_explicit && !symbols.is_empty() {
+                // Tier 1.2: BM25 returns hits for any token overlap, not
+                // just literal-equal names. Only label `exact` when the
+                // symbol name matches the query verbatim (ignore case).
+                // Promote pure prefixes to `prefix`; everything else is a
+                // partial token-overlap hit and gets `partial`.
+                let q = args.query.as_str();
                 for s in &mut symbols {
-                    s.match_type = Some("exact".to_string());
+                    let label = if s.name.eq_ignore_ascii_case(q) {
+                        "exact"
+                    } else if s
+                        .name
+                        .to_ascii_lowercase()
+                        .starts_with(&q.to_ascii_lowercase())
+                    {
+                        "prefix"
+                    } else {
+                        "partial"
+                    };
+                    s.match_type = Some(label.to_string());
                 }
             }
             if fuzzy_explicit {
@@ -431,6 +547,8 @@ impl CodeService {
             more_file_hits,
             fuzzy_applied,
             name_only_applied,
+            regex_bytes_scanned,
+            regex_files_scanned,
         })
     }
 
@@ -543,7 +661,11 @@ impl CodeService {
             &mut items,
             args.include_vendored.unwrap_or(false),
             plan.scope.as_deref(),
-            |path| code_store.as_ref().and_then(|s| s.file_bytes(path).ok().flatten()),
+            |path| {
+                code_store
+                    .as_ref()
+                    .and_then(|s| s.file_bytes(path).ok().flatten())
+            },
         );
         // The fuzzy lane needs the same vendor deprioritization — otherwise a
         // typo match in `assets/embedder/tokenizer.json` could outrank the
@@ -552,7 +674,11 @@ impl CodeService {
             &mut fuzzy_items,
             args.include_vendored.unwrap_or(false),
             plan.scope.as_deref(),
-            |path| code_store.as_ref().and_then(|s| s.file_bytes(path).ok().flatten()),
+            |path| {
+                code_store
+                    .as_ref()
+                    .and_then(|s| s.file_bytes(path).ok().flatten())
+            },
         );
         // Query-intent penalty: when the user asks a code-shaped question,
         // doc-section hits get a 0.4× multiplier (softened to 0.5× when the
@@ -590,7 +716,9 @@ impl CodeService {
                 // Doc sections embed `#h<N>` anchor kind in the id. Symbol
                 // ids end in `#function`, `#class`, … or `#file`.
                 let kind = id.rsplit('#').next().unwrap_or("");
-                kind.starts_with('h') && kind.len() >= 2 && kind[1..].chars().all(|c| c.is_ascii_digit())
+                kind.starts_with('h')
+                    && kind.len() >= 2
+                    && kind[1..].chars().all(|c| c.is_ascii_digit())
             };
             let has_code = items.iter().any(|item| !is_doc_section(item));
             let has_docs = items.iter().any(is_doc_section);
@@ -610,25 +738,41 @@ impl CodeService {
         // hit set (path:line:snippet per row), capped intrinsically at the
         // caller's `limit`. Not the sum of file sizes of every matched file.
         let raw_bytes = search_rg_equivalent_bytes(&items);
-        // Confidence: keyword/regex over an authoritative index is `safe`.
-        // Fuzzy or semantic / natural-language augments BM25 with heuristic
-        // scoring — drop to `partial`.
+        // Confidence (Tier 1.1):
+        // - `natural_language` and fuzzy/semantic-augmented passes are
+        //   inherently heuristic — already `Partial`.
+        // - For pure keyword/regex over the authoritative index, downgrade
+        //   from `Safe` to `Partial` when calibration signals fire
+        //   (NO_EXACT_MATCH / AMBIGUOUS_IDENTIFIER / OVERBROAD_QUERY). BM25
+        //   scores aren't comparable across queries, so calibration uses
+        //   *relative* signals only.
         let confidence = match plan.query_mode_effective.as_str() {
             "natural_language" => Confidence::Partial,
             _ if stats.fuzzy_applied || semantic_requested => Confidence::Partial,
-            _ => Confidence::Safe,
+            _ => {
+                let (conf, calib) = calibrate_keyword_confidence(
+                    &items,
+                    counts.total_matches,
+                    plan.lim,
+                    &args.query,
+                );
+                warnings.extend(calib);
+                conf
+            }
         };
         let timer = MetaBuilder::new(raw_bytes)
             .with_class(crate::service::savings::RetrievalClass::Search)
             .with_confidence(confidence);
-        let extra = build_meta_extras(
-            &plan,
-            stats.fuzzy_applied,
+        let extra = build_meta_extras(MetaExtras {
+            plan: &plan,
+            fuzzy_applied: stats.fuzzy_applied,
             semantic_requested,
-            stats.name_only_applied,
+            name_only_applied: stats.name_only_applied,
             doc_section_penalty,
             doc_section_rank_demotion,
-        );
+            regex_bytes_scanned: stats.regex_bytes_scanned,
+            regex_files_scanned: stats.regex_files_scanned,
+        });
 
         let fmt_ctx = FormatCtx {
             output_mode: &plan.output_mode,
@@ -686,6 +830,8 @@ impl CodeService {
         let mut more_file_hits_exist = false;
         let mut fuzzy_applied = false;
         let mut name_only_applied = false;
+        let mut regex_bytes_scanned: u64 = 0;
+        let mut regex_files_scanned: usize = 0;
         if let Some(store) = code_store {
             let stats = self.search_code_side(
                 store,
@@ -700,6 +846,8 @@ impl CodeService {
             more_file_hits_exist = stats.more_file_hits;
             fuzzy_applied = stats.fuzzy_applied;
             name_only_applied = stats.name_only_applied;
+            regex_bytes_scanned = stats.regex_bytes_scanned;
+            regex_files_scanned = stats.regex_files_scanned;
         }
         if let Some(dstore) = doc_store
             && (plan.flags.want_section || plan.domain == "docs" || plan.domain == "hybrid")
@@ -710,6 +858,8 @@ impl CodeService {
             more_file_hits_exist,
             fuzzy_applied,
             name_only_applied,
+            regex_bytes_scanned,
+            regex_files_scanned,
         })
     }
 
@@ -765,6 +915,14 @@ impl CodeService {
             dense_symbol_items,
             dense_section_items,
         );
+        // Tier 7.1: deterministic post-RRF rerank for NL queries. Only
+        // applied when the caller explicitly chose `mode=nl` — keyword and
+        // regex callers asked for a literal match; we don't second-guess
+        // their ordering. See `apply_nl_rerank` for the rules and the
+        // cross-encoder follow-up note.
+        if plan.query_mode_effective == "natural_language" {
+            dense::apply_nl_rerank(items, &args.query);
+        }
         Ok(true)
     }
 }
@@ -800,7 +958,10 @@ mod tests {
     #[test]
     fn apply_vendor_penalty_pushes_vendored_to_tail_and_scales_score() {
         let mut items = vec![
-            scored("crates/codesight-retrieval/assets/embedder/tokenizer.json", 0.9),
+            scored(
+                "crates/codesight-retrieval/assets/embedder/tokenizer.json",
+                0.9,
+            ),
             scored("src/main.rs", 0.4),
             scored("tests/fixtures/sample.cs", 0.85),
             scored("src/lib.rs", 0.3),

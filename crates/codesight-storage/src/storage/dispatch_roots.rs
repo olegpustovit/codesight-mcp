@@ -42,7 +42,7 @@ impl DispatchStrength {
             DispatchStrength::Weak => "weak",
         }
     }
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "strong" => Some(Self::Strong),
             "weak" => Some(Self::Weak),
@@ -88,8 +88,7 @@ pub fn replace_all(conn: &mut Connection, roots: &[DispatchRoot]) -> StorageResu
 /// the table has not been populated yet (first run after migration v10);
 /// callers should fall back to in-memory detection in that case.
 pub fn load_all(conn: &Connection) -> StorageResult<(Vec<DispatchRoot>, Vec<DispatchRoot>)> {
-    let mut stmt =
-        conn.prepare("SELECT file_path, symbol_name, strength FROM dispatch_roots")?;
+    let mut stmt = conn.prepare("SELECT file_path, symbol_name, strength FROM dispatch_roots")?;
     let rows = stmt.query_map([], |row| {
         let file_path: String = row.get(0)?;
         let symbol_name: String = row.get(1)?;
@@ -101,7 +100,7 @@ pub fn load_all(conn: &Connection) -> StorageResult<(Vec<DispatchRoot>, Vec<Disp
     let mut weak = Vec::new();
     for row in rows {
         let (file_path, symbol_name, strength_s) = row?;
-        let Some(strength) = DispatchStrength::from_str(&strength_s) else {
+        let Some(strength) = DispatchStrength::parse(&strength_s) else {
             continue;
         };
         let entry = DispatchRoot {
@@ -121,10 +120,9 @@ pub fn load_all(conn: &Connection) -> StorageResult<(Vec<DispatchRoot>, Vec<Disp
 /// dead_code path to decide between the cached-fast path and the on-the-fly
 /// detector fallback.
 pub fn is_populated(conn: &Connection) -> StorageResult<bool> {
-    let count: i64 =
-        conn.query_row("SELECT COUNT(*) FROM dispatch_roots LIMIT 1", [], |row| {
-            row.get(0)
-        })?;
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM dispatch_roots LIMIT 1", [], |row| {
+        row.get(0)
+    })?;
     Ok(count > 0)
 }
 

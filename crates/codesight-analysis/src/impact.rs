@@ -17,13 +17,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use serde_json::{Value, json};
 
+use codesight_language_support::is_vendored_or_fixture_path;
+use codesight_language_support::language_id_for_path;
+use codesight_language_support::manifest::UNKNOWN_LANGUAGE;
 pub use codesight_language_support::path_rename::{
     PathRenameChange, PathRenameCollision, PathRenameFilePlan, PathRenamePlan, PathRenameUnhandled,
     affected_paths, summarize as summarize_path_rename,
 };
-use codesight_language_support::is_vendored_or_fixture_path;
-use codesight_language_support::language_id_for_path;
-use codesight_language_support::manifest::UNKNOWN_LANGUAGE;
 use codesight_language_support::text_match::{classify_body_match, locate_identifier_ci};
 use codesight_storage::storage::IndexStore;
 
@@ -111,8 +111,7 @@ pub fn rename_safety_payload(
         .rsplit('.')
         .next()
         .unwrap_or(symbol_name.as_str());
-    let (trait_owner, required_edits) =
-        detect_trait_impl_sites(store, file_path, symbol_leaf)?;
+    let (trait_owner, required_edits) = detect_trait_impl_sites(store, file_path, symbol_leaf)?;
     let required_edits_rendered: Vec<Value> = required_edits
         .iter()
         .map(|file| {
@@ -134,10 +133,8 @@ pub fn rename_safety_payload(
     // receiver prefix tells us the rename is a method-rename so we can
     // require a receiver shape (`ledger.record(` / `Type::record(`) at the
     // call site rather than a bare identifier.
-    let is_method_like = matches!(
-        record.kind,
-        codesight_core::SymbolKind::Method
-    ) || symbol_name.contains('.');
+    let is_method_like =
+        matches!(record.kind, codesight_core::SymbolKind::Method) || symbol_name.contains('.');
     let scan = scan_symbol_references(
         store,
         symbol_id,
@@ -162,9 +159,7 @@ pub fn rename_safety_payload(
         .collect();
 
     let collision_free = conflicts.is_empty();
-    let safe = collision_free
-        && !trait_method_detected
-        && unrewritten_references.is_empty();
+    let safe = collision_free && !trait_method_detected && unrewritten_references.is_empty();
 
     let mut payload = json!({
         "analysis": "rename_safety",
@@ -330,18 +325,13 @@ fn scan_symbol_references(
             .nth(rel_line.saturating_sub(1) as usize)
             .unwrap_or("");
         // `col` is 1-based; `classify_body_match` takes a 0-based column.
-        let body_match = classify_body_match(
-            line_text,
-            col.saturating_sub(1) as usize,
-            symbol_name.len(),
-        );
+        let body_match =
+            classify_body_match(line_text, col.saturating_sub(1) as usize, symbol_name.len());
         if body_match == "comment_or_string" {
             rejected_comment += 1;
             continue;
         }
-        if require_receiver
-            && !has_receiver_prefix(line_text, col.saturating_sub(1) as usize)
-        {
+        if require_receiver && !has_receiver_prefix(line_text, col.saturating_sub(1) as usize) {
             rejected_no_receiver += 1;
             continue;
         }
@@ -362,13 +352,14 @@ fn scan_symbol_references(
         });
         seen_files.insert(sym.file.clone());
     }
-    let confidence = if !partial_language && references.iter().all(|r| r.kind == "symbol_body_reference") {
-        "high"
-    } else if references.is_empty() {
-        "none_after_filters"
-    } else {
-        "partial"
-    };
+    let confidence =
+        if !partial_language && references.iter().all(|r| r.kind == "symbol_body_reference") {
+            "high"
+        } else if references.is_empty() {
+            "none_after_filters"
+        } else {
+            "partial"
+        };
     Ok(ReferenceScan {
         references,
         complete,

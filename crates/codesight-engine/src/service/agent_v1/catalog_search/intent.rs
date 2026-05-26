@@ -58,7 +58,11 @@ pub(super) fn effective_doc_section_multiplier(intent: QueryIntent, items: &[Val
     let mut best_code: Option<f64> = None;
     for item in items {
         let s = item.get("score").and_then(Value::as_f64).unwrap_or(0.0);
-        let slot = if is_doc_section_item(item) { &mut best_doc } else { &mut best_code };
+        let slot = if is_doc_section_item(item) {
+            &mut best_doc
+        } else {
+            &mut best_code
+        };
         if slot.is_none_or(|cur| s > cur) {
             *slot = Some(s);
         }
@@ -145,8 +149,7 @@ pub(super) fn classify_query(query: &str) -> QueryIntent {
 
     let starts_with_any =
         |phrases: &[&str]| -> bool { phrases.iter().any(|p| lower.starts_with(p)) };
-    let contains_any =
-        |phrases: &[&str]| -> bool { phrases.iter().any(|p| lower.contains(p)) };
+    let contains_any = |phrases: &[&str]| -> bool { phrases.iter().any(|p| lower.contains(p)) };
 
     let code_hit = starts_with_any(CODE_PHRASES) || contains_any(CODE_PHRASES);
     let doc_hit = starts_with_any(DOC_PHRASES) || contains_any(DOC_PHRASES);
@@ -176,10 +179,10 @@ fn is_doc_section_item(item: &Value) -> bool {
 /// intent-based penalty so a user who *asked for* doc sections gets
 /// untouched scores.
 pub(super) fn caller_opted_into_doc_sections(unit_kinds: Option<&Vec<String>>) -> bool {
-    let Some(kinds) = unit_kinds else { return false };
-    let only_sections = kinds
-        .iter()
-        .all(|k| k == "section" || k == "doc_section");
+    let Some(kinds) = unit_kinds else {
+        return false;
+    };
+    let only_sections = kinds.iter().all(|k| k == "section" || k == "doc_section");
     !kinds.is_empty() && only_sections
 }
 
@@ -214,7 +217,9 @@ pub(super) fn apply_intent_doc_penalty(
             if !is_doc_section_item(item) {
                 continue;
             }
-            let Some(obj) = item.as_object_mut() else { continue };
+            let Some(obj) = item.as_object_mut() else {
+                continue;
+            };
             let old = obj.get("score").and_then(Value::as_f64).unwrap_or(0.0);
             // Round to 3 decimals to match `round_score` so JSON serialization
             // is stable.
@@ -360,7 +365,10 @@ mod tests {
             }),
         ];
         let mult = apply_intent_doc_penalty(&mut items, QueryIntent::Code).multiplier;
-        assert!((mult - 0.4).abs() < 1e-9, "expected hard 0.4 multiplier, got {mult}");
+        assert!(
+            (mult - 0.4).abs() < 1e-9,
+            "expected hard 0.4 multiplier, got {mult}"
+        );
         let ids: Vec<&str> = items
             .iter()
             .map(|i| i.pointer("/ref/id").and_then(Value::as_str).unwrap())
@@ -387,7 +395,10 @@ mod tests {
             }),
         ];
         let mult = apply_intent_doc_penalty(&mut items, QueryIntent::Code).multiplier;
-        assert!((mult - 0.5).abs() < 1e-9, "expected soft 0.5 multiplier, got {mult}");
+        assert!(
+            (mult - 0.5).abs() < 1e-9,
+            "expected soft 0.5 multiplier, got {mult}"
+        );
         // Doc demoted 0.6 * 0.5 = 0.3, below the 0.5 code score.
         let s_doc = items[1].get("score").and_then(Value::as_f64).unwrap();
         assert!((s_doc - 0.3).abs() < 1e-6, "expected ~0.3, got {s_doc}");
@@ -412,7 +423,10 @@ mod tests {
             }),
         ];
         let mult = apply_intent_doc_penalty(&mut items, QueryIntent::Code).multiplier;
-        assert!((mult - 0.4).abs() < 1e-9, "expected hard 0.4 multiplier, got {mult}");
+        assert!(
+            (mult - 0.4).abs() < 1e-9,
+            "expected hard 0.4 multiplier, got {mult}"
+        );
     }
 
     #[test]
@@ -423,7 +437,10 @@ mod tests {
             "score": 0.5,
         })];
         let mult = apply_intent_doc_penalty(&mut items, QueryIntent::Code).multiplier;
-        assert!((mult - 0.4).abs() < 1e-9, "expected base 0.4 multiplier, got {mult}");
+        assert!(
+            (mult - 0.4).abs() < 1e-9,
+            "expected base 0.4 multiplier, got {mult}"
+        );
         let s = items[0].get("score").and_then(Value::as_f64).unwrap();
         assert!((s - 0.2).abs() < 1e-6, "expected 0.5 * 0.4 = 0.2, got {s}");
     }
@@ -447,7 +464,11 @@ mod tests {
             "score": 0.4,
         })];
         let p = apply_intent_doc_penalty(&mut items, QueryIntent::Doc);
-        assert!((p.multiplier - 1.15).abs() < 1e-9, "expected 1.15× boost, got {}", p.multiplier);
+        assert!(
+            (p.multiplier - 1.15).abs() < 1e-9,
+            "expected 1.15× boost, got {}",
+            p.multiplier
+        );
         assert_eq!(p.rank_demotion, 0, "doc intent should not rank-demote");
         let s = items[0].get("score").and_then(Value::as_f64).unwrap();
         assert!((s - 0.46).abs() < 1e-6, "expected ~0.46, got {s}");
@@ -457,7 +478,9 @@ mod tests {
     fn rank_demotion_pushes_doc_below_low_score_code() {
         // Pathological case: doc raw score is 1.0 and code is so low that
         // even the 0.4× multiplier (→ 0.4) ties or beats the code score.
-        // Rank demotion should still push the doc-section toward the tail.
+        // Rank demotion shifts the doc-section down `max(N/2, 3)` slots
+        // from its post-score-sort position. With N=5 the floor is 3, so
+        // the doc lands at index 3 (4th slot), not the absolute tail.
         let mut items = vec![
             json!({ "ref": { "id": "doc.md::Top#h2" }, "score": 1.0 }),
             json!({ "ref": { "id": "src/a.rs::a#function" }, "score": 0.39 }),
@@ -466,16 +489,21 @@ mod tests {
             json!({ "ref": { "id": "src/d.rs::d#function" }, "score": 0.20 }),
         ];
         let p = apply_intent_doc_penalty(&mut items, QueryIntent::Code);
-        assert_eq!(p.rank_demotion, (5 / 2usize).max(3)); // 3
+        assert_eq!(p.rank_demotion, 3); // max(N/2, 3) with N=5
         let ids: Vec<&str> = items
             .iter()
             .map(|i| i.pointer("/ref/id").and_then(Value::as_str).unwrap())
             .collect();
-        // After 0.4× the doc is at 0.4, then the rank demotion pushes it
-        // down 3 slots from its post-score-sort position (which is index 0
-        // because 0.4 > 0.39).
+        // After 0.4× the doc is at 0.4 (still beats 0.39 code), score-sort
+        // keeps it at index 0, then rank_demote_doc_sections shifts it from
+        // target index 0 → min(0+3, 4) = 3. Stable sort by target leaves
+        // doc (originally first) ahead of c (which also targets 3): the
+        // doc lands at index 2, c at index 3.
         assert_eq!(ids[0], "src/a.rs::a#function");
-        assert_eq!(ids.last().copied(), Some("doc.md::Top#h2"));
+        assert_eq!(ids[1], "src/b.rs::b#function");
+        assert_eq!(ids[2], "doc.md::Top#h2");
+        assert_eq!(ids[3], "src/c.rs::c#function");
+        assert_eq!(ids[4], "src/d.rs::d#function");
     }
 
     #[test]

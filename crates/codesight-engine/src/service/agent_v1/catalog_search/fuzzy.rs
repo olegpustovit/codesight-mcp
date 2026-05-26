@@ -40,7 +40,15 @@ pub(super) fn augment_with_fuzzy(
     auto_fuzzy: bool,
     symbols: &mut Vec<SearchSymbol>,
 ) -> usize {
-    let rows = collect_fuzzy_rows(store, args, scope, exclude, per_kind_cap, auto_fuzzy, symbols);
+    let rows = collect_fuzzy_rows(
+        store,
+        args,
+        scope,
+        exclude,
+        per_kind_cap,
+        auto_fuzzy,
+        symbols,
+    );
     let added = rows.len();
     symbols.extend(rows);
     added

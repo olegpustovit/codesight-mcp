@@ -36,10 +36,7 @@ impl Language for Swift {
     }
     /// Swift-idiomatic `import Module` (ROADMAP P1.6). Swift imports never
     /// carry named bindings, so `names` is intentionally ignored.
-    fn display_import_lines(
-        &self,
-        edges: &[crate::imports_types::ImportEdge],
-    ) -> Vec<String> {
+    fn display_import_lines(&self, edges: &[crate::imports_types::ImportEdge]) -> Vec<String> {
         edges
             .iter()
             .map(|e| format!("import {}", e.specifier))
@@ -85,13 +82,59 @@ impl Language for Swift {
     }
     fn reserved_identifiers(&self) -> &'static [&'static str] {
         &[
-            "associatedtype", "class", "deinit", "enum", "extension", "fileprivate", "func",
-            "import", "init", "inout", "internal", "let", "open", "operator", "private",
-            "protocol", "public", "rethrows", "static", "struct", "subscript", "typealias",
-            "var", "break", "case", "continue", "default", "defer", "do", "else", "fallthrough",
-            "for", "guard", "if", "in", "repeat", "return", "switch", "where", "while", "as",
-            "Any", "catch", "false", "is", "nil", "super", "self", "Self", "throw", "throws",
-            "true", "try",
+            "associatedtype",
+            "class",
+            "deinit",
+            "enum",
+            "extension",
+            "fileprivate",
+            "func",
+            "import",
+            "init",
+            "inout",
+            "internal",
+            "let",
+            "open",
+            "operator",
+            "private",
+            "protocol",
+            "public",
+            "rethrows",
+            "static",
+            "struct",
+            "subscript",
+            "typealias",
+            "var",
+            "break",
+            "case",
+            "continue",
+            "default",
+            "defer",
+            "do",
+            "else",
+            "fallthrough",
+            "for",
+            "guard",
+            "if",
+            "in",
+            "repeat",
+            "return",
+            "switch",
+            "where",
+            "while",
+            "as",
+            "Any",
+            "catch",
+            "false",
+            "is",
+            "nil",
+            "super",
+            "self",
+            "Self",
+            "throw",
+            "throws",
+            "true",
+            "try",
         ]
     }
 }

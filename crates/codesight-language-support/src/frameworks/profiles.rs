@@ -25,9 +25,7 @@ pub struct LayerDefinition {
 }
 
 /// Convert a profile to a JSON-like metadata map.
-pub fn profile_to_meta(
-    profile: &FrameworkProfile,
-) -> FxHashMap<String, serde_json::Value> {
+pub fn profile_to_meta(profile: &FrameworkProfile) -> FxHashMap<String, serde_json::Value> {
     let mut meta = FxHashMap::default();
 
     let mut fp = serde_json::Map::new();

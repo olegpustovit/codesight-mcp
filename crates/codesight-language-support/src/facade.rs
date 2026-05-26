@@ -111,6 +111,17 @@ pub fn is_test_file(path: &str) -> bool {
     generic_is_test_file(path)
 }
 
+/// True when `path` is a top-level test-binary entry point under any
+/// registered language's convention (e.g. Rust's `tests/*.rs`).
+pub fn is_test_target_root(path: &str) -> bool {
+    if let Some(lang) = lookup_for_path(path)
+        && lang.is_test_target_root(path)
+    {
+        return true;
+    }
+    false
+}
+
 /// True when `path` is a fixture/golden/snapshot file for any language.
 pub fn is_test_fixture(path: &str) -> bool {
     if let Some(lang) = lookup_for_path(path)

@@ -135,10 +135,9 @@ fn test_al_xmlport_extracted() {
 #[test]
 fn test_al_extension_objects() {
     let syms = extract_symbols();
-    let ext_names: FxHashSet<&str> =
-        ["My Page Ext", "My Table Ext", "My Enum Ext"]
-            .into_iter()
-            .collect();
+    let ext_names: FxHashSet<&str> = ["My Page Ext", "My Table Ext", "My Enum Ext"]
+        .into_iter()
+        .collect();
     let ext_syms: Vec<_> = syms
         .iter()
         .filter(|s| ext_names.contains(s.name.as_str()))
@@ -271,8 +270,7 @@ fn test_al_field_extracted() {
                 && s.signature.matches(';').count() >= 2
         })
         .collect();
-    let field_names: FxHashSet<_> =
-        fields.iter().map(|s| s.name.as_str()).collect();
+    let field_names: FxHashSet<_> = fields.iter().map(|s| s.name.as_str()).collect();
     assert!(field_names.contains("No."), "missing field 'No.'");
     assert!(field_names.contains("Name"), "missing field 'Name'");
 }
@@ -304,8 +302,7 @@ fn test_al_enum_value_extracted() {
         .iter()
         .filter(|s| s.kind == SymbolKind::Constant && s.signature.contains("value("))
         .collect();
-    let value_names: FxHashSet<_> =
-        values.iter().map(|s| s.name.as_str()).collect();
+    let value_names: FxHashSet<_> = values.iter().map(|s| s.name.as_str()).collect();
     assert!(value_names.contains("None"), "missing enum value 'None'");
     assert!(
         value_names.contains("Option1"),

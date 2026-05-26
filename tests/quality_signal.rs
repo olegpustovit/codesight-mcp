@@ -95,7 +95,8 @@ fn quality_signal_returns_all_fields() {
     assert!(data["assessment"].is_string());
     assert!(data["confidence"].is_string());
     assert_eq!(
-        data["agent_readiness"]["type_annotation_method"], "measured"
+        data["agent_readiness"]["type_annotation_method"],
+        "measured"
     );
     assert!(data["bottleneck"].is_string());
     assert!(data["bottleneck_layer"].is_string());
@@ -187,66 +188,7 @@ fn repo_health_includes_quality_signal_finding() {
     assert!(ev["structural_root_causes"].is_object());
     assert!(ev["agent_readiness"]["dimensions"].is_object());
     assert!(ev["agent_readiness"]["submetrics"].is_object());
-    assert_eq!(
-        ev["agent_readiness"]["type_annotation_method"], "measured"
-    );
-}
-
-#[test]
-fn snapshot_and_regression_round_trip() {
-    let (svc, _ws, sid) = build_multi_module_repo();
-
-    // Snapshot current state
-    let r = svc
-        .dispatch(
-            "manage_indexes",
-            json!({
-                "source_id": sid,
-                "action": "snapshot_quality",
-                "snapshot_name": "test_baseline",
-            }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "snapshot_quality failed: {r:?}");
-    assert!(r["data"]["stored"].as_bool().unwrap());
-
-    // Regression check without changes → should not be degraded
-    let r = svc
-        .dispatch(
-            "evaluate_quality",
-            json!({
-                "source_id": sid,
-                "analysis": "regression_check",
-                "snapshot_name": "test_baseline",
-            }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "regression_check failed: {r:?}");
-    let data = &r["data"];
-    assert_eq!(data["analysis"], "regression_check");
-    assert!(data["baseline"].is_object());
-    assert!(data["current"].is_object());
-    assert!(data["delta"].is_object());
-    // Score delta should be 0.0 (same data)
-    let delta = data["delta"]["score"].as_f64().unwrap();
-    assert!(delta.abs() < 1e-9, "expected zero score delta, got {delta}");
-}
-
-#[test]
-fn regression_check_without_baseline_errors() {
-    let (svc, _ws, sid) = build_multi_module_repo();
-    let r = svc
-        .dispatch(
-            "evaluate_quality",
-            json!({
-                "source_id": sid,
-                "analysis": "regression_check",
-                "snapshot_name": "nonexistent",
-            }),
-        )
-        .unwrap();
-    assert!(!r["ok"].as_bool().unwrap());
-    assert_eq!(r["error"]["code"], "NO_BASELINE");
+    assert_eq!(ev["agent_readiness"]["type_annotation_method"], "measured");
 }
 
 #[test]
@@ -343,36 +285,4 @@ def simple_func():
             .any(|warning| warning["code"] == "QUALITY_REGRESSION"),
         "expected QUALITY_REGRESSION warning: {ended:?}"
     );
-}
-
-#[test]
-fn test_gaps_returns_ranked_results() {
-    let (svc, _ws, sid) = build_multi_module_repo();
-    let r = svc
-        .dispatch(
-            "evaluate_quality",
-            json!({
-                "source_id": sid,
-                "analysis": "test_gaps",
-                "top_n": 10,
-                "min_complexity": 2,
-            }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "test_gaps failed: {r:?}");
-    let data = &r["data"];
-    assert_eq!(data["analysis"], "test_gaps");
-    assert!(data["total_untested_functions"].is_number());
-    assert!(data["gaps"].is_array());
-
-    // Gaps should be sorted by risk_score descending
-    let gaps = data["gaps"].as_array().unwrap();
-    if gaps.len() >= 2 {
-        let first = gaps[0]["risk_score"].as_f64().unwrap();
-        let second = gaps[1]["risk_score"].as_f64().unwrap();
-        assert!(
-            first >= second,
-            "gaps should be sorted descending: {first} < {second}"
-        );
-    }
 }

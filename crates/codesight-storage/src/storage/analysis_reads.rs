@@ -1,7 +1,7 @@
 //! Analysis-oriented aggregations and reference counts.
 
-use std::collections::BTreeMap;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::BTreeMap;
 
 use rusqlite::OptionalExtension;
 
@@ -180,10 +180,7 @@ impl IndexStore {
             if name.len() < 2 {
                 continue;
             }
-            by_name
-                .entry(name.clone())
-                .or_default()
-                .insert(id.clone());
+            by_name.entry(name.clone()).or_default().insert(id.clone());
         }
         if by_name.is_empty() {
             return Ok(FxHashSet::default());
@@ -214,9 +211,7 @@ impl IndexStore {
                     continue;
                 }
                 let start = i;
-                while i < bytes.len()
-                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
-                {
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                     i += 1;
                 }
                 let tok = &body[start..i];

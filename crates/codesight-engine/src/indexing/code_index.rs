@@ -198,8 +198,7 @@ where
     // Reachability edges: per-language structural extraction at ingest
     // time. Replaces the file-scan augmentation passes that used to live
     // in `codesight_analysis::dead_code::reachability`.
-    let reachability_edges =
-        compute_reachability_edges_for_sources(&graph_sources, &registry);
+    let reachability_edges = compute_reachability_edges_for_sources(&graph_sources, &registry);
 
     let indexed_at = chrono::Utc::now().to_rfc3339();
     let symbol_vectors = build_symbol_vectors(&repo, &updated_files)?;
@@ -225,7 +224,10 @@ where
     // at debug and leaves the cache empty (dead_code falls back to the
     // in-memory detector). We never block the ingest commit on it.
     if let Err(error) = populate_dispatch_roots_cache(&store) {
-        tracing::debug!(?error, "dispatch_roots cache population failed; using fallback");
+        tracing::debug!(
+            ?error,
+            "dispatch_roots cache population failed; using fallback"
+        );
     }
 
     let package_names =
@@ -532,9 +534,7 @@ fn iter_string_literal_identifiers_local(source: &str) -> Vec<&str> {
                 let is_id_start = c.is_ascii_alphabetic() || c == b'_';
                 if is_id_start {
                     let s = j;
-                    while j < lb.len()
-                        && (lb[j].is_ascii_alphanumeric() || lb[j] == b'_')
-                    {
+                    while j < lb.len() && (lb[j].is_ascii_alphanumeric() || lb[j] == b'_') {
                         j += 1;
                     }
                     if j - s >= 3 {

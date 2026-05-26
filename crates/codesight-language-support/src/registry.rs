@@ -1,8 +1,8 @@
 //! `LanguageRegistry` — the single entry point every crate above L0.75
 //! uses to look up language identity and behavior.
 
-use std::collections::BTreeSet;
 use rustc_hash::FxHashMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 

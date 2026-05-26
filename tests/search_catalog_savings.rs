@@ -62,7 +62,10 @@ fn search_catalog_savings_use_rg_equivalent_not_repo_bytes() {
         "single-hit rg-equivalent baseline should be bounded (~path:line:snippet), got {naive_tokens}: {response:?}"
     );
     let estimate_method = response["_meta"]["estimate_method"].as_str().unwrap_or("");
-    assert_eq!(estimate_method, "rg_equivalent_output_bytes", "{response:?}");
+    assert_eq!(
+        estimate_method, "rg_equivalent_output_bytes",
+        "{response:?}"
+    );
 }
 
 // `output_mode=count` doesn't return items, so the rg-equivalent baseline is

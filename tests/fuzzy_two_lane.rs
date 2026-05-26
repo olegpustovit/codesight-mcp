@@ -7,7 +7,11 @@ use codesight_engine::config::AppConfig;
 use serde_json::json;
 use tempfile::tempdir;
 
-fn build_repo() -> (tempfile::TempDir, codesight_engine::service::CodeService, String) {
+fn build_repo() -> (
+    tempfile::TempDir,
+    codesight_engine::service::CodeService,
+    String,
+) {
     let ws = tempdir().unwrap();
     let src = ws.path().join("repo").join("src");
     fs::create_dir_all(&src).unwrap();

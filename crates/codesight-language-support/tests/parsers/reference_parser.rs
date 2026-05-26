@@ -145,8 +145,7 @@ fn symbol_byte_ranges_are_non_empty() {
 fn js_const_extraction_matches_reference_oracle() {
     let ex = scm_extractor("javascript");
     let syms = ex.extract("util.js", JS_CONST_SOURCE).expect("js extract");
-    let by_name: FxHashMap<_, _> =
-        syms.iter().map(|s| (s.name.as_str(), s)).collect();
+    let by_name: FxHashMap<_, _> = syms.iter().map(|s| (s.name.as_str(), s)).collect();
 
     assert!(by_name.contains_key("MAX_RETRIES"));
     assert!(by_name.contains_key("BASE_URL"));
@@ -166,8 +165,7 @@ fn js_const_extraction_matches_reference_oracle() {
 fn ts_const_extraction_matches_reference_oracle() {
     let ex = scm_extractor("typescript");
     let syms = ex.extract("util.ts", TS_CONST_SOURCE).expect("ts extract");
-    let by_name: FxHashMap<_, _> =
-        syms.iter().map(|s| (s.name.as_str(), s)).collect();
+    let by_name: FxHashMap<_, _> = syms.iter().map(|s| (s.name.as_str(), s)).collect();
 
     assert!(by_name.contains_key("MAX_RETRIES"));
     assert!(by_name.contains_key("BASE_URL"));

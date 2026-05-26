@@ -4,7 +4,9 @@ use crate::service::CodeService;
 use crate::service::agent_v1::args::EvaluateQualityArgs;
 use crate::service::require_store;
 use crate::service::savings::{Confidence, MetaBuilder};
-use codesight_analysis::{dead_code, quality, quality_signal};
+use codesight_analysis::{quality, quality_signal};
+
+use super::cached_default_dead_code_count;
 
 impl CodeService {
     pub(super) fn quality_repo_health(
@@ -33,13 +35,14 @@ impl CodeService {
         let cycle_count = cycles.len();
         let cycles_sample: Vec<_> = cycles.iter().take(5).cloned().collect();
 
-        let dead_code_data =
-            dead_code::dead_code_payload(&store, "file", 0.5, true, &[], None, false, false)?;
-        let dead_count = dead_code_data
-            .get("dead_file_count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
-        let dead_code_pct = if meta.file_count == 0 {
+        // Tier 5.1: use the cached dead-code count instead of running a
+        // fresh reachability walk. `repo_health` warms in < 1 s; a cold
+        // cache returns `dead_count_pending=true` and the caller can run
+        // `health analysis=dead_code` separately for a fresh number.
+        let cached_dead = cached_default_dead_code_count(self, &args.source_id);
+        let dead_count = cached_dead.unwrap_or(0) as usize;
+        let dead_count_pending = cached_dead.is_none();
+        let dead_code_pct = if meta.file_count == 0 || dead_count_pending {
             0.0
         } else {
             (dead_count as f64 / meta.file_count as f64) * 100.0
@@ -91,7 +94,17 @@ impl CodeService {
             }));
         }
 
-        if dead_code_pct >= 20.0 {
+        if dead_count_pending {
+            findings.push(json!({
+                "finding_id": "repo_health:dead_code",
+                "analysis": "repo_health",
+                "severity": "info",
+                "confidence": 0.0,
+                "summary": "dead-code count not in cache — run `health analysis=dead_code` for a fresh figure",
+                "evidence": { "pending": true },
+                "related_refs": [],
+            }));
+        } else if dead_code_pct >= 20.0 {
             let severity = if dead_code_pct >= 50.0 {
                 "error"
             } else {
@@ -143,6 +156,7 @@ impl CodeService {
                 "fn_method_count": fn_method,
                 "avg_complexity": avg_complexity,
                 "dead_count": dead_count,
+                "dead_count_pending": dead_count_pending,
                 "dead_code_pct": dead_code_pct,
                 "cycle_count": cycle_count,
                 "cycles_sample": cycles_sample,

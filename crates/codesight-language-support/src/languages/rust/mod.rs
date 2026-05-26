@@ -260,6 +260,24 @@ impl Language for Rust {
         &["/tests/", "/test/"]
     }
 
+    /// Cargo integration-test convention: a `.rs` file that lives directly
+    /// under a `tests/` directory (workspace-root or per-crate). Each one
+    /// links as its own test binary; nested `tests/foo/helper.rs` modules
+    /// don't count as roots.
+    fn is_test_target_root(&self, path: &str) -> bool {
+        if !path.ends_with(".rs") {
+            return false;
+        }
+        if let Some(rest) = path.strip_prefix("tests/") {
+            return !rest.contains('/');
+        }
+        if let Some(idx) = path.rfind("/tests/") {
+            let rest = &path[idx + 7..];
+            return !rest.contains('/');
+        }
+        false
+    }
+
     /// insta snapshots: `.snap` is the committed baseline, `.snap.new` is the
     /// most recent divergence awaiting review, `.pending.snap` is the
     /// current-run candidate that has not been accepted yet.
@@ -293,15 +311,33 @@ impl Language for Rust {
     ) -> Vec<crate::traits::LiveRoot> {
         use crate::traits::{LiveRoot, LiveRootConfidence};
         let mut roots = Vec::new();
-        for path in detect_cargo_target_files(root, all_files) {
+        let cargo_targets = detect_cargo_target_files(root, all_files);
+        for path in &cargo_targets {
             let message =
                 format!("file '{path}' is a Cargo [[test]]/[[example]]/[[bench]]/[[bin]] target");
             roots.push(LiveRoot {
-                path,
+                path: path.clone(),
                 reason: "cargo_target",
                 message,
                 confidence: LiveRootConfidence::Structural,
                 explicit: true,
+            });
+        }
+        // Tier 4.1: any module-prefixed call in a bin entry's body
+        // (`hooks::run_pretooluse()`, `cli::serve()`, …) implies the host
+        // module is reachable at runtime even if no static `use` line
+        // mentions the callee — common pattern in clap subcommand
+        // dispatch. Promote those host files to live roots.
+        for path in detect_dispatch_handler_files(root, all_files, &cargo_targets) {
+            let message = format!(
+                "file '{path}' is the host module of a path-call expression in a bin entry (e.g. `module::handler()` from main.rs)"
+            );
+            roots.push(LiveRoot {
+                path,
+                reason: "bin_entry_dispatch",
+                message,
+                confidence: LiveRootConfidence::Heuristic,
+                explicit: false,
             });
         }
         for path in detect_foreign_trait_impl_files(root, all_files) {
@@ -369,8 +405,7 @@ impl Language for Rust {
         let trait_owner = owning_trait_for_symbol(defining_source, symbol_name).or_else(|| {
             owning_trait_from_impl_site(defining_source, symbol_name).and_then(|candidate| {
                 repo_files.iter().find_map(|(_, c)| {
-                    owning_trait_for_symbol(c, symbol_name)
-                        .filter(|found| found == &candidate)
+                    owning_trait_for_symbol(c, symbol_name).filter(|found| found == &candidate)
                 })
             })
         });
@@ -802,6 +837,152 @@ fn detect_cargo_target_files(root_path: Option<&Path>, all_files: &[String]) -> 
     }
 
     targets
+}
+
+/// Tier 4.1: scan bin-entry files for `<module>::<fn>(` call expressions
+/// and resolve each `<module>` to a sibling file in the same crate's `src/`
+/// dir. Those host files are promoted to live roots so dead-code analysis
+/// doesn't flag clap subcommand handlers (e.g. `hooks::run_pretooluse()`
+/// from `src/main.rs` → `src/cli/hooks.rs` or `src/hooks.rs`).
+///
+/// Conservative: only fires on lowercase module names (Rust convention),
+/// requires `(` immediately after the function ident, and resolves only
+/// to files already in `all_files`. Skips path calls whose first segment
+/// matches a `use` alias (those are direct calls, already covered by the
+/// import edge graph).
+fn detect_dispatch_handler_files(
+    root_path: Option<&Path>,
+    all_files: &[String],
+    bin_entries: &FxHashSet<String>,
+) -> FxHashSet<String> {
+    let mut handlers = FxHashSet::default();
+    let Some(root) = root_path else {
+        return handlers;
+    };
+    if bin_entries.is_empty() {
+        return handlers;
+    }
+    let file_set: FxHashSet<&str> = all_files.iter().map(String::as_str).collect();
+    for bin in bin_entries {
+        let abs = root.join(bin);
+        let Ok(source) = fs::read_to_string(&abs) else {
+            continue;
+        };
+        // Sibling-search dir: `<bin_parent>/src/` if `<bin>` is `src/main.rs`,
+        // else the bin's parent directory itself (e.g. `crates/foo/src/main.rs`
+        // → `crates/foo/src/`).
+        let bin_parent = std::path::Path::new(bin)
+            .parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or("");
+        for module in scan_module_path_calls(&source) {
+            for candidate in resolve_module_to_file(bin_parent, &module, &file_set) {
+                handlers.insert(candidate);
+            }
+        }
+    }
+    handlers
+}
+
+/// Find lowercase-module path-call expressions (`module::fn(`) in `source`.
+/// Returns the module ident only — the function name doesn't matter for
+/// reachability of the host file.
+fn scan_module_path_calls(source: &str) -> FxHashSet<String> {
+    let mut out = FxHashSet::default();
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i + 4 < bytes.len() {
+        // Look for `::`.
+        if bytes[i] != b':' || bytes[i + 1] != b':' {
+            i += 1;
+            continue;
+        }
+        // Walk back to find the module ident.
+        let mod_end = i;
+        let mut mod_start = mod_end;
+        while mod_start > 0 {
+            let b = bytes[mod_start - 1];
+            if b.is_ascii_alphanumeric() || b == b'_' {
+                mod_start -= 1;
+            } else {
+                break;
+            }
+        }
+        if mod_start == mod_end {
+            i += 2;
+            continue;
+        }
+        // Walk forward over the function ident.
+        let fn_start = i + 2;
+        let mut fn_end = fn_start;
+        while fn_end < bytes.len() {
+            let b = bytes[fn_end];
+            if b.is_ascii_alphanumeric() || b == b'_' {
+                fn_end += 1;
+            } else {
+                break;
+            }
+        }
+        if fn_end == fn_start {
+            i = fn_start;
+            continue;
+        }
+        // Skip whitespace, then expect `(`.
+        let mut p = fn_end;
+        while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t') {
+            p += 1;
+        }
+        if p < bytes.len() && bytes[p] == b'(' {
+            // ASCII slice safe because the bytes are alnum/underscore.
+            let module = std::str::from_utf8(&bytes[mod_start..mod_end]).unwrap_or("");
+            // Lowercase first char filters out types (Self, Vec, Foo) —
+            // Rust convention reserves snake_case for modules.
+            if module
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_lowercase())
+                && module != "self"
+                && module != "super"
+                && module != "crate"
+            {
+                out.insert(module.to_string());
+            }
+        }
+        i = fn_end;
+    }
+    out
+}
+
+/// Map a module ident to candidate sibling-file paths. For `bin_parent =
+/// "src"` and `module = "hooks"`, returns `["src/hooks.rs",
+/// "src/hooks/mod.rs", "src/cli/hooks.rs", "src/cli/hooks/mod.rs"]` filtered
+/// to files actually in `all_files`.
+fn resolve_module_to_file(
+    bin_parent: &str,
+    module: &str,
+    file_set: &FxHashSet<&str>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let prefix = if bin_parent.is_empty() {
+        String::new()
+    } else {
+        format!("{bin_parent}/")
+    };
+    let candidates = [
+        format!("{prefix}{module}.rs"),
+        format!("{prefix}{module}/mod.rs"),
+        // Common nesting: `src/cli/<module>.rs`.
+        format!("{prefix}cli/{module}.rs"),
+        format!("{prefix}cli/{module}/mod.rs"),
+        format!("{prefix}commands/{module}.rs"),
+        format!("{prefix}commands/{module}/mod.rs"),
+    ];
+    for c in candidates {
+        if file_set.contains(c.as_str()) {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

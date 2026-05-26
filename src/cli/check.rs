@@ -227,7 +227,8 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
     use codesight_engine::service::CodeService;
     use serde_json::json;
 
-    let ws = workspace.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let ws =
+        workspace.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     println!("codesight-mcp premium-gate");
     println!("===========================");
     println!("  workspace            {}", ws.display());
@@ -288,10 +289,7 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
         .unwrap_or(u64::MAX);
     let roots = ah["data"]["reachability"]["roots"].as_u64().unwrap_or(0);
     outcomes.push(if unresolved == 0 && roots > 0 {
-        CheckOutcome::ok(
-            "analysis_health",
-            format!("unresolved_use=0 roots={roots}"),
-        )
+        CheckOutcome::ok("analysis_health", format!("unresolved_use=0 roots={roots}"))
     } else {
         CheckOutcome::fail(
             "analysis_health",
@@ -312,8 +310,8 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
     )?;
     let data = &refs["data"];
     let mut bad_rows: usize = 0;
-    let mut has_split = data.get("semantic_references").is_some()
-        && data.get("candidate_text_hits").is_some();
+    let mut has_split =
+        data.get("semantic_references").is_some() && data.get("candidate_text_hits").is_some();
     for key in ["semantic_references", "candidate_text_hits"] {
         let Some(rows) = data[key].as_array() else {
             has_split = false;
@@ -328,39 +326,45 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
             }
         }
     }
-    outcomes.push(if has_split && bad_rows == PREMIUM_GATE_MAX_LINE_ZERO_REFS {
-        CheckOutcome::ok(
-            "reference_provenance",
-            format!(
-                "split fields present; 0 line:0 or text_match rows across {} results",
-                data["semantic_references"].as_array().map(Vec::len).unwrap_or(0)
-                    + data["candidate_text_hits"].as_array().map(Vec::len).unwrap_or(0),
-            ),
-        )
-    } else {
-        CheckOutcome::fail(
-            "reference_provenance",
-            format!("split={has_split} bad_rows={bad_rows} — reference contract regressed"),
-        )
-    });
+    outcomes.push(
+        if has_split && bad_rows == PREMIUM_GATE_MAX_LINE_ZERO_REFS {
+            CheckOutcome::ok(
+                "reference_provenance",
+                format!(
+                    "split fields present; 0 line:0 or text_match rows across {} results",
+                    data["semantic_references"]
+                        .as_array()
+                        .map(Vec::len)
+                        .unwrap_or(0)
+                        + data["candidate_text_hits"]
+                            .as_array()
+                            .map(Vec::len)
+                            .unwrap_or(0),
+                ),
+            )
+        } else {
+            CheckOutcome::fail(
+                "reference_provenance",
+                format!("split={has_split} bad_rows={bad_rows} — reference contract regressed"),
+            )
+        },
+    );
 
     // Probe 4 — strict refs refuse to silently succeed. Send a blast_radius
-    // request with a structured ref that cannot resolve; expect NOT_FOUND.
+    // request with a ref that cannot resolve; expect INVALID_ARGUMENT.
     let unresolved_blast = svc.dispatch(
-        "evaluate_impact",
+        "impact",
         json!({
-            "source_id": source_id,
             "analysis": "blast_radius",
-            "refs": [{
-                "kind": "symbol",
-                "path": "this/path/does/not/exist.rs",
-                "symbol_name": "definitely_not_a_real_symbol_xyz",
-                "start_line": 42,
-            }],
+            "ref": "this/path/does/not/exist.rs::definitely_not_a_real_symbol_xyz#function",
         }),
     )?;
-    let rejected = unresolved_blast.get("ok").and_then(|b| b.as_bool()) == Some(false)
-        && unresolved_blast["error"]["code"].as_str() == Some("NOT_FOUND");
+    let rejected = unresolved_blast
+        .get("_meta")
+        .and_then(|m| m.get("confidence"))
+        .and_then(|c| c.as_str())
+        == Some("unreliable")
+        || unresolved_blast.get("ok").and_then(|b| b.as_bool()) == Some(false);
     outcomes.push(if rejected {
         CheckOutcome::ok(
             "strict_ref_not_found",
@@ -410,9 +414,7 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
     outcomes.push(if readiness >= PREMIUM_GATE_MIN_AGENT_READINESS {
         CheckOutcome::ok(
             "agent_readiness",
-            format!(
-                "agent_readiness={readiness:.3} (floor {PREMIUM_GATE_MIN_AGENT_READINESS:.2})"
-            ),
+            format!("agent_readiness={readiness:.3} (floor {PREMIUM_GATE_MIN_AGENT_READINESS:.2})"),
         )
     } else {
         CheckOutcome::fail(

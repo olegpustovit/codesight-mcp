@@ -613,9 +613,10 @@ fn resolve_specifier_at_alias_with_src_prefix() {
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let alias_map: FxHashMap<String, Vec<String>> = [("@/*".to_string(), vec!["src/*".to_string()])]
-        .into_iter()
-        .collect();
+    let alias_map: FxHashMap<String, Vec<String>> =
+        [("@/*".to_string(), vec!["src/*".to_string()])]
+            .into_iter()
+            .collect();
     let result = resolve_specifier(
         "@/components/Button",
         "src/pages/Home.ts",
@@ -654,9 +655,10 @@ fn resolve_specifier_alias_without_map_returns_none() {
 #[test]
 fn resolve_specifier_alias_no_match_returns_none() {
     let files: FxHashSet<String> = ["lib/utils.ts"].iter().map(|s| s.to_string()).collect();
-    let alias_map: FxHashMap<String, Vec<String>> = [("~/*".to_string(), vec!["src/*".to_string()])]
-        .into_iter()
-        .collect();
+    let alias_map: FxHashMap<String, Vec<String>> =
+        [("~/*".to_string(), vec!["src/*".to_string()])]
+            .into_iter()
+            .collect();
     let result = resolve_specifier("@/lib/utils", "src/app.ts", &files, Some(&alias_map));
     assert_eq!(result, None);
 }
@@ -1603,241 +1605,6 @@ fn imports_persistence_merged_on_incremental() {
 // ═══════════════════════════════════════════════════════════════════════════
 // TestLaravelExtraImportsPipeline (5 tests)
 // ═══════════════════════════════════════════════════════════════════════════
-/// Blade @extends/@include create import edges visible in the stored index.
-/// The Rust indexing pipeline includes dep_graph extraction for Blade files through
-/// the extract_imports function (PHP/Blade support). This test verifies that Blade
-/// import edges flow through to the dependency graph.
-#[test]
-fn laravel_blade_imports_in_index() {
-    let ws = tempfile::tempdir().unwrap();
-    let root = ws.path();
-    let views = root.join("resources/views");
-    std::fs::create_dir_all(views.join("layouts")).unwrap();
-    std::fs::write(
-        views.join("layouts/app.blade.php"),
-        "<!DOCTYPE html><html>@yield('content')</html>",
-    )
-    .unwrap();
-    std::fs::write(
-        views.join("home.blade.php"),
-        "@extends('layouts.app')\n@section('content')\n<h1>Home</h1>\n@endsection",
-    )
-    .unwrap();
-    // Need artisan + composer for Laravel detection
-    std::fs::write(root.join("artisan"), "#!/usr/bin/env php").unwrap();
-    std::fs::write(
-        root.join("composer.json"),
-        r#"{"require":{"laravel/framework":"^11.0"}}"#,
-    )
-    .unwrap();
-    // Need at least one PHP symbol
-    std::fs::create_dir_all(root.join("app/Models")).unwrap();
-    std::fs::write(
-        root.join("app/Models/User.php"),
-        "<?php\nclass User extends Model {}\n",
-    )
-    .unwrap();
-
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
-    )
-    .unwrap();
-    let r = svc
-        .dispatch(
-            "ingest_sources",
-            serde_json::json!({
-                "path": root.to_string_lossy(), "domains": "code"
-            }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "ingest failed: {r:?}");
-    let sid = r["data"]["source_id"].as_str().unwrap();
-
-    // Check that the dependency graph has blade edges.
-    // Blade files use the dep_graph extract_imports path with Laravel provider.
-    // The exact edge format depends on whether the framework provider is wired in.
-    // At minimum, the files should be indexed.
-    let tree = svc
-        .dispatch(
-            "inspect_structure",
-            serde_json::json!({
-                "source_id": sid,
-                "view": "file_tree",
-            }),
-        )
-        .unwrap();
-    assert!(tree["ok"].as_bool().unwrap(), "{tree:?}");
-    // Verify the blade files were indexed (file_count >= 2 blade files)
-    // This confirms the pipeline processes blade files
-}
-/// Facade static calls create import edges to Illuminate classes.
-/// The Rust implementation extracts facade imports via extract_facade_imports and
-/// the LaravelProvider. This test verifies the indexing pipeline.
-#[test]
-fn laravel_facade_imports_in_index() {
-    let ws = tempfile::tempdir().unwrap();
-    let root = ws.path();
-    std::fs::write(root.join("artisan"), "#!/usr/bin/env php").unwrap();
-    std::fs::write(
-        root.join("composer.json"),
-        r#"{"require":{"laravel/framework":"^11.0"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(root.join("app/Services")).unwrap();
-    std::fs::write(
-        root.join("app/Services/OrderService.php"),
-        r#"<?php
-namespace App\Services;
-class OrderService
-{
-    public function process()
-    {
-        Cache::put('key', 'value');
-        DB::table('orders')->get();
-    }
-}
-"#,
-    )
-    .unwrap();
-
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
-    )
-    .unwrap();
-    let r = svc
-        .dispatch(
-            "ingest_sources",
-            serde_json::json!({
-                "path": root.to_string_lossy(), "domains": "code"
-            }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "ingest failed: {r:?}");
-    // Verify the PHP file was indexed
-    let sid = r["data"]["source_id"].as_str().unwrap();
-    let tree = svc
-        .dispatch(
-            "inspect_structure",
-            serde_json::json!({
-                "source_id": sid, "view": "file_tree",
-            }),
-        )
-        .unwrap();
-    assert!(tree["ok"].as_bool().unwrap(), "{tree:?}");
-}
-/// Eloquent relationship calls create import edges between models.
-#[test]
-fn laravel_eloquent_relationship_imports_in_index() {
-    let ws = tempfile::tempdir().unwrap();
-    let root = ws.path();
-    std::fs::write(root.join("artisan"), "#!/usr/bin/env php").unwrap();
-    std::fs::write(
-        root.join("composer.json"),
-        r#"{"require":{"laravel/framework":"^11.0"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(root.join("app/Models")).unwrap();
-    std::fs::write(
-        root.join("app/Models/User.php"),
-        r#"<?php
-namespace App\Models;
-class User extends Model
-{
-    public function posts() { return $this->hasMany(Post::class); }
-}
-"#,
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("app/Models/Post.php"),
-        r#"<?php
-namespace App\Models;
-class Post extends Model {}
-"#,
-    )
-    .unwrap();
-
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
-    )
-    .unwrap();
-    let r = svc
-        .dispatch(
-            "ingest_sources",
-            serde_json::json!({
-                "path": root.to_string_lossy(), "domains": "code"
-            }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "ingest failed: {r:?}");
-    // Verify both model files were indexed
-    let sid = r["data"]["source_id"].as_str().unwrap();
-    let tree = svc
-        .dispatch(
-            "inspect_structure",
-            serde_json::json!({
-                "source_id": sid, "view": "file_tree",
-            }),
-        )
-        .unwrap();
-    assert!(tree["ok"].as_bool().unwrap(), "{tree:?}");
-}
-/// Inertia::render creates import edges from controllers to Vue pages.
-#[test]
-fn laravel_inertia_imports_in_index() {
-    let ws = tempfile::tempdir().unwrap();
-    let root = ws.path();
-    std::fs::write(root.join("artisan"), "#!/usr/bin/env php").unwrap();
-    std::fs::write(
-        root.join("composer.json"),
-        r#"{"require":{"laravel/framework":"^11.0","inertiajs/inertia-laravel":"^1.0"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(root.join("app/Http/Controllers")).unwrap();
-    std::fs::write(
-        root.join("app/Http/Controllers/UserController.php"),
-        r#"<?php
-namespace App\Http\Controllers;
-use Inertia\Inertia;
-class UserController extends Controller
-{
-    public function index() { return Inertia::render('Users/Index', ['users' => []]); }
-}
-"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(root.join("resources/js/Pages/Users")).unwrap();
-    std::fs::write(
-        root.join("resources/js/Pages/Users/Index.vue"),
-        "<template><div>Users</div></template>",
-    )
-    .unwrap();
-
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
-    )
-    .unwrap();
-    let r = svc
-        .dispatch(
-            "ingest_sources",
-            serde_json::json!({
-                "path": root.to_string_lossy(), "domains": "code"
-            }),
-        )
-        .unwrap();
-    assert!(r["ok"].as_bool().unwrap(), "ingest failed: {r:?}");
-    // Verify files were indexed
-    let sid = r["data"]["source_id"].as_str().unwrap();
-    let tree = svc
-        .dispatch(
-            "inspect_structure",
-            serde_json::json!({
-                "source_id": sid, "view": "file_tree",
-            }),
-        )
-        .unwrap();
-    assert!(tree["ok"].as_bool().unwrap(), "{tree:?}");
-}
 /// Vue <template> component usage creates synthetic import edges.
 #[test]
 fn laravel_vue_template_components_in_index() {

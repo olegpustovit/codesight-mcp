@@ -11,23 +11,11 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::service::CodeService;
-use crate::service::agent_v1::args::{DEFAULT_FILE_TREE_MAX_FILES, InspectStructureArgs};
-use crate::service::agent_v1::file_tree::{
-    FileTreeBuildNode, file_tree_hint, file_tree_insert, file_tree_to_json_depth,
-    normalize_file_tree_path_prefix,
-};
-use crate::service::agent_v1::util::graph::build_toc_tree;
-use crate::service::agent_v1::util::pack_catalog_items_to_token_budget;
+use crate::service::agent_v1::args::InspectStructureArgs;
 use crate::service::agent_v1::validate::ValidatedArgs;
 use crate::service::helpers::{ToolError, ToolErrorCategory};
 use crate::service::savings::{Confidence, MetaBuilder};
 use codesight_storage::storage::IndexStore;
-use codesight_storage::storage::doc_index::DocStore;
-
-/// Default budget for `view=toc`, `view=toc_tree`, and `view=document_outline`.
-/// Large documents (e.g. REFACTOR_PLAN.md) can produce 30k+ token TOCs if
-/// unbounded. Same pattern as `DEFAULT_REPO_OUTLINE_TOKEN_BUDGET`.
-const DEFAULT_TOC_TOKEN_BUDGET: u32 = 8000;
 
 /// Result of a store-open attempt: either the ready pair or a pre-formed
 /// error envelope the caller should return verbatim.
@@ -37,14 +25,8 @@ impl CodeService {
     pub(in crate::service) fn inspect_structure(&self, v: Value) -> anyhow::Result<Value> {
         let args: InspectStructureArgs = ValidatedArgs::from_validated(v)?.into_inner();
         match args.view.to_ascii_lowercase().as_str() {
-            "file_tree" => self.structure_file_tree(&args),
             "repo_outline" => self.structure_repo_outline(&args),
-            "repository_rollup" => self.structure_repository_rollup(&args),
             "file_outline" => self.structure_file_outline(&args),
-            "toc" => self.structure_toc(&args),
-            "toc_tree" => self.structure_toc_tree(&args),
-            "document_outline" => self.structure_document_outline(&args),
-            "class_hierarchy" => self.structure_class_hierarchy(&args),
             other => self.error_response(
                 &MetaBuilder::new(0),
                 ToolError {
@@ -81,122 +63,6 @@ impl CodeService {
         }
     }
 
-    /// Open the doc index for this call and prepare a timer. Same shape as
-    /// `setup_repo_call`; same null-baseline rule.
-    fn setup_doc_call(
-        &self,
-        args: &InspectStructureArgs,
-    ) -> anyhow::Result<StoreOrError<DocStore>> {
-        match self.ensure_doc_store(&args.source_id, args.repo_path.as_deref()) {
-            Ok(store) => Ok(Ok((
-                store,
-                MetaBuilder::new(0).with_confidence(Confidence::Safe),
-            ))),
-            Err(e) => Ok(Err(self.error_response(&MetaBuilder::new(0), e)?)),
-        }
-    }
-
-    fn structure_file_tree(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {
-        let (store, timer) = match self.setup_repo_call(args)? {
-            Ok(pair) => pair,
-            Err(resp) => return Ok(resp),
-        };
-        let mut max_files = args.max_files.unwrap_or(DEFAULT_FILE_TREE_MAX_FILES).max(1);
-        // Apply token budget as a row cap. Each tree entry serializes to
-        // roughly 120 bytes (path + language + size + symbol_count);
-        // take the stricter of max_files and max_tokens.
-        if let Some(budget) = args.max_tokens {
-            let budget_rows =
-                (budget as usize).saturating_mul(crate::config::BYTES_PER_TOKEN as usize) / 120;
-            max_files = max_files.min(budget_rows.max(1));
-        }
-        let prefix = normalize_file_tree_path_prefix(&args.path);
-        let mut rows = store.file_tree_rows()?;
-        if let Some(ref pref) = prefix {
-            rows.retain(|(p, _, _, _)| p.starts_with(pref));
-        }
-        let total = rows.len();
-        let truncated = total > max_files;
-        if truncated {
-            rows.truncate(max_files);
-        }
-        let listed = rows.len();
-        // Reclassification (e.g. .h → c): bucket rows by their declared
-        // language, ask each language for its distinctive symbol kinds,
-        // and batch-query storage once per bucket. The language itself
-        // decides whether to override (`Language::reclassify_file_language`).
-        use rustc_hash::{FxHashMap, FxHashSet};
-        let mut buckets: FxHashMap<&str, (&'static [&'static str], Vec<&str>)> = FxHashMap::default();
-        for (path, lang, _, sym_count) in &rows {
-            if *sym_count == 0 {
-                continue;
-            }
-            let kinds =
-                codesight_language_support::distinctive_symbol_kinds_for_language(lang.as_str());
-            if kinds.is_empty() {
-                continue;
-            }
-            buckets
-                .entry(lang.as_str())
-                .or_insert_with(|| (kinds, Vec::new()))
-                .1
-                .push(path.as_str());
-        }
-        let mut distinctive_set: FxHashSet<String> =
-            FxHashSet::default();
-        for (kinds, paths) in buckets.values() {
-            let hits = store.files_with_symbol_kinds_batch(paths, kinds)?;
-            distinctive_set.extend(hits);
-        }
-        let mut root: BTreeMap<String, FileTreeBuildNode> = BTreeMap::new();
-        for (path, mut lang, size, sym_count) in rows {
-            if sym_count > 0
-                && let Some(new_lang) = codesight_language_support::reclassify_file_language(
-                    lang.as_str(),
-                    path.as_str(),
-                    distinctive_set.contains(path.as_str()),
-                )
-            {
-                lang = new_lang.to_string();
-            }
-            let file_json = json!({
-                "type": "file",
-                "path": path,
-                "language": lang,
-                "size_bytes": size,
-                "symbol_count": sym_count,
-            });
-            file_tree_insert(&mut root, &path, file_json);
-        }
-        // ROADMAP P2.7: when the caller gives no `path` prefix, this is an
-        // orientation call — cap depth at 2 so the output is crate + top
-        // modules, not a deeply-nested wall. Drilling requires an explicit
-        // `path=` on the next call.
-        let max_depth = if prefix.is_some() {
-            usize::MAX
-        } else {
-            2
-        };
-        let items = file_tree_to_json_depth(&root, "", max_depth);
-        let mut body = serde_json::Map::new();
-        body.insert("view".to_string(), json!("file_tree"));
-        body.insert("items".to_string(), Value::Array(items));
-        if truncated {
-            body.insert("truncated".to_string(), json!(true));
-            body.insert("total_file_count".to_string(), json!(total));
-            body.insert(
-                "hint".to_string(),
-                json!(file_tree_hint(listed, total, max_files)),
-            );
-        }
-        self.success_response_with_meta_extra(
-            &timer,
-            Value::Object(body),
-            Vec::new(),
-            [("file_count".to_string(), json!(listed))],
-        )
-    }
-
     fn structure_repo_outline(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {
         let _ = args.max_tokens; // token budget is enforced by per-section caps below
         let (store, timer) = match self.setup_repo_call(args)? {
@@ -224,9 +90,7 @@ impl CodeService {
         let rows = store.file_tree_rows()?;
         let filtered_rows: Vec<&(String, String, i64, u64)> = rows
             .iter()
-            .filter(|(path, _, _, _)| {
-                !codesight_language_support::is_outline_noise_basename(path)
-            })
+            .filter(|(path, _, _, _)| !codesight_language_support::is_outline_noise_basename(path))
             .collect();
 
         let adj = store.dependency_graph().unwrap_or_default();
@@ -268,20 +132,6 @@ impl CodeService {
         });
         self.store_repo_outline_body(&args.source_id, &indexed_at, body.clone());
         self.success_response(&timer, body)
-    }
-
-    fn structure_repository_rollup(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {
-        let (store, timer) = match self.setup_repo_call(args)? {
-            Ok(pair) => pair,
-            Err(resp) => return Ok(resp),
-        };
-        let rollup = store.repository_rollup()?;
-        let mut body = serde_json::Map::new();
-        body.insert("view".to_string(), json!("repository_rollup"));
-        if let Value::Object(m) = rollup {
-            body.extend(m);
-        }
-        self.success_response(&timer, Value::Object(body))
     }
 
     fn structure_file_outline(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {
@@ -364,153 +214,6 @@ impl CodeService {
             }),
             warnings,
         )
-    }
-
-    fn structure_toc(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {
-        let (store, timer) = match self.setup_doc_call(args)? {
-            Ok(pair) => pair,
-            Err(resp) => return Ok(resp),
-        };
-        let toc = store.toc()?;
-        let budget = args.max_tokens.unwrap_or(DEFAULT_TOC_TOKEN_BUDGET);
-        let (toc, truncated) = pack_catalog_items_to_token_budget(toc, budget);
-        self.success_response(
-            &timer,
-            json!({ "view": "toc", "items": toc, "truncated": truncated }),
-        )
-    }
-
-    fn structure_toc_tree(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {
-        let (store, timer) = match self.setup_doc_call(args)? {
-            Ok(pair) => pair,
-            Err(resp) => return Ok(resp),
-        };
-        let budget = args.max_tokens.unwrap_or(DEFAULT_TOC_TOKEN_BUDGET);
-        // Trim the flat TOC to the budget, then build the tree from the
-        // trimmed prefix. Packing the flat list keeps the budget predictable
-        // and still preserves file-adjacency ordering in the resulting tree.
-        let flat = store.toc()?;
-        let (flat, truncated) = pack_catalog_items_to_token_budget(flat, budget);
-        let tree = build_toc_tree(&flat);
-        self.success_response(
-            &timer,
-            json!({ "view": "toc_tree", "items": tree, "truncated": truncated }),
-        )
-    }
-
-    fn structure_document_outline(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {
-        let (store, timer) = match self.setup_doc_call(args)? {
-            Ok(pair) => pair,
-            Err(resp) => return Ok(resp),
-        };
-        let Some(file_path) = args.file_path.as_ref().or(args.path.as_ref()) else {
-            return self.error_response(
-                &timer,
-                ToolError {
-                    category: ToolErrorCategory::InvalidArgument,
-                    code: "INVALID_REQUEST",
-                    message: "document_outline requires path or file_path.".to_string(),
-                    detail: json!({}),
-                },
-            );
-        };
-        let sections = store.sections_for_file(file_path)?;
-        if sections.is_empty() && !store.doc_file_exists(file_path)? {
-            return self.error_response(
-                &timer,
-                ToolError {
-                    category: ToolErrorCategory::NotFound,
-                    code: "NOT_FOUND",
-                    message: format!("Document '{file_path}' is not indexed."),
-                    detail: json!({ "path": file_path }),
-                },
-            );
-        }
-        let budget = args.max_tokens.unwrap_or(DEFAULT_TOC_TOKEN_BUDGET);
-        let (sections, truncated) = pack_catalog_items_to_token_budget(sections, budget);
-        self.success_response(
-            &timer,
-            json!({ "view": "document_outline", "items": sections, "truncated": truncated }),
-        )
-    }
-
-    fn structure_class_hierarchy(&self, args: &InspectStructureArgs) -> anyhow::Result<Value> {
-        let (store, timer) = match self.setup_repo_call(args)? {
-            Ok(pair) => pair,
-            Err(resp) => return Ok(resp),
-        };
-        let fp = args.file_path.as_ref().or(args.path.as_ref());
-        let class_name = match args
-            .class_path
-            .as_ref()
-            .or(fp)
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            Some(n) => n.to_string(),
-            None => {
-                return self.error_response(
-                    &timer,
-                    ToolError {
-                        category: ToolErrorCategory::InvalidArgument,
-                        code: "INVALID_REQUEST",
-                        message: "class_hierarchy requires class_path (the class name)."
-                            .to_string(),
-                        detail: json!({}),
-                    },
-                );
-            }
-        };
-        let rows = match store.class_index_rows() {
-            Ok(r) => r,
-            Err(e) => {
-                return self.error_response(
-                    &timer,
-                    ToolError {
-                        category: ToolErrorCategory::Internal,
-                        code: "INDEX_ERROR",
-                        message: e.to_string(),
-                        detail: json!({}),
-                    },
-                );
-            }
-        };
-        let Some(view) =
-            codesight_storage::class_hierarchy::compute_hierarchy_view(&rows, &class_name)
-        else {
-            return self.error_response(
-                &timer,
-                ToolError {
-                    category: ToolErrorCategory::NotFound,
-                    code: "NOT_FOUND",
-                    message: format!("Class '{class_name}' not found in index."),
-                    detail: json!({ "class_name": class_name }),
-                },
-            );
-        };
-        let mut body = json!({
-            "view": "class_hierarchy",
-            "class": view.class,
-            "ancestors": view.ancestors,
-            "descendants": view.descendants,
-            "ancestor_count": view.ancestor_count,
-            "descendant_count": view.descendant_count,
-        });
-        // Rust, Go, and similarly non-OOP languages don't model ancestors /
-        // descendants via class inheritance — traits and interfaces live in
-        // a separate graph. When the class was found but both sides are
-        // empty, emit a diagnostic note so clients don't confuse "no edges"
-        // with "class not found".
-        if view.ancestor_count == 0
-            && view.descendant_count == 0
-            && let Some(msg) =
-                codesight_language_support::class_hierarchy_note_for_path(view.class.file.as_str())
-            && let Some(obj) = body.as_object_mut()
-        {
-            obj.insert("note".to_string(), json!(msg));
-            obj.insert("supports_hierarchy".to_string(), json!(false));
-        }
-        self.success_response(&timer, body)
     }
 }
 
@@ -692,10 +395,7 @@ fn discover_package_roots(
 }
 
 /// Find the longest package-root prefix that contains `file_path`.
-fn nearest_package_root(
-    file_path: &str,
-    roots: &BTreeMap<String, String>,
-) -> Option<String> {
+fn nearest_package_root(file_path: &str, roots: &BTreeMap<String, String>) -> Option<String> {
     let mut best: Option<&str> = None;
     for root in roots.keys() {
         let matches = if root.is_empty() {
@@ -756,10 +456,7 @@ fn top_modules_by_centrality(
         .collect()
 }
 
-fn top_modules_by_size(
-    rows: &[&(String, String, i64, u64)],
-    limit: usize,
-) -> Vec<Value> {
+fn top_modules_by_size(rows: &[&(String, String, i64, u64)], limit: usize) -> Vec<Value> {
     let mut sorted: Vec<&&(String, String, i64, u64)> = rows.iter().collect();
     sorted.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
     sorted

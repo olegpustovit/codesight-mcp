@@ -107,9 +107,7 @@ impl CodeService {
                 "domains": ["code"],
                 "status": if m.is_stale == Some(true) { "stale" } else { "indexed" },
                 "capabilities": [
-                    "ingest_sources", "catalog_sources", "search_catalog", "read_content",
-                    "inspect_structure", "inspect_graph", "evaluate_impact", "evaluate_quality",
-                    "assemble_context", "manage_indexes",
+                    "search", "outline", "read", "references", "impact", "health",
                 ],
                 "file_count": m.file_count,
                 "symbol_count": m.symbol_count,
@@ -141,8 +139,7 @@ impl CodeService {
                 "domains": ["docs"],
                 "status": "indexed",
                 "capabilities": [
-                    "ingest_sources", "catalog_sources", "search_catalog", "read_content",
-                    "inspect_structure", "assemble_context", "manage_indexes",
+                    "search", "outline", "read",
                 ],
                 "file_count": d.get("file_count"),
                 "section_count": d.get("section_count"),

@@ -74,9 +74,9 @@ fn typo_finds_nearest_symbol() {
             }),
         )
         .unwrap();
-    let fuzzy = res["data"]["fuzzy"].as_array().unwrap_or_else(|| {
-        panic!("`data.fuzzy` array missing when fuzzy=true; got {res:?}")
-    });
+    let fuzzy = res["data"]["fuzzy"]
+        .as_array()
+        .unwrap_or_else(|| panic!("`data.fuzzy` array missing when fuzzy=true; got {res:?}"));
     assert!(
         fuzzy
             .iter()
@@ -228,10 +228,7 @@ fn case_fuzzy_integration_cases() {
             }),
         )
         .unwrap();
-    let fuzzy_hits = res["data"]["fuzzy"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let fuzzy_hits = res["data"]["fuzzy"].as_array().cloned().unwrap_or_default();
     assert!(!fuzzy_hits.is_empty(), "expected fuzzy hits");
     let hit = fuzzy_hits
         .iter()

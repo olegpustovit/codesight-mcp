@@ -1,7 +1,7 @@
 //! Class inheritance line parsing and hierarchy views.
 
-use std::collections::VecDeque;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
 
 use serde::Serialize;
 

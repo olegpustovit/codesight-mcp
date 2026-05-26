@@ -93,7 +93,10 @@ impl IndexStore {
 
     /// Batch-variant of [`IndexStore::file_language`]. Returns a
     /// `path → language` map; missing paths map to absent keys.
-    pub fn file_languages_batch(&self, paths: &[&str]) -> anyhow::Result<FxHashMap<String, String>> {
+    pub fn file_languages_batch(
+        &self,
+        paths: &[&str],
+    ) -> anyhow::Result<FxHashMap<String, String>> {
         let mut out: FxHashMap<String, String> = FxHashMap::default();
         if paths.is_empty() {
             return Ok(out);

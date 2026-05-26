@@ -1,6 +1,5 @@
 use std::fs;
 
-use anyhow::Context;
 use codesight_storage::storage::vector_index::OwnedVectorRow;
 use serde_json::{Value, json};
 use tracing::info;
@@ -329,16 +328,20 @@ impl CodeService {
     }
 
     pub(crate) fn wipe_indexes_for_repo(&self, repo: &str) -> anyhow::Result<()> {
-        let repo_dir = self.config.repo_dir(repo);
-        if repo_dir.exists() {
-            fs::remove_dir_all(&repo_dir)
-                .with_context(|| format!("failed to remove code index for '{}'", repo))?;
+        // Best-effort WAL checkpoint on every SQLite file under the repo and
+        // doc dirs *before* deletion. Without it, a writer mid-checkpoint can
+        // create a fresh `-wal`/`-shm` between our `read_dir` and the final
+        // `rmdir`, surfacing as `Directory not empty` (Linux ENOTEMPTY).
+        let code_db = self.config.repo_db_path(repo);
+        if code_db.exists() {
+            let _ = codesight_storage::db::wal_checkpoint_passive(&code_db);
         }
-        let doc_dir = self.config.doc_dir(repo);
-        if doc_dir.exists() {
-            fs::remove_dir_all(&doc_dir)
-                .with_context(|| format!("failed to remove doc index for '{}'", repo))?;
+        let doc_db = self.config.doc_db_path(repo);
+        if doc_db.exists() {
+            let _ = codesight_storage::db::wal_checkpoint_passive(&doc_db);
         }
+        wipe_dir_with_retry(&self.config.repo_dir(repo), "code")?;
+        wipe_dir_with_retry(&self.config.doc_dir(repo), "doc")?;
         Ok(())
     }
 
@@ -541,4 +544,29 @@ impl CodeService {
             }),
         }
     }
+}
+
+/// Recursive remove with up to 5 retries against transient SQLite WAL/SHM
+/// races: a writer checkpoint can create a `-wal`/`-shm` file between our
+/// `read_dir` and the final `rmdir`, producing a spurious ENOTEMPTY. Each
+/// retry sleeps 50 ms before re-attempting.
+fn wipe_dir_with_retry(path: &std::path::Path, label: &'static str) -> anyhow::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut last_err = None;
+    for _ in 0..5 {
+        match fs::remove_dir_all(path) {
+            Ok(()) => return Ok(()),
+            Err(_) if !path.exists() => return Ok(()), // raced to empty already.
+            Err(e) => {
+                last_err = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+    Err(anyhow::Error::new(last_err.unwrap()).context(format!(
+        "failed to remove {label} index at {}",
+        path.display()
+    )))
 }
