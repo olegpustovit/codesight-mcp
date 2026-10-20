@@ -504,7 +504,7 @@ fn make_sym(
     let qualified_name = if scopes.is_empty() {
         name.to_string()
     } else {
-        format!("{}.{}", &scopes[scopes.len() - 1], name)
+        format!("{}.{}", scopes[scopes.len() - 1], name)
     };
     let source_text = source
         .get(start_byte..end_byte)

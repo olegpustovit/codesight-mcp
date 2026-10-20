@@ -27,7 +27,7 @@ pub(super) fn make_symbol(
     let qualified_name = if scopes.is_empty() {
         name.to_string()
     } else {
-        format!("{}.{}", &scopes[scopes.len() - 1], name)
+        format!("{}.{}", scopes[scopes.len() - 1], name)
     };
     let source_text = source
         .get(start_byte..end_byte)
@@ -72,7 +72,7 @@ pub(super) fn make_symbol_with_sig(
     let qualified_name = if scopes.is_empty() {
         name.to_string()
     } else {
-        format!("{}.{}", &scopes[scopes.len() - 1], name)
+        format!("{}.{}", scopes[scopes.len() - 1], name)
     };
     let source_text = source
         .get(start_byte..end_byte)
