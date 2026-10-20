@@ -87,7 +87,7 @@
       }
     },
     "examples": [
-      { "name": "references to a symbol", "args": { "kind": "symbol", "ref": "crates/codesight-core/src/core/symbols.rs::FactQuality#enum" } },
+      { "name": "references to a symbol", "args": { "kind": "symbol", "ref": "crates/codesight-core/src/core/symbols.rs::FactQuality#type" } },
       { "name": "what this file imports", "args": { "kind": "imports", "path": "crates/codesight-core/src/lib.rs" } },
       { "name": "who imports this file", "args": { "kind": "importers", "path": "crates/codesight-core/src/lib.rs" } }
     ]
@@ -108,8 +108,8 @@
       }
     },
     "examples": [
-      { "name": "blast radius", "args": { "analysis": "blast_radius", "ref": "crates/codesight-core/src/core/symbols.rs::FactQuality#enum" } },
-      { "name": "rename safety", "args": { "analysis": "rename_safety", "ref": "crates/codesight-core/src/core/symbols.rs::FactQuality#enum", "new_name": "FactGrade" } }
+      { "name": "blast radius", "args": { "analysis": "blast_radius", "ref": "crates/codesight-core/src/core/symbols.rs::FactQuality#type" } },
+      { "name": "rename safety", "args": { "analysis": "rename_safety", "ref": "crates/codesight-core/src/core/symbols.rs::FactQuality#type", "new_name": "FactGrade" } }
     ]
   },
   {

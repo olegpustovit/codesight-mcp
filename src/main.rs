@@ -27,7 +27,13 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Serve the MCP protocol over stdio (default when no subcommand is given).
-    Serve,
+    Serve {
+        /// Repository to serve. Tools resolve the index from the process
+        /// working directory; this flag changes into PATH first, for clients
+        /// that do not launch MCP servers from the project root.
+        #[arg(long, value_name = "PATH")]
+        workspace: Option<PathBuf>,
+    },
     /// Operator health check: storage, schema, query packs, project config.
     Check {
         /// Optional workspace path whose `.codesight.toml` and readability are checked.
@@ -105,8 +111,8 @@ enum Command {
 fn main() {
     let args = Args::parse();
     init_tracing(args.log_format);
-    let exit_code = match args.command.unwrap_or(Command::Serve) {
-        Command::Serve => match run() {
+    let exit_code = match args.command.unwrap_or(Command::Serve { workspace: None }) {
+        Command::Serve { workspace } => match run(workspace.as_deref()) {
             Ok(()) => 0,
             Err(error) => {
                 tracing::error!(error = %error, "codesight-mcp startup or runtime failed");
@@ -203,7 +209,11 @@ fn init_tracing(log_format: LogFormat) {
     }
 }
 
-fn run() -> anyhow::Result<()> {
+fn run(workspace: Option<&std::path::Path>) -> anyhow::Result<()> {
+    if let Some(dir) = workspace {
+        std::env::set_current_dir(dir)
+            .map_err(|err| anyhow::anyhow!("cannot use --workspace {}: {err}", dir.display()))?;
+    }
     tracing::info!(
         version = codesight_engine::config::BUILD_VERSION,
         sha = codesight_engine::config::BUILD_SHA,

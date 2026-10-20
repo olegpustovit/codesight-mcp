@@ -166,14 +166,14 @@ fn handle_grep(tool_input: &Value) -> i32 {
 
     let suggestion = match domain {
         IndexableDomain::Docs => format!(
-            "Grep for '{pattern}' on docs → use: search_catalog query_mode=regex query=\"{pattern}\" unit_kinds=[\"section\"] domain=docs"
+            "Grep for '{pattern}' on docs → use: search mode=regex query=\"{pattern}\" scope=\"*.md\""
         ),
-        IndexableDomain::Code if is_identifier_pattern(pattern) => format!(
-            "Grep for '{pattern}' → use: search_catalog query_mode=keyword query=\"{pattern}\""
-        ),
-        IndexableDomain::Code => format!(
-            "Grep for '{pattern}' → use: search_catalog query_mode=regex query=\"{pattern}\""
-        ),
+        IndexableDomain::Code if is_identifier_pattern(pattern) => {
+            format!("Grep for '{pattern}' → use: search query=\"{pattern}\"")
+        }
+        IndexableDomain::Code => {
+            format!("Grep for '{pattern}' → use: search mode=regex query=\"{pattern}\"")
+        }
     };
 
     emit_deny(&suggestion);
@@ -193,12 +193,9 @@ fn handle_glob(tool_input: &Value) -> i32 {
     }
 
     let suggestion = if pattern.contains("**") || pattern.ends_with('*') {
-        format!("Glob '{}' → use: inspect_structure view=file_tree", pattern)
+        format!("Glob '{}' → use: outline view=repo", pattern)
     } else {
-        format!(
-            "Glob '{}' → use: search_catalog output_mode=files_with_matches query=\"{}\"",
-            pattern, pattern
-        )
+        format!("Glob '{}' → use: search query=\"{}\"", pattern, pattern)
     };
 
     emit_deny(&suggestion);
@@ -237,12 +234,12 @@ fn handle_bash(tool_input: &Value) -> i32 {
 
     let suggestion = match cmd_name {
         "grep" | "rg" => format!(
-            "Bash '{}' → use: search_catalog query_mode=regex query=<pattern>",
+            "Bash '{}' → use: search mode=regex query=<pattern>",
             cmd_name
         ),
-        "find" => "Bash 'find' → use: inspect_structure view=file_tree".to_string(),
+        "find" => "Bash 'find' → use: outline view=repo".to_string(),
         "cat" | "head" | "tail" | "less" | "more" => format!(
-            "Bash '{}' → use: read_content refs=[{{kind:\"file\", path:\"...\", start_line:N, end_line:M}}]",
+            "Bash '{}' → use: read refs=[\"path:N-M\"] (or outline view=file path=... first)",
             cmd_name
         ),
         _ => format!("Bash '{}' → use codesight-mcp tools instead", cmd_name),
@@ -286,7 +283,7 @@ fn handle_edit_probe(tool_input: &Value) -> i32 {
     }
 
     let message = format!(
-        "Editing `{}`: file agent_readiness={:.2} (threshold {:.2}), weakest={}. Consider refactor before adding code. Run `evaluate_quality analysis=quality_signal scope={}` for detail.",
+        "Editing `{}`: file agent_readiness={:.2} (threshold {:.2}), weakest={}. Consider refactor before adding code. Run `health analysis=quality_signal scope={}` for detail.",
         file_path, entry.score, entry.threshold, entry.weakest_dimension, file_path
     );
     emit_allow(&message);
@@ -403,7 +400,8 @@ fn detect_use_prefix_rewrite(tool_input: &Value) -> Option<String> {
                 .unwrap_or("")
                 .to_string(),
         )
-    } else if let Some(edits) = tool_input.get("edits").and_then(Value::as_array) {
+    } else {
+        let edits = tool_input.get("edits").and_then(Value::as_array)?;
         let mut old = String::new();
         let mut new = String::new();
         for edit in edits {
@@ -417,8 +415,6 @@ fn detect_use_prefix_rewrite(tool_input: &Value) -> Option<String> {
             }
         }
         (old, new)
-    } else {
-        return None;
     };
     let mut old_prefixes = FxHashMap::default();
     let mut new_prefixes = FxHashMap::default();
