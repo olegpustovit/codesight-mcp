@@ -1,18 +1,9 @@
 ---
-description: codesight-hooks active — native Grep/Glob/exploration-Bash are hard-blocked
+description: codesight-hooks active — native Read/Grep/Glob intercepted
 alwaysApply: true
 ---
 
-codesight-hooks are active in this workspace. Native `Grep`, `Glob`, and
-code-exploration `Bash` calls (grep/rg/find/cat/head/tail/less/more/wc/awk/sed)
-are intercepted and **blocked** — the hook returns `permissionDecision: deny`
-with a pointer to the right codesight-mcp tool. Safe Bash (git/cargo/npm/docker/
-pytest/build tools) passes through unchanged.
-
-`Read` is **not** intercepted. Claude's Edit/Write tools require a prior Read
-in session state, so blocking Read breaks the edit flow. Prefer codesight-mcp's
-structured retrieval (`inspect_structure view=file_outline`, `read_content` with
-explicit ranges, `get_symbol_source`) when you don't need the full file.
-
-When a hook blocks a call, follow the `additionalContext` the block carries —
-it names the specific codesight-mcp tool that covers the same intent.
+codesight-hooks are active in this workspace. Native Read, Grep, Glob, and
+Bash code-exploration calls are intercepted and redirected to codesight-mcp
+tools. If a hook warns or blocks, follow its suggestion — it's pointing to
+a cheaper, structured alternative.

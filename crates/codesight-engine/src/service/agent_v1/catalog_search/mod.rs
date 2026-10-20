@@ -373,11 +373,9 @@ impl CodeService {
                 Err(e) if domain == "hybrid" && code_store.is_some() => {
                     warnings.push(json!({
                         "code": "PROMOTE_TO_HYBRID",
-                        "message": format!(
-                            "Doc index not present; NL queries run code-only. \
+                        "message": "Doc index not present; NL queries run code-only. \
                              Run `ingest_sources path=<repo> domains=docs` once, \
-                             then retry with domain=hybrid for hybrid ranking."
-                        ),
+                             then retry with domain=hybrid for hybrid ranking.".to_string(),
                         "detail": {
                             "missing": "docs",
                             "source_id": args.source_id,

@@ -10,3 +10,9 @@ t
 
 .claude/
 .codesight-index/
+
+# Python bytecode and generated stress-harness reports
+__pycache__/
+scripts/stress/*_report.json
+# agentpack lockfile (machine-local paths)
+pack.lock

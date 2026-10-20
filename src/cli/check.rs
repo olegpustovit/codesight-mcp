@@ -212,7 +212,7 @@ fn check_project_config(workspace: &Path) -> CheckOutcome {
 // ── Premium release gate ─────────────────────────────────────────────────
 //
 // `codesight-mcp check --premium-gate [--workspace PATH]` runs an end-to-end
-// probe of every P0 trust invariant from ROADMAP.md. Any failure here blocks
+// probe of every P0 trust invariant. Any failure here blocks
 // the release. Thresholds are centralised here so "premium" is a measurable
 // contract, not a marketing word.
 
@@ -351,7 +351,7 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
     );
 
     // Probe 4 — strict refs refuse to silently succeed. Send a blast_radius
-    // request with a ref that cannot resolve; expect INVALID_ARGUMENT.
+    // request with a ref that cannot resolve; expect NOT_FOUND (ok=false).
     let unresolved_blast = svc.dispatch(
         "impact",
         json!({

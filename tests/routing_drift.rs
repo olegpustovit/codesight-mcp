@@ -1,5 +1,5 @@
 //! Drift gate between `tools.json` (the authoritative MCP surface) and the
-//! human-facing docs (`AGENTS.md`, `plugins/codesight-mcp/rules/codesight-routing.mdc`).
+//! human-facing docs (`AGENTS.md`, `README.md`, and the plugin routing rules).
 //!
 //! What this guards against:
 //! - The 6-tool wrapper drifting away from the documented 10-tool surface
@@ -83,7 +83,9 @@ const VARIANT_KEYS: &[&str] = &["mode", "view", "kind", "analysis", "graph"];
 
 const DOCS: &[&str] = &[
     "AGENTS.md",
+    "README.md",
     "plugins/codesight-mcp/rules/codesight-routing.mdc",
+    "plugins/codesight-mcp-dev/rules/codesight-routing.mdc",
 ];
 
 #[test]
@@ -191,7 +193,13 @@ fn extract_warning_codes(body: &str) -> Vec<String> {
             .chars()
             .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
             .collect();
-        if token.len() >= 5 && token.contains('_') && body[i + 1 + token.len()..].starts_with('`') {
+        // Environment variables look like warning codes; skip them.
+        let is_env_var = token.starts_with("CODESIGHT_") || token == "RUST_LOG";
+        if token.len() >= 5
+            && token.contains('_')
+            && !is_env_var
+            && body[i + 1 + token.len()..].starts_with('`')
+        {
             out.push(token);
         }
     }

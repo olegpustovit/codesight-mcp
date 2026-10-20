@@ -13,7 +13,7 @@ agentpack sync
 ## Requirements
 
 - `codesight-mcp` binary on PATH
-- An indexed repository (`codesight-mcp ingest --path .`)
+- An indexed repository (`codesight-mcp ingest .`)
 
 ## What's included
 

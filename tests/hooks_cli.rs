@@ -154,7 +154,7 @@ fn pretooluse_read_with_offset_limit_silent() {
 // ── hook-pretooluse: Grep ────────────────────────────────────────────
 
 #[test]
-fn pretooluse_grep_suggests_search_catalog() {
+fn pretooluse_grep_suggests_search() {
     let input = serde_json::json!({
         "tool_name": "Grep",
         "tool_input": {
@@ -168,8 +168,8 @@ fn pretooluse_grep_suggests_search_catalog() {
     let ctx = hook_additional_context(&stdout)
         .unwrap_or_else(|| panic!("Grep should emit a hookSpecificOutput JSON: {stdout}"));
     assert!(
-        ctx.contains("search_catalog"),
-        "expected search_catalog suggestion in additionalContext: {ctx}"
+        ctx.contains("use: search "),
+        "expected `search` suggestion in additionalContext: {ctx}"
     );
 }
 
@@ -191,8 +191,8 @@ fn pretooluse_grep_on_markdown_suggests_docs_search() {
         panic!("Grep on .md should emit a hookSpecificOutput JSON (deny): {stdout}")
     });
     assert!(
-        ctx.contains("search_catalog") && ctx.contains("docs"),
-        "expected docs-oriented search_catalog suggestion: {ctx}"
+        ctx.contains("use: search ") && ctx.contains("docs"),
+        "expected docs-oriented `search` suggestion: {ctx}"
     );
 }
 
@@ -219,7 +219,7 @@ fn pretooluse_grep_on_binary_passes_through() {
 // ── hook-pretooluse: Glob ────────────────────────────────────────────
 
 #[test]
-fn pretooluse_glob_suggests_file_tree() {
+fn pretooluse_glob_suggests_outline() {
     let input = serde_json::json!({
         "tool_name": "Glob",
         "tool_input": {
@@ -232,8 +232,8 @@ fn pretooluse_glob_suggests_file_tree() {
     let ctx = hook_additional_context(&stdout)
         .unwrap_or_else(|| panic!("Glob should emit a hookSpecificOutput JSON: {stdout}"));
     assert!(
-        ctx.contains("inspect_structure"),
-        "expected inspect_structure suggestion in additionalContext: {ctx}"
+        ctx.contains("outline view=repo"),
+        "expected `outline view=repo` suggestion in additionalContext: {ctx}"
     );
 }
 
@@ -262,7 +262,7 @@ fn pretooluse_bash_safe_command_silent() {
 }
 
 #[test]
-fn pretooluse_bash_grep_suggests_search_catalog() {
+fn pretooluse_bash_grep_suggests_search() {
     let input = serde_json::json!({
         "tool_name": "Bash",
         "tool_input": {
@@ -275,8 +275,8 @@ fn pretooluse_bash_grep_suggests_search_catalog() {
     let ctx = hook_additional_context(&stdout)
         .unwrap_or_else(|| panic!("Bash grep should emit a hookSpecificOutput JSON: {stdout}"));
     assert!(
-        ctx.contains("search_catalog"),
-        "expected search_catalog suggestion for bash grep in additionalContext: {ctx}"
+        ctx.contains("use: search "),
+        "expected `search` suggestion for bash grep in additionalContext: {ctx}"
     );
 }
 
