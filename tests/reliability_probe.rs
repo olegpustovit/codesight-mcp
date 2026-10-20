@@ -33,8 +33,14 @@ const TIER_HEAVY_COLD_MS: f64 = 5_000.0;
 
 // ── Setup ────────────────────────────────────────────────────────────────────
 
+/// The CUTPLAN adapters resolve `source_id` from the process cwd, which is
+/// global state. `cargo test` runs tests on parallel threads in one process,
+/// so every probe holds this lock for as long as it has the cwd changed.
+static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct ProbeEnv {
     svc: CodeService,
+    _cwd_guard: std::sync::MutexGuard<'static, ()>,
     _ws: tempfile::TempDir,
     _repo: std::path::PathBuf,
     _saved_cwd: std::path::PathBuf,
@@ -73,6 +79,7 @@ fn build_env() -> ProbeEnv {
     );
 
     // The CUTPLAN adapters resolve source_id from cwd. Use a guard pattern.
+    let cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let saved_cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
 
@@ -94,6 +101,7 @@ fn build_env() -> ProbeEnv {
 
     ProbeEnv {
         svc,
+        _cwd_guard: cwd_guard,
         _ws: ws,
         _repo: repo,
         _saved_cwd: saved_cwd,
@@ -304,6 +312,48 @@ fn probe_impact_blast_radius_is_symbol_scoped() {
         data(&r).get("direct_importers").is_none(),
         "impact.blast_radius: must not return file-importer counts: {r:?}"
     );
+}
+
+#[test]
+fn probe_impact_unresolved_structured_ref_is_not_found() {
+    let env = build_env();
+    // A structured ref whose file is not indexed, a ref to a real file with
+    // a symbol that does not exist, and the same via `id:`. None of these may
+    // fall back to a bare-name search and report `confidence: safe`.
+    for r#ref in [
+        "this/path/does/not/exist.rs::FactQuality#enum",
+        "src/lib.rs::DefinitelyNotASymbol#struct",
+        "id:src/missing.rs::FactQuality#enum",
+    ] {
+        for analysis in ["blast_radius", "rename_safety"] {
+            let r = env
+                .svc
+                .dispatch(
+                    "impact",
+                    json!({ "analysis": analysis, "ref": r#ref, "new_name": "Renamed" }),
+                )
+                .unwrap();
+            assert_eq!(
+                r["ok"].as_bool(),
+                Some(false),
+                "impact.{analysis} must refuse unresolved ref {ref}: {r:?}"
+            );
+            assert_eq!(
+                r["error"]["code"].as_str(),
+                Some("NOT_FOUND"),
+                "impact.{analysis} {ref}: {r:?}"
+            );
+        }
+    }
+    // A bare identifier is still a name search, not a strict ref.
+    let r = env
+        .svc
+        .dispatch(
+            "impact",
+            json!({ "analysis": "blast_radius", "ref": "FactQuality" }),
+        )
+        .unwrap();
+    assert_eq!(r["ok"].as_bool(), Some(true), "{r:?}");
 }
 
 #[test]

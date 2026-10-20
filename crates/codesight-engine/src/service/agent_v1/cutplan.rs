@@ -602,6 +602,50 @@ impl CodeService {
         }
     }
 
+    /// Strict-ref check for `impact`. A structured ref (`path::Name#kind` or
+    /// `id:<stable_id>`) names one specific symbol, so it must resolve to an
+    /// indexed symbol before we walk references by bare name. Otherwise a
+    /// typo'd or deleted path would silently fall back to a name-only search
+    /// and could return `confidence: safe` for a symbol that does not exist.
+    /// Bare identifiers (no `::`) are unaffected.
+    ///
+    /// Returns `Some(NOT_FOUND)` when the ref cannot be resolved.
+    fn unresolved_structured_ref(
+        &self,
+        sid: &str,
+        ref_str: &str,
+        identifier: &str,
+    ) -> Option<ToolError> {
+        let trimmed = ref_str.trim();
+        let stable_id = trimmed.strip_prefix("id:").unwrap_or(trimmed);
+        let (path, _) = stable_id.split_once("::")?;
+        let not_found = |reason: &str| {
+            ToolError::new(
+                ToolErrorCategory::NotFound,
+                "NOT_FOUND",
+                format!("ref '{ref_str}' does not resolve to an indexed symbol: {reason}"),
+                json!({ "ref": ref_str, "path": path, "identifier": identifier }),
+            )
+        };
+        let store = match self.open_repo_store(sid) {
+            Ok(store) => store,
+            Err(e) => return Some(e),
+        };
+        if matches!(store.symbol_record(stable_id), Ok(Some(_))) {
+            return None;
+        }
+        match store.file_exists(path) {
+            Ok(true) => {}
+            Ok(false) => return Some(not_found("file is not in the index")),
+            Err(e) => return Some(not_found(&format!("index lookup failed: {e}"))),
+        }
+        match store.symbol_id_at_name(path, identifier) {
+            Ok(Some(_)) => None,
+            Ok(None) => Some(not_found("no symbol with that name in the file")),
+            Err(e) => Some(not_found(&format!("index lookup failed: {e}"))),
+        }
+    }
+
     fn cutplan_impact_blast_radius(&self, sid: &str, args: &ImpactArgs) -> anyhow::Result<Value> {
         let identifier = match extract_identifier_from_ref(&args.r#ref) {
             Some(id) => id,
@@ -620,6 +664,10 @@ impl CodeService {
                 );
             }
         };
+
+        if let Some(err) = self.unresolved_structured_ref(sid, &args.r#ref, &identifier) {
+            return self.error_response(&MetaBuilder::new(0), err);
+        }
 
         // Walk the structural references graph and deduplicate by file.
         let refs_response = self.inspect_graph(json!({
@@ -721,6 +769,10 @@ impl CodeService {
                 );
             }
         };
+
+        if let Some(err) = self.unresolved_structured_ref(sid, &args.r#ref, &identifier) {
+            return self.error_response(&MetaBuilder::new(0), err);
+        }
 
         // Walk the references graph for both the old and new names.
         let old_refs = self.inspect_graph(json!({
