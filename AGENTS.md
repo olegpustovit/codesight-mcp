@@ -25,7 +25,7 @@ Three rules are non-negotiable:
 - LoC and per-module cyclomatic complexity only go down or stay flat. 
 - Defaults come from `crates/codesight-analysis/src/thresholds.rs` — plain
   constants in `pub const THRESHOLDS: Thresholds = Thresholds { ... }`,
-  surfaced via `evaluate_quality ... _meta_verbose=true`. Edit the constants
+  surfaced by `health analysis=quality_signal`. Edit the constants
   directly if a threshold has to move.
 
   | Signal | Default | Action when missed |

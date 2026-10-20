@@ -1,4 +1,4 @@
-# Agentpack project manifest — direct dependencies only. Run `agentpack lock` to refresh pack.lock.
+# Agentpack project manifest — direct dependencies only. `agentpack lock` writes pack.lock (gitignored: it records machine-local paths).
 
 name = "mcp-impl"
 version = "0.0.1"

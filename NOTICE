@@ -1,0 +1,8 @@
+codesight-mcp
+Copyright 2026 Oleg Pustovit
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It bundles the potion-base-8M static embedding model
+(crates/codesight-retrieval/assets/embedder/potion-base-8M/) by Minish Lab,
+https://huggingface.co/minishlab/potion-base-8M, licensed under the MIT License.
