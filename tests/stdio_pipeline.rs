@@ -25,14 +25,32 @@ impl Drop for Server {
 
 #[test]
 fn initialized_notification_followed_by_request_does_not_stall() {
+    pipeline(false);
+}
+
+#[cfg(all(target_os = "linux", debug_assertions))]
+#[test]
+fn blocking_stdio_initialized_notification_followed_by_request_does_not_stall() {
+    pipeline(true);
+}
+
+fn pipeline(blocking_stdio: bool) {
     let workspace = tempfile::tempdir().unwrap();
     for iteration in 0..25 {
         let mut stderr = tempfile::tempfile().unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_codesight-mcp"));
+        command.env_remove("CODESIGHT_TEST_BLOCKING_STDIO");
+        if blocking_stdio {
+            command.env("CODESIGHT_TEST_BLOCKING_STDIO", "1");
+        }
         let mut server = Server(
-            Command::new(env!("CARGO_BIN_EXE_codesight-mcp"))
+            command
                 .args(["serve", "--workspace", workspace.path().to_str().unwrap()])
                 .env("CODESIGHT_INDEX_DIR", workspace.path().join("index"))
-                .env("RUST_LOG", "rmcp=trace,codesight_mcp=info")
+                .env(
+                    "RUST_LOG",
+                    "rmcp=trace,codesight_mcp=info,codesight_mcp::stdio_io=trace",
+                )
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::from(stderr.try_clone().unwrap()))

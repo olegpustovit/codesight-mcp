@@ -6,6 +6,8 @@ use codesight_engine::{config::AppConfig, service::CodeService};
 use codesight_mcp::cli::{check, hooks, init};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
+mod stdio_io;
+
 #[derive(Copy, Clone, Debug, Default, ValueEnum)]
 enum LogFormat {
     #[default]
@@ -236,11 +238,28 @@ async fn run_rmcp_stdio(service: Arc<CodeService>) -> anyhow::Result<()> {
     use rmcp::ServiceExt;
     use rmcp::transport::stdio_pipes;
 
+    let transport = stdio_pipes();
+    #[cfg(debug_assertions)]
+    let running = if std::env::var_os("CODESIGHT_TEST_BLOCKING_STDIO").is_some() {
+        service
+            .clone()
+            .serve((
+                tokio::io::stdin(),
+                stdio_io::ObservedWriter(tokio::io::stdout()),
+            ))
+            .await
+    } else {
+        service
+            .clone()
+            .serve((transport.0, stdio_io::ObservedWriter(transport.1)))
+            .await
+    };
+    #[cfg(not(debug_assertions))]
     let running = service
         .clone()
-        .serve(stdio_pipes())
-        .await
-        .map_err(|err| anyhow::anyhow!("rmcp stdio serve failed: {err}"))?;
+        .serve((transport.0, stdio_io::ObservedWriter(transport.1)))
+        .await;
+    let running = running.map_err(|err| anyhow::anyhow!("rmcp stdio serve failed: {err}"))?;
     let cancel = running.cancellation_token();
 
     tokio::spawn(async move {
