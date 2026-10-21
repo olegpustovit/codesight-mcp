@@ -53,13 +53,8 @@ impl CodeService {
         }
     }
 
-    /// FEEDBACK.md §7: surface graph/reachability/staleness counters so the
-    /// class of "dead-code false positive near crate boundaries" bugs is
-    /// observable via the tool itself. Specifically:
-    /// - `reachability.roots / unreached_files` — dead-code input shape
-    /// - `graph.workspace_crate_edges / unresolved_use_statements` —
-    ///   red flags for the import resolver
-    /// - `staleness.in_flight / last_reindex_ms_ago` — timing sanity
+    /// Surface graph evidence quality, reachability inputs and staleness.
+    /// Unresolved specifiers are not retained, so completeness is unmeasured.
     fn manage_analysis_health(
         &self,
         args: &ManageIndexesArgs,
@@ -94,19 +89,25 @@ impl CodeService {
 
         let total_edges: u64 = graph.values().map(|t| t.len() as u64).sum();
 
-        // Proxy for "unresolved use statements" promised by AGENTS.md:
-        // import edges persisted with `FactQuality::Heuristic` are the ones
-        // where the structural extractor couldn't confirm the target. This
-        // isn't literally the count of unresolved specifiers (those get
-        // dropped before INSERT) but it's the best signal derivable from
-        // persisted state without a schema change, and the dogfood
-        // remediation plan explicitly calls for surfacing this as a
-        // red-flag number.
-        let unresolved_use_statements: u64 = graph_with_quality
-            .values()
-            .flat_map(|targets| targets.iter())
-            .filter(|(_, q)| matches!(q, codesight_core::symbols::FactQuality::Heuristic))
-            .count() as u64;
+        // Stored candidates measure evidence quality, not unresolved specifiers,
+        // which are not retained by the import pipeline.
+        let strict_graph = store.dependency_graph_strict()?;
+        let heuristic_edges: Vec<_> = graph_with_quality
+            .iter()
+            .flat_map(|(source, targets)| {
+                targets.iter().map(move |(target, q)| (source, target, q))
+            })
+            .filter(|(_, _, q)| matches!(q, codesight_core::symbols::FactQuality::Heuristic))
+            .collect();
+        let heuristic_import_edges = heuristic_edges.len();
+        let heuristic_edges_in_strict_graph = heuristic_edges
+            .iter()
+            .filter(|(source, target, _)| {
+                strict_graph
+                    .get(*source)
+                    .is_some_and(|targets| targets.contains(*target))
+            })
+            .count();
 
         let roots = all_files
             .iter()
@@ -132,7 +133,9 @@ impl CodeService {
                     "total_edges": total_edges,
                     "workspace_crate_edges": workspace_crate_edges,
                     "reexport_edges": reexport_edges,
-                    "unresolved_use_statements": unresolved_use_statements,
+                    "heuristic_import_edges": heuristic_import_edges,
+                    "heuristic_edges_in_strict_graph": heuristic_edges_in_strict_graph,
+                    "unresolved_import_coverage": "not_measured",
                 },
                 "staleness": {
                     "in_flight": in_flight,

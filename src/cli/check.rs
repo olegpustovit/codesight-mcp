@@ -278,24 +278,12 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
         )
     });
 
-    // Probe 2 — analysis_health. No unresolved `use` statements, non-zero
-    // reachability roots in a multi-crate repo.
+    // Probe 2 checks evidence separation, not import-resolution completeness.
     let ah = svc.dispatch(
         "manage_indexes",
         json!({ "action": "analysis_health", "source_id": source_id }),
     )?;
-    let unresolved = ah["data"]["graph"]["unresolved_use_statements"]
-        .as_u64()
-        .unwrap_or(u64::MAX);
-    let roots = ah["data"]["reachability"]["roots"].as_u64().unwrap_or(0);
-    outcomes.push(if unresolved == 0 && roots > 0 {
-        CheckOutcome::ok("analysis_health", format!("unresolved_use=0 roots={roots}"))
-    } else {
-        CheckOutcome::fail(
-            "analysis_health",
-            format!("unresolved_use={unresolved} roots={roots}"),
-        )
-    });
+    outcomes.push(check_import_evidence_integrity(&ah));
 
     // Probe 3 — reference provenance. `find_references` on a well-known
     // identifier must expose `identifier_references` + `candidate_text_hits`
@@ -446,4 +434,61 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
         }
     );
     Ok(all_ok)
+}
+
+// Missing or malformed fields fail closed; this is not a Rust completeness gate.
+fn check_import_evidence_integrity(health: &serde_json::Value) -> CheckOutcome {
+    let data = &health["data"];
+    let graph = &data["graph"];
+    let candidates = graph["heuristic_import_edges"].as_u64();
+    let overlap = graph["heuristic_edges_in_strict_graph"].as_u64();
+    let coverage = graph["unresolved_import_coverage"].as_str();
+    let roots = data["reachability"]["roots"].as_u64();
+    let detail = format!(
+        "heuristic_import_edges={candidates:?} heuristic_edges_in_strict_graph={overlap:?} roots={roots:?} unresolved_import_coverage={coverage:?}"
+    );
+    if candidates.is_some()
+        && overlap == Some(0)
+        && roots.is_some_and(|n| n > 0)
+        && coverage == Some("not_measured")
+    {
+        CheckOutcome::ok("import_evidence_integrity", detail)
+    } else {
+        CheckOutcome::fail("import_evidence_integrity", detail)
+    }
+}
+
+#[cfg(test)]
+mod import_evidence_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn import_evidence_gate_accepts_candidates_but_rejects_overlap_and_missing_fields() {
+        let valid = json!({"data":{"reachability":{"roots":1},"graph":{
+            "heuristic_import_edges":4,"heuristic_edges_in_strict_graph":0,
+            "unresolved_import_coverage":"not_measured"}}});
+        assert!(check_import_evidence_integrity(&valid).status.is_ok());
+        let mut overlap = valid.clone();
+        overlap["data"]["graph"]["heuristic_edges_in_strict_graph"] = json!(1);
+        assert!(check_import_evidence_integrity(&overlap).status.is_err());
+        let mut no_roots = valid.clone();
+        no_roots["data"]["reachability"]["roots"] = json!(0);
+        assert!(check_import_evidence_integrity(&no_roots).status.is_err());
+        for field in [
+            "heuristic_import_edges",
+            "heuristic_edges_in_strict_graph",
+            "unresolved_import_coverage",
+        ] {
+            let mut missing = valid.clone();
+            missing["data"]["graph"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                check_import_evidence_integrity(&missing).status.is_err(),
+                "{field}"
+            );
+        }
+    }
 }

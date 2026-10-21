@@ -161,3 +161,25 @@ pretending the aggregate is one dispatch. No runtime speedup is claimed. All thr
 corrected targets passed; the preceding full-run failure remains preserved, with
 no new full-pass claim after these assertion-only edits. Workspace/all-target
 clippy with warnings denied, formatting and whitespace checks passed.
+
+
+## Import-evidence diagnostic correction
+
+The published CI self-check failed after import candidates were correctly marked
+heuristic. Its old diagnostic mislabeled all-language stored heuristic edges as
+unresolved Rust uses. An isolated self-index found four Python candidates and
+zero intersections with the strict graph; unresolved import coverage was not
+measured. The original CI failure remains evidence of this diagnostic defect.
+
+The diagnostic now reports `heuristic_import_edges`, actual
+`heuristic_edges_in_strict_graph`, and `unresolved_import_coverage: not_measured`.
+The redesigned `import_evidence_integrity` gate requires nonzero roots and zero
+heuristic edges in the strict graph, failing closed on absent fields. This checks
+evidence separation and does not replace the old intended Rust-completeness
+check. No complete import-resolution claim follows from its result. Mixed-language
+fixtures include two missing Rust specifiers alongside one Python heuristic candidate;
+gate controls cover candidate acceptance, contamination, zero roots and missing
+fields. Focused validation passed: two analysis-health tests, the gate control
+test, and the stdio pipeline diagnostic. Workspace/all-target clippy with warnings
+denied and formatting checks passed. This is targeted validation, not a new full
+workspace or macOS CI pass.

@@ -187,6 +187,13 @@ Output on this repository for v0.1.0 (release build; `tool_latency` was 807.5 ms
   ok    agent_readiness              agent_readiness=0.684 (floor 0.65)
 ```
 
+That historical `analysis_health` line used a mislabeled heuristic-edge counter;
+it did not measure unresolved Rust uses. The current `import_evidence_integrity`
+probe instead checks nonzero roots and zero heuristic edges in the strict graph.
+It reports stored `heuristic_import_edges` and explicitly marks
+`unresolved_import_coverage` as `not_measured`; a pass establishes evidence
+separation, not import-resolution completeness.
+
 The probes are tuned for this repository: the dead-code cap, the readiness
 floor, and the `CodeService` reference probe all assume this codebase. On
 other repositories, use `check` for operator health and treat `self-check`

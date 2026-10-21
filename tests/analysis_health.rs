@@ -31,13 +31,15 @@ fn analysis_health_reports_graph_and_reachability_shape() {
             ),
             (
                 "crates/bin/src/main.rs",
-                "use lib::api;\nfn main() { api(); }\n",
+                "use lib::api;\nuse missing_crate::unresolved;\nuse another_missing::absent;\nfn main() { api(); }\n",
             ),
             (
                 "crates/lib/Cargo.toml",
                 "[package]\nname=\"lib\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
             ),
             ("crates/lib/src/lib.rs", "pub fn api() {}\n"),
+            ("tools/check.py", "import json\n"),
+            ("fixtures/json.rs", "pub fn placeholder() {}\n"),
         ],
     )
     .unwrap();
@@ -65,6 +67,12 @@ fn analysis_health_reports_graph_and_reachability_shape() {
     let graph = &data["graph"];
     assert!(graph["total_edges"].as_u64().is_some());
     assert!(graph["workspace_crate_edges"].as_u64().is_some());
+
+    assert_eq!(graph["heuristic_import_edges"], json!(1), "{graph}");
+    assert_eq!(graph["heuristic_edges_in_strict_graph"], json!(0));
+    assert_eq!(graph["unresolved_import_coverage"], json!("not_measured"));
+    // One Python candidate coexists with two absent Rust specifiers: stored
+    // candidate count cannot measure unresolved imports in either language.
 
     let stale = &data["staleness"];
     assert!(stale["in_flight"].as_bool().is_some());
