@@ -39,4 +39,27 @@ impl Language for JsonSupport {
     fn is_reference_target(&self) -> bool {
         false
     }
+    fn postprocess_symbols(
+        &self,
+        symbols: &mut [codesight_core::StoredSymbol],
+        file_path: &str,
+        _source: &str,
+    ) {
+        for symbol in symbols {
+            if let Ok(name) = serde_json::from_str::<String>(&symbol.name) {
+                if let Some(prefix) = symbol.qualified_name.strip_suffix(&symbol.name) {
+                    symbol.qualified_name = format!("{prefix}{name}");
+                }
+                symbol.id = format!(
+                    "{file_path}::{}#{}",
+                    symbol.qualified_name,
+                    symbol.kind.as_str()
+                );
+                symbol.name = name;
+            }
+        }
+    }
 }
+
+#[cfg(test)]
+mod tests;

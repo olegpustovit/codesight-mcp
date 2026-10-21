@@ -20,6 +20,7 @@ use codesight_storage::storage::IndexStore;
 
 use codesight_core::pipeline::{FileFingerprint, IndexedFileUpdate};
 
+use super::ingest_diagnostics::{IngestDiagnostics, PayloadCounts};
 use codesight_language_support::{LanguageRegistry, dep_graph};
 
 use crate::{
@@ -110,25 +111,35 @@ where
     let store = IndexStore::open(config.repo_db_path(&repo))?;
     let index_version = store.current_index_version()?.saturating_add(1);
     let extractor_version = indexer.version_stamp();
-    // If the backend's version stamp changed since the last ingest, drop
-    // cached file fingerprints so every matching file gets re-extracted
-    // even when its content hash hasn't changed. Without this, edits to
+    // If the backend's version stamp changed, disable fingerprint reuse
+    // so every matching file gets re-extracted even when its content hash
+    // is unchanged. Retain the old inventory for deleted-path removal.
+    // Without this, edits to
     // `runtime/queries/**/tags.scm` or the extractor pipeline would leave
     // stale symbol ids in the index until a full rebuild.
     let stored_stamp = store.stored_extractor_version().unwrap_or_default();
-    let existing = if stored_stamp == extractor_version {
-        store.file_fingerprints()?
+    let existing = store.file_fingerprints()?;
+    let no_reuse = FxHashMap::default();
+    let reusable = if stored_stamp == extractor_version {
+        &existing
     } else {
-        FxHashMap::default()
+        &no_reuse
     };
 
     let registry = indexer.registry_for(root);
 
     let (walked, indexed_languages) = walk_candidates(root, &registry);
+    let diagnostics = IngestDiagnostics::from_env();
+    let mut diagnostic_counts = PayloadCounts {
+        candidate_files: walked.len(),
+        input_bytes: walked.iter().map(|file| file.size_bytes).sum(),
+        ..Default::default()
+    };
+    diagnostics.record("extraction_start", None, diagnostic_counts);
 
     let outcomes: Vec<FileOutcome> = walked
         .into_par_iter()
-        .filter_map(|file| process_file(file, &existing, &registry))
+        .filter_map(|file| process_file(file, reusable, &registry, diagnostics))
         .collect();
 
     let mut warnings = Vec::new();
@@ -147,12 +158,16 @@ where
                 touched_files.push(fp);
             }
             FileOutcome::Updated { update, source } => {
+                if diagnostics.0 {
+                    diagnostic_counts.add(&source, &update.symbols);
+                }
                 seen_files.insert(update.file_path.clone());
                 graph_sources.push((update.file_path.clone(), source));
                 updated_files.push(update);
             }
         }
     }
+    diagnostics.record("extraction_end", None, diagnostic_counts);
 
     let total_indexed = seen_files.len();
     let has_root_gitignore = root.join(".gitignore").exists();
@@ -188,20 +203,27 @@ where
     // otherwise an import from a new file to an unchanged file fails to
     // resolve and drops the edge.
     let known_paths: Vec<String> = seen_files.iter().cloned().collect();
+    diagnostics.record("dependency_graph_start", None, diagnostic_counts);
     let dep_edges = dep_graph::build_dependency_graph_edges_full(
         &graph_sources,
         Some(&known_paths),
         alias_ref,
         workspace_ref,
     );
+    diagnostics.record("dependency_graph_end", None, diagnostic_counts);
 
     // Reachability edges: per-language structural extraction at ingest
     // time. Replaces the file-scan augmentation passes that used to live
     // in `codesight_analysis::dead_code::reachability`.
+    diagnostics.record("reachability_start", None, diagnostic_counts);
     let reachability_edges = compute_reachability_edges_for_sources(&graph_sources, &registry);
+    diagnostics.record("reachability_end", None, diagnostic_counts);
 
     let indexed_at = chrono::Utc::now().to_rfc3339();
+    diagnostics.record("vectors_start", None, diagnostic_counts);
     let symbol_vectors = build_symbol_vectors(&repo, &updated_files)?;
+    diagnostics.record("vectors_end", None, diagnostic_counts);
+    diagnostics.record("store_start", None, diagnostic_counts);
     store.apply_index_with_deps(
         &repo,
         root,
@@ -215,6 +237,7 @@ where
         &reachability_edges,
         &extractor_version,
     )?;
+    diagnostics.record("store_end", None, diagnostic_counts);
 
     // P3 perf fix: compute string-dispatch roots once at ingest end and
     // persist to the `dispatch_roots` table. The detector's input is
@@ -223,12 +246,14 @@ where
     // `evaluate_quality dead_code` call. Best-effort: a failure here logs
     // at debug and leaves the cache empty (dead_code falls back to the
     // in-memory detector). We never block the ingest commit on it.
+    diagnostics.record("dispatch_roots_start", None, diagnostic_counts);
     if let Err(error) = populate_dispatch_roots_cache(&store) {
         tracing::debug!(
             ?error,
             "dispatch_roots cache population failed; using fallback"
         );
     }
+    diagnostics.record("dispatch_roots_end", None, diagnostic_counts);
 
     let package_names =
         codesight_language_support::packages::extract_package_names(&root.to_string_lossy());
@@ -336,6 +361,7 @@ fn process_file(
     file: WalkedFile,
     existing: &FxHashMap<String, FileFingerprint>,
     registry: &LanguageRegistry,
+    diagnostics: IngestDiagnostics,
 ) -> Option<FileOutcome> {
     let bytes = match fs::read(&file.abs_path) {
         Ok(bytes) => bytes,
@@ -369,6 +395,15 @@ fn process_file(
 
     // Content differs (or never seen) — decode UTF-8 and extract symbols.
     let source = String::from_utf8_lossy(&bytes).into_owned();
+    diagnostics.record(
+        "extract_file_start",
+        Some(&file.relative_path),
+        PayloadCounts {
+            files: 1,
+            source_bytes: source.len(),
+            ..Default::default()
+        },
+    );
     let symbols = registry
         .for_path(&file.abs_path)
         .map(|lang| {
@@ -376,6 +411,11 @@ fn process_file(
                 .unwrap_or_default()
         })
         .unwrap_or_default();
+    if diagnostics.0 {
+        let mut counts = PayloadCounts::default();
+        counts.add(&source, &symbols);
+        diagnostics.record("extract_file_end", Some(&file.relative_path), counts);
+    }
     let update = IndexedFileUpdate {
         file_path: file.relative_path,
         language: codesight_core::LanguageId::intern(&file.language),

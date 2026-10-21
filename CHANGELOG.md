@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Capture whole JSON keys once and decode names/IDs, including escaped and empty keys, while preserving pair spans and custom scope prefixes.
+- Remove deleted files and symbols when an extractor-version refresh disables fingerprint reuse.
+
+- Propagate import resolution quality separately from extraction quality. Keep unique basename guesses in heuristic candidate lists, reject ambiguous guesses and exclude them from strict graphs; invalidate prior cached resolution on refresh.
+
 - Add structural OCaml implementation/interface symbols; binding and import resolution remain unsupported.
 - Include Dart function bodies in symbol ranges, and disclose index scope and static test-gap limits without upgrading weaker confidence.
 - Stop and join background file watchers when their service is dropped.

@@ -239,11 +239,16 @@ These were observed on this repository while preparing v0.1.0:
   registry list. Unsupported, ignored and unindexed files can be absent; no omitted-file
   count is inferred. Import graph requests reject unindexed targets. Failed read
   references appear in `data.errors[]` with `PARTIAL_BATCH`.
-- **Importer evidence.** `importers` contains resolved import edges;
-  `candidate_usage_importers` separately retains heuristic name-usage candidates,
-  which can include text mentions. Both local lists share the requested cap,
-  expose their unbounded totals and report truncation. Missing import extraction
-  still makes the result incomplete.
+- **Import evidence.** `imports` and `importers` contain structural import
+  resolution. `candidate_imports` retains unique basename guesses;
+  `candidate_usage_importers` retains heuristic resolution and name-usage
+  candidates, including text mentions. Each query shares its requested cap
+  between structural and candidate lists, exposes totals and reports truncation.
+  Duplicate basename guesses remain unresolved. These bounded local graphs have
+  partial confidence and `complete: false`; an empty list does not prove that
+  no dependency exists. Strict analyses exclude heuristic resolution.
+  `has_imports` describes the structural list only; check `candidate_imports`
+  and `complete` before interpreting an empty structural list.
 - **Stale index.** Reopened preindexed workspaces activate background watching.
   Overlapping in-flight reindexes immediately emit `STALE_DATA_WARNING` and partial
   confidence. Symbol reads verify disk contents and reject drifted offsets with

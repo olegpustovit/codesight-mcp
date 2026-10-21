@@ -6,6 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::Path;
 
+use codesight_core::symbols::FactQuality;
 use tree_sitter::Language as TsLanguage;
 
 use crate::family::{LanguageFamily, NestingMode};
@@ -164,7 +165,7 @@ impl Language for Python {
         known_files_vec: &[String],
         alias_map: Option<&FxHashMap<String, Vec<String>>>,
         _workspace_crates: Option<&FxHashMap<String, String>>,
-    ) -> Option<String> {
+    ) -> Option<(String, FactQuality)> {
         if let Some(p) = crate::imports_orchestration::resolve_specifier(
             self,
             &edge.specifier,
@@ -182,8 +183,11 @@ impl Language for Python {
             if top.is_empty() {
                 return None;
             }
-            let resolved = imports::resolve_imports_to_files(&[top], known_files_vec, from_file);
-            return resolved.into_iter().next();
+            let mut resolved =
+                imports::resolve_imports_to_files(&[top], known_files_vec, from_file);
+            if resolved.len() == 1 {
+                return resolved.pop().map(|path| (path, FactQuality::Heuristic));
+            }
         }
         None
     }

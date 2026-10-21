@@ -25,6 +25,7 @@ fn resolve_specifier(
         source_files,
         alias_map,
     )
+    .map(|(path, _quality)| path)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1518,7 +1519,7 @@ fn imports_persistence_dbt_refs_saved_in_index() {
     assert!(r["ok"].as_bool().unwrap());
     let sid = r["data"]["source_id"].as_str().unwrap();
 
-    // Verify via find_importers that dim_client.sql is imported by fact_orders.sql
+    // DBT extraction is heuristic; persist the candidate without upgrading it.
     let importers = svc
         .dispatch(
             "inspect_graph",
@@ -1531,16 +1532,26 @@ fn imports_persistence_dbt_refs_saved_in_index() {
         .unwrap();
     assert!(importers["ok"].as_bool().unwrap(), "{importers:?}");
     let data = &importers["data"];
-    let empty = vec![];
-    let importers_list = data["importers"].as_array().unwrap_or(&empty);
-    let importer_files: Vec<&str> = importers_list
-        .iter()
-        .filter_map(|i| i["file"].as_str().or(i.as_str()))
-        .collect();
+    assert_eq!(data["importers"], serde_json::json!([]));
+    assert_eq!(
+        data["candidate_usage_importers"],
+        serde_json::json!(["fact_orders.sql"])
+    );
+    assert_eq!(data["complete"], false);
+    let database =
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")).repo_db_path(sid);
+    let store = codesight_storage::storage::IndexStore::open_existing(database)
+        .unwrap()
+        .unwrap();
     assert!(
-        importer_files.contains(&"fact_orders.sql")
-            || data["importer_count"].as_u64().unwrap_or(0) >= 1,
-        "fact_orders.sql should import dim_client.sql: {data:?}"
+        store.dependency_graph_with_import_quality().unwrap()["fact_orders.sql"].contains(&(
+            "dim_client.sql".into(),
+            codesight_core::symbols::FactQuality::Heuristic
+        ))
+    );
+    assert!(
+        !store.dependency_graph_strict().unwrap()["fact_orders.sql"]
+            .contains(&"dim_client.sql".into())
     );
 }
 /// Verify that incremental re-indexing preserves existing dependency edges and adds new ones.
@@ -1658,12 +1669,28 @@ import UserTable from './components/UserTable.vue'
         )
         .unwrap();
     assert!(importers["ok"].as_bool().unwrap(), "{importers:?}");
-    // App.vue imports UserTable.vue — should show up as an importer
+    // Vue's fallback extraction must remain available as a heuristic candidate.
     let data = &importers["data"];
-    let count = data["importer_count"].as_u64().unwrap_or(0);
+    assert_eq!(data["importers"], serde_json::json!([]));
+    assert_eq!(
+        data["candidate_usage_importers"],
+        serde_json::json!(["src/App.vue"])
+    );
+    assert_eq!(data["complete"], false);
+    let database =
+        codesight_engine::config::AppConfig::new(ws.path().join("idx")).repo_db_path(sid);
+    let store = codesight_storage::storage::IndexStore::open_existing(database)
+        .unwrap()
+        .unwrap();
     assert!(
-        count >= 1,
-        "UserTable.vue should have at least 1 importer (App.vue): {data:?}"
+        store.dependency_graph_with_import_quality().unwrap()["src/App.vue"].contains(&(
+            "src/components/UserTable.vue".into(),
+            codesight_core::symbols::FactQuality::Heuristic
+        ))
+    );
+    assert!(
+        !store.dependency_graph_strict().unwrap()["src/App.vue"]
+            .contains(&"src/components/UserTable.vue".into())
     );
 }
 

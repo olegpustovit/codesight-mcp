@@ -22,30 +22,50 @@ impl CodeService {
             Ok(path) => path,
             Err(error) => return self.error_response(&MetaBuilder::new(0), error),
         };
-        let adj = store.dependency_graph()?;
-        let imports: Vec<&String> = adj
-            .get(file_path)
-            .map(|deps| {
-                deps.iter()
-                    .filter(|target| {
-                        path_matches_filter(
-                            target,
-                            args.scope.as_deref(),
-                            args.exclude.as_deref(),
-                            args.file_pattern.as_deref(),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let adj = store.dependency_graph_with_import_quality()?;
+        let mut resolved = BTreeSet::new();
+        let mut candidates = BTreeSet::new();
+        for (target, quality) in adj.get(file_path).into_iter().flatten() {
+            if path_matches_filter(
+                target,
+                args.scope.as_deref(),
+                args.exclude.as_deref(),
+                args.file_pattern.as_deref(),
+            ) {
+                if quality.suitable_for_strict_analysis() {
+                    resolved.insert(target);
+                } else {
+                    candidates.insert(target);
+                }
+            }
+        }
+        let limit = args.limit.unwrap_or(50);
+        let imports: Vec<_> = resolved.iter().take(limit).collect();
+        let candidate_imports: Vec<_> = candidates
+            .iter()
+            .take(limit.saturating_sub(imports.len()))
+            .collect();
+        let truncated = resolved.len() + candidates.len() > imports.len() + candidate_imports.len();
         let data = json!({
             "graph": "imports",
             "file_path": file_path,
             "import_count": imports.len(),
+            "total_imports": resolved.len(),
             "imports": imports,
-            "has_imports": !imports.is_empty(),
+            "has_imports": !resolved.is_empty(),
+            "evidence": "structural_import_resolution", "complete": false,
+            "candidate_imports": candidate_imports, "total_candidate_imports": candidates.len(),
+            "candidate_evidence": "heuristic_import_resolution", "truncated": truncated,
         });
-        self.success_response(&MetaBuilder::new(0).with_confidence(Confidence::Safe), data)
+        let warnings = truncated
+            .then_some(json!({"code":"TRUNCATED", "message":"imports capped by requested limit"}))
+            .into_iter()
+            .collect();
+        self.success_response_with_warnings(
+            &MetaBuilder::new(0).with_confidence(Confidence::Partial),
+            data,
+            warnings,
+        )
     }
 
     pub(super) fn graph_importers(&self, args: &InspectGraphArgs) -> anyhow::Result<Value> {
@@ -70,7 +90,7 @@ impl CodeService {
                 .map(|(src, _)| src)
                 .collect()
         };
-        let resolved = incoming(store.dependency_graph()?);
+        let resolved = incoming(store.dependency_graph_strict()?);
         let usage = incoming(codesight_analysis::graph::adjacency_with_usage_edges(
             &store,
         )?);
@@ -95,7 +115,7 @@ impl CodeService {
 
         data["candidate_usage_importers"] = json!(candidates);
         data["total_candidate_usage_importers"] = json!(candidate_total);
-        data["candidate_evidence"] = json!("heuristic_name_usage");
+        data["candidate_evidence"] = json!("heuristic_import_resolution_or_name_usage");
         let cross_repo = args.cross_repo.unwrap_or(false);
         if cross_repo {
             let summaries = list_repo_summaries(&self.config.repos_dir())?;

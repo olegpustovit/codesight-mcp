@@ -119,7 +119,7 @@ pub fn resolve_specifier<L: Language + ?Sized>(
     from_file: &str,
     source_files: &FxHashSet<String>,
     alias_map: Option<&FxHashMap<String, Vec<String>>>,
-) -> Option<String> {
+) -> Option<(String, FactQuality)> {
     if specifier.starts_with("source:") {
         return None;
     }
@@ -127,11 +127,13 @@ pub fn resolve_specifier<L: Language + ?Sized>(
     if let Some(aliases) = alias_map
         && let Some(resolved) = resolve_with_aliases(lang, specifier, source_files, aliases)
     {
-        return Some(resolved);
+        return Some((resolved, FactQuality::BaselineStructural));
     }
 
     if specifier.starts_with("./") || specifier.starts_with("../") {
-        return lang.resolve_relative_specifier(specifier, from_file, source_files);
+        return lang
+            .resolve_relative_specifier(specifier, from_file, source_files)
+            .map(|path| (path, FactQuality::BaselineStructural));
     }
 
     if specifier.starts_with('.') {
@@ -139,20 +141,22 @@ pub fn resolve_specifier<L: Language + ?Sized>(
     }
 
     if source_files.contains(specifier) {
-        return Some(specifier.to_string());
+        return Some((specifier.to_string(), FactQuality::BaselineStructural));
     }
 
     let spec_lower = specifier.to_ascii_lowercase();
     if !specifier.contains('.') && !specifier.contains('/') {
-        for file in source_files {
+        let mut matches = source_files.iter().filter(|file| {
             let file_name = file.rsplit('/').next().unwrap_or(file);
             let stem = file_name
                 .rsplit_once('.')
                 .map(|(s, _)| s)
                 .unwrap_or(file_name);
-            if stem.to_ascii_lowercase() == spec_lower {
-                return Some(file.clone());
-            }
+            stem.to_ascii_lowercase() == spec_lower
+        });
+        let first = matches.next()?;
+        if matches.next().is_none() {
+            return Some((first.clone(), FactQuality::Heuristic));
         }
     }
 
@@ -208,7 +212,7 @@ pub fn resolve_import_edge_for_graph(
     known_files_vec: &[String],
     alias_map: Option<&FxHashMap<String, Vec<String>>>,
     workspace_crates: Option<&FxHashMap<String, String>>,
-) -> Option<String> {
+) -> Option<(String, FactQuality)> {
     let registry = builtin_registry();
     let resolved_lang =
         lookup_by_name(registry, lang).or_else(|| registry.for_path(Path::new(from_file)))?;
@@ -225,6 +229,29 @@ pub fn resolve_import_edge_for_graph(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn specifier_resolution_distinguishes_exact_paths_from_unique_and_ambiguous_guesses() {
+        let lang = builtin_registry().get(crate::TYPESCRIPT).unwrap();
+        let mut files = ["src/b.ts".to_string(), "one/errors.go".to_string()]
+            .into_iter()
+            .collect();
+        for specifier in ["./b", "src/b.ts"] {
+            assert_eq!(
+                resolve_specifier(lang, specifier, "src/a.ts", &files, None),
+                Some(("src/b.ts".into(), FactQuality::BaselineStructural))
+            );
+        }
+        assert_eq!(
+            resolve_specifier(lang, "errors", "main.go", &files, None),
+            Some(("one/errors.go".into(), FactQuality::Heuristic))
+        );
+        files.insert("two/errors.go".into());
+        assert_eq!(
+            resolve_specifier(lang, "errors", "main.go", &files, None),
+            None
+        );
+    }
 
     #[test]
     fn python_imports_with_quality_is_structural_when_tree_sitter_runs() {

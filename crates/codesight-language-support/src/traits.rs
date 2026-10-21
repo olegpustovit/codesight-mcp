@@ -14,7 +14,7 @@ use path_clean::PathClean;
 
 use codesight_core::StoredSymbol;
 use codesight_core::reachability::StructuralEdge;
-use codesight_core::symbols::ExtractionTier;
+use codesight_core::symbols::{ExtractionTier, FactQuality};
 
 use crate::family::{LanguageFamily, NestingMode};
 use crate::frameworks::FrameworkProvider;
@@ -280,7 +280,7 @@ pub trait Language: Send + Sync {
         _known_files_vec: &[String],
         alias_map: Option<&FxHashMap<String, Vec<String>>>,
         _workspace_crates: Option<&FxHashMap<String, String>>,
-    ) -> Option<String> {
+    ) -> Option<(String, FactQuality)> {
         crate::imports_orchestration::resolve_specifier(
             self,
             &edge.specifier,

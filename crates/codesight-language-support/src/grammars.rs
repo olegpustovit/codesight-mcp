@@ -20,6 +20,7 @@ pub fn builtin_extractor_version_stamp() -> &'static str {
     STAMP
         .get_or_init(|| {
             let mut hasher = blake3::Hasher::new();
+            hasher.update(b"import-resolution-quality-v1\0");
             hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
             hasher.update(b"\0");
             for (pack_id, query, injections, metadata) in BUILTIN_QUERY_PACKS {

@@ -4,5 +4,6 @@
 pub mod code_index;
 pub mod doc_index;
 pub mod indexer;
+mod ingest_diagnostics;
 
 pub use indexer::Indexer;

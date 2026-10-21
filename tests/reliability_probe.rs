@@ -98,6 +98,16 @@ fn build_env_with_preindex(preindex: bool) -> ProbeEnv {
             ),
             ("sample.ml", "module M = struct\nlet inc x = x + 1\nend\n"),
             ("sample.mli", "module M : sig\n val inc : int -> int\nend\n"),
+            (
+                "main.go",
+                "package main\nimport \"errors\"\nfunc fail() error { return errors.New(\"x\") }\n",
+            ),
+            ("httpx/errors.go", "package httpx\nfunc LocalError() {}\n"),
+            ("mix.ts", "import './ui';\nimport 'errors';\n"),
+            (
+                "keys.json",
+                r#"{"plain":1,"quote\"key":2,"slash\\key":3,"":4,"\u03b2":5}"#,
+            ),
             ("theme.css", ".button { color: red; }\n"),
             (
                 "ui.ts",
@@ -517,7 +527,7 @@ fn diagnostic_regex_limits_preserve_matching_lines() {
 }
 
 #[test]
-fn diagnostic_importers_cap_excludes_text_mentions() {
+fn diagnostic_importers_caps_heuristic_guesses_without_resolved_claims() {
     let env = build_env();
     let r = env
         .svc
@@ -526,10 +536,25 @@ fn diagnostic_importers_cap_excludes_text_mentions() {
             json!({"kind":"importers", "path":"target.py", "limit":1}),
         )
         .unwrap();
-    assert_eq!(r["data"]["importers"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["data"]["importers"].as_array().unwrap().len(), 0, "{r}");
+    assert_eq!(
+        r["data"]["candidate_usage_importers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "{r}"
+    );
     assert_tier("diagnostic.importers", &r, 100.0);
     eprintln!("importers: {} ms", r["_meta"]["timing_ms"]);
-    assert_eq!(r["data"]["total_importers"], 2, "{r}");
+    assert_eq!(r["data"]["total_importers"], 0, "{r}");
+    assert!(
+        r["data"]["total_candidate_usage_importers"]
+            .as_u64()
+            .unwrap()
+            >= 2,
+        "{r}"
+    );
     assert_eq!(r["data"]["evidence"], "resolved_import", "{r}");
     assert!(
         r["warnings"]
@@ -746,6 +771,262 @@ fn diagnostic_importer_target_needs_no_outgoing_extractor() {
         "{r}"
     );
     assert_eq!(r["_meta"]["confidence"], "partial", "{r}");
+}
+
+#[test]
+fn diagnostic_import_resolution_guesses_stay_out_of_resolved_and_strict_graphs() {
+    let env = build_env();
+    let outgoing = env
+        .svc
+        .dispatch("references", json!({"kind":"imports","path":"main.go"}))
+        .unwrap();
+    assert_eq!(outgoing["ok"], true, "{outgoing}");
+    assert_eq!(outgoing["data"]["imports"], json!([]), "{outgoing}");
+    assert_eq!(
+        outgoing["data"]["candidate_imports"],
+        json!(["httpx/errors.go"]),
+        "{outgoing}"
+    );
+    assert_eq!(outgoing["data"]["complete"], false, "{outgoing}");
+    assert_eq!(outgoing["_meta"]["confidence"], "partial", "{outgoing}");
+    let capped = env
+        .svc
+        .dispatch(
+            "references",
+            json!({"kind":"imports","path":"mix.ts","limit":1}),
+        )
+        .unwrap();
+    assert_eq!(capped["data"]["imports"], json!(["ui.ts"]), "{capped}");
+    assert_eq!(capped["data"]["candidate_imports"], json!([]), "{capped}");
+    assert_eq!(capped["data"]["total_candidate_imports"], 1, "{capped}");
+    assert_eq!(capped["data"]["truncated"], true, "{capped}");
+    assert_eq!(capped["warnings"][0]["code"], "TRUNCATED", "{capped}");
+    let incoming = env
+        .svc
+        .dispatch(
+            "references",
+            json!({"kind":"importers","path":"httpx/errors.go"}),
+        )
+        .unwrap();
+    assert_eq!(incoming["data"]["importers"], json!([]), "{incoming}");
+    assert!(
+        incoming["data"]["candidate_usage_importers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path == "main.go"),
+        "{incoming}"
+    );
+    let config = AppConfig::new(env._ws.path().join("idx"));
+    let sid = codesight_engine::repo_id::normalize_repo_id(&env._repo);
+    let store = codesight_storage::storage::IndexStore::open_existing(config.repo_db_path(&sid))
+        .unwrap()
+        .unwrap();
+    assert!(
+        !store
+            .dependency_graph_strict()
+            .unwrap()
+            .get("main.go")
+            .is_some_and(|targets| targets.iter().any(|path| path == "httpx/errors.go"))
+    );
+}
+
+#[test]
+fn diagnostic_ingest_phase_logging_is_opt_in_and_omits_source_text() {
+    let workspace = tempdir().unwrap();
+    let repo = workspace.path().join("repo");
+    fs::create_dir(&repo).unwrap();
+    fs::write(
+        repo.join("probe.rs"),
+        "pub fn private_source_marker() -> i32 { 7 }\n",
+    )
+    .unwrap();
+    for enabled in [false, true] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_codesight-mcp"))
+            .env(
+                "CODESIGHT_INDEX_DIR",
+                workspace.path().join(format!("index-{enabled}")),
+            )
+            .env(
+                "CODESIGHT_INGEST_DIAGNOSTICS",
+                if enabled { "1" } else { "0" },
+            )
+            .env("RUST_LOG", "info")
+            .args([
+                "--log-format",
+                "json",
+                "ingest",
+                repo.to_str().unwrap(),
+                "--domains",
+                "code",
+                "--full",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let events: Vec<Value> = String::from_utf8(output.stderr)
+            .unwrap()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|event| {
+                event["fields"]["message"] == "ingest diagnostic"
+                    || event["fields"]["message"] == "SCM ingest diagnostic"
+            })
+            .collect();
+        if !enabled {
+            assert!(events.is_empty());
+            continue;
+        }
+        for phase in [
+            "extraction",
+            "dependency_graph",
+            "reachability",
+            "vectors",
+            "store",
+            "dispatch_roots",
+            "extract_file",
+            "scm_parse",
+            "scm_capture",
+            "scm_dedupe",
+            "scm_docs",
+            "scm_finalize",
+            "scm_postprocess",
+            "scm_injections",
+        ] {
+            for suffix in ["start", "end"] {
+                assert!(
+                    events
+                        .iter()
+                        .any(|event| event["fields"]["phase"] == format!("{phase}_{suffix}")),
+                    "{events:?}"
+                );
+            }
+        }
+        assert!(
+            events
+                .iter()
+                .any(|event| event["fields"]["symbols"].as_u64().unwrap_or(0) > 0)
+        );
+        assert!(
+            !serde_json::to_string(&events)
+                .unwrap()
+                .contains("private_source_marker")
+        );
+    }
+}
+
+#[test]
+fn diagnostic_json_key_outline_ids_round_trip_reads() {
+    let env = build_env();
+    let outline = env
+        .svc
+        .dispatch("outline", json!({"view":"file","path":"keys.json"}))
+        .unwrap();
+    assert_eq!(outline["ok"], true, "{outline}");
+    let symbols = outline["data"]["items"].as_array().unwrap();
+    assert_eq!(symbols.len(), 5, "{outline}");
+    let mut refs = Vec::new();
+    for name in ["plain", "quote\"key", "slash\\key", "", "β"] {
+        let matches: Vec<_> = symbols
+            .iter()
+            .filter(|symbol| symbol["name"] == name)
+            .collect();
+        assert_eq!(matches.len(), 1, "{outline}");
+        let id = matches[0]["id"].as_str().unwrap();
+        assert_eq!(id, format!("keys.json::{name}#constant"));
+        refs.push(id);
+    }
+    let read = env.svc.dispatch("read", json!({"refs":refs})).unwrap();
+    assert_eq!(read["ok"], true, "{read}");
+    assert!(read["data"]["errors"].is_null(), "{read}");
+    let items = read["data"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 5, "{read}");
+    let actual: std::collections::BTreeSet<_> = items
+        .iter()
+        .map(|item| {
+            let pair: serde_json::Map<String, Value> =
+                serde_json::from_str(&format!("{{{}}}", item["source"].as_str().unwrap())).unwrap();
+            assert_eq!(pair.len(), 1);
+            pair.into_iter().next().unwrap().0
+        })
+        .collect();
+    assert_eq!(
+        actual,
+        ["plain", "quote\"key", "slash\\key", "", "β"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    );
+}
+
+#[test]
+fn diagnostic_stamp_change_removes_deleted_paths_and_regrades_old_guesses() {
+    use codesight_core::symbols::FactQuality;
+    use codesight_engine::indexing::{Indexer, code_index::index_workspace};
+    use codesight_storage::storage::IndexStore;
+    let workspace = tempdir().unwrap();
+    let repo = workspace.path().join("repo");
+    fs::create_dir_all(repo.join("httpx")).unwrap();
+    fs::write(repo.join("main.go"), "package main\nimport \"errors\"\n").unwrap();
+    fs::write(
+        repo.join("httpx/errors.go"),
+        "package httpx\nfunc LocalError() {}\n",
+    )
+    .unwrap();
+    fs::write(repo.join("gone.go"), "package main\nfunc Gone() {}\n").unwrap();
+    let config = AppConfig::new(workspace.path().join("index"));
+    config.ensure_layout().unwrap();
+    let indexer = std::sync::Arc::new(Indexer::new());
+    let first = index_workspace(&config, &repo, &indexer).unwrap();
+    let database = config.repo_db_path(&first.summary.repo);
+    let store = IndexStore::open_existing(database.clone())
+        .unwrap()
+        .unwrap();
+    {
+        let connection = codesight_storage::db::open_rw(&database).unwrap();
+        connection
+            .execute(
+                "UPDATE repo_info SET extractor_version = 'old-resolution-semantics'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE dependency_edges SET import_fact_quality = ?1",
+                [FactQuality::BaselineStructural.as_str()],
+            )
+            .unwrap();
+    }
+    assert!(
+        store.dependency_graph_strict().unwrap()["main.go"]
+            .contains(&"httpx/errors.go".to_string())
+    );
+    fs::remove_file(repo.join("gone.go")).unwrap();
+    let refreshed = index_workspace(&config, &repo, &indexer).unwrap();
+    assert_eq!(refreshed.delta.files_removed, 1);
+    assert!(!store.file_exists("gone.go").unwrap());
+    assert!(
+        store
+            .symbol_record("gone.go::Gone#function")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !store.dependency_graph_strict().unwrap()["main.go"]
+            .contains(&"httpx/errors.go".to_string())
+    );
+    assert!(
+        store.dependency_graph_with_import_quality().unwrap()["main.go"]
+            .contains(&("httpx/errors.go".to_string(), FactQuality::Heuristic))
+    );
+    assert_eq!(
+        store.stored_extractor_version().unwrap(),
+        indexer.version_stamp()
+    );
 }
 
 #[test]

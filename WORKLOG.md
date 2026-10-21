@@ -126,3 +126,38 @@ passed. The normal-profile binary build passed under the same caps, peak
 2,501,730,304 bytes and 12 tasks, with zero memory/PID denial or OOM events.
 The researcher keeps a copied frozen recovery executable; no commit or push was
 performed by this recovery session.
+
+Import resolution now combines extraction and resolution FactQuality. A generated
+Go fixture demonstrates a standard-library name colliding with a local basename:
+the guess remains a separate heuristic candidate, never a structural import or a
+strict-analysis edge. Ambiguous basenames no longer pick an arbitrary HashSet
+entry. Both import views share caps with candidate lists, retain totals and state
+incomplete coverage. The resolver semantic stamp forces re-extraction on refresh;
+deleted-path inventory is retained separately so the refresh removes old ghosts.
+
+JSON key extraction now captures a whole key once and decodes its name with
+serde_json. Escaped keys previously generated repeated fragment captures and
+duplicated complete pair payloads. The generated before-test returned 15 symbols
+for seven root pairs; the repaired test yields one per root pair with decoded
+names/IDs and exact spans. Ordinary, quote/backslash, Unicode, empty, long escaped
+and custom-scope controls pass, as does public outline-to-ID-to-read use. An exact
+141,118-byte diagnostic input now indexes 459 symbols whose decoded names, IDs and
+spans match an independent JSON check. This is development verification, not a
+claim about every possible input or independent benchmark performance.
+
+Focused import-quality and opt-in logging checks passed. Optional
+`CODESIGHT_INGEST_DIAGNOSTICS=1` emits phase/file counts, grammar identity and Linux
+RSS to tracing without source text. It is off by default; no data exclusion or
+arbitrary size cap was introduced. Real-process logging and public-read tests take
+several seconds and remain tracked as slow tests.
+
+The combined workspace run completed 1,362 tests successfully and preserved three
+failures: two assertions that still classified fallback DBT/Vue evidence as
+structural, and a timing test that applied one-dispatch's 200 ms allowance to a
+10,000-call aggregate. The exact DBT/Vue candidates now remain asserted together
+with stored heuristic quality and strict-graph exclusion. The timing test keeps
+200 ms/50 ms per-invocation guards and reports the 10,000-call observation without
+pretending the aggregate is one dispatch. No runtime speedup is claimed. All three
+corrected targets passed; the preceding full-run failure remains preserved, with
+no new full-pass claim after these assertion-only edits. Workspace/all-target
+clippy with warnings denied, formatting and whitespace checks passed.

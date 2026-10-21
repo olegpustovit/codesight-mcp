@@ -38,7 +38,7 @@ pub fn build_dependency_graph_with_aliases(
     adj
 }
 
-/// Resolved file dependency edges with per-source [`FactQuality`] from import extraction.
+/// Dependency candidates with the weaker of import extraction and resolution quality.
 ///
 /// Extraction and per-edge resolution run in parallel across files — for a
 /// 500-file Rust repo this is the dominant cost if left sequential, because
@@ -81,7 +81,7 @@ pub fn build_dependency_graph_edges_full(
             let (edges, quality) = extract_imports_with_quality(content, path, lang);
             let mut resolved: Vec<(String, String, FactQuality)> = Vec::with_capacity(edges.len());
             for edge in &edges {
-                if let Some(target) = resolve_import_edge_for_graph(
+                if let Some((target, resolution_quality)) = resolve_import_edge_for_graph(
                     edge,
                     path,
                     lang,
@@ -91,7 +91,11 @@ pub fn build_dependency_graph_edges_full(
                     workspace_crates,
                 ) && target != *path
                 {
-                    resolved.push((path.clone(), target, quality));
+                    resolved.push((
+                        path.clone(),
+                        target,
+                        weaker_import_fact_quality(quality, resolution_quality),
+                    ));
                 }
             }
             resolved
@@ -144,7 +148,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dependency_edges_carry_structural_quality_for_python_tree_sitter() {
+    fn dependency_edges_combine_structural_extraction_and_heuristic_resolution() {
         let files = vec![
             ("a.py".to_string(), "import b\n".to_string()),
             ("b.py".to_string(), String::new()),
@@ -154,6 +158,47 @@ mod tests {
             .iter()
             .find(|(s, t, _)| s == "a.py" && t == "b.py")
             .expect("resolved edge");
-        assert_eq!(e.2, FactQuality::BaselineStructural);
+        assert_eq!(e.2, FactQuality::Heuristic);
+    }
+
+    #[test]
+    fn resolution_quality_controls_bare_collisions_and_preserves_structural_controls() {
+        let files = vec![
+            ("main.go".into(), "package main\nimport \"errors\"\n".into()),
+            ("httpx/errors.go".into(), "package httpx\n".into()),
+            ("src/a.ts".into(), "import './b';\nimport '@/b';\n".into()),
+            ("src/b.ts".into(), "export const b = 1;".into()),
+            ("main.py".into(), "from pkg.sub import thing\n".into()),
+            ("pkg.py".into(), String::new()),
+            ("src/main.rs".into(), "use helper::foo;\n".into()),
+            ("helper/src/lib.rs".into(), "pub fn foo() {}".into()),
+        ];
+        let aliases = [("@/*".into(), vec!["src/*".into()])].into_iter().collect();
+        let crates = [("helper".into(), "helper/src/lib.rs".into())]
+            .into_iter()
+            .collect();
+        let edges =
+            build_dependency_graph_edges_with_aliases(&files, Some(&aliases), Some(&crates));
+        for (from, target, expected) in [
+            ("main.go", "httpx/errors.go", FactQuality::Heuristic),
+            ("src/a.ts", "src/b.ts", FactQuality::BaselineStructural),
+            ("main.py", "pkg.py", FactQuality::Heuristic),
+            (
+                "src/main.rs",
+                "helper/src/lib.rs",
+                FactQuality::BaselineStructural,
+            ),
+        ] {
+            assert!(
+                edges
+                    .iter()
+                    .any(|(s, t, q)| s == from && t == target && *q == expected),
+                "{edges:?}"
+            );
+        }
+        assert_eq!(
+            weaker_import_fact_quality(FactQuality::Heuristic, FactQuality::BaselineStructural),
+            FactQuality::Heuristic
+        );
     }
 }

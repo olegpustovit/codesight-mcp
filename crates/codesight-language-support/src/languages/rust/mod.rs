@@ -12,6 +12,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::Path;
 
+use codesight_core::symbols::FactQuality;
 use tree_sitter::Language as TsLanguage;
 
 use crate::family::{LanguageFamily, NestingMode};
@@ -111,8 +112,9 @@ impl Language for Rust {
         known_files_vec: &[String],
         _alias_map: Option<&FxHashMap<String, Vec<String>>>,
         workspace_crates: Option<&FxHashMap<String, String>>,
-    ) -> Option<String> {
+    ) -> Option<(String, FactQuality)> {
         imports::resolve_edge(edge, from_file, known_files_vec, workspace_crates)
+            .map(|path| (path, FactQuality::BaselineStructural))
     }
 
     fn branch_keywords(&self) -> &'static [&'static str] {
