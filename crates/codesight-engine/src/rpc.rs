@@ -8,9 +8,9 @@ use std::time::Duration;
 use rmcp::{
     ErrorData, ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResult, Content, Implementation, ListToolsResult,
-        PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
-        ToolsCapability,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+        ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
+        Tool, ToolsCapability,
     },
     service::{RequestContext, RoleServer},
 };
@@ -58,12 +58,12 @@ fn build_tool_catalog() -> Vec<Tool> {
 }
 
 impl ServerHandler for CodeService {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let mut capabilities = ServerCapabilities::default();
-        capabilities.tools = Some(ToolsCapability {
-            list_changed: Some(false),
-        });
-        ServerInfo::new(capabilities)
+        let mut tools = ToolsCapability::default();
+        tools.list_changed = Some(false);
+        capabilities.tools = Some(tools);
+        ServerConfig::new(capabilities)
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_server_info(Implementation::new(env!("CARGO_PKG_NAME"), BUILD_VERSION))
     }
@@ -80,7 +80,7 @@ impl ServerHandler for CodeService {
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         let tool_name = request.name.to_string();
         let arguments = request.arguments.map(Value::Object).unwrap_or(Value::Null);
         let payload = dispatch_tool(self, tool_name, arguments).await?;
@@ -89,9 +89,9 @@ impl ServerHandler for CodeService {
             ErrorData::internal_error(format!("failed to serialize tool response: {err}"), None)
         })?;
         let mut result = CallToolResult::default();
-        result.content = vec![Content::text(body)];
+        result.content = vec![ContentBlock::text(body)];
         result.is_error = Some(is_error);
-        Ok(result)
+        Ok(result.into())
     }
 }
 

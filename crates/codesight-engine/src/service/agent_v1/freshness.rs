@@ -34,9 +34,18 @@ pub(super) fn is_read_tool(tool: &str) -> bool {
     READ_TOOLS.contains(&tool)
 }
 
-/// Extract the `source_id` argument the read-tool envelope uses to scope a repo.
-pub(super) fn source_id(args: &Value) -> Option<&str> {
-    args.get("source_id").and_then(Value::as_str)
+/// Scope freshness to an explicit source, or the public tools' canonical cwd.
+pub(super) fn source_id(args: &Value) -> Option<String> {
+    args.get("source_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()?
+                .canonicalize()
+                .ok()
+                .map(|path| crate::repo_id::normalize_repo_id(&path))
+        })
 }
 
 /// Collect file-path-shaped args so we can intersect against the in-flight
@@ -51,29 +60,35 @@ pub(super) fn touched_files(args: &Value) -> Vec<String> {
             out.insert(s.to_string());
         }
     }
-    if let Some(arr) = args.get("file_paths").and_then(Value::as_array) {
-        for v in arr {
-            if let Some(s) = v.as_str()
-                && !s.is_empty()
-            {
-                out.insert(s.to_string());
-            }
+    for v in args
+        .get("file_paths")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(s) = v.as_str()
+            && !s.is_empty()
+        {
+            out.insert(s.to_string());
         }
     }
-    if let Some(arr) = args.get("refs").and_then(Value::as_array) {
-        for r in arr {
-            if let Some(s) = r.get("path").and_then(Value::as_str)
-                && !s.is_empty()
+    for r in args
+        .get("refs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(s) = r.get("path").and_then(Value::as_str)
+            && !s.is_empty()
+        {
+            out.insert(s.to_string());
+        }
+        for key in ["stable_id", "id"] {
+            if let Some(s) = r.get(key).and_then(Value::as_str)
+                && let Some(path) = s.split("::").next()
+                && !path.is_empty()
             {
-                out.insert(s.to_string());
-            }
-            for key in ["stable_id", "id"] {
-                if let Some(s) = r.get(key).and_then(Value::as_str)
-                    && let Some(path) = s.split("::").next()
-                    && !path.is_empty()
-                {
-                    out.insert(path.to_string());
-                }
+                out.insert(path.to_string());
             }
         }
     }
@@ -168,17 +183,11 @@ fn annotate_status(
         return response;
     };
     let files_in_flight: Vec<String> = status.files_in_flight.into_iter().take(5).collect();
-    // ROADMAP P2.6: only escalate to a full warning when the reindex has
-    // been in flight long enough to actually diverge (>500 ms) and the
-    // query scope overlaps. Short-lived incremental reindexes from
-    // Edit/Write hooks usually drain before the next query completes, so
-    // warning on every one of them floods the agent with noise.
-    const STALE_WARNING_THRESHOLD_MS: u64 = 500;
-    let stale_enough = status
-        .stale_since_ms
-        .map(|ms| ms >= STALE_WARNING_THRESHOLD_MS)
-        .unwrap_or(false);
-    if intersects && stale_enough {
+    if intersects {
+        let meta = body.entry("_meta").or_insert_with(|| json!({}));
+        if meta["confidence"].is_null() || meta["confidence"] == "safe" {
+            meta["confidence"] = json!("partial");
+        }
         let warnings = body
             .entry("warnings".to_string())
             .or_insert_with(|| Value::Array(Vec::new()));
@@ -230,17 +239,23 @@ mod tests {
     }
 
     #[test]
-    fn no_warning_when_reindex_just_started() {
-        // ROADMAP P2.6: a <500 ms reindex is expected to drain fast, so the
-        // warning is demoted to a quiet `_meta.indexing` hint.
-        let status = fake_stale_status(&["src/lib.rs"], 50);
-        let body = json!({ "ok": true, "data": {}, "warnings": [], "_meta": {} });
+    fn warning_when_reindex_just_started() {
+        let status = fake_stale_status(&["src/lib.rs"], 0);
+        let body = json!({"ok": true, "data": {}, "warnings": [], "_meta": {"confidence": "safe"}});
         let annotated = annotate_status("repo-x", status, &["src/lib.rs".to_string()], body);
-        assert!(annotated["warnings"].as_array().unwrap().is_empty());
-        assert_eq!(
-            annotated["_meta"]["indexing"].as_array().unwrap()[0],
-            "src/lib.rs"
-        );
+        assert_eq!(annotated["warnings"][0]["code"], "STALE_DATA_WARNING");
+        assert_eq!(annotated["_meta"]["confidence"], "partial");
+    }
+
+    #[test]
+    fn freshness_preserves_weaker_confidence() {
+        for confidence in ["partial", "heuristic", "unreliable"] {
+            let body = json!({"ok": true, "_meta": {"confidence": confidence}, "warnings": []});
+            let annotated =
+                annotate_status("repo-x", fake_stale_status(&["src/lib.rs"], 0), &[], body);
+            assert_eq!(annotated["_meta"]["confidence"], confidence);
+            assert_eq!(annotated["warnings"][0]["code"], "STALE_DATA_WARNING");
+        }
     }
 
     #[test]

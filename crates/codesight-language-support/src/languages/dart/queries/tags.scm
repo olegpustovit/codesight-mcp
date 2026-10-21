@@ -18,25 +18,32 @@
 (type_alias (type_identifier) @name) @definition.type
 
 ; ── Methods (function signatures inside class/mixin/etc) ──
-(method_signature
+((method_signature
   (function_signature name: (identifier) @name)) @definition.method
+  . (function_body)? @definition.method)
 
 ; ── Getters inside classes ───────────────────────────────
-(method_signature
+((method_signature
   (getter_signature name: (identifier) @name)) @definition.method
+  . (function_body)? @definition.method)
 
 ; ── Setters inside classes ───────────────────────────────
-(method_signature
+((method_signature
   (setter_signature name: (identifier) @name)) @definition.method
+  . (function_body)? @definition.method)
 
 ; ── Constructors ─────────────────────────────────────────
-(constructor_signature name: (identifier) @name) @definition.method
+((constructor_signature name: (identifier) @name) @definition.method
+  . (function_body)? @definition.method)
 
 ; ── Top-level functions ──────────────────────────────────
-(function_signature name: (identifier) @name) @definition.function
+((function_signature name: (identifier) @name) @definition.function
+  . (function_body)? @definition.function)
 
 ; ── Top-level getters ────────────────────────────────────
-(getter_signature name: (identifier) @name) @definition.function
+((getter_signature name: (identifier) @name) @definition.function
+  . (function_body)? @definition.function)
 
 ; ── Top-level setters ────────────────────────────────────
-(setter_signature name: (identifier) @name) @definition.function
+((setter_signature name: (identifier) @name) @definition.function
+  . (function_body)? @definition.function)

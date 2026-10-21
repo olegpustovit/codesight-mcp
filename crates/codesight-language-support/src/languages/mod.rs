@@ -31,6 +31,7 @@ pub mod lua;
 pub mod luau;
 pub mod markdown;
 pub mod nix;
+pub mod ocaml;
 pub mod openapi;
 pub mod perl;
 pub mod php;

@@ -13,9 +13,9 @@ use std::path::Path;
 // can hold typed language identity without reaching up into L0.75.
 pub use codesight_core::language_id::{
     AL, ANSIBLE, ASM, BASH, BLADE, C, CPP, CSHARP, CSS, DART, EJS, ELIXIR, ERLANG, FORTRAN, GLEAM,
-    GO, JAVA, JAVASCRIPT, JSON, JSX, KOTLIN, LESS, LUA, LUAU, LanguageId, MARKDOWN, NIX, OPENAPI,
-    PERL, PHP, PYTHON, RAZOR, RUBY, RUST, SASS, SCSS, SQL, STYL, SWIFT, TOML, TREE_SITTER_QUERY,
-    TSX, TYPESCRIPT, UNKNOWN_LANGUAGE, VERSE, VUE, XML, YAML,
+    GO, JAVA, JAVASCRIPT, JSON, JSX, KOTLIN, LESS, LUA, LUAU, LanguageId, MARKDOWN, NIX, OCAML,
+    OCAML_INTERFACE, OPENAPI, PERL, PHP, PYTHON, RAZOR, RUBY, RUST, SASS, SCSS, SQL, STYL, SWIFT,
+    TOML, TREE_SITTER_QUERY, TSX, TYPESCRIPT, UNKNOWN_LANGUAGE, VERSE, VUE, XML, YAML,
 };
 
 /// Host-profile identifier (e.g. `openapi`, `ansible`, `nextjs`, `dbt`).

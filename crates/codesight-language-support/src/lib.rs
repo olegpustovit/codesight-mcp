@@ -16,6 +16,7 @@ pub mod frameworks;
 pub mod generic_ast;
 pub mod grammars;
 pub mod host_segments;
+pub mod identifier_syntax;
 pub mod imports_orchestration;
 pub mod imports_types;
 pub mod languages;

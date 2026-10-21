@@ -1055,3 +1055,52 @@ fn helper(x: Int) -> Int {
         "missing helper: {names:?}"
     );
 }
+
+#[test]
+fn scm_dart_definitions_include_adjacent_block_and_expression_bodies() {
+    let ext = make_extractor("dart");
+    let source = "List<num> rgb(List<num> xyz)\n{\n  return [xyz[0] + 1];\n}\nint twice(int n) => n * 2;\nabstract class C {\n  int declared();\n  int method(int n) { return n + 3; }\n}\n";
+    let symbols = ext.extract("convert.dart", source).unwrap();
+    for (name, body) in [
+        ("rgb", "return [xyz[0] + 1];"),
+        ("twice", "n * 2;"),
+        ("method", "return n + 3;"),
+    ] {
+        let symbol = symbols
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("{name}: {symbols:?}"));
+        assert!(symbol.source_text.contains(body), "{symbol:?}");
+        assert_eq!(
+            &source[symbol.start_byte..symbol.end_byte],
+            symbol.source_text
+        );
+    }
+    let rgb = symbols.iter().find(|s| s.name == "rgb").unwrap();
+    assert_eq!((rgb.start_line, rgb.end_line), (1, 4));
+    assert_eq!(rgb.signature, "List<num> rgb(List<num> xyz)");
+    assert!(symbols.iter().any(|s| s.name == "declared"));
+}
+
+#[test]
+fn scm_patterns_never_combine_different_definition_kinds() {
+    // Multiple captures can join sibling signature/body nodes, but a match
+    // cannot mix e.g. an enclosing class span into a function definition.
+    for spec in crate::builtin_grammars() {
+        let query = tree_sitter::Query::new(&(spec.loader)(), spec.tags_scm).unwrap();
+        for pattern in 0..query.pattern_count() {
+            let definitions: std::collections::BTreeSet<_> = query
+                .capture_names()
+                .iter()
+                .zip(query.capture_quantifiers(pattern))
+                .filter(|(_, count)| **count != tree_sitter::CaptureQuantifier::Zero)
+                .filter_map(|(name, _)| name.strip_prefix("definition."))
+                .collect();
+            assert!(
+                definitions.len() <= 1,
+                "{} pattern {pattern}: {definitions:?}",
+                spec.grammar_name
+            );
+        }
+    }
+}

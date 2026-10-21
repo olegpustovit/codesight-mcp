@@ -39,7 +39,7 @@ const TIER_HEAVY_COLD_MS: f64 = 5_000.0;
 static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct ProbeEnv {
-    svc: CodeService,
+    svc: std::sync::Arc<CodeService>,
     _cwd_guard: std::sync::MutexGuard<'static, ()>,
     _ws: tempfile::TempDir,
     _repo: std::path::PathBuf,
@@ -57,6 +57,10 @@ fn write(root: &std::path::Path, files: &[(&str, &str)]) {
 }
 
 fn build_env() -> ProbeEnv {
+    build_env_with_preindex(false)
+}
+
+fn build_env_with_preindex(preindex: bool) -> ProbeEnv {
     let ws = tempdir().unwrap();
     let repo = ws.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -74,6 +78,31 @@ fn build_env() -> ProbeEnv {
                 "use crate::FactQuality;\n\
                  pub fn upgrade(q: FactQuality) -> FactQuality { q }\n",
             ),
+            ("target.py", "def target():\n    return 1\n"),
+            (
+                "caller.py",
+                "from target import target\ndef caller():\n    return target()\n",
+            ),
+            (
+                "caller2.py",
+                "from target import target\nvalue = target()\n",
+            ),
+            (
+                "mentions.py",
+                "# target()\ndef mention():\n    return \"target\"\n",
+            ),
+            ("lines.py", "# NEEDLE\n# NEEDLE\n# NEEDLE\n"),
+            (
+                "convert.dart",
+                "List<num> rgb(List<num> xyz)\n{\n  return [xyz[0] + 1];\n}\n",
+            ),
+            ("sample.ml", "module M = struct\nlet inc x = x + 1\nend\n"),
+            ("sample.mli", "module M : sig\n val inc : int -> int\nend\n"),
+            ("theme.css", ".button { color: red; }\n"),
+            (
+                "ui.ts",
+                "import \"./theme.css\";\nexport function render() {}\n",
+            ),
             ("README.md", "# Probe fixture\n\nDescribes regex routing.\n"),
         ],
     );
@@ -83,21 +112,44 @@ fn build_env() -> ProbeEnv {
     let saved_cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    if preindex {
+        let r = std::process::Command::new(env!("CARGO_BIN_EXE_codesight-mcp"))
+            .env("CODESIGHT_INDEX_DIR", ws.path().join("idx"))
+            .args([
+                "ingest",
+                repo.to_str().unwrap(),
+                "--domains",
+                "code",
+                "--full",
+            ])
+            .output()
+            .unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&r.stdout).unwrap()["ok"],
+            true
+        );
+    }
+    let svc = std::sync::Arc::new(
+        codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+            ws.path().join("idx"),
+        ))
+        .unwrap(),
+    );
+    svc.install_arc_handle();
 
     // Pre-warm: ingest under an explicit source_id matching cwd-derived id.
-    svc.dispatch(
-        "ingest_sources",
-        json!({
-            "path": repo.to_string_lossy(),
-            "domains": "code",
-            "incremental": true,
-        }),
-    )
-    .unwrap();
+    if !preindex {
+        svc.dispatch(
+            "ingest_sources",
+            json!({
+                "path": repo.to_string_lossy(),
+                "domains": "code",
+                "incremental": true,
+            }),
+        )
+        .unwrap();
+    }
 
     ProbeEnv {
         svc,
@@ -380,19 +432,14 @@ fn probe_impact_rename_safety_invariants() {
         .and_then(Value::as_bool)
         .unwrap_or(true);
     let safe = data(&r).get("safe");
-    let cov = data(&r).get("coverage_pct").and_then(Value::as_f64);
+    let cov = data(&r).get("identifier_match_pct").and_then(Value::as_f64);
     assert!(
         cov.is_some(),
-        "impact.rename_safety: coverage_pct mandatory (P2.3): {r:?}"
+        "impact.rename_safety: identifier_match_pct mandatory (P2.3): {r:?}"
     );
-    if !complete {
-        // P2.3: complete=false ⇒ safe=undecided
-        assert_eq!(
-            safe.and_then(Value::as_str),
-            Some("undecided"),
-            "impact.rename_safety: complete=false must imply safe=undecided: {r:?}"
-        );
-    }
+    assert!(!complete, "{r}");
+    assert!(safe.is_some_and(Value::is_null), "{r}");
+    assert_eq!(data(&r)["status"], "undecided");
 }
 
 #[test]
@@ -437,4 +484,301 @@ fn probe_no_legacy_tools_in_public_list() {
         names, expected,
         "tools.json must list exactly: search, outline, read, references, impact, health"
     );
+}
+
+#[test]
+fn diagnostic_regex_limits_preserve_matching_lines() {
+    let env = build_env();
+    for (cap, expected) in [(2, 2), (3, 3)] {
+        let r = env
+            .svc
+            .dispatch(
+                "search",
+                json!({"mode":"regex", "query":"NEEDLE", "per_file_limit":cap, "limit":20}),
+            )
+            .unwrap();
+        assert_tier("diagnostic.regex", &r, 150.0);
+        eprintln!("regex cap {cap}: {} ms", r["_meta"]["timing_ms"]);
+        assert_eq!(
+            r["data"]["items"].as_array().unwrap().len(),
+            expected,
+            "{r}"
+        );
+        assert_eq!(
+            r["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w["code"] == "TRUNCATED"),
+            cap == 2,
+            "{r}"
+        );
+    }
+}
+
+#[test]
+fn diagnostic_importers_cap_excludes_text_mentions() {
+    let env = build_env();
+    let r = env
+        .svc
+        .dispatch(
+            "references",
+            json!({"kind":"importers", "path":"target.py", "limit":1}),
+        )
+        .unwrap();
+    assert_eq!(r["data"]["importers"].as_array().unwrap().len(), 1, "{r}");
+    assert_tier("diagnostic.importers", &r, 100.0);
+    eprintln!("importers: {} ms", r["_meta"]["timing_ms"]);
+    assert_eq!(r["data"]["total_importers"], 2, "{r}");
+    assert_eq!(r["data"]["evidence"], "resolved_import", "{r}");
+    assert!(
+        r["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["code"] == "TRUNCATED"),
+        "{r}"
+    );
+    let r = env
+        .svc
+        .dispatch(
+            "references",
+            json!({"kind":"importers", "path":"target.py", "limit":20}),
+        )
+        .unwrap();
+    assert!(
+        !r["data"]["importers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "mentions.py"),
+        "{r}"
+    );
+}
+
+#[test]
+fn diagnostic_reference_and_impact_exclude_comment_string_only_files() {
+    let env = build_env();
+    let r = env
+        .svc
+        .dispatch(
+            "references",
+            json!({"kind":"symbol", "ref":"target.py::target#function", "include_weak":true}),
+        )
+        .unwrap();
+    assert_tier("diagnostic.references", &r, 100.0);
+    eprintln!("references: {} ms", r["_meta"]["timing_ms"]);
+    assert!(
+        r["data"]["weak_hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["file"] == "mentions.py"),
+        "weak mentions must remain accessible: {r}"
+    );
+    assert!(
+        !r["warnings"].to_string().contains("candidate_text_hits"),
+        "public warning names an internal-only field: {r}"
+    );
+    let items = r["data"]["items"].as_array().unwrap();
+    assert!(!items.iter().any(|v| v["file"] == "mentions.py"), "{r}");
+    assert!(items.iter().any(|v| v["file"] == "caller.py"), "{r}");
+    assert!(
+        items.iter().any(|v| v["file"] == "caller2.py"),
+        "top-level code missing: {r}"
+    );
+    let r = env
+        .svc
+        .dispatch(
+            "impact",
+            json!({"analysis":"blast_radius", "ref":"target.py::target#function"}),
+        )
+        .unwrap();
+    assert_tier("diagnostic.impact", &r, 250.0);
+    eprintln!("impact: {} ms", r["_meta"]["timing_ms"]);
+    let files = r["data"]["symbol_scoped_files"].as_array().unwrap();
+    assert!(!files.iter().any(|v| v == "mentions.py"), "{r}");
+    assert!(files.iter().any(|v| v == "caller.py"), "{r}");
+    assert!(files.iter().any(|v| v == "caller2.py"), "{r}");
+    assert_eq!(r["_meta"]["confidence"], "partial", "{r}");
+}
+
+#[test]
+fn diagnostic_rename_safety_never_infers_bindings_from_syntax_ratio() {
+    let env = build_env();
+    let r = env.svc.dispatch("impact", json!({"analysis":"rename_safety", "ref":"target.py::target#function", "new_name":"unused_name"})).unwrap();
+    assert_eq!(r["data"]["complete"], false, "{r}");
+    assert!(r["data"]["safe"].is_null(), "{r}");
+    assert_eq!(r["data"]["status"], "undecided", "{r}");
+    assert_eq!(r["_meta"]["confidence"], "partial", "{r}");
+}
+
+#[test]
+fn diagnostic_cli_preindexed_service_refreshes_without_safe_stale_reads() {
+    let env = build_env_with_preindex(true);
+    let args = json!({"refs":["target.py::target#function"]});
+    let initial = env.svc.dispatch("read", args.clone()).unwrap();
+    assert!(initial.to_string().contains("return 1"), "{initial}");
+    fs::write(env._repo.join("target.py"), "def target():\n    return 2\n").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let r = env.svc.dispatch("read", args.clone()).unwrap();
+        if r.to_string().contains("return 2") {
+            break;
+        }
+        assert_ne!(
+            r["_meta"]["confidence"], "safe",
+            "stale response mislabeled safe: {r}"
+        );
+        assert!(
+            r["warnings"].as_array().is_some_and(|w| !w.is_empty()),
+            "stale response lacks warning: {r}"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "refresh did not converge: {r}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn diagnostic_index_scope_and_failed_reads_are_explicit() {
+    let env = build_env();
+    // A real unsupported extension stays outside the index, even when it exists.
+    fs::write(env._repo.join("program.rays"), "module Program\n").unwrap();
+    for kind in ["imports", "importers"] {
+        let r = env
+            .svc
+            .dispatch("references", json!({"kind":kind,"path":"program.rays"}))
+            .unwrap();
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(r.to_string().contains("FILE_NOT_INDEXED"), "{r}");
+        assert_ne!(r["_meta"]["confidence"], "safe", "{r}");
+    }
+    let r = env
+        .svc
+        .dispatch(
+            "read",
+            json!({"refs":["target.py::target#function", "program.rays::missing#function"]}),
+        )
+        .unwrap();
+    assert_eq!(r["data"]["items"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["data"]["errors"].as_array().unwrap().len(), 1, "{r}");
+    assert_ne!(r["_meta"]["confidence"], "safe", "{r}");
+    assert!(r["warnings"].to_string().contains("PARTIAL_BATCH"), "{r}");
+    let r = env.svc.dispatch("outline", json!({"view":"repo"})).unwrap();
+    assert_eq!(r["data"]["coverage"]["scope"], "indexed_files_only", "{r}");
+    assert_eq!(
+        r["data"]["coverage"]["repository_coverage_complete"], false,
+        "{r}"
+    );
+    assert!(r["data"]["coverage"]["omitted_file_count"].is_null(), "{r}");
+    assert!(
+        r["warnings"].to_string().contains("INDEX_SCOPE_ONLY"),
+        "{r}"
+    );
+    assert_eq!(r["_meta"]["confidence"], "partial", "{r}");
+}
+
+#[test]
+fn diagnostic_test_gaps_describes_static_proxy_not_test_absence() {
+    let env = build_env();
+    let dead = env
+        .svc
+        .dispatch("health", json!({"analysis":"dead_code"}))
+        .unwrap();
+    assert_eq!(
+        dead["_meta"]["confidence"], "heuristic",
+        "coverage annotation upgraded evidence: {dead}"
+    );
+    assert!(
+        dead["warnings"].to_string().contains("INDEX_SCOPE_ONLY"),
+        "{dead}"
+    );
+    let r = env
+        .svc
+        .dispatch("health", json!({"analysis":"test_gaps"}))
+        .unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(
+        r["data"]["evidence"]["basis"], "heuristic_test_file_dependency_graph",
+        "{r}"
+    );
+    assert_eq!(
+        r["data"]["evidence"]["executed_test_coverage"], false,
+        "{r}"
+    );
+    assert_eq!(
+        r["data"]["evidence"]["total_untested_functions_is_proxy"], true,
+        "{r}"
+    );
+    assert!(
+        r["data"]["coverage"]["index_file_count"].as_u64().unwrap() > 0,
+        "{r}"
+    );
+    assert_eq!(r["_meta"]["confidence"], "partial", "{r}");
+}
+
+#[test]
+fn diagnostic_importer_target_needs_no_outgoing_extractor() {
+    let env = build_env();
+    let r = env
+        .svc
+        .dispatch("references", json!({"kind":"imports","path":"theme.css"}))
+        .unwrap();
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(
+        r.to_string().contains("IMPORT_EXTRACTION_UNSUPPORTED"),
+        "{r}"
+    );
+    let r = env
+        .svc
+        .dispatch("references", json!({"kind":"importers","path":"theme.css"}))
+        .unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(
+        r["data"]["importers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "ui.ts"),
+        "{r}"
+    );
+    assert_eq!(r["_meta"]["confidence"], "partial", "{r}");
+}
+
+#[test]
+fn diagnostic_dart_and_ocaml_public_symbol_reads_include_complete_spans() {
+    let env = build_env();
+    for (path, name, body) in [
+        ("convert.dart", "rgb", "return [xyz[0] + 1];"),
+        ("sample.ml", "inc", "x + 1"),
+        ("sample.mli", "inc", "int -> int"),
+    ] {
+        let outline = env
+            .svc
+            .dispatch("outline", json!({"view":"file","path":path}))
+            .unwrap();
+        assert_eq!(outline["ok"], true, "{outline}");
+        let symbols: Vec<_> = outline["data"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|symbol| symbol["name"] == name && symbol["kind"] == "function")
+            .collect();
+        assert_eq!(symbols.len(), 1, "{outline}");
+        let id = symbols[0]["id"].as_str().unwrap();
+        let r = env
+            .svc
+            .dispatch("read", json!({"refs":[format!("id:{id}")]}))
+            .unwrap();
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(
+            r["data"]["errors"].is_null()
+                || r["data"]["errors"].as_array().is_some_and(Vec::is_empty),
+            "{r}"
+        );
+        assert!(r["data"]["items"].to_string().contains(body), "{r}");
+    }
 }

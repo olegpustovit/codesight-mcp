@@ -1111,10 +1111,10 @@ fn find_references_named_import_match() {
         .unwrap();
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
     let data = &refs["data"];
-    let total = data["semantic_reference_count"].as_u64().unwrap()
+    let total = data["identifier_reference_count"].as_u64().unwrap()
         + data["candidate_text_hit_count"].as_u64().unwrap();
     assert!(total >= 2, "expected >=2 references: {data:?}");
-    let ref_files: Vec<&str> = data["semantic_references"]
+    let ref_files: Vec<&str> = data["identifier_references"]
         .as_array()
         .unwrap()
         .iter()
@@ -1174,10 +1174,10 @@ fn find_references_specifier_stem_match() {
         .unwrap();
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
     let data = &refs["data"];
-    let total = data["semantic_reference_count"].as_u64().unwrap()
+    let total = data["identifier_reference_count"].as_u64().unwrap()
         + data["candidate_text_hit_count"].as_u64().unwrap();
     assert!(total >= 1);
-    let ref_files: Vec<&str> = data["semantic_references"]
+    let ref_files: Vec<&str> = data["identifier_references"]
         .as_array()
         .unwrap()
         .iter()
@@ -1222,7 +1222,7 @@ fn find_references_case_insensitive_match() {
         .unwrap();
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
     let data = &refs["data"];
-    let total = data["semantic_reference_count"].as_u64().unwrap()
+    let total = data["identifier_reference_count"].as_u64().unwrap()
         + data["candidate_text_hit_count"].as_u64().unwrap();
     assert!(
         total >= 1,
@@ -1262,7 +1262,7 @@ fn find_references_no_false_positives() {
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
     let empty = vec![];
     let data = &refs["data"];
-    let ref_files: Vec<&str> = data["semantic_references"]
+    let ref_files: Vec<&str> = data["identifier_references"]
         .as_array()
         .unwrap_or(&empty)
         .iter()
@@ -1317,7 +1317,7 @@ fn find_references_does_not_emit_line_zero_text_matches() {
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
     let empty = vec![];
     let data = &refs["data"];
-    let references: Vec<&serde_json::Value> = data["semantic_references"]
+    let references: Vec<&serde_json::Value> = data["identifier_references"]
         .as_array()
         .unwrap_or(&empty)
         .iter()
@@ -1411,10 +1411,10 @@ fn find_references_dbt_ref_reference() {
         .unwrap();
     assert!(refs["ok"].as_bool().unwrap(), "{refs:?}");
     let data = &refs["data"];
-    let total = data["semantic_reference_count"].as_u64().unwrap()
+    let total = data["identifier_reference_count"].as_u64().unwrap()
         + data["candidate_text_hit_count"].as_u64().unwrap();
     assert!(total >= 2, "expected >=2 refs: {data:?}");
-    let ref_files: Vec<&str> = data["semantic_references"]
+    let ref_files: Vec<&str> = data["identifier_references"]
         .as_array()
         .unwrap()
         .iter()

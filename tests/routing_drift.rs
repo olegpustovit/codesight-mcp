@@ -193,11 +193,12 @@ fn extract_warning_codes(body: &str) -> Vec<String> {
             .chars()
             .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
             .collect();
-        // Environment variables look like warning codes; skip them.
+        // Environment variables and documented per-ref errors are not warnings.
         let is_env_var = token.starts_with("CODESIGHT_") || token == "RUST_LOG";
         if token.len() >= 5
             && token.contains('_')
             && !is_env_var
+            && token != "STALE_ID"
             && body[i + 1 + token.len()..].starts_with('`')
         {
             out.push(token);
@@ -219,7 +220,10 @@ mod self_tests {
 
     #[test]
     fn extract_warning_codes_picks_codes_only() {
-        let codes = extract_warning_codes("expect `OUTLINE_FIRST` and `TOKEN_HEAVY_READ` warnings");
+        let codes = extract_warning_codes(
+            "expect `OUTLINE_FIRST` and `TOKEN_HEAVY_READ` warnings; `STALE_ID` is a per-ref error",
+        );
+        assert!(!codes.iter().any(|c| c == "STALE_ID"));
         assert!(codes.iter().any(|c| c == "OUTLINE_FIRST"));
         assert!(codes.iter().any(|c| c == "TOKEN_HEAVY_READ"));
     }

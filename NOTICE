@@ -6,3 +6,7 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 It bundles the potion-base-8M static embedding model
 (crates/codesight-retrieval/assets/embedder/potion-base-8M/) by Minish Lab,
 https://huggingface.co/minishlab/potion-base-8M, licensed under the MIT License.
+
+OCaml definition queries are adapted from tree-sitter-ocaml 0.26.0,
+Copyright (c) 2020 Max Brunsfeld and Pieter Goetschalckx, MIT License.
+The retained license is at crates/codesight-language-support/src/languages/ocaml/LICENSE.

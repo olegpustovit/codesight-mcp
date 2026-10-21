@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{QueryCursor, Tree};
 
-use crate::extract_tree_sitter::{first_line, node_text, parser_for_language, source_slice};
+use crate::extract_tree_sitter::{node_text, parser_for_language};
 
 use codesight_core::symbols::SymbolKind;
 
@@ -77,13 +77,11 @@ pub(super) fn collect_raw_captures(
     while let Some(m) = matches.next() {
         let mut props = super::pattern::read_pattern_props(&compiled.tags_query, m.pattern_index);
 
-        let mut def_start = 0usize;
+        let mut def_start = usize::MAX;
         let mut def_end = 0usize;
-        let mut def_start_row = 0usize;
+        let mut def_start_row = usize::MAX;
         let mut def_end_row = 0usize;
         let mut def_kind_str: Option<String> = None;
-        let mut def_signature = String::new();
-        let mut def_source_text = String::new();
         let mut name_text: Option<String> = None;
         let mut name_start_byte = 0usize;
         let mut doc_text: Option<String> = None;
@@ -97,10 +95,6 @@ pub(super) fn collect_raw_captures(
             let cap_name = capture_names[cap.index as usize];
             if let Some(rest) = cap_name.strip_prefix("definition.") {
                 has_def = true;
-                def_start = cap.node.start_byte();
-                def_end = cap.node.end_byte();
-                def_start_row = cap.node.start_position().row;
-                def_end_row = cap.node.end_position().row;
                 // Parse suffixes: "constant.nofunc" → kind="constant", exclude_inside="function"
                 // "namespace.scope_only" → kind="namespace", scope_only=true
                 let mut kind_part = rest;
@@ -111,9 +105,20 @@ pub(super) fn collect_raw_captures(
                     kind_part = base;
                     capture_props.scope_only = true;
                 }
+                // Join same-kind sibling spans; mixed-kind workspace packs
+                // retain their previous last-definition semantics.
+                if def_kind_str.as_deref() != Some(kind_part) {
+                    def_start = cap.node.start_byte();
+                    def_end = cap.node.end_byte();
+                    def_start_row = cap.node.start_position().row;
+                    def_end_row = cap.node.end_position().row;
+                } else {
+                    def_start = def_start.min(cap.node.start_byte());
+                    def_end = def_end.max(cap.node.end_byte());
+                    def_start_row = def_start_row.min(cap.node.start_position().row);
+                    def_end_row = def_end_row.max(cap.node.end_position().row);
+                }
                 def_kind_str = Some(kind_part.to_string());
-                def_signature = first_line(cap.node, source).unwrap_or_default();
-                def_source_text = source_slice(cap.node, source).unwrap_or("").to_string();
             } else {
                 match cap_name {
                     "name" => {
@@ -171,13 +176,18 @@ pub(super) fn collect_raw_captures(
         if capture_props.exclude_inside.is_some() {
             props.exclude_inside = capture_props.exclude_inside;
         }
-        if capture_props.scope_only {
-            props.scope_only = true;
-        }
-        if capture_props.fixed_name.is_some() {
-            props.fixed_name = capture_props.fixed_name;
-        }
+        props.scope_only |= capture_props.scope_only;
 
+        let def_source_text = source
+            .get(def_start..def_end)
+            .unwrap_or_default()
+            .to_string();
+        let def_signature = def_source_text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         raws.push(OwnedCapture {
             kind,
             kind_str,

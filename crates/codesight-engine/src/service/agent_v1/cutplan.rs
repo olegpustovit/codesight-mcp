@@ -17,6 +17,8 @@ use crate::service::savings::MetaBuilder;
 
 #[derive(Debug, Deserialize)]
 pub struct SearchArgs {
+    #[serde(default)]
+    pub per_file_limit: Option<usize>,
     pub query: String,
     #[serde(default)]
     pub mode: Option<String>,
@@ -220,6 +222,9 @@ impl CodeService {
             translated["max_tokens"] = json!(t);
         }
 
+        if let Some(cap) = args.per_file_limit {
+            translated["per_file_limit"] = json!(cap);
+        }
         let mut result = self.search_catalog(translated)?;
         freeze_envelope(&mut result);
         // P2.6: fuzzy hits already merge into items[] in the underlying
@@ -293,6 +298,9 @@ impl CodeService {
         }
 
         let mut result = self.inspect_structure(translated)?;
+        if args.view == "repo" {
+            self.annotate_indexed_scope(&sid, &mut result);
+        }
         freeze_envelope(&mut result);
         Ok(result)
     }
@@ -331,6 +339,7 @@ impl CodeService {
         let mut translated = json!({
             "source_id": sid,
             "refs": object_refs,
+            "verify": true,
         });
         if let Some(c) = args.context_lines {
             translated["context_lines"] = json!(c);
@@ -420,7 +429,7 @@ impl CodeService {
                     "limit": 5,
                 }))
                 && let Some(items) = refs_resp
-                    .pointer("/data/semantic_references")
+                    .pointer("/data/identifier_references")
                     .and_then(Value::as_array)
             {
                 for item in items.iter().take(5) {
@@ -529,6 +538,8 @@ impl CodeService {
                     "source_id": sid,
                     "graph": args.kind,
                     "file_path": path,
+                    "limit": args.limit.unwrap_or(50),
+                    "scope": args.scope,
                 })
             }
             other => {
@@ -587,7 +598,7 @@ impl CodeService {
             // P2.2: blast_radius is symbol-scoped — bypass the legacy
             // file-importer path entirely. Walk symbol references, dedupe
             // by file. Refuse with `unreliable` when the references graph
-            // can't produce structurally-resolved hits.
+            // can't produce identifier-syntax candidates.
             "blast_radius" => self.cutplan_impact_blast_radius(&sid, &args),
             "rename_safety" => self.cutplan_impact_rename_safety(&sid, &args),
             other => self.error_response(
@@ -669,7 +680,7 @@ impl CodeService {
             return self.error_response(&MetaBuilder::new(0), err);
         }
 
-        // Walk the structural references graph and deduplicate by file.
+        // Collect name-based identifier candidates and deduplicate by file.
         let refs_response = self.inspect_graph(json!({
             "source_id": sid,
             "graph": "find_references",
@@ -679,7 +690,7 @@ impl CodeService {
         let mut files: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         let mut weak_files: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         if let Some(arr) = refs_response
-            .pointer("/data/semantic_references")
+            .pointer("/data/identifier_references")
             .and_then(Value::as_array)
         {
             for row in arr {
@@ -708,10 +719,10 @@ impl CodeService {
         let mut weak_sorted: Vec<String> = weak_files.into_iter().collect();
         weak_sorted.sort();
 
-        // Confidence: safe when we have semantic refs; unreliable when none
+        // Identifier candidates remain partial; text-only evidence is unreliable
         // and only weak text mentions exist (CUTPLAN §impact contract).
         let confidence = if count > 0 {
-            "safe"
+            "partial"
         } else if !weak_sorted.is_empty() {
             "unreliable"
         } else {
@@ -730,7 +741,10 @@ impl CodeService {
         let mut response = self.success_response_with_meta_extra(
             &MetaBuilder::new(0),
             body,
-            Vec::new(),
+            refs_response["warnings"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
             [("confidence".to_string(), json!(confidence))],
         )?;
         freeze_envelope(&mut response);
@@ -786,8 +800,8 @@ impl CodeService {
             "identifier": new_name,
         }))?;
 
-        let semantic_count = old_refs
-            .pointer("/data/semantic_reference_count")
+        let identifier_count = old_refs
+            .pointer("/data/identifier_reference_count")
             .and_then(Value::as_u64)
             .unwrap_or(0);
         let candidate_count = old_refs
@@ -795,56 +809,34 @@ impl CodeService {
             .and_then(Value::as_u64)
             .unwrap_or(0);
         let collisions = new_refs
-            .pointer("/data/semantic_reference_count")
+            .pointer("/data/identifier_reference_count")
             .and_then(Value::as_u64)
             .unwrap_or(0);
 
-        // Coverage: 100% iff all non-vendored files in the index were
-        // structurally analyzed. We use the simple ratio `semantic /
-        // (semantic + candidate)` — CUTPLAN says coverage_pct must be on
-        // the response; an exact denominator from the indexer is overkill.
-        let total = semantic_count + candidate_count;
-        let coverage_pct = if total == 0 {
-            // No mentions at all — coverage is conceptually complete.
-            100.0
+        // Syntax coverage is not binding completeness or rename safety.
+        let total = identifier_count + candidate_count;
+        let identifier_match_pct = if total == 0 {
+            0.0
         } else {
-            (semantic_count as f64 / total as f64 * 100.0 * 100.0).round() / 100.0
+            (identifier_count as f64 / total as f64 * 10000.0).round() / 100.0
         };
-        let complete = candidate_count == 0;
-
-        // P2.3 invariants: complete=false ⇒ safe=undecided. Complete and
-        // no collisions ⇒ safe=true. Complete and collisions ⇒ safe=false.
-        let safe = if !complete {
-            json!("undecided")
-        } else if collisions > 0 {
-            json!(false)
-        } else {
-            json!(true)
-        };
-        let confidence = if complete && collisions == 0 {
-            "safe"
-        } else if !complete {
-            "partial"
-        } else {
-            "safe"
-        };
-
         let body = json!({
             "analysis": "rename_safety",
             "identifier": identifier,
             "new_name": new_name,
-            "safe": safe,
-            "complete": complete,
-            "coverage_pct": coverage_pct,
-            "scanned_semantic_references": semantic_count,
+            "safe": null,
+            "status": "undecided",
+            "complete": false,
+            "identifier_match_pct": identifier_match_pct,
+            "scanned_identifier_references": identifier_count,
             "candidate_text_hits": candidate_count,
             "collision_count_with_new_name": collisions,
         });
         let mut response = self.success_response_with_meta_extra(
             &MetaBuilder::new(0),
             body,
-            Vec::new(),
-            [("confidence".to_string(), json!(confidence))],
+            vec![json!({"code": "PARTIAL_REFERENCES", "message": "Name-based syntax candidates cannot establish complete bindings or rename safety; collision counts are also name-based."})],
+            [("confidence".to_string(), json!("partial"))],
         )?;
         freeze_envelope(&mut response);
         Ok(response)
@@ -908,6 +900,7 @@ impl CodeService {
         }
 
         let mut result = self.evaluate_quality(translated)?;
+        self.annotate_indexed_scope(&sid, &mut result);
         freeze_envelope(&mut result);
         Ok(result)
     }
@@ -1003,15 +996,15 @@ fn reshape_references_symbol(value: &mut Value, ref_str: Option<&str>, include_w
         return;
     };
 
-    // Rewrite semantic_references rows: name → identifier (= searched name).
-    if let Some(Value::Array(items)) = data.get_mut("semantic_references") {
+    // Rewrite identifier_references rows: name → identifier (= searched name).
+    if let Some(Value::Array(items)) = data.get_mut("identifier_references") {
         for item in items.iter_mut() {
             if let Some(o) = item.as_object_mut() {
                 o.insert("identifier".to_string(), json!(identifier));
                 o.remove("name");
             }
         }
-        let items = data.remove("semantic_references").unwrap();
+        let items = data.remove("identifier_references").unwrap();
         data.insert("items".to_string(), items);
     }
 
@@ -1034,7 +1027,7 @@ fn reshape_references_symbol(value: &mut Value, ref_str: Option<&str>, include_w
     data.remove("definitions");
     data.remove("definition_count");
     data.remove("graph");
-    data.remove("semantic_reference_count");
+    data.remove("identifier_reference_count");
     data.remove("candidate_text_hit_count");
 }
 

@@ -1,4 +1,4 @@
-//! Test gap analysis: rank untested high-risk code by
+//! Test gap proxy: rank code without an indexed test-file dependency by
 //! `cyclomatic × (1 + fan_in) × (1 + ln(1 + churn))`.
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -23,7 +23,7 @@ pub struct TestGap {
     pub reason: String,
 }
 
-/// Compute test gap analysis: identify untested high-risk symbols.
+/// Rank symbols lacking a recognized indexed test-file dependency (not executed coverage).
 ///
 /// Returns the JSON `data` payload for the MCP response.
 pub fn test_gap_payload(
@@ -72,6 +72,12 @@ pub fn test_gap_payload(
     Ok(json!({
         "analysis": "test_gaps",
         "total_untested_functions": total_untested,
+        "evidence": {
+            "basis":"heuristic_test_file_dependency_graph",
+            "executed_test_coverage":false,
+            "total_untested_functions_is_proxy":true,
+            "meaning":"Candidates lack a recognized test-file dependency path in the index; this does not establish absence of tests or behavioral coverage. The count includes only candidates meeting the minimum complexity threshold."
+        },
         "gaps": items,
     }))
 }
@@ -114,7 +120,7 @@ fn compute_gaps(
             cyclomatic: cc,
             fan_in: fi,
             churn: ch,
-            reason: format!("untested, cc={cc}, fan_in={fi}, churn={ch}"),
+            reason: format!("no indexed test dependency, cc={cc}, fan_in={fi}, churn={ch}"),
         });
     }
 

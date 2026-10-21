@@ -104,6 +104,11 @@ pub trait Language: Send + Sync {
         self.grammar_spec().map(|spec| spec.language())
     }
 
+    /// Grammar node classes that carry identifier syntax, without binding resolution.
+    fn is_identifier_node(&self, kind: &str) -> bool {
+        kind.ends_with("identifier")
+    }
+
     /// SCM tags query for this language. Default reads from `grammar_spec()`.
     fn tags_query(&self) -> Option<&'static str> {
         self.grammar_spec().map(|spec| spec.tags_scm)

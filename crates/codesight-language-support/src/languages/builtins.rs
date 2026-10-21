@@ -12,8 +12,8 @@ use crate::registry::LanguageRegistry;
 
 use super::{
     al, ansible, asm, bash, blade, c, cpp, csharp, css, dart, ejs, elixir, erlang, fortran, gleam,
-    go, java, javascript, json, jsx, kotlin, less, lua, luau, markdown, nix, openapi, perl, php,
-    python, razor, ruby, rust, sass, scss, sql, styl, swift, toml, tree_sitter_query, tsx,
+    go, java, javascript, json, jsx, kotlin, less, lua, luau, markdown, nix, ocaml, openapi, perl,
+    php, python, razor, ruby, rust, sass, scss, sql, styl, swift, toml, tree_sitter_query, tsx,
     typescript, verse, vue, xml, yaml,
 };
 use crate::manifest::{
@@ -503,6 +503,30 @@ manifest!(
 );
 
 manifest!(
+    OCAML_MANIFEST,
+    display = "OCaml",
+    aliases = &[],
+    ext = &["ml"],
+    filenames = &[],
+    compound = &[],
+    grammar = Some(&ocaml::GRAMMAR),
+    profiles = &[],
+    probe = None
+);
+
+manifest!(
+    OCAML_INTERFACE_MANIFEST,
+    display = "OCaml interface",
+    aliases = &[],
+    ext = &["mli"],
+    filenames = &[],
+    compound = &[],
+    grammar = Some(&ocaml::INTERFACE_GRAMMAR),
+    profiles = &[],
+    probe = None
+);
+
+manifest!(
     GLEAM_MANIFEST,
     display = "Gleam",
     aliases = &[],
@@ -636,6 +660,8 @@ const CURATED: &[LanguageId] = &[
     crate::manifest::ERLANG,
     crate::manifest::FORTRAN,
     crate::manifest::GLEAM,
+    crate::manifest::OCAML,
+    crate::manifest::OCAML_INTERFACE,
     crate::manifest::VUE,
 ];
 
@@ -680,6 +706,8 @@ pub fn register_builtins(registry: &mut LanguageRegistry) {
     registry.register(Arc::new(erlang::Erlang));
     registry.register(Arc::new(fortran::FortranSupport));
     registry.register(Arc::new(gleam::GleamSupport));
+    registry.register(Arc::new(ocaml::OcamlSupport::<false>));
+    registry.register(Arc::new(ocaml::OcamlSupport::<true>));
     registry.register(Arc::new(vue::VueSupport));
     registry.register(Arc::new(al::AlSupport));
     registry.register(Arc::new(markdown::MarkdownSupport));

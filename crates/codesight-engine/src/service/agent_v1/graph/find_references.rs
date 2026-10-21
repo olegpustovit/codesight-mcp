@@ -55,43 +55,10 @@ impl<'a> RefFilter<'a> {
     }
 }
 
-/// Return true when `c` is part of a Rust-shaped identifier token. Used for
-/// word-boundary checks on case-insensitive substring searches.
-fn is_ident_char(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_'
-}
+use codesight_language_support::text_match::locate_identifier_ci;
 
-/// Locate the first case-insensitive, word-boundary-delimited occurrence of
-/// `identifier` in `source`. Returns `(line, column)` with 1-based indexing.
-fn locate_identifier_ci(source: &str, identifier: &str) -> Option<(u32, u32)> {
-    if identifier.is_empty() {
-        return None;
-    }
-    let id_lower = identifier.to_ascii_lowercase();
-    let id_len = id_lower.len();
-    for (line_idx, line) in source.lines().enumerate() {
-        let bytes = line.as_bytes();
-        let line_lower = line.to_ascii_lowercase();
-        let lower_bytes = line_lower.as_bytes();
-        let mut search_from = 0usize;
-        while let Some(pos) = line_lower[search_from..].find(&id_lower) {
-            let abs = search_from + pos;
-            let before_ok = abs == 0 || !is_ident_char(bytes[abs - 1]);
-            let end = abs + id_len;
-            let after_ok = end >= lower_bytes.len() || !is_ident_char(bytes[end]);
-            if before_ok && after_ok {
-                return Some((line_idx as u32 + 1, abs as u32 + 1));
-            }
-            search_from = abs + id_len;
-        }
-    }
-    None
-}
-
-/// Fully-populated reference row. `definition` and `symbol_body_match` are
-/// semantic (definition site or a match inside a symbol body). `file_body_match`
-/// is a candidate text hit — the identifier appears somewhere in file text that
-/// isn't covered by an indexed symbol span.
+/// Name-based candidates: definitions and grammar identifier tokens form the
+/// primary rows; unparsed text mentions remain weak evidence.
 #[derive(Debug, Clone)]
 struct ReferenceRow {
     file: String,
@@ -105,9 +72,7 @@ struct ReferenceRow {
     /// enclosing symbol toward the file root. Empty when the reference is
     /// top-level or comes from a `file_body_match` candidate row.
     call_chain: Vec<String>,
-    /// FIXUP T2.5: classification of a `symbol_body_match` row —
-    /// `call_site`, `use_stmt`, `type_ref`, `comment_or_string`, or `other`.
-    /// Populated only when `kind == "symbol_body_match"`.
+    /// Grammar identifier syntax or an unresolved text mention.
     body_match_kind: Option<&'static str>,
 }
 
@@ -136,88 +101,9 @@ impl ReferenceRow {
         Value::Object(m)
     }
 
-    fn is_semantic(&self) -> bool {
-        !matches!(self.kind, "file_body_match")
+    fn is_identifier_candidate(&self) -> bool {
+        self.kind == "definition" || self.body_match_kind == Some("identifier_syntax")
     }
-}
-
-/// FIXUP T2.5: line-based classifier for `symbol_body_match` rows.
-/// Operates on the containing line and the column of the identifier; does
-/// not build a tree-sitter tree, so it's a best-effort heuristic. Returns
-/// `"other"` for any structural shape it doesn't recognize.
-fn classify_body_match(line_text: &str, ident_col: usize, ident_len: usize) -> &'static str {
-    let trimmed = line_text.trim_start();
-    let leading_ws = line_text.len() - trimmed.len();
-    // Normalize the column so `before`/`after` slicing works on char bytes
-    // while still staying sane when col points past end-of-line.
-    let col = ident_col.min(line_text.len());
-    let end = (col + ident_len).min(line_text.len());
-    let before_raw = &line_text[..col];
-    let after_raw = line_text.get(end..).unwrap_or("");
-
-    // comment_or_string: `//` anywhere before the match, odd count of `"`
-    // before, or surrounded by a `/* ... */` that opens earlier on this line.
-    let before_no_strings = strip_strings_before(before_raw);
-    if before_no_strings.contains("//") || before_no_strings.contains("/*") {
-        return "comment_or_string";
-    }
-    let quote_count = before_raw.bytes().filter(|b| *b == b'"').count();
-    if quote_count % 2 == 1 {
-        return "comment_or_string";
-    }
-
-    // use_stmt: line begins with an import-style keyword.
-    let head: &str = &line_text[leading_ws..];
-    for kw in [
-        "use ", "import ", "from ", "require ", "require(", "pub use ",
-    ] {
-        if head.starts_with(kw) {
-            return "use_stmt";
-        }
-    }
-
-    // call_site: first non-space char after the identifier is `(` — this
-    // also covers turbofish `foo::<T>(` because the `(` still follows.
-    let next = after_raw.trim_start_matches(|c: char| c == ':' || c.is_ascii_whitespace());
-    if next.starts_with('(') {
-        return "call_site";
-    }
-    // Also accept `foo::<T>(` where next starts with `::<`.
-    if after_raw.trim_start().starts_with("::<") {
-        return "call_site";
-    }
-
-    // type_ref: appears in a type position. Cheap signals that rarely
-    // false-positive on real code.
-    let before_trim = before_raw.trim_end();
-    if before_trim.ends_with(':')
-        || before_trim.ends_with("->")
-        || before_trim.ends_with('<')
-        || before_trim.ends_with("impl")
-        || before_trim.ends_with(" for")
-        || before_trim.ends_with("dyn")
-    {
-        return "type_ref";
-    }
-
-    "other"
-}
-
-/// Strip matched `"..."` string literals from `s` left-to-right so a `//`
-/// inside a string doesn't register as a comment marker. Cheap and good
-/// enough for the classifier — it deliberately doesn't track triple-quoted
-/// strings or escaped quotes precisely.
-fn strip_strings_before(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut in_str = false;
-    for ch in s.chars() {
-        match ch {
-            '"' => in_str = !in_str,
-            _ if !in_str => out.push(ch),
-            _ => {}
-        }
-    }
-    out
 }
 
 /// Derive the scope chain (ancestor names) from a symbol's stable id using
@@ -239,6 +125,17 @@ fn collect_rows(
 ) -> Vec<ReferenceRow> {
     let mut rows: Vec<ReferenceRow> = Vec::new();
     let mut seen_files: FxHashSet<String> = FxHashSet::default();
+
+    let positions: std::collections::BTreeMap<_, _> = all_contents
+        .iter()
+        .filter(|(file, source)| filter.admits(file) && source.contains(identifier))
+        .map(|(file, source)| {
+            (
+                file.as_str(),
+                codesight_language_support::identifier_syntax::positions(file, source, identifier),
+            )
+        })
+        .collect();
 
     for sym in sym_infos {
         if !filter.admits(&sym.file) {
@@ -266,20 +163,27 @@ fn collect_rows(
             continue;
         }
         if mentions_identifier_ci_in_file(&sym.file, &sym.source, identifier) {
-            let located = locate_identifier_ci(&sym.source, identifier);
-            let (line, column) = located
-                .map(|(rel_line, col)| (sym.line + rel_line - 1, Some(col)))
-                .unwrap_or((sym.line, None));
-            // FIXUP T2.5: classify the body-match position. Pull the
-            // containing line text out of `sym.source` using the relative
-            // line the locator gave us.
-            let body_match_kind = located.map(|(rel_line, col)| {
-                let line_text = sym
-                    .source
-                    .lines()
-                    .nth(rel_line.saturating_sub(1) as usize)
-                    .unwrap_or("");
-                classify_body_match(line_text, col as usize, identifier.len())
+            let located = positions
+                .get(sym.file.as_str())
+                .and_then(Option::as_ref)
+                .and_then(|positions| {
+                    positions
+                        .iter()
+                        .copied()
+                        .find(|(line, _)| *line >= sym.line && *line <= sym.end_line)
+                });
+            let (line, column) =
+                located
+                    .map(|(line, col)| (line, Some(col)))
+                    .unwrap_or_else(|| {
+                        locate_identifier_ci(&sym.source, identifier)
+                            .map(|(line, col)| (sym.line + line - 1, Some(col)))
+                            .unwrap_or((sym.line, None))
+                    });
+            let body_match_kind = Some(if located.is_some() {
+                "identifier_syntax"
+            } else {
+                "text_mention"
             });
             let mut chain = call_chain_from_stable_id(&sym.id);
             chain.push(sym.name.clone());
@@ -302,7 +206,12 @@ fn collect_rows(
         if seen_files.contains(file) || !filter.admits(file) {
             continue;
         }
-        let Some((line, col)) = locate_identifier_ci(content, identifier) else {
+        let syntax = positions
+            .get(file.as_str())
+            .and_then(Option::as_ref)
+            .and_then(|p| p.first())
+            .copied();
+        let Some((line, col)) = syntax.or_else(|| locate_identifier_ci(content, identifier)) else {
             continue;
         };
         rows.push(ReferenceRow {
@@ -314,7 +223,11 @@ fn collect_rows(
             enclosing_symbol: None,
             enclosing_kind: None,
             call_chain: Vec::new(),
-            body_match_kind: None,
+            body_match_kind: Some(if syntax.is_some() {
+                "identifier_syntax"
+            } else {
+                "text_mention"
+            }),
         });
         seen_files.insert(file.clone());
     }
@@ -322,18 +235,18 @@ fn collect_rows(
     rows
 }
 
-fn split_semantic_and_candidate(rows: Vec<ReferenceRow>) -> (Vec<Value>, Vec<Value>) {
-    let mut semantic = Vec::new();
+fn split_identifier_and_text(rows: Vec<ReferenceRow>) -> (Vec<Value>, Vec<Value>) {
+    let mut primary = Vec::new();
     let mut candidate = Vec::new();
     for row in rows {
         let json = row.to_json();
-        if row.is_semantic() {
-            semantic.push(json);
+        if row.is_identifier_candidate() {
+            primary.push(json);
         } else {
             candidate.push(json);
         }
     }
-    (semantic, candidate)
+    (primary, candidate)
 }
 
 fn partial_references_warning(candidate_count: usize) -> Vec<Value> {
@@ -343,9 +256,8 @@ fn partial_references_warning(candidate_count: usize) -> Vec<Value> {
     vec![json!({
         "code": "PARTIAL_REFERENCES",
         "message": format!(
-            "{candidate_count} candidate text hit(s) returned alongside semantic references. \
-             Candidate hits live in `candidate_text_hits` — they are substring matches in file text \
-             not covered by any indexed symbol span, and are weaker than semantic references."
+            "{candidate_count} text-only candidate hit(s) found; these are weaker than identifier syntax \
+             and may be omitted by result limits or request options."
         ),
     })]
 }
@@ -386,25 +298,25 @@ impl CodeService {
         let mut total_candidate: usize = 0;
         for ident in identifiers {
             let rows = collect_rows(&sym_infos, &all_contents, ident, &filter, true);
-            let (semantic, candidate) = split_semantic_and_candidate(rows);
+            let (primary, candidate) = split_identifier_and_text(rows);
             total_candidate += candidate.len();
             results.push(json!({
                 "identifier": ident,
-                "semantic_reference_count": semantic.len(),
+                "identifier_reference_count": primary.len(),
                 "candidate_text_hit_count": candidate.len(),
-                "semantic_references": semantic,
+                "identifier_references": primary,
                 "candidate_text_hits": candidate,
             }));
         }
-        let total_semantic: usize = results
+        let total_identifier: usize = results
             .iter()
-            .filter_map(|r| r.get("semantic_reference_count")?.as_u64())
+            .filter_map(|r| r.get("identifier_reference_count")?.as_u64())
             .sum::<u64>() as usize;
         self.success_response_with_warnings(
-            &MetaBuilder::new(0).with_confidence(Confidence::Safe),
+            &MetaBuilder::new(0).with_confidence(Confidence::Partial),
             json!({
                 "graph": "find_references",
-                "total_semantic_references": total_semantic,
+                "total_identifier_references": total_identifier,
                 "total_candidate_text_hits": total_candidate,
                 "results": results,
             }),
@@ -424,35 +336,35 @@ impl CodeService {
         let filter = RefFilter::from_args(args);
 
         let rows = collect_rows(&sym_infos, &all_contents, identifier, &filter, false);
-        let (mut semantic, mut candidate) = split_semantic_and_candidate(rows);
-        let total_semantic = semantic.len();
+        let (mut primary, mut candidate) = split_identifier_and_text(rows);
+        let total_identifier = primary.len();
         let total_candidate = candidate.len();
         // Tier 2.1: enforce the caller's global `limit` over the merged
-        // (semantic + candidate) result set. Definitions sort first inside
-        // `semantic` (see `collect_rows`), so we keep them.
+        // (primary + candidate) result set. Definitions sort first inside
+        // `primary` (see `collect_rows`), so we keep them.
         let limit = args.limit.unwrap_or(50).clamp(1, 500);
-        let total_unbounded = total_semantic + total_candidate;
-        let semantic_truncated = if semantic.len() > limit {
-            semantic.truncate(limit);
+        let total_unbounded = total_identifier + total_candidate;
+        let primary_truncated = if primary.len() > limit {
+            primary.truncate(limit);
             true
         } else {
             false
         };
-        let semantic_remaining = limit.saturating_sub(semantic.len());
-        let candidate_truncated = if candidate.len() > semantic_remaining {
-            candidate.truncate(semantic_remaining);
+        let primary_remaining = limit.saturating_sub(primary.len());
+        let candidate_truncated = if candidate.len() > primary_remaining {
+            candidate.truncate(primary_remaining);
             true
         } else {
             false
         };
-        let truncated = semantic_truncated || candidate_truncated;
-        let semantic_count = semantic.len();
+        let truncated = primary_truncated || candidate_truncated;
+        let primary_count = primary.len();
         let candidate_count = candidate.len();
 
         // FIXUP T2.5: surface ambiguity at the top level. Callers should
-        // not have to iterate the `semantic_references` list hunting for
+        // not have to iterate the `identifier_references` list hunting for
         // `kind: "definition"` rows.
-        let definitions: Vec<Value> = semantic
+        let definitions: Vec<Value> = primary
             .iter()
             .filter(|row| row.get("kind").and_then(Value::as_str) == Some("definition"))
             .cloned()
@@ -468,11 +380,11 @@ impl CodeService {
         let mut data = json!({
             "graph": "find_references",
             "identifier": identifier,
-            "semantic_reference_count": semantic_count,
+            "identifier_reference_count": primary_count,
             "candidate_text_hit_count": candidate_count,
             "definition_count": definition_count,
             "definitions": definitions,
-            "semantic_references": semantic,
+            "identifier_references": primary,
             "candidate_text_hits": candidate,
         });
 
@@ -504,7 +416,9 @@ impl CodeService {
             data["call_chain"] = Value::Array(chain);
         }
 
-        let mut warnings = partial_references_warning(candidate_count);
+        let mut warnings = partial_references_warning(total_candidate);
+        warnings.push(json!({"code": "PARTIAL_REFERENCES",
+            "message": "Identifier syntax and definitions are name-based candidates; aliases, shadowing and cross-file bindings are not resolved."}));
         if definition_count > 1 {
             warnings.push(json!({
                 "code": "AMBIGUOUS_DEFINITION",
@@ -518,17 +432,17 @@ impl CodeService {
             warnings.push(json!({
                 "code": "TRUNCATED",
                 "message": format!(
-                    "results truncated to limit {limit} (semantic + candidate); {total_unbounded} total references exist."
+                    "results truncated to limit {limit} (primary + candidate); {total_unbounded} total references exist."
                 ),
                 "detail": {
                     "limit": limit,
-                    "total_semantic_references": total_semantic,
+                    "total_identifier_references": total_identifier,
                     "total_candidate_text_hits": total_candidate,
                 },
             }));
         }
         self.success_response_with_warnings(
-            &MetaBuilder::new(0).with_confidence(Confidence::Safe),
+            &MetaBuilder::new(0).with_confidence(Confidence::Partial),
             data,
             warnings,
         )

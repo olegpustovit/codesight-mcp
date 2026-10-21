@@ -121,15 +121,14 @@ from the index, so a Rust enum is `#type` (for example
 
 | Tool | Required | Optional | What it returns |
 |---|---|---|---|
-| `search` | `query` | `mode` = `keyword` (default) \| `regex` \| `nl`; `scope` (glob); `limit` (25); `max_tokens`; `fuzzy` | Ranked symbols, doc sections, or text hits |
+| `search` | `query` | `mode` = `keyword` (default) \| `regex` \| `nl`; `scope` (glob); `limit` (25); `per_file_limit` (regex); `max_tokens`; `fuzzy` | Ranked symbols, doc sections, or text hits |
 | `outline` | `view` = `file` \| `repo` | `path` or `paths[]` (file view); `max_tokens` (repo view) | Symbol list for a file, or a workspace summary (entrypoints, languages, modules by centrality) |
 | `read` | `refs[]` | `context_lines` (0); `max_tokens`; `with_neighbors` | Content for `path:N-M`, `path:N`, `path::Name#kind`, `id:<stable_id>`, `section:path::heading` |
 | `references` | `kind` = `symbol` \| `imports` \| `importers` | `ref` (symbol); `path` (imports/importers); `limit` (50); `scope`; `include_weak` | Reference sites with enclosing symbol, or import edges for a file |
 | `impact` | `analysis` = `blast_radius` \| `rename_safety`; `ref` | `new_name` (rename); `limit` (50) | Files that use a symbol; rename coverage and name collisions |
-| `health` | `analysis` = `quality_signal` \| `hotspots` \| `dead_code` \| `repo_health` \| `test_gaps` | `scope`; `top_n`; `min_confidence`; `include_tests`; `max_tokens` | Agent-readiness dimensions, churn × complexity hotspots, dead code, untested risky symbols |
+| `health` | `analysis` = `quality_signal` \| `hotspots` \| `dead_code` \| `repo_health` \| `test_gaps` | `scope`; `top_n`; `min_confidence`; `include_tests`; `max_tokens` | Agent-readiness dimensions, churn × complexity hotspots, dead-code and heuristic test-gap candidates |
 
-`tools.json` also lists `per_file_limit` for `search`, but the `search` adapter
-does not forward it yet (see Limitations).
+Regex search returns matching lines; `per_file_limit` caps each file and `limit` caps the total. Omitted lines produce `TRUNCATED`.
 
 ## Trust contract
 
@@ -137,10 +136,10 @@ does not forward it yet (see Limitations).
 
 | Value | Meaning | Examples |
 |---|---|---|
-| `safe` | Derived from index lookups or structurally resolved references | `read` of a symbol id; `references kind=imports`; `impact blast_radius` with resolved references |
-| `partial` | Correct but incomplete or only suggestive. The response says why | whole-file `read`; `search` with `NO_EXACT_MATCH` / `AMBIGUOUS_IDENTIFIER` / `OVERBROAD_QUERY`; `rename_safety` with coverage below 100% |
+| `safe` | Derived from index lookups or structurally resolved references | `read` of a symbol id; `references kind=imports` |
+| `partial` | Incomplete or suggestive; candidates can be false positives and bindings may be unresolved. The response says why | name-based symbol references and blast radius; whole-file `read`; `search` with `NO_EXACT_MATCH` / `AMBIGUOUS_IDENTIFIER` / `OVERBROAD_QUERY`; `rename_safety` without binding resolution |
 | `heuristic` | Best-effort string/regex/dispatch analysis | `health analysis=dead_code` |
-| `unreliable` | No structural evidence. Primary results are empty and text mentions are only in a separate weak list | `impact blast_radius` when only text mentions exist (`weak_files_text_mentions`); `references kind=symbol` for languages without a scope analyzer (`weak_hits[]` only with `include_weak=true`) |
+| `unreliable` | No structural evidence. Primary results are empty and text mentions are only in a separate weak list | `impact blast_radius` when only text mentions exist (`weak_files_text_mentions`) |
 
 Hard rules enforced in code and tests:
 
@@ -148,16 +147,17 @@ Hard rules enforced in code and tests:
   resolve to an indexed symbol returns `ok: false` with `error.code =
   "NOT_FOUND"`. It never falls back to a bare-name search. A bare identifier
   (`"FactQuality"`) is still treated as a name search.
-- `rename_safety` returns `safe: "undecided"` with `coverage_pct < 100` when
-  any reference is only a text hit. It never reports `complete: false`
-  together with `confidence: safe`.
+- `rename_safety` returns `safe: null`, `status: "undecided"`,
+  `complete: false` and partial confidence. `identifier_match_pct` describes
+  syntax versus text candidates; it does not establish reference completeness
+  or rename safety.
 - `blast_radius` returns symbol-scoped files, never file-importer counts.
 
 Example from this repository:
 
 ```text
 impact {"analysis":"blast_radius","ref":"crates/codesight-core/src/core/symbols.rs::FactQuality#type"}
-→ ok, confidence=safe, symbol_scoped_file_count=10,
+→ historical v0.1.0 output: confidence=safe, symbol_scoped_file_count=10,
   weak_files_text_mentions=[crates/codesight-core/src/lib.rs, crates/codesight-language-support/src/traits.rs]
 
 impact {"analysis":"blast_radius","ref":"no/such/file.rs::FactQuality#enum"}
@@ -216,23 +216,42 @@ These were observed on this repository while preparing v0.1.0:
   returned `TIMEOUT`, and the next `search` returned no items. Run
   `codesight-mcp ingest .` first. Timeout budgets: `read` 3 s, `search` /
   `outline` / `references` 5 s, `impact` / `health` 15 s.
-- **Body matches count as references.** `references kind=symbol` and
-  `blast_radius` include `symbol_body_match` rows, which can include
-  mentions inside comments or strings (`body_match_kind: "comment_or_string"`).
-  These are labeled per row, but they still count toward
-  `symbol_scoped_files`.
+- **Name-based references, not resolved bindings.** Primary reference and
+  blast-radius results use definitions and grammar identifier tokens. Comments
+  and string contents are weak mentions; interpolated expressions remain code.
+  Aliases, shadowing and dynamic dispatch are not resolved. Unsupported or
+  malformed source produces weak text evidence. These results remain partial.
 - **Import extraction is uneven.** On this repository, `ingest` reported
   `languages_without_import_extractor` for al, blade, c, cpp, csharp, elixir,
-  java, json, markdown, perl, php, razor, ruby, toml, and xml, so import and
-  importer graphs only cover the remaining languages.
-- **`references kind=importers` ignores `limit`.** With `limit: 3` it returned
-  all 76 importers.
-- **`search mode=regex` returns at most one hit per file**, and
-  `per_file_limit` is not forwarded by the `search` adapter.
-- **Stale index.** Edits are picked up by a background reindex. Responses that
-  overlap a reindex carry `STALE_DATA_WARNING`.
-- **Platforms.** Built and tested on Linux x86_64. macOS is covered by CI on
-  the release PR. Windows is untested.
+  java, json, markdown, perl, php, razor, ruby, toml, and xml. Outgoing imports
+  for languages without an extractor return an explicit unsupported error.
+  Incoming edges from supported importers can still target those files.
+- **OCaml scope.** `.ml` and `.mli` use the maintained tree-sitter OCaml
+  implementation/interface grammars for structural functions, modules, types
+  and function signatures. Imports, binding resolution and arbitrary PPX
+  extensions are not implemented. `.rays` remains a separate unsupported DSL.
+- **Test-gap evidence.** Candidates lack a recognized test-file dependency
+  in the index. The count is a static proxy, not executed coverage or proof
+  that tests are absent; same-package calls and indirect test protection can
+  be missed.
+- **Index coverage.** Repository outlines and health describe indexed files,
+  with `INDEX_SCOPE_ONLY`, partial or weaker confidence and a built-in language
+  registry list. Unsupported, ignored and unindexed files can be absent; no omitted-file
+  count is inferred. Import graph requests reject unindexed targets. Failed read
+  references appear in `data.errors[]` with `PARTIAL_BATCH`.
+- **Importer evidence.** `importers` contains resolved import edges;
+  `candidate_usage_importers` separately retains heuristic name-usage candidates,
+  which can include text mentions. Both local lists share the requested cap,
+  expose their unbounded totals and report truncation. Missing import extraction
+  still makes the result incomplete.
+- **Stale index.** Reopened preindexed workspaces activate background watching.
+  Overlapping in-flight reindexes immediately emit `STALE_DATA_WARNING` and partial
+  confidence. Symbol reads verify disk contents and reject drifted offsets with
+  `STALE_ID` until reindex completes; retry the read. This check reads the source
+  file and adds I/O compared with an unchecked cached body.
+
+- **Platforms.** These changes were built and tested on Linux arm64.
+  macOS and Windows runtime behavior was not verified in this validation.
 
 ## Repository layout
 

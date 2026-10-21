@@ -34,7 +34,7 @@
   {
     "name": "outline",
     "capabilities_version": "v3",
-    "description": "Structural views — call this before reading any whole file. `view=file` returns a symbol list for one file (or batch via `paths`); `view=repo` returns a workspace summary (crates, top modules by centrality, languages). Centrality is cached in SQLite and recomputed only on reingest, so the repo view is fast on repeat calls. Frozen envelope: `{ok, data, _meta:{confidence, timing_ms, tokens_saved}, warnings}`.",
+    "description": "Structural views — call this before reading any whole file. `view=file` returns a symbol list for one file (or batch via `paths`); `view=repo` returns a workspace summary (crates, top modules by centrality, languages). Centrality is cached in SQLite and recomputed only on reingest, so the repo view is fast on repeat calls. Frozen envelope: `{ok, data, _meta:{confidence, timing_ms, tokens_saved}, warnings}`. Repository views describe indexed files only: coverage.scope=indexed_files_only, repository_coverage_complete=false and INDEX_SCOPE_ONLY; unsupported, ignored or unindexed files may be absent.",
     "inputSchema": {
       "type": "object",
       "required": ["view"],
@@ -73,7 +73,7 @@
   {
     "name": "references",
     "capabilities_version": "v3",
-    "description": "Reference and import-edge queries with structural resolution. `kind=symbol` enumerates references to a symbol — items carry `{file, line, column, identifier, enclosing_symbol, enclosing_kind, body_match_kind}`, where `identifier` is the searched name (not the enclosing function). Languages without a scope analyzer return `confidence: unreliable` and *only* `weak_hits[]` (text-mention candidates) when `include_weak=true`. `kind=imports` returns a file's outgoing imports; `kind=importers` returns its incoming imports.",
+    "description": "Reference candidates and import-edge queries. Symbol rows use name-based grammar identifier syntax, not resolved bindings; aliases and shadowing remain unresolved and confidence is partial. `kind=symbol` enumerates references to a symbol — items carry `{file, line, column, identifier, enclosing_symbol, enclosing_kind, body_match_kind}`, where `identifier` is the searched name (not the enclosing function). Unparsed non-definition text stays in `weak_hits[]` when `include_weak=true`; symbol-reference confidence remains partial. `kind=imports` returns a file's outgoing imports; `kind=importers` returns resolved incoming imports in `importers`, separately labeled heuristic name-usage candidates in `candidate_usage_importers`, unbounded totals, and truncation; both local lists share `limit`. Imports/importers reject unindexed target paths. Outgoing imports also reject languages without an import extractor; incoming edges can target any indexed file.",
     "inputSchema": {
       "type": "object",
       "required": ["kind"],
@@ -83,7 +83,7 @@
         "path": { "type": "string", "description": "`kind=imports` / `kind=importers`: file path." },
         "limit": { "type": "integer", "default": 50, "description": "Max items returned." },
         "scope": { "type": "string", "description": "Optional path glob restricting where to search." },
-        "include_weak": { "type": "boolean", "default": false, "description": "Include text-mention `weak_hits[]` in addition to structurally-resolved items." }
+        "include_weak": { "type": "boolean", "default": false, "description": "Include text-mention `weak_hits[]` alongside name-based identifier syntax candidates; no binding resolution is implied." }
       }
     },
     "examples": [
@@ -95,7 +95,7 @@
   {
     "name": "impact",
     "capabilities_version": "v3",
-    "description": "Change-oriented analyses backed by the structural reference graph. `analysis=blast_radius` returns the set of files actually using a symbol (deduplicated walk over symbol references; refuses with `confidence: unreliable` on languages without a scope analyzer — never returns file-importer counts). `analysis=rename_safety` requires complete reference coverage or returns `safe: \"undecided\"` with `coverage_pct < 100`; `complete=false` is never paired with `confidence: high`.",
+    "description": "Change-oriented analyses backed by the structural reference graph. `analysis=blast_radius` returns candidate files containing definitions or name-matched grammar identifiers with partial confidence (not binding resolution; comments/string contents remain separate weak mentions; text-only evidence has unreliable confidence; never returns file-importer counts). `analysis=rename_safety` reports name-based collision candidates but cannot establish binding completeness: `safe: null`, `status: \"undecided\"`, `complete: false`, partial confidence. `identifier_match_pct` is the fraction of syntax rather than weak text candidates, never a safety/coverage guarantee.",
     "inputSchema": {
       "type": "object",
       "required": ["analysis", "ref"],
@@ -115,7 +115,7 @@
   {
     "name": "health",
     "capabilities_version": "v3",
-    "description": "Quality signals. `quality_signal` reports the four agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) plus structural root causes. `hotspots` returns top-N functions by churn × cyclomatic. `dead_code` walks reachability + a string-literal-dispatch heuristic; cli/bin/hooks/main paths are capped at confidence < 0.5 with a `MANUAL_REVIEW_REQUIRED` warning since externally-invoked entry points can't be statically reached. `repo_health` aggregates the others plus cycle count, using cached dead-code output to stay under the warm SLA. `test_gaps` ranks untested high-risk symbols by `cyclomatic × (1 + fan_in) × (1 + ln(1 + churn))`.",
+    "description": "Quality signals. `quality_signal` reports the four agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) plus structural root causes. `hotspots` returns top-N functions by churn × cyclomatic. `dead_code` walks reachability + a string-literal-dispatch heuristic; cli/bin/hooks/main paths are capped at confidence < 0.5 with a `MANUAL_REVIEW_REQUIRED` warning since externally-invoked entry points can't be statically reached. `repo_health` aggregates the others plus cycle count, using cached dead-code output to stay under the warm SLA. `test_gaps` ranks heuristic candidates lacking an indexed test-file dependency (not executed coverage) by `cyclomatic × (1 + fan_in) × (1 + ln(1 + churn))`. Health describes the indexed subset, with INDEX_SCOPE_ONLY and partial confidence; it is not a complete repository audit.",
     "inputSchema": {
       "type": "object",
       "required": ["analysis"],

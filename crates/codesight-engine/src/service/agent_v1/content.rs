@@ -72,6 +72,10 @@ impl CodeService {
             .map(|m| m.file_size_bytes)
             .unwrap_or(0);
         match self.retrieve_symbol(store, sym_id, opts.verify, opts.context_lines) {
+            Ok(sym) if sym.source_drift == Some(true) => Ok(err_item(
+                "STALE_ID",
+                "Symbol source changed on disk; retry after reindex before using indexed offsets.",
+            )),
             Ok(sym) => {
                 let mut o = serde_json::to_value(&sym)?;
                 if let Some(obj) = o.as_object_mut() {
@@ -244,14 +248,12 @@ impl CodeService {
         // have `cat`-ed the whole file". For whole-file reads the response
         // equals the baseline → tokens_saved ≈ 0 (honest). For ranges, the
         // savings reflect the bytes the agent didn't have to page through.
-        if let Some(store) = self
+        let bytes = self
             .ensure_repo_store(opts.sid, opts.repo_path)
             .ok()
-            .as_ref()
-            && let Ok(Some(bytes)) = store.file_bytes(file_path)
-        {
-            *raw_bytes = raw_bytes.saturating_add(bytes);
-        }
+            .and_then(|store| store.file_bytes(file_path).ok().flatten())
+            .unwrap_or(0);
+        *raw_bytes = raw_bytes.saturating_add(bytes);
         match self.get_file_content(fc) {
             Ok(v) => {
                 if v.get("ok").and_then(|b| b.as_bool()) != Some(true) {
@@ -485,16 +487,12 @@ impl CodeService {
                         &format!("Code source '{}' has not been indexed.", opts.sid),
                     )));
                 };
-                match self.read_symbol_item(pref, store, opts, raw_bytes) {
-                    Ok(item) => Ok(RefReadResult::Ok {
-                        item,
-                        scope: "symbol",
-                    }),
-                    Err(e) => Ok(RefReadResult::Err(err_item(
-                        "READ_FAILED",
-                        &format!("symbol read failed: {e}"),
-                    ))),
-                }
+                Ok(RefReadResult::from_result(
+                    self.read_symbol_item(pref, store, opts, raw_bytes),
+                    "symbol",
+                    "READ_FAILED",
+                    "symbol",
+                ))
             }
             "section" => {
                 scopes.section += 1;
@@ -504,16 +502,12 @@ impl CodeService {
                         "section ref needs id/stable_id",
                     )));
                 };
-                match self.read_section_item(sec_id, opts, repo_store, raw_bytes) {
-                    Ok(item) => Ok(RefReadResult::Ok {
-                        item,
-                        scope: "section",
-                    }),
-                    Err(e) => Ok(RefReadResult::Err(err_item(
-                        "SECTION_NOT_FOUND",
-                        &format!("section read failed: {e}"),
-                    ))),
-                }
+                Ok(RefReadResult::from_result(
+                    self.read_section_item(sec_id, opts, repo_store, raw_bytes),
+                    "section",
+                    "SECTION_NOT_FOUND",
+                    "section",
+                ))
             }
             "file" => {
                 let Some(file_path) = pref.path.as_deref().or(id.as_deref()) else {
@@ -529,13 +523,12 @@ impl CodeService {
                     scopes.file_full += 1;
                     "file_full"
                 };
-                match self.read_file_item(pref, file_path, opts, raw_bytes) {
-                    Ok(item) => Ok(RefReadResult::Ok { item, scope }),
-                    Err(e) => Ok(RefReadResult::Err(err_item(
-                        "READ_FAILED",
-                        &format!("file read failed: {e}"),
-                    ))),
-                }
+                Ok(RefReadResult::from_result(
+                    self.read_file_item(pref, file_path, opts, raw_bytes),
+                    scope,
+                    "READ_FAILED",
+                    "file",
+                ))
             }
             other => Ok(RefReadResult::Err(err_item(
                 "UNSUPPORTED_KIND",
@@ -556,6 +549,22 @@ struct ReadScopeCounters {
 enum RefReadResult {
     Ok { item: Value, scope: &'static str },
     Err(Value),
+}
+
+impl RefReadResult {
+    fn from_result(
+        result: anyhow::Result<Value>,
+        scope: &'static str,
+        code: &str,
+        kind: &str,
+    ) -> Self {
+        let item = result.unwrap_or_else(|e| err_item(code, &format!("{kind} read failed: {e}")));
+        if item.get("error").is_some() {
+            Self::Err(item)
+        } else {
+            Self::Ok { item, scope }
+        }
+    }
 }
 
 fn extract_item_bytes(item: &Value) -> u64 {

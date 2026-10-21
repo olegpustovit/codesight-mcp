@@ -50,9 +50,7 @@ enum FileClass {
 }
 
 fn classify_path(path: &str) -> FileClass {
-    let has_prefix = |p: &str| {
-        path == p || path.starts_with(&format!("{p}/")) || path.contains(&format!("/{p}/"))
-    };
+    let has_prefix = |p: &str| path == p || path.split('/').rev().skip(1).any(|part| part == p);
     if codesight_language_support::is_vendored_path(path) {
         return FileClass::Vendored;
     }
@@ -649,7 +647,9 @@ impl CodeService {
         // the ranker's ordering wins inside a single class. Also drop
         // duplicate rows produced by the hybrid fusion when the symbol and
         // section layers both find the same stable_id.
-        dedupe_by_stable_id(&mut items);
+        if args.query_mode.as_deref() != Some("regex") {
+            dedupe_by_stable_id(&mut items);
+        }
         // Vendor deprioritization runs for every query_mode — tokenizer
         // dumps and asset payloads shouldn't outrank real code whether
         // the caller typed `keyword`, `regex`, or `natural_language`.

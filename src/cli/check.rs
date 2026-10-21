@@ -298,7 +298,7 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
     });
 
     // Probe 3 — reference provenance. `find_references` on a well-known
-    // identifier must expose `semantic_references` + `candidate_text_hits`
+    // identifier must expose `identifier_references` + `candidate_text_hits`
     // and refuse to emit `text_match` / `line:0` rows.
     let refs = svc.dispatch(
         "inspect_graph",
@@ -311,8 +311,8 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
     let data = &refs["data"];
     let mut bad_rows: usize = 0;
     let mut has_split =
-        data.get("semantic_references").is_some() && data.get("candidate_text_hits").is_some();
-    for key in ["semantic_references", "candidate_text_hits"] {
+        data.get("identifier_references").is_some() && data.get("candidate_text_hits").is_some();
+    for key in ["identifier_references", "candidate_text_hits"] {
         let Some(rows) = data[key].as_array() else {
             has_split = false;
             continue;
@@ -332,7 +332,7 @@ pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
                 "reference_provenance",
                 format!(
                     "split fields present; 0 line:0 or text_match rows across {} results",
-                    data["semantic_references"]
+                    data["identifier_references"]
                         .as_array()
                         .map(Vec::len)
                         .unwrap_or(0)

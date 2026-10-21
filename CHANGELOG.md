@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Add structural OCaml implementation/interface symbols; binding and import resolution remain unsupported.
+- Include Dart function bodies in symbol ranges, and disclose index scope and static test-gap limits without upgrading weaker confidence.
+- Stop and join background file watchers when their service is dropped.
+
+- Upgrade rmcp to 3.6 and use its maintained nonblocking Linux pipe transport; retain upstream stdio fallback on other inputs/platforms.
+
+- Regex search honors per-file limits, preserves matching lines and discloses truncation.
+- Importers cap results and distinguish resolved import edges from heuristic usage candidates.
+- Symbol references and blast radius exclude comment/string-only mentions from primary evidence; grammar identifier syntax remains explicitly name-based and partial.
+
 ## v0.1.0 — 2026-10-20
 
 First tagged release.

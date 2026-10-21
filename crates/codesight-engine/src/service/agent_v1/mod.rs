@@ -4,6 +4,7 @@ mod args;
 mod catalog;
 mod catalog_search;
 mod content;
+mod coverage;
 mod cutplan;
 mod freshness;
 mod graph;
@@ -26,15 +27,10 @@ pub(in crate::service) fn dispatch(
 ) -> anyhow::Result<Value> {
     let args = validate::coerce_and_validate(tool_name, args).map_err(anyhow::Error::new)?;
 
-    // Read-path freshness: never block. When a reindex is mid-flight and the
-    // query touches an in-flight file, the envelope carries a
-    // `STALE_DATA_WARNING`. When the query is unrelated, we demote to a
-    // quiet `_meta.indexing` hint so agents aren't desensitized.
+    // Immediately warn and demote confidence when a reindex overlaps a read.
+    // Unrelated reindexes carry only an indexing hint.
     let (freshness_repo, touched) = if freshness::is_read_tool(tool_name) {
-        (
-            freshness::source_id(&args).map(str::to_string),
-            freshness::touched_files(&args),
-        )
+        (freshness::source_id(&args), freshness::touched_files(&args))
     } else {
         (None, Vec::new())
     };

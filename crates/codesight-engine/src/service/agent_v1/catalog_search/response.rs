@@ -129,21 +129,14 @@ pub(super) fn format_output(
             let lim = ctx.lim;
             let pre_cap_exceeds_lim = total_matches > items.len().max(lim);
             let overflow = items.len() > lim;
-            if overflow {
-                warnings.push(json!({
-                    "code": "TRUNCATED",
-                    "message": format!("results truncated to limit {lim}"),
-                }));
-                items.truncate(lim);
-            } else if pre_cap_exceeds_lim {
-                warnings.push(json!({
-                    "code": "TRUNCATED",
-                    "message": format!("results truncated to limit {lim}"),
-                }));
-            }
             if overflow || pre_cap_exceeds_lim || ctx.more_file_hits_exist {
+                warnings.push(json!({
+                    "code": "TRUNCATED",
+                    "message": format!("results omitted by global/per-file limit (global limit {lim})"),
+                }));
                 truncated_by.push("limit");
             }
+            items.truncate(lim);
 
             // Tier 2.1: byte-cap pops items only down to the floor — never
             // below `limit` (or `BYTE_CAP_ITEM_FLOOR`, whichever is smaller).

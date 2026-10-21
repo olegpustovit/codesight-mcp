@@ -1,16 +1,14 @@
 //! Integration tests for the `hook-pretooluse`, `hook-posttooluse`, and
 //! `hook-precompact` CLI subcommands.
 //!
-//! These tests invoke the binary via `cargo run` with JSON piped to stdin,
+//! These tests invoke the Cargo-built binary with JSON piped to stdin,
 //! verifying exit codes, stderr messages, and stdout JSON responses.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
 
 fn cargo_bin() -> Command {
-    let mut cmd = Command::new(env!("CARGO"));
-    cmd.args(["run", "--quiet", "--"]);
-    cmd
+    Command::new(env!("CARGO_BIN_EXE_codesight-mcp"))
 }
 
 fn run_hook(subcommand: &str, input: &str) -> (i32, String, String) {

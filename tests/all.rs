@@ -99,6 +99,8 @@ mod search_scope_exclusion;
 mod self_dogfood;
 #[path = "session_stats.rs"]
 mod session_stats;
+#[path = "stdio_pipeline.rs"]
+mod stdio_pipeline;
 #[path = "symbol_body_in_search.rs"]
 mod symbol_body_in_search;
 #[path = "symbol_not_found_in_code.rs"]

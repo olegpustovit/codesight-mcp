@@ -38,6 +38,9 @@ pub const SUGGEST_OUTLINE: &str = "SUGGEST_OUTLINE";
 /// Whole-file read returned more than the configured byte threshold.
 pub const TOKEN_HEAVY_READ: &str = "TOKEN_HEAVY_READ";
 
+/// Results describe the indexed subset, not complete repository coverage.
+pub const INDEX_SCOPE_ONLY: &str = "INDEX_SCOPE_ONLY";
+
 /// At least one ref in a `read` batch errored; remaining refs were processed.
 /// Per-ref errors land in `data.errors[]`; successful refs in `data.items[]`.
 pub const PARTIAL_BATCH: &str = "PARTIAL_BATCH";
@@ -123,6 +126,7 @@ pub const ALL_CODES: &[&str] = &[
     SUGGEST_OUTLINE,
     TOKEN_HEAVY_READ,
     PARTIAL_BATCH,
+    INDEX_SCOPE_ONLY,
     SECTION_NOT_FOUND,
     TRUNCATED,
     REGEX_OVERFLOW,

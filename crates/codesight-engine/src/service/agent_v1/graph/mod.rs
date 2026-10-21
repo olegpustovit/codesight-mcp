@@ -1,8 +1,6 @@
-//! `inspect_graph` — three structurally-resolved modes only:
-//! `find_references`, `imports`, `importers`. Per CUTPLAN, every other mode
-//! (`calls`, `centrality`, `dependency_*`, `layer_violations`, `references`,
-//! `related`, `resolve_fqn`) was retired because it text-scanned through
-//! symbol bodies and could not satisfy the `confidence: safe` invariant.
+//! Import edges and incomplete name-based reference candidates.
+//! `find_references`, `imports`, and `importers` preserve their separate
+//! syntax, resolved-import and heuristic evidence labels.
 
 pub(crate) mod find_references;
 mod importers;

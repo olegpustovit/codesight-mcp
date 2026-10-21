@@ -408,6 +408,12 @@ impl CodeService {
                 if let Ok(root) = store.root_path()
                     && root.is_dir()
                 {
+                    self.watchers.ensure_watching(
+                        repo,
+                        root.clone(),
+                        self.config.clone(),
+                        self.indexer().clone(),
+                    );
                     let indexer = self.indexer();
                     let known = |p: &std::path::Path| indexer.detect_language(&root, p).is_some();
                     if store.is_stale(&root, known).unwrap_or(false) {

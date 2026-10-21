@@ -234,11 +234,11 @@ fn run(workspace: Option<&std::path::Path>) -> anyhow::Result<()> {
 async fn run_rmcp_stdio(service: Arc<CodeService>) -> anyhow::Result<()> {
     use codesight_engine::config::defaults::SHUTDOWN_DRAIN_SECS;
     use rmcp::ServiceExt;
-    use rmcp::transport::io::stdio;
+    use rmcp::transport::stdio_pipes;
 
     let running = service
         .clone()
-        .serve(stdio())
+        .serve(stdio_pipes())
         .await
         .map_err(|err| anyhow::anyhow!("rmcp stdio serve failed: {err}"))?;
     let cancel = running.cancellation_token();
