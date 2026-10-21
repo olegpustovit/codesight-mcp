@@ -23,8 +23,46 @@ jobs:
         run: cargo fmt --all -- --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Prepare macOS crash diagnostics
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          diagnostics="$RUNNER_TEMP/macos-crash-diagnostics"
+          mkdir -p "$diagnostics"
+          touch "$diagnostics/test-start"
+          {
+            date -u
+            sw_vers
+            uname -a
+            rustc -vV
+            cargo --version
+            git rev-parse HEAD
+            printf 'Focused command: cargo test --test integration stdio_pipeline -- --test-threads=1\n'
+            printf 'Native Mac scope: one test, 25 sessions, unchanged five-second response deadline\n'
+            printf 'Full command: cargo test --workspace\n'
+          } > "$diagnostics/environment.txt"
+          cargo test --test integration --no-run --message-format=json > "$diagnostics/build-artifacts.jsonl"
+          binary=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "integration" and .executable != null) | .executable' "$diagnostics/build-artifacts.jsonl" | tail -n 1)
+          test -n "$binary"
+          printf '%s\n' "$binary" > "$diagnostics/integration-binary.txt"
+          shasum -a 256 "$binary" > "$diagnostics/integration-binary.sha256"
+      - name: macOS native blocking stdio diagnostic
+        if: runner.os == 'macOS'
+        run: cargo test --test integration stdio_pipeline -- --test-threads=1
       - name: test
         run: cargo test --workspace
+      - name: Collect macOS crash reports
+        if: failure() && runner.os == 'macOS'
+        shell: bash
+        run: bash .github/scripts/collect-macos-crash-reports.sh "$RUNNER_TEMP/macos-crash-diagnostics/test-start" "$RUNNER_TEMP/macos-crash-diagnostics"
+      - name: Upload macOS failure diagnostics
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-failure-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/macos-crash-diagnostics
+          retention-days: 7
+          if-no-files-found: warn
       - name: self-check
         env:
           CODESIGHT_INDEX_DIR: ${{ runner.temp }}/codesight-index
