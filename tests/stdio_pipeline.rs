@@ -34,6 +34,98 @@ fn blocking_stdio_initialized_notification_followed_by_request_does_not_stall() 
     pipeline(true);
 }
 
+#[cfg(target_os = "macos")]
+fn sample_stalled_child(pid: u32) -> String {
+    let capture = || -> std::io::Result<String> {
+        let mut output = tempfile::NamedTempFile::new()?;
+        let mut diagnostics = tempfile::tempfile()?;
+        let mut sample = Server(
+            Command::new("/usr/bin/sample")
+                .args([pid.to_string(), "1".into(), "-file".into()])
+                .arg(output.path())
+                .stdin(Stdio::null())
+                .stdout(Stdio::from(diagnostics.try_clone()?))
+                .stderr(Stdio::from(diagnostics.try_clone()?))
+                .spawn()?,
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let (status, timed_out) = loop {
+            if let Some(status) = sample.0.try_wait()? {
+                break (status, false);
+            }
+            if std::time::Instant::now() >= deadline {
+                sample.0.kill()?;
+                break (sample.0.wait()?, true);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let mut captured = Vec::new();
+        let mut sizes = Vec::new();
+        for file in [output.as_file_mut(), &mut diagnostics] {
+            let original_bytes = file.metadata()?.len();
+            file.set_len(original_bytes.min(64 * 1024))?;
+            file.seek(SeekFrom::Start(0))?;
+            file.read_to_end(&mut captured)?;
+            sizes.push(original_bytes);
+        }
+        Ok(format!(
+            "command=/usr/bin/sample {pid} 1 -file <tempfile>; status={status}; \
+             timed_out={timed_out}; original_file_bytes={sizes:?}; cap=128KiB; output={}",
+            String::from_utf8_lossy(&captured)
+        ))
+    };
+    capture().unwrap_or_else(|error| format!("/usr/bin/sample {pid}: diagnostic failed: {error}"))
+}
+
+#[cfg(target_os = "linux")]
+fn sample_stalled_child(pid: u32) -> String {
+    let mut captured = Vec::new();
+    let mut append = |bytes: &[u8]| {
+        let count = bytes
+            .len()
+            .min((128 * 1024usize).saturating_sub(captured.len()));
+        captured.extend_from_slice(&bytes[..count]);
+    };
+    let directory = format!("/proc/{pid}/task");
+    match std::fs::read_dir(&directory) {
+        Err(error) => append(format!("{directory}: {error}\n").as_bytes()),
+        Ok(tasks) => {
+            let mut remaining_read = 128 * 1024;
+            'tasks: for entry in tasks.take(128) {
+                let task = match entry {
+                    Ok(entry) => entry.path(),
+                    Err(error) => {
+                        append(format!("task entry: {error}\n").as_bytes());
+                        continue;
+                    }
+                };
+                for name in ["comm", "wchan", "syscall", "stack", "status"] {
+                    if remaining_read == 0 {
+                        break 'tasks;
+                    }
+                    let path = task.join(name);
+                    append(format!("\n{} (cap=8KiB):\n", path.display()).as_bytes());
+                    let mut bytes = Vec::new();
+                    match std::fs::File::open(path).and_then(|file| {
+                        file.take(remaining_read.min(8 * 1024))
+                            .read_to_end(&mut bytes)
+                    }) {
+                        Ok(count) => {
+                            remaining_read -= count as u64;
+                            append(&bytes);
+                        }
+                        Err(error) => append(format!("read error: {error}\n").as_bytes()),
+                    }
+                }
+            }
+        }
+    }
+    format!(
+        "Linux proc task snapshot; cap=128KiB; {}",
+        String::from_utf8_lossy(&captured)
+    )
+}
+
 fn pipeline(blocking_stdio: bool) {
     let workspace = tempfile::tempdir().unwrap();
     for iteration in 0..25 {
@@ -74,20 +166,30 @@ fn pipeline(blocking_stdio: bool) {
         let mut stdin = server.0.stdin.take().unwrap();
         let mut prior_responses = Vec::new();
         let mut receive = |stage| {
-            let response = rx.recv_timeout(Duration::from_secs(5)).unwrap_or_else(|error| {
-                let status = server.0.try_wait();
-                let _ = server.0.kill();
-                let _ = server.0.wait();
-                stderr.seek(SeekFrom::Start(0)).unwrap();
-                let mut logs = String::new();
-                stderr.read_to_string(&mut logs).unwrap();
-                let bytes = raw_stdout.lock().unwrap();
-                panic!(
-                    "{stage}: {error}; iteration={iteration}; child_status={status:?}; \
-                     prior_responses={prior_responses:?}; stdout_bytes={}; raw_stdout={:?}; stderr={logs}",
-                    bytes.len(), String::from_utf8_lossy(&bytes)
-                );
-            }).unwrap();
+            let response = rx
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap_or_else(|error| {
+                    let status = server.0.try_wait();
+                    let bytes = raw_stdout.lock().unwrap().clone();
+                    // Sampling follows a failed receive; it never extends the MCP deadline.
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    let native_sample = sample_stalled_child(server.0.id());
+                    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+                    let native_sample = "not available on this platform";
+                    let _ = server.0.kill();
+                    let _ = server.0.wait();
+                    stderr.seek(SeekFrom::Start(0)).unwrap();
+                    let mut logs = String::new();
+                    stderr.read_to_string(&mut logs).unwrap();
+                    panic!(
+                        "{stage}: {error}; iteration={iteration}; child_status={status:?}; \
+                     prior_responses={prior_responses:?}; stdout_bytes={}; raw_stdout={:?}; \
+                     stderr={logs}; native_sample={native_sample}",
+                        bytes.len(),
+                        String::from_utf8_lossy(&bytes)
+                    );
+                })
+                .unwrap();
             prior_responses.push(response.clone());
             response
         };
