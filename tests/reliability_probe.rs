@@ -419,6 +419,42 @@ fn probe_impact_unresolved_structured_ref_is_not_found() {
 }
 
 #[test]
+fn diagnostic_empty_impact_never_establishes_safety() {
+    let env = build_env();
+    let known = env
+        .svc
+        .dispatch(
+            "impact",
+            json!({"analysis":"blast_radius", "ref":"target.py::target#function"}),
+        )
+        .unwrap();
+    assert!(
+        known["data"]["symbol_scoped_file_count"].as_u64().unwrap() > 0,
+        "{known}"
+    );
+    for args in [
+        json!({"analysis":"blast_radius", "ref":"no_such_identifier_anywhere"}),
+        json!({"analysis":"blast_radius", "ref":"target.py::target#function", "limit":0}),
+    ] {
+        let response = env.svc.dispatch("impact", args).unwrap();
+        eprintln!("empty impact: {} ms", response["_meta"]["timing_ms"]);
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(
+            response["data"]["symbol_scoped_files"],
+            json!([]),
+            "{response}"
+        );
+        assert_eq!(
+            response["data"]["symbol_scoped_file_count"], 0,
+            "{response}"
+        );
+        assert_eq!(response["_meta"]["confidence"], "partial", "{response}");
+        assert_eq!(response["data"]["status"], "incomplete", "{response}");
+        assert_eq!(response["data"]["complete"], false, "{response}");
+    }
+}
+
+#[test]
 fn probe_impact_rename_safety_invariants() {
     let env = build_env();
     let r = env
@@ -626,6 +662,23 @@ fn diagnostic_reference_and_impact_exclude_comment_string_only_files() {
     assert!(files.iter().any(|v| v == "caller.py"), "{r}");
     assert!(files.iter().any(|v| v == "caller2.py"), "{r}");
     assert_eq!(r["_meta"]["confidence"], "partial", "{r}");
+    assert_eq!(r["data"]["complete"], false, "{r}");
+    let weak = env
+        .svc
+        .dispatch("impact", json!({"analysis":"blast_radius", "ref":"NEEDLE"}))
+        .unwrap();
+    assert_eq!(weak["data"]["symbol_scoped_files"], json!([]), "{weak}");
+    assert!(
+        weak["data"]["weak_files_text_mentions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "lines.py"),
+        "{weak}"
+    );
+    assert_eq!(weak["_meta"]["confidence"], "unreliable", "{weak}");
+    assert_eq!(weak["data"]["status"], "incomplete", "{weak}");
+    assert_eq!(weak["data"]["complete"], false, "{weak}");
 }
 
 #[test]

@@ -95,7 +95,7 @@
   {
     "name": "impact",
     "capabilities_version": "v3",
-    "description": "Change-oriented analyses backed by the structural reference graph. `analysis=blast_radius` returns candidate files containing definitions or name-matched grammar identifiers with partial confidence (not binding resolution; comments/string contents remain separate weak mentions; text-only evidence has unreliable confidence; never returns file-importer counts). `analysis=rename_safety` reports name-based collision candidates but cannot establish binding completeness: `safe: null`, `status: \"undecided\"`, `complete: false`, partial confidence. `identifier_match_pct` is the fraction of syntax rather than weak text candidates, never a safety/coverage guarantee.",
+    "description": "Change-oriented analyses backed by the structural reference graph. `analysis=blast_radius` returns candidate files containing definitions or name-matched grammar identifiers with partial confidence (not binding resolution; comments/string contents remain separate weak mentions; text-only evidence has unreliable confidence; never returns file-importer counts). Successful blast-radius results carry `status: \"incomplete\"` and `complete: false`; empty matches or `limit: 0` do not prove absence of impact. `analysis=rename_safety` reports name-based collision candidates but cannot establish binding completeness: `safe: null`, `status: \"undecided\"`, `complete: false`, partial confidence. `identifier_match_pct` is the fraction of syntax rather than weak text candidates, never a safety/coverage guarantee.",
     "inputSchema": {
       "type": "object",
       "required": ["analysis", "ref"],

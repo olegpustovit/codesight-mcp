@@ -1,5 +1,24 @@
 # Worklog
 
+## 2026-10-21 — empty impact results remain incomplete
+
+Blast-radius confidence now describes collected evidence before applying the
+requested file limit. Empty name searches and a zero limit cannot establish
+safety: successful results carry `status: incomplete` and `complete: false`.
+Name-based candidates remain partial, text-only evidence remains unreliable,
+and unresolved structured references still return `NOT_FOUND`.
+
+Four focused controls passed, one test each: empty/zero-limit results,
+nonempty and weak-only evidence, structured-symbol impact, and missing
+structured references. Workspace/all-target clippy and formatting passed.
+The new empty-query dispatch timings were 0.20/0.23 ms; these are internal
+dispatch measurements, not end-to-end SLA measurements.
+
+Slow-test list: the four fixture tests took 2.70/3.44/4.08/1.96 s, each above
+one second. Plan: reduce repeated cold fixture initialization while retaining
+isolated state and every public-response assertion; do not ignore cases or
+weaken checks to reduce setup time.
+
 ## 2026-10-21 — diagnostic development fixes
 
 The five development findings from the SANER preparation were reproduced as

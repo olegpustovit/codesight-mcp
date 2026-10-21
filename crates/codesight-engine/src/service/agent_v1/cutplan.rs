@@ -710,6 +710,13 @@ impl CodeService {
             }
         }
 
+        // Classify the evidence before limiting it; an empty name search
+        // cannot establish that a change has no impact.
+        let confidence = if files.is_empty() && !weak_files.is_empty() {
+            "unreliable"
+        } else {
+            "partial"
+        };
         let mut sorted: Vec<String> = files.into_iter().collect();
         sorted.sort();
         if let Some(limit) = args.limit {
@@ -719,18 +726,10 @@ impl CodeService {
         let mut weak_sorted: Vec<String> = weak_files.into_iter().collect();
         weak_sorted.sort();
 
-        // Identifier candidates remain partial; text-only evidence is unreliable
-        // and only weak text mentions exist (CUTPLAN §impact contract).
-        let confidence = if count > 0 {
-            "partial"
-        } else if !weak_sorted.is_empty() {
-            "unreliable"
-        } else {
-            "safe"
-        };
-
         let mut body = json!({
             "analysis": "blast_radius",
+            "status": "incomplete",
+            "complete": false,
             "identifier": identifier,
             "symbol_scoped_files": sorted,
             "symbol_scoped_file_count": count,
