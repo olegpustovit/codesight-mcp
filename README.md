@@ -17,94 +17,158 @@ error. It never gets a file-level guess presented as an answer.
   vendored static embedding model (`potion-base-8M`, MIT) compiled into the
   binary.
 
-## Build
+## Install a prebuilt release
 
-Requirements: stable Rust with edition 2024 support, a C and C++ compiler
-(`cc`/`c++`, for tree-sitter grammars and `esaxx-rs`), and `git` on `PATH`.
-SQLite is bundled.
-
-```sh
-cargo install --path .        # installs ~/.cargo/bin/codesight-mcp
-# or
-cargo build --release         # target/release/codesight-mcp
-```
-
-On an 8-core Debian 13 box with Rust 1.99.1 and dependencies already compiled,
-`cargo build --release` took 2 min 42 s (the release profile uses fat LTO with
-one codegen unit). The release binary is 91 MB; 30 MB of that is the embedded
-model.
-
-## Quick start
-
-Tools take no `source_id`. The server indexes the repository at its working
-directory, and the first tool call indexes it automatically if needed. That
-first call can time out on a large repository, so index ahead of time:
+Linux and macOS users do not need Rust. Download the pinned installer, then run
+it to install **v0.1.1** in `~/.local/bin`:
 
 ```sh
-cd /path/to/repo
-codesight-mcp ingest .        # prints the ingest envelope as JSON
-codesight-mcp check --workspace .
+curl -fL https://github.com/olegpustovit/codesight-mcp/releases/download/v0.1.1/install.sh -o /tmp/codesight-install.sh
+sh /tmp/codesight-install.sh v0.1.1
+"$HOME/.local/bin/codesight-mcp" --version
 ```
 
-Indexing this repository (494 code files, 14 doc files, 4,791 symbols) took
-about 5.5 s with a debug build. The index lives under `CODESIGHT_INDEX_DIR`, or
-by default the OS data directory: `~/.local/share/codesight-mcp` on Linux,
-`~/Library/Application Support/codesight-mcp` on macOS. Nothing is written
-into the repository.
+The installer detects your OS and architecture, downloads the matching archive,
+verifies its SHA-256 checksum, and checks the binary version before replacing an
+existing installation. It requires `curl`, `tar`, and `sha256sum` or `shasum`.
+Set `CODESIGHT_INSTALL_DIR=/absolute/directory` to choose another location.
+Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile for CLI use;
+the client examples below use the absolute path and do not depend on `PATH`.
+
+| Platform | Release archive suffix | Compatibility |
+|---|---|---|
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | Ubuntu 22.04 baseline, glibc 2.35 or newer, standard C/C++ runtime libraries |
+| Linux arm64 | `aarch64-unknown-linux-gnu` | Ubuntu 22.04 baseline, glibc 2.35 or newer, standard C/C++ runtime libraries |
+| macOS Intel | `x86_64-apple-darwin` | Built and smoke-tested on macOS 15 |
+| macOS Apple Silicon | `aarch64-apple-darwin` | Built and smoke-tested on macOS 15 |
+
+macOS binaries are unsigned and not notarized. Earlier macOS versions and
+Windows are not supported by these prebuilt releases. Alpine Linux uses musl
+and cannot run these glibc builds directly.
+
+### Manual download and updates
+
+All archives, per-file checksums and `SHA256SUMS` are on the
+[v0.1.1 release page](https://github.com/olegpustovit/codesight-mcp/releases/tag/v0.1.1).
+For example, on Linux x86_64:
+
+```sh
+archive=codesight-mcp-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
+base=https://github.com/olegpustovit/codesight-mcp/releases/download/v0.1.1
+curl -fLO "$base/$archive"
+curl -fLO "$base/$archive.sha256"
+sha256sum -c "$archive.sha256"   # macOS: shasum -a 256 -c "$archive.sha256"
+tar -xzf "$archive" codesight-mcp
+mkdir -p "$HOME/.local/bin"
+install -m 755 codesight-mcp "$HOME/.local/bin/codesight-mcp"
+```
+
+There is no automatic update. To update, download the installer from the desired
+release and run it with that same version. Running the commands above again
+reinstalls v0.1.1. Restart your MCP client after an update. Archives include the
+license, third-party notices and `BUILD-INFO.txt` with the exact source commit.
+
+## Add Codesight to your coding agent
+
+Choose the repository you want the agent to work on and index it first. Replace
+`/absolute/path/to/your/repo` below. The server keeps its SQLite index outside
+your repository and makes no network or model API calls.
+
+```sh
+cd /absolute/path/to/your/repo
+"$HOME/.local/bin/codesight-mcp" ingest "$PWD"
+"$HOME/.local/bin/codesight-mcp" check --workspace "$PWD"
+```
+
+The first tool call can index automatically, but pre-indexing avoids a cold-call
+timeout on a large repository. By default the index is under
+`~/.local/share/codesight-mcp` on Linux and
+`~/Library/Application Support/codesight-mcp` on macOS;
+`CODESIGHT_INDEX_DIR` overrides that location.
 
 ### Claude Code
 
+Run this from the target repository:
+
 ```sh
-cd /path/to/repo
-codesight-mcp init --claude-code       # writes/merges ./.mcp.json
-# or
-claude mcp add codesight -- "$(command -v codesight-mcp)" serve
+claude mcp add --transport stdio --scope local codesight -- \
+  "$HOME/.local/bin/codesight-mcp" serve --workspace "$PWD"
+claude mcp get codesight
 ```
 
-Resulting `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "codesight": { "command": "/abs/path/to/codesight-mcp", "args": ["serve"] }
-  }
-}
-```
-
-Claude Code starts the server from the directory you run `claude` in. If you
-start it somewhere else, add `"--workspace", "/path/to/repo"` to `args`. Optional hooks that steer Claude Code away from native
-Grep/Glob are in [`plugins/codesight-hooks`](plugins/codesight-hooks/README.md).
+Restart Claude Code and check `/mcp`. The server is configured for this
+repository. See [Claude Code's MCP documentation](https://code.claude.com/docs/en/mcp).
+Optional routing hooks are in
+[`plugins/codesight-hooks`](plugins/codesight-hooks/README.md).
 
 ### Codex
 
-`~/.codex/config.toml` (or a project-scoped `.codex/config.toml`):
+Run this from the target repository:
+
+```sh
+codex mcp add codesight -- "$HOME/.local/bin/codesight-mcp" serve --workspace "$PWD"
+codex mcp list
+```
+
+This adds a server to Codex's user configuration, pinned to this repository.
+Use a different server name for each repository if you keep several configured.
+Restart Codex after adding it. You can instead add this to the repository's
+trusted `.codex/config.toml`, replacing both absolute paths:
 
 ```toml
 [mcp_servers.codesight]
-command = "/abs/path/to/codesight-mcp"
-args = ["serve"]
-cwd = "/path/to/repo"
+command = "/absolute/path/to/.local/bin/codesight-mcp"
+args = ["serve", "--workspace", "/absolute/path/to/your/repo"]
 ```
+
+See [Codex's MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 ### Cursor
 
-Cursor does not guarantee the server's working directory, so pass it
-explicitly. `.cursor/mcp.json` in the repository:
+Create `.cursor/mcp.json` in the target repository. Replace the executable path
+with the absolute path printed by the installer:
 
 ```json
 {
   "mcpServers": {
     "codesight": {
-      "type": "stdio",
-      "command": "/abs/path/to/codesight-mcp",
+      "command": "/absolute/path/to/.local/bin/codesight-mcp",
       "args": ["serve", "--workspace", "${workspaceFolder}"]
     }
   }
 }
 ```
 
-`serve --workspace PATH` changes into `PATH` before serving. Any MCP client can
-use it.
+Restart Cursor, then check the server under MCP settings. See
+[Cursor's MCP documentation](https://cursor.com/docs/mcp).
+`serve --workspace PATH` makes the workspace explicit for any MCP client.
+
+## Build from source
+
+Requirements: stable Rust with edition 2024 support, a C and C++ compiler
+(`cc`/`c++`, for tree-sitter grammars and `esaxx-rs`), and `git` on `PATH`.
+SQLite is bundled. From a checkout of this repository:
+
+```sh
+cargo install --locked --path .   # installs ~/.cargo/bin/codesight-mcp
+# or
+cargo build --locked --release --bin codesight-mcp
+```
+
+The release profile uses LTO with one codegen unit. No profile overrides are
+applied to the prebuilt releases. Native release builds run in GitHub Actions;
+each binary must pass version, fresh-index, MCP handshake, six-tool discovery,
+outline/read content and installer checks before publication.
+
+## Paper and reproduction package
+
+The [SANER 2027 Tool Demo paper and artifact release](https://github.com/olegpustovit/codesight-mcp/releases/tag/saner-2027-artifact-v1)
+contains the paper PDF, LaTeX manuscript source (`codesight-source.zip`),
+reproduction archive and checksums. GitHub’s automatic **Source code** downloads
+on that release contain the measured software snapshot. This is a submission
+candidate, with no claim of submission or acceptance. The reported study uses revision `5d0f620adda96e2d39b2259e188a48e318ad4208`; later fixes and v0.1.1
+have not been reevaluated in that study. Use that release’s automatic software source download to
+reproduce the paper and v0.1.1 for the current installable tool.
 
 ## Tools
 
@@ -262,8 +326,10 @@ These were observed on this repository while preparing v0.1.0:
   `STALE_ID` until reindex completes; retry the read. This check reads the source
   file and adds I/O compared with an unchecked cached body.
 
-- **Platforms.** These changes were built and tested on Linux arm64.
-  macOS and Windows runtime behavior was not verified in this validation.
+- **Platforms.** The older validation described above ran on Linux arm64.
+  Native release smoke checks cover the four platforms in the installation
+  table; those smoke checks do not replace the paper study or establish
+  complete behavior on every platform.
 
 ## Repository layout
 

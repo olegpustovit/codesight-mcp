@@ -12,7 +12,7 @@ resolver = "2"
 
 [package]
 name = "codesight-mcp"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Token-efficient code & documentation retrieval MCP server with AST-based symbol extraction"
 license = "Apache-2.0"

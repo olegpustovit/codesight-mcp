@@ -359,7 +359,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "codesight-analysis"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "codesight-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phf",
  "rustc-hash",
@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "codesight-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "codesight-language-support"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "codesight-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "codesight-retrieval"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -534,7 +534,7 @@ dependencies = [
 
 [[package]]
 name = "codesight-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "codesight-core",

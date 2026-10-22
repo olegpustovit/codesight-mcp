@@ -1,0 +1,120 @@
+name: Native release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+    env:
+      CARGO_BUILD_JOBS: '1'
+      MACOSX_DEPLOYMENT_TARGET: '15.0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      - name: Release metadata
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then test "$GITHUB_REF_NAME" = "v$version"; fi
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "$TARGET"
+          echo "RELEASE_VERSION=v$version" >> "$GITHUB_ENV"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+      - name: Build native release (unchanged release profile)
+        run: cargo build --locked --release --bin codesight-mcp
+      - name: Native MCP smoke
+        run: uv run scripts/release_smoke.py target/release/codesight-mcp
+      - name: Native installer and failed-update checks
+        run: uv run scripts/test_installer.py --binary target/release/codesight-mcp
+      - name: Package and checksum
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist package
+          cp target/release/codesight-mcp LICENSE NOTICE package/
+          {
+            echo "version=$RELEASE_VERSION"
+            echo "commit=$(git rev-parse HEAD)"
+            echo "target=$TARGET"
+            echo "runner=$RUNNER_OS/$RUNNER_ARCH"
+            rustc -vV
+            if [[ "$RUNNER_OS" == Linux ]]; then ldd target/release/codesight-mcp; else otool -L target/release/codesight-mcp; fi
+            file target/release/codesight-mcp
+          } > package/BUILD-INFO.txt
+          archive="codesight-mcp-$RELEASE_VERSION-$TARGET.tar.gz"
+          tar -czf "dist/$archive" -C package codesight-mcp LICENSE NOTICE BUILD-INFO.txt
+          cd dist
+          shasum -a 256 "$archive" > "$archive.sha256"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: native-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: native-*
+          path: dist
+          merge-multiple: true
+      - name: Publish verified native release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -name '*.tar.gz' | wc -l)" -eq 4
+          (cd dist && cat ./*.sha256 > SHA256SUMS && sha256sum -c SHA256SUMS)
+          cp install.sh dist/install.sh
+          cat > release-notes.md <<'NOTES'
+          Prebuilt Codesight MCP for Linux x86_64/arm64 (glibc 2.35 or newer) and macOS Intel/Apple Silicon (macOS 15 or newer). No Rust installation required.
+
+          Every native binary passed --version, fresh indexing, MCP initialize, six-tool discovery, outline/read content, and installer tamper/failed-update checks before publication. Archives include LICENSE, NOTICE and BUILD-INFO.txt with the exact source commit and compiler.
+
+          See the repository README for checksum-verified installation and Claude Code, Codex and Cursor setup. The installer defaults to ~/.local/bin and accepts an explicit version. Linux requires the standard C/C++ runtime libraries. macOS binaries are not signed or notarized.
+
+          Paper, measured source and reproduction package: https://github.com/olegpustovit/codesight-mcp/releases/tag/saner-2027-artifact-v1. That study evaluates an earlier revision; later fixes and this release have not been reevaluated in the paper.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "Codesight MCP $GITHUB_REF_NAME" --notes-file release-notes.md --latest

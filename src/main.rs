@@ -16,7 +16,7 @@ enum LogFormat {
 }
 
 #[derive(Parser)]
-#[command(name = "codesight-mcp", about = "MCP server (stdio JSON-RPC)")]
+#[command(name = "codesight-mcp", version, about = "MCP server (stdio JSON-RPC)")]
 struct Args {
     /// Log output format (stderr only; JSON-RPC stays on stdout).
     #[arg(long, value_enum, default_value_t = LogFormat::Pretty, env = "CODESIGHT_LOG_FORMAT")]
