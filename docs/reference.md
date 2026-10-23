@@ -146,7 +146,7 @@ outline/read content and installer checks before publication.
 ## Paper and reproduction package
 
 The [SANER 2027 Tool Demo paper and artifact release](https://github.com/olegpustovit/dowser-mcp/releases/tag/saner-2027-artifact-v2)
-contains the paper PDF, LaTeX manuscript source archive,
+contains the paper PDF, LaTeX manuscript source (`dowser-source.zip`),
 reproduction archive and checksums. The reported study uses revision
 `5d0f620adda96e2d39b2259e188a48e318ad4208`. GitHub’s automatic **Source code**
 downloads on that release, and the tag `evaluated-5d0f620`, contain that revision
