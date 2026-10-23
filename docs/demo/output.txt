@@ -1,0 +1,18 @@
+Actual stdio MCP server with a synthetic JavaScript file
+
+Tools: search, outline, read, references, impact, health
+
+outline math.js
+  calculateTotal at lines 1-3
+  Reported confidence: safe
+
+read math.js:1-3
+export function calculateTotal(quantity, unitPrice) {
+  return quantity * unitPrice;
+}
+
+impact missing.js::calculateTotal#function
+  ok: false
+  Error code: NOT_FOUND
+
+Raw envelopes are saved in results.json.

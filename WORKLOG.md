@@ -202,3 +202,7 @@ fields. Focused validation passed: two analysis-health tests, the gate control
 test, and the stdio pipeline diagnostic. Workspace/all-target clippy with warnings
 denied and formatting checks passed. This is targeted validation, not a new full
 workspace or macOS CI pass.
+
+## Repository presentation check, 23 October 2026
+
+Source build and a synthetic stdio MCP fixture passed on Linux ARM64. The fixture checks tool discovery, file outline, line reading and a missing structured reference. No engine behavior changed. For source navigation, a debug ingest of this public checkout reported 512 code files, 17 docs and 4944 symbols in 10498.81 ms. This run exceeds the existing cold-ingest target; disk pressure, debug mode and this single observation do not establish a release regression or a benchmark. No latency or token-saving claim was added. See docs/demo for reproduction and limits.

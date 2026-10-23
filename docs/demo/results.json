@@ -1,0 +1,93 @@
+{
+  "tools": [
+    "search",
+    "outline",
+    "read",
+    "references",
+    "impact",
+    "health"
+  ],
+  "outline": {
+    "_meta": {
+      "confidence": "safe",
+      "timing_ms": 0.67,
+      "tokens_saved": 0
+    },
+    "data": {
+      "items": [
+        {
+          "end_line": 3,
+          "id": "math.js::calculateTotal#function",
+          "kind": "function",
+          "line": 1,
+          "name": "calculateTotal",
+          "signature": "function calculateTotal(quantity, unitPrice) {"
+        }
+      ],
+      "language": "javascript",
+      "path": "math.js",
+      "symbol_count": 1,
+      "view": "file_outline"
+    },
+    "ok": true,
+    "warnings": []
+  },
+  "read": {
+    "_meta": {
+      "confidence": "safe",
+      "timing_ms": 0.63,
+      "tokens_saved": 0
+    },
+    "data": {
+      "items": [
+        {
+          "content": "export function calculateTotal(quantity, unitPrice) {\n  return quantity * unitPrice;\n}",
+          "end_line": 3,
+          "end_line_clamped": false,
+          "file": "math.js",
+          "language": "javascript",
+          "line_count": 3,
+          "read_scope": "file_range",
+          "ref": {
+            "domain": "code",
+            "kind": "file",
+            "path": "math.js",
+            "source_id": "local/workspace-f47968d4"
+          },
+          "size_bytes": 87,
+          "source_id": "local/workspace-f47968d4",
+          "start_line": 1,
+          "start_line_clamped": false,
+          "warnings": []
+        }
+      ]
+    },
+    "ok": true,
+    "warnings": []
+  },
+  "missing": {
+    "_meta": {
+      "error_category": "not_found",
+      "timing_ms": 0.14
+    },
+    "data": {
+      "detail": {
+        "identifier": "calculateTotal",
+        "path": "missing.js",
+        "ref": "missing.js::calculateTotal#function"
+      }
+    },
+    "error": {
+      "category": "not_found",
+      "code": "NOT_FOUND",
+      "detail": {
+        "identifier": "calculateTotal",
+        "path": "missing.js",
+        "ref": "missing.js::calculateTotal#function"
+      },
+      "message": "ref 'missing.js::calculateTotal#function' does not resolve to an indexed symbol: file is not in the index"
+    },
+    "ok": false,
+    "warnings": []
+  }
+}

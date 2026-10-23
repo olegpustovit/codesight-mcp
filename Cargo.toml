@@ -14,7 +14,7 @@ resolver = "2"
 name = "codesight-mcp"
 version = "0.1.1"
 edition = "2024"
-description = "Token-efficient code & documentation retrieval MCP server with AST-based symbol extraction"
+description = "Local MCP server for indexed source-code search and reading"
 license = "Apache-2.0"
 # Every tests/*.rs would otherwise compile as its own binary (85 link steps,
 # each pulling the full engine+tokio+rmcp graph). One consolidated binary
