@@ -6,7 +6,7 @@ a routing policy that steers agents toward structured retrieval.
 ## Install
 
 ```bash
-agentpack add path/to/plugins/symslice-mcp
+agentpack add olegpustovit/symslice-mcp/plugins/symslice-mcp
 agentpack sync
 ```
 

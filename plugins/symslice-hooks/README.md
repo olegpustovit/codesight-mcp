@@ -6,7 +6,7 @@ tool calls and steers toward symslice structured retrieval.
 ## Install
 
 ```bash
-agentpack add path/to/plugins/symslice-hooks
+agentpack add olegpustovit/symslice-mcp/plugins/symslice-hooks
 agentpack sync
 ```
 
