@@ -3,11 +3,11 @@
 //! and the rendered lines must round-trip back through the language's
 //! `extract_imports` parser to the same structured edges.
 
-use dowser_language_support::builtin_registry;
-use dowser_language_support::imports_types::ImportEdge;
 use std::path::Path;
+use symslice_language_support::builtin_registry;
+use symslice_language_support::imports_types::ImportEdge;
 
-fn lang_for(path: &str) -> &'static dyn dowser_language_support::traits::Language {
+fn lang_for(path: &str) -> &'static dyn symslice_language_support::traits::Language {
     builtin_registry()
         .for_path(Path::new(path))
         .expect("language registered")

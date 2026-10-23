@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
-use dowser_engine::service::agent_v1::warnings::ALL_CODES as WARNING_CODES;
+use symslice_engine::service::agent_v1::warnings::ALL_CODES as WARNING_CODES;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -26,7 +26,7 @@ fn read_doc(rel: &str) -> String {
 }
 
 fn tools_json() -> Vec<serde_json::Value> {
-    let raw = read_doc("crates/dowser-engine/src/tools.json");
+    let raw = read_doc("crates/symslice-engine/src/tools.json");
     serde_json::from_str(&raw).expect("tools.json is valid JSON")
 }
 
@@ -84,8 +84,8 @@ const VARIANT_KEYS: &[&str] = &["mode", "view", "kind", "analysis", "graph"];
 const DOCS: &[&str] = &[
     "AGENTS.md",
     "README.md",
-    "plugins/dowser-mcp/rules/dowser-routing.mdc",
-    "plugins/dowser-mcp-dev/rules/dowser-routing.mdc",
+    "plugins/symslice-mcp/rules/symslice-routing.mdc",
+    "plugins/symslice-mcp-dev/rules/symslice-routing.mdc",
 ];
 
 #[test]
@@ -133,7 +133,7 @@ fn warning_codes_in_docs_are_declared() {
             assert!(
                 declared.contains(code.as_str()),
                 "{doc_path} mentions warning code `{code}` but it isn't declared in \
-                 dowser_engine::service::agent_v1::warnings::ALL_CODES"
+                 symslice_engine::service::agent_v1::warnings::ALL_CODES"
             );
         }
     }
@@ -144,7 +144,7 @@ fn every_tool_in_tools_json_appears_in_routing_skill() {
     // Reverse drift: a new tool added to tools.json must show up in the
     // routing skill so callers know it exists.
     let (names, _) = canonical_surface();
-    let body = read_doc("plugins/dowser-mcp/rules/dowser-routing.mdc");
+    let body = read_doc("plugins/symslice-mcp/rules/symslice-routing.mdc");
     for name in &names {
         let backticked = format!("`{name}`");
         assert!(
@@ -194,7 +194,7 @@ fn extract_warning_codes(body: &str) -> Vec<String> {
             .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
             .collect();
         // Environment variables and documented per-ref errors are not warnings.
-        let is_env_var = token.starts_with("DOWSER_") || token == "RUST_LOG";
+        let is_env_var = token.starts_with("SYMSLICE_") || token == "RUST_LOG";
         if token.len() >= 5
             && token.contains('_')
             && !is_env_var

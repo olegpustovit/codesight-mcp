@@ -1,0 +1,3 @@
+name = "symslice-mcp"
+version = "0.2.0"
+description = "MCP server registration and routing policy for symslice-mcp"

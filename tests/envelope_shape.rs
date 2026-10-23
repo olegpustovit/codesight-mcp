@@ -3,9 +3,9 @@
 use std::collections::BTreeSet;
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
 use serde_json::{Value, json};
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
 use tempfile::tempdir;
 
 fn build_service() -> (CodeService, tempfile::TempDir) {
@@ -14,7 +14,7 @@ fn build_service() -> (CodeService, tempfile::TempDir) {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("main.py"), "def hello():\n    return 1\n").unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     (svc, ws)
 }

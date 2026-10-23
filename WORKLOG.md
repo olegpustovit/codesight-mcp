@@ -165,7 +165,7 @@ spans match an independent JSON check. This is development verification, not a
 claim about every possible input or independent benchmark performance.
 
 Focused import-quality and opt-in logging checks passed. Optional
-`DOWSER_INGEST_DIAGNOSTICS=1` emits phase/file counts, grammar identity and Linux
+`SYMSLICE_INGEST_DIAGNOSTICS=1` emits phase/file counts, grammar identity and Linux
 RSS to tracing without source text. It is off by default; no data exclusion or
 arbitrary size cap was introduced. Real-process logging and public-read tests take
 several seconds and remain tracked as slow tests.

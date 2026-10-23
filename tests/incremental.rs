@@ -2,9 +2,9 @@
 
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
 use serde_json::{Value, json};
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
 use tempfile::tempdir;
 
 #[test]
@@ -45,7 +45,7 @@ fn ingest(svc: &CodeService, root: &std::path::Path, incremental: bool) -> Value
 /// pollute the crawled file set.
 fn make_svc() -> (tempfile::TempDir, CodeService) {
     let idx_dir = tempdir().unwrap();
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(
         idx_dir.path().to_path_buf(),
     ))
     .unwrap();
@@ -322,7 +322,8 @@ fn case_same_basename_folders_distinct_source_ids() {
     .unwrap();
 
     let idx_path = ws.path().join("idx");
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(idx_path)).unwrap();
+    let svc =
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(idx_path)).unwrap();
 
     let r_left = svc
         .dispatch(

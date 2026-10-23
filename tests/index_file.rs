@@ -2,9 +2,9 @@
 
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_storage::db;
 use serde_json::json;
+use symslice_engine::config::AppConfig;
+use symslice_storage::db;
 use tempfile::tempdir;
 
 #[test]
@@ -26,7 +26,7 @@ fn run_all() {
 fn run_file_not_found() {
     let workspace = tempdir().unwrap();
     let idx = workspace.path().join("index");
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
     let ghost = workspace.path().join("nope.py");
     let r = svc
         .dispatch(
@@ -52,7 +52,7 @@ fn run_path_not_a_file() {
     let src = workspace.path().join("src");
     fs::create_dir_all(&src).unwrap();
     let idx = workspace.path().join("index");
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",
@@ -80,7 +80,7 @@ fn run_index_changed_file() {
     fs::write(src.join("util.py"), "def noop():\n    pass\n").unwrap();
 
     let idx = workspace.path().join("index");
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
     let r1 = svc
         .dispatch(
             "ingest_sources",
@@ -148,7 +148,7 @@ fn run_index_new_file() {
     fs::write(src.join("hello.py"), "def hello():\n    return 'hi'\n").unwrap();
 
     let idx = workspace.path().join("index");
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
     let r1 = svc
         .dispatch(
             "ingest_sources",
@@ -187,7 +187,7 @@ fn run_unchanged_reingest_stable_counts() {
     fs::write(&py, "def hello():\n    return 'hi'\n").unwrap();
 
     let idx = workspace.path().join("index");
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
     let r1 = svc
         .dispatch(
             "ingest_sources",
@@ -225,7 +225,7 @@ fn run_mtime_persisted_in_sqlite() {
 
     let idx = workspace.path().join("index");
     let cfg = AppConfig::new(idx);
-    let svc = dowser_mcp::test_support::make_service_from_config(cfg.clone()).unwrap();
+    let svc = symslice_mcp::test_support::make_service_from_config(cfg.clone()).unwrap();
     let r1 = svc
         .dispatch(
             "ingest_sources",
@@ -281,7 +281,7 @@ fn run_no_matching_index_single_file_ingest() {
     fs::write(&py_file, "def hello():\n    return 'hi'\n").unwrap();
 
     let idx = workspace.path().join("index");
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
 
     // No folder has been indexed yet — try single_file ingest
     let r = svc
@@ -327,7 +327,7 @@ fn run_unsupported_file_type_single_file_ingest() {
     fs::write(src.join("hello.py"), "def hello():\n    return 'hi'\n").unwrap();
 
     let idx = workspace.path().join("index");
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(idx)).unwrap();
 
     // First index the folder so there is an existing index
     let r1 = svc

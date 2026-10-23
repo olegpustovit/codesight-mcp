@@ -1,0 +1,9 @@
+---
+description: symslice-hooks active — native Read/Grep/Glob intercepted
+alwaysApply: true
+---
+
+symslice-hooks are active in this workspace. Native Read, Grep, Glob, and
+Bash code-exploration calls are intercepted and redirected to symslice-mcp
+tools. If a hook warns or blocks, follow its suggestion — it's pointing to
+a cheaper, structured alternative.

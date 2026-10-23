@@ -8,7 +8,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 fn cargo_bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_dowser-mcp"))
+    Command::new(env!("CARGO_BIN_EXE_symslice-mcp"))
 }
 
 fn run_hook(subcommand: &str, input: &str) -> (i32, String, String) {
@@ -18,7 +18,7 @@ fn run_hook(subcommand: &str, input: &str) -> (i32, String, String) {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("failed to spawn dowser-mcp");
+        .expect("failed to spawn symslice-mcp");
 
     if let Some(ref mut stdin) = child.stdin {
         stdin.write_all(input.as_bytes()).unwrap();
@@ -86,7 +86,7 @@ fn pretooluse_read_small_code_file_silent() {
     // Filter out tracing noise — only check for hook-specific output.
     let hook_stderr: String = stderr
         .lines()
-        .filter(|l| l.contains("dowser-hooks"))
+        .filter(|l| l.contains("symslice-hooks"))
         .collect();
     assert!(
         hook_stderr.is_empty(),
@@ -112,7 +112,7 @@ fn pretooluse_read_noncode_file_silent() {
     assert_eq!(code, 0);
     let hook_stderr: String = stderr
         .lines()
-        .filter(|l| l.contains("dowser-hooks"))
+        .filter(|l| l.contains("symslice-hooks"))
         .collect();
     assert!(
         hook_stderr.is_empty(),
@@ -140,7 +140,7 @@ fn pretooluse_read_with_offset_limit_silent() {
     assert_eq!(code, 0);
     let hook_stderr: String = stderr
         .lines()
-        .filter(|l| l.contains("dowser-hooks"))
+        .filter(|l| l.contains("symslice-hooks"))
         .collect();
     assert!(
         hook_stderr.is_empty(),
@@ -250,7 +250,7 @@ fn pretooluse_bash_safe_command_silent() {
     assert_eq!(code, 0);
     let hook_stderr: String = stderr
         .lines()
-        .filter(|l| l.contains("dowser-hooks"))
+        .filter(|l| l.contains("symslice-hooks"))
         .collect();
     assert!(
         hook_stderr.is_empty(),
@@ -315,7 +315,7 @@ fn precompact_returns_session_snapshot() {
         .as_str()
         .unwrap();
     assert!(
-        ctx.contains("dowser session snapshot"),
+        ctx.contains("symslice session snapshot"),
         "snapshot should contain header: {ctx}"
     );
 }

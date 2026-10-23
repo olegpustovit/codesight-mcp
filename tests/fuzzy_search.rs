@@ -2,10 +2,10 @@
 
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
-use dowser_retrieval::fuzzy::{fuzzy_rank, fuzzy_score};
 use serde_json::json;
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
+use symslice_retrieval::fuzzy::{fuzzy_rank, fuzzy_score};
 use tempfile::tempdir;
 
 #[test]
@@ -56,7 +56,7 @@ fn typo_finds_nearest_symbol() {
     // assert the lane array is present and carries the nucleo-ranked hit.
     let workspace = tempdir().unwrap();
     let root = setup_fuzzy_demo_repo(workspace.path());
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(
         workspace.path().join("idx"),
     ))
     .unwrap();
@@ -189,7 +189,7 @@ fn symbol_names_from_search(data: &serde_json::Value) -> Vec<String> {
 fn case_fuzzy_integration_cases() {
     let workspace = tempdir().unwrap();
     let root = setup_fuzzy_demo_repo(workspace.path());
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(
         workspace.path().join("idx"),
     ))
     .unwrap();

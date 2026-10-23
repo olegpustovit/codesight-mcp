@@ -1,6 +1,6 @@
 //! Integration tests: path map.
 
-use dowser_engine::path_map::{parse_path_map, remap};
+use symslice_engine::path_map::{parse_path_map, remap};
 
 // ===========================================================================
 // parse_path_map tests (9 tests)
@@ -156,7 +156,7 @@ fn remap_does_not_match_across_directory_boundary() {
 
 #[test]
 fn list_repos_source_root_remapped() {
-    use dowser_engine::config::AppConfig;
+    use symslice_engine::config::AppConfig;
 
     use serde_json::json;
 
@@ -174,7 +174,7 @@ fn list_repos_source_root_remapped() {
     let mut config = AppConfig::new(index_root.clone());
     // No path_map during indexing.
     let service =
-        dowser_mcp::test_support::make_service_from_config(config.clone()).expect("service");
+        symslice_mcp::test_support::make_service_from_config(config.clone()).expect("service");
 
     let indexed = service
         .dispatch(
@@ -195,7 +195,7 @@ fn list_repos_source_root_remapped() {
     // Use the canonicalized workspace path as the original prefix.
     let orig_prefix = workspace_canon.to_string_lossy().to_string();
     config.path_map = vec![(orig_prefix.clone(), "/remapped/prefix".to_owned())];
-    let service2 = dowser_mcp::test_support::make_service_from_config(config).expect("service2");
+    let service2 = symslice_mcp::test_support::make_service_from_config(config).expect("service2");
 
     let catalog = service2
         .dispatch("catalog_sources", json!({}))
@@ -228,8 +228,8 @@ fn index_folder_reverse_remap_finds_existing_index() {
     // Verify that reverse remap produces the same repo_id hash as the original
     // path, so an existing index can be found when the user's path has been
     // remapped.
-    use dowser_engine::repo_id::normalize_repo_id;
     use std::path::Path;
+    use symslice_engine::repo_id::normalize_repo_id;
 
     let original_path = "/real/projects/myapp";
     let original_id = normalize_repo_id(Path::new(original_path));
@@ -250,8 +250,8 @@ fn index_folder_reverse_remap_finds_existing_index() {
 fn watcher_reverse_remap_produces_stored_hash() {
     // Applying reverse remap before normalize_repo_id yields the same hash
     // as the stored path.
-    use dowser_engine::repo_id::normalize_repo_id;
     use std::path::Path;
+    use symslice_engine::repo_id::normalize_repo_id;
 
     let pairs = vec![("/real/project".to_owned(), "/remapped/project".to_owned())];
 
@@ -269,8 +269,8 @@ fn watcher_reverse_remap_produces_stored_hash() {
 #[test]
 fn stop_watching_remap_produces_stored_hash() {
     // The reverse remap produces the same hash as the original indexed path.
-    use dowser_engine::repo_id::normalize_repo_id;
     use std::path::Path;
+    use symslice_engine::repo_id::normalize_repo_id;
 
     let pairs = vec![("/stored/root".to_owned(), "/current/root".to_owned())];
 

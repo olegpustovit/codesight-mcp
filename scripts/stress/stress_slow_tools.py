@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Stress-reproduce the slow-tool timeouts I hit during the 2026-04-17 quality
-push (see DOWSER_FEEDBACK_2.md). Each case targets a specific code path
+push (see SYMSLICE_FEEDBACK_2.md). Each case targets a specific code path
 that either exceeded the 2000ms HANDLER_TIMEOUT or came dangerously close.
 
 Cases, in priority order:
@@ -45,14 +45,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BIN = REPO_ROOT / "target" / "release" / "dowser-mcp"
+DEFAULT_BIN = REPO_ROOT / "target" / "release" / "symslice-mcp"
 
 
 class McpClient:
     def __init__(self, bin_path: Path, workspace: Path, env_overrides: dict[str, str] | None = None):
         env = os.environ.copy()
-        env.setdefault("DOWSER_LOG_FORMAT", "json")
-        env.setdefault("RUST_LOG", "warn,dowser_mcp=warn")
+        env.setdefault("SYMSLICE_LOG_FORMAT", "json")
+        env.setdefault("RUST_LOG", "warn,symslice_mcp=warn")
         if env_overrides:
             env.update(env_overrides)
         self.proc = subprocess.Popen(
@@ -388,7 +388,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bin", default=str(DEFAULT_BIN))
     ap.add_argument("--workspace", default=str(REPO_ROOT))
-    ap.add_argument("--source", default="olegpustovit/dowser-mcp")
+    ap.add_argument("--source", default="olegpustovit/symslice-mcp")
     ap.add_argument("--soft-deadline-ms", type=int, default=1800,
                     help="Warn below the 2000ms handler cap so we see the danger zone.")
     ap.add_argument("--repeat", type=int, default=3,

@@ -1,10 +1,10 @@
 //! Slice tests for dead-code analysis, plus a small MCP-envelope contract check.
 
-use dowser_analysis::dead_code::dead_code_payload;
-use dowser_engine::config::AppConfig;
-use dowser_mcp::test_support::{index_code_fixture, open_code_store, write_files};
-use dowser_storage::storage::IndexStore;
 use serde_json::{Value, json};
+use symslice_analysis::dead_code::dead_code_payload;
+use symslice_engine::config::AppConfig;
+use symslice_mcp::test_support::{index_code_fixture, open_code_store, write_files};
+use symslice_storage::storage::IndexStore;
 use tempfile::tempdir;
 
 fn make_repo(files: &[(&str, &str)]) -> (tempfile::TempDir, AppConfig, String, IndexStore) {
@@ -222,7 +222,7 @@ fn options_entry_point_patterns_respected() {
 fn errors_unknown_repo_returns_error() {
     let ws = tempdir().unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let r = svc
         .dispatch(
@@ -242,7 +242,7 @@ fn errors_response_shape() {
     let src = ws.path().join("src");
     write_files(&src, &[("main.py", "if __name__ == '__main__': pass")]).unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let indexed = svc
         .dispatch(

@@ -1,6 +1,6 @@
 //! Sanity checks for the checked-in documentation fixtures.
 
-use dowser_mcp::test_support::doc_reference_fixtures_dir;
+use symslice_mcp::test_support::doc_reference_fixtures_dir;
 
 #[test]
 fn doc_reference_fixtures_mirrored() {

@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 framework nuxt.
 
-use dowser_language_support::frameworks::FrameworkProvider;
-use dowser_language_support::languages::vue::nuxt::*;
+use symslice_language_support::frameworks::FrameworkProvider;
+use symslice_language_support::languages::vue::nuxt::*;
 
 // ── _nuxt_route_from_path ───────────────────────────────────────────────────
 #[test]

@@ -1,5 +1,5 @@
-//! dowser-mcp binary crate: CLI subcommands + stdio MCP server entry point.
-//! Business logic lives in `dowser-engine`. JSON-RPC framing lives in
+//! symslice-mcp binary crate: CLI subcommands + stdio MCP server entry point.
+//! Business logic lives in `symslice-engine`. JSON-RPC framing lives in
 //! `mcp-rpc`.
 
 pub mod cli;

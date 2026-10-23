@@ -1,9 +1,9 @@
 //! Integration tests: agent v1 staleness.
 
-use dowser_engine::reindex_state::ReindexStateManager;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use symslice_engine::reindex_state::ReindexStateManager;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Repo State Creation

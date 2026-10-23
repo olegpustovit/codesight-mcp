@@ -130,18 +130,18 @@ fn pipeline(blocking_stdio: bool) {
     let workspace = tempfile::tempdir().unwrap();
     for iteration in 0..25 {
         let mut stderr = tempfile::tempfile().unwrap();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_dowser-mcp"));
-        command.env_remove("DOWSER_TEST_BLOCKING_STDIO");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_symslice-mcp"));
+        command.env_remove("SYMSLICE_TEST_BLOCKING_STDIO");
         if blocking_stdio {
-            command.env("DOWSER_TEST_BLOCKING_STDIO", "1");
+            command.env("SYMSLICE_TEST_BLOCKING_STDIO", "1");
         }
         let mut server = Server(
             command
                 .args(["serve", "--workspace", workspace.path().to_str().unwrap()])
-                .env("DOWSER_INDEX_DIR", workspace.path().join("index"))
+                .env("SYMSLICE_INDEX_DIR", workspace.path().join("index"))
                 .env(
                     "RUST_LOG",
-                    "rmcp=trace,dowser_mcp=info,dowser_mcp::stdio_io=trace",
+                    "rmcp=trace,symslice_mcp=info,symslice_mcp::stdio_io=trace",
                 )
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())

@@ -1,5 +1,0 @@
-{
-  "name": "dowser-mcp-dev",
-  "version": "0.2.0",
-  "description": "Dev-mode dowser-mcp: serves via cargo run, hooks steer toward dowser tools"
-}

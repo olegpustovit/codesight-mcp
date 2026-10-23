@@ -2,9 +2,9 @@
 
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
 use serde_json::json;
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
 use tempfile::tempdir;
 
 #[test]
@@ -85,7 +85,7 @@ fn test_heuristic_summary_single_class() {
     )
     .unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/test.py");
@@ -109,7 +109,7 @@ fn test_heuristic_summary_multi_function() {
     }
     fs::write(src.join("test.py"), &code).unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/test.py");
@@ -132,7 +132,7 @@ fn test_heuristic_summary_few_functions() {
     )
     .unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/test.py");
@@ -151,7 +151,7 @@ fn test_heuristic_summary_empty() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("test.py"), "# just a comment\n").unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/test.py");
@@ -168,7 +168,7 @@ fn test_generate_file_summaries_heuristic() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("b.py"), "def bar(): pass\n").unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/b.py");
@@ -187,7 +187,7 @@ fn test_generate_file_summaries_empty_fallback() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("c.py"), "# empty\n").unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/c.py");
@@ -205,7 +205,7 @@ fn test_file_outline_includes_rust_reexports() {
     .unwrap();
     fs::write(src.join("mod.rs"), "pub use crate::inner::Thing;\n").unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/config/mod.rs");
@@ -249,7 +249,7 @@ fn test_storage_roundtrip_file_summaries() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("hello.py"), "def hello(): pass\n").unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path());
 
@@ -286,7 +286,7 @@ fn test_v2_index_storage() {
     fs::write(src.join("main.py"), "def main(): pass\n").unwrap();
 
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let _sid = ingest(&svc, ws.path());
     // If the index loaded, the v2 compat path works.
@@ -307,7 +307,7 @@ fn test_index_version_bumped() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("main.py"), "def main(): pass\n").unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = svc

@@ -1,17 +1,17 @@
 [workspace]
 members = [
     ".",
-    "crates/dowser-analysis",
-    "crates/dowser-core",
-    "crates/dowser-engine",
-    "crates/dowser-language-support",
-    "crates/dowser-retrieval",
-    "crates/dowser-storage",
+    "crates/symslice-analysis",
+    "crates/symslice-core",
+    "crates/symslice-engine",
+    "crates/symslice-language-support",
+    "crates/symslice-retrieval",
+    "crates/symslice-storage",
 ]
 resolver = "2"
 
 [package]
-name = "dowser-mcp"
+name = "symslice-mcp"
 version = "0.2.0"
 edition = "2024"
 description = "Local MCP server for indexed source-code search and reading"
@@ -29,12 +29,12 @@ path = "tests/all.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
-dowser-analysis = { path = "crates/dowser-analysis" }
-dowser-core = { path = "crates/dowser-core" }
-dowser-engine = { path = "crates/dowser-engine" }
-dowser-language-support = { path = "crates/dowser-language-support" }
-dowser-retrieval = { path = "crates/dowser-retrieval" }
-dowser-storage = { path = "crates/dowser-storage" }
+symslice-analysis = { path = "crates/symslice-analysis" }
+symslice-core = { path = "crates/symslice-core" }
+symslice-engine = { path = "crates/symslice-engine" }
+symslice-language-support = { path = "crates/symslice-language-support" }
+symslice-retrieval = { path = "crates/symslice-retrieval" }
+symslice-storage = { path = "crates/symslice-storage" }
 rmcp = { version = "3.6", default-features = false, features = ["server", "transport-io", "macros"] }
 rustc-hash = "2"
 chrono = { version = "0.4", features = ["serde"] }

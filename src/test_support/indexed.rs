@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::indexing::Indexer;
-use dowser_engine::indexing::code_index::{CodeIndexOutcome, index_workspace};
-use dowser_engine::indexing::doc_index;
-use dowser_engine::repo_id::normalize_repo_id;
-use dowser_engine::service::CodeService;
-use dowser_storage::storage::IndexStore;
-use dowser_storage::storage::doc_index::{DocIndexSummary, DocStore};
+use symslice_engine::config::AppConfig;
+use symslice_engine::indexing::Indexer;
+use symslice_engine::indexing::code_index::{CodeIndexOutcome, index_workspace};
+use symslice_engine::indexing::doc_index;
+use symslice_engine::repo_id::normalize_repo_id;
+use symslice_engine::service::CodeService;
+use symslice_storage::storage::IndexStore;
+use symslice_storage::storage::doc_index::{DocIndexSummary, DocStore};
 
 fn indexer() -> std::sync::Arc<Indexer> {
     std::sync::Arc::new(Indexer::new())

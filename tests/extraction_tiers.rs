@@ -1,8 +1,8 @@
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_storage::db;
 use serde_json::json;
+use symslice_engine::config::AppConfig;
+use symslice_storage::db;
 
 #[test]
 fn indexed_symbols_persist_extraction_tiers() {
@@ -21,7 +21,7 @@ fn indexed_symbols_persist_extraction_tiers() {
     .unwrap();
 
     let cfg = AppConfig::new(workspace.path().join("index"));
-    let svc = dowser_mcp::test_support::make_service_from_config(cfg.clone()).unwrap();
+    let svc = symslice_mcp::test_support::make_service_from_config(cfg.clone()).unwrap();
     let indexed = svc
         .dispatch(
             "ingest_sources",

@@ -7,7 +7,7 @@ The source binary built with Rust 1.96.0 on Linux ARM64. The first build ran out
 Commands from the repository root:
 
 ```sh
-cargo build --locked --bin dowser-mcp
+cargo build --locked --bin symslice-mcp
 node docs/demo/run.cjs
 ```
 

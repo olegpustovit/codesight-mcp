@@ -4,9 +4,9 @@
 
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
 use serde_json::{Value, json};
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
 use tempfile::tempdir;
 
 fn setup() -> (tempfile::TempDir, tempfile::TempDir, CodeService, String) {
@@ -18,7 +18,7 @@ fn setup() -> (tempfile::TempDir, tempfile::TempDir, CodeService, String) {
         "def hinted():\n    return 'hi'\n",
     )
     .unwrap();
-    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(
+    let svc = symslice_mcp::test_support::make_service_from_config(AppConfig::new(
         idx.path().to_path_buf(),
     ))
     .unwrap();

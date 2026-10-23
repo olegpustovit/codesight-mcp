@@ -2,10 +2,10 @@
 //! reachability + graph counters so the "dead-code false positive" class
 //! is observable via the tool itself rather than by eyeballing output.
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
-use dowser_mcp::test_support::{index_code_fixture, write_files};
 use serde_json::json;
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
+use symslice_mcp::test_support::{index_code_fixture, write_files};
 use tempfile::tempdir;
 
 fn make_service(index_root: &std::path::Path) -> CodeService {

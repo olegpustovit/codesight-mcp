@@ -1,0 +1,5 @@
+{
+  "name": "symslice-mcp-dev",
+  "version": "0.2.0",
+  "description": "Dev-mode symslice-mcp: serves via cargo run, hooks steer toward symslice tools"
+}

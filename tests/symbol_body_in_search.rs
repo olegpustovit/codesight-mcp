@@ -1,8 +1,8 @@
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
 use serde_json::json;
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
 use tempfile::tempdir;
 
 fn ingest(svc: &CodeService, root: &std::path::Path, domains: &str) -> String {
@@ -31,7 +31,7 @@ fn symbol_body_included_with_context() {
     )
     .unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path(), "code");
 
@@ -80,7 +80,7 @@ fn section_body_included_with_context() {
     )
     .unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest(&svc, ws.path(), "docs");
 

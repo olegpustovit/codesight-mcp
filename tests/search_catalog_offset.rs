@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
 use serde_json::json;
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
 use tempfile::tempdir;
 
 fn build_repo() -> (CodeService, tempfile::TempDir, String) {
@@ -18,7 +18,7 @@ fn build_repo() -> (CodeService, tempfile::TempDir, String) {
         .unwrap();
     }
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let r = svc
         .dispatch(

@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 framework laravel.
 
-use dowser_language_support::frameworks::FrameworkProvider;
-use dowser_language_support::languages::php::laravel::*;
+use symslice_language_support::frameworks::FrameworkProvider;
+use symslice_language_support::languages::php::laravel::*;
 
 // ── _guess_table ────────────────────────────────────────────────────────────
 #[test]

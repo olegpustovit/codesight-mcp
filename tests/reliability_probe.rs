@@ -17,9 +17,9 @@
 use std::collections::BTreeSet;
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
 use serde_json::{Value, json};
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
 use tempfile::tempdir;
 
 // ── Tier budgets (mirror AGENTS.md) ─────────────────────────────────────────
@@ -123,8 +123,8 @@ fn build_env_with_preindex(preindex: bool) -> ProbeEnv {
     std::env::set_current_dir(&repo).unwrap();
 
     if preindex {
-        let r = std::process::Command::new(env!("CARGO_BIN_EXE_dowser-mcp"))
-            .env("DOWSER_INDEX_DIR", ws.path().join("idx"))
+        let r = std::process::Command::new(env!("CARGO_BIN_EXE_symslice-mcp"))
+            .env("SYMSLICE_INDEX_DIR", ws.path().join("idx"))
             .args([
                 "ingest",
                 repo.to_str().unwrap(),
@@ -141,7 +141,7 @@ fn build_env_with_preindex(preindex: bool) -> ProbeEnv {
         );
     }
     let svc = std::sync::Arc::new(
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap(),
     );
     svc.install_arc_handle();
@@ -504,7 +504,7 @@ fn probe_health_repo_health_returns_aggregate() {
 #[test]
 fn probe_no_legacy_tools_in_public_list() {
     // CUTPLAN §Acceptance: tools.json lists exactly 6 tools.
-    let raw = include_str!("../crates/dowser-engine/src/tools.json");
+    let raw = include_str!("../crates/symslice-engine/src/tools.json");
     let parsed: Value = serde_json::from_str(raw).unwrap();
     let arr = parsed.as_array().unwrap();
     assert_eq!(arr.len(), 6, "tools.json must list exactly 6 tools");
@@ -869,8 +869,8 @@ fn diagnostic_import_resolution_guesses_stay_out_of_resolved_and_strict_graphs()
         "{incoming}"
     );
     let config = AppConfig::new(env._ws.path().join("idx"));
-    let sid = dowser_engine::repo_id::normalize_repo_id(&env._repo);
-    let store = dowser_storage::storage::IndexStore::open_existing(config.repo_db_path(&sid))
+    let sid = symslice_engine::repo_id::normalize_repo_id(&env._repo);
+    let store = symslice_storage::storage::IndexStore::open_existing(config.repo_db_path(&sid))
         .unwrap()
         .unwrap();
     assert!(
@@ -893,12 +893,15 @@ fn diagnostic_ingest_phase_logging_is_opt_in_and_omits_source_text() {
     )
     .unwrap();
     for enabled in [false, true] {
-        let output = std::process::Command::new(env!("CARGO_BIN_EXE_dowser-mcp"))
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_symslice-mcp"))
             .env(
-                "DOWSER_INDEX_DIR",
+                "SYMSLICE_INDEX_DIR",
                 workspace.path().join(format!("index-{enabled}")),
             )
-            .env("DOWSER_INGEST_DIAGNOSTICS", if enabled { "1" } else { "0" })
+            .env(
+                "SYMSLICE_INGEST_DIAGNOSTICS",
+                if enabled { "1" } else { "0" },
+            )
             .env("RUST_LOG", "info")
             .args([
                 "--log-format",
@@ -1013,9 +1016,9 @@ fn diagnostic_json_key_outline_ids_round_trip_reads() {
 
 #[test]
 fn diagnostic_stamp_change_removes_deleted_paths_and_regrades_old_guesses() {
-    use dowser_core::symbols::FactQuality;
-    use dowser_engine::indexing::{Indexer, code_index::index_workspace};
-    use dowser_storage::storage::IndexStore;
+    use symslice_core::symbols::FactQuality;
+    use symslice_engine::indexing::{Indexer, code_index::index_workspace};
+    use symslice_storage::storage::IndexStore;
     let workspace = tempdir().unwrap();
     let repo = workspace.path().join("repo");
     fs::create_dir_all(repo.join("httpx")).unwrap();
@@ -1035,7 +1038,7 @@ fn diagnostic_stamp_change_removes_deleted_paths_and_regrades_old_guesses() {
         .unwrap()
         .unwrap();
     {
-        let connection = dowser_storage::db::open_rw(&database).unwrap();
+        let connection = symslice_storage::db::open_rw(&database).unwrap();
         connection
             .execute(
                 "UPDATE repo_info SET extractor_version = 'old-resolution-semantics'",

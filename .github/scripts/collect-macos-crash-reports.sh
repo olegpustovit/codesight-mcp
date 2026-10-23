@@ -14,7 +14,7 @@ fi
 start=$SECONDS
 while :; do
     found=0
-    for file in "$reports"/{integration-*,dowser-mcp*}.{ips,crash} "$reports"/Retired/{integration-*,dowser-mcp*}.{ips,crash}; do
+    for file in "$reports"/{integration-*,symslice-mcp*}.{ips,crash} "$reports"/Retired/{integration-*,symslice-mcp*}.{ips,crash}; do
         [[ -f "$file" && ! -L "$file" && "$file" -nt "$stamp" ]] && found=1
     done
     [[ "$found" -eq 1 || $((SECONDS - start)) -ge 10 ]] && break
@@ -22,7 +22,7 @@ while :; do
 done
 count=0
 total=0
-for file in "$reports"/{integration-*,dowser-mcp*}.{ips,crash} "$reports"/Retired/{integration-*,dowser-mcp*}.{ips,crash}; do
+for file in "$reports"/{integration-*,symslice-mcp*}.{ips,crash} "$reports"/Retired/{integration-*,symslice-mcp*}.{ips,crash}; do
     [[ -f "$file" && ! -L "$file" && "$file" -nt "$stamp" ]] || continue
     [[ "$count" -ge 20 || "$total" -ge 16777216 ]] && break
     size=$(wc -c < "$file" 2>> "$destination/collection-errors.log") || continue

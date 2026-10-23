@@ -4,9 +4,9 @@
 
 ### Changed
 
-- Renamed the project to Dowser. The package and binary are now `dowser-mcp`,
-  environment variables use the `DOWSER_*` prefix, and configuration and index
-  paths (`.dowser.toml`, `.dowser/`, the platform data directory `dowser-mcp`)
+- Renamed the project to Symslice. The package and binary are now `symslice-mcp`,
+  environment variables use the `SYMSLICE_*` prefix, and configuration and index
+  paths (`.symslice.toml`, `.symslice/`, the platform data directory `symslice-mcp`)
   and the MCP server name changed accordingly. Existing indexes must be rebuilt
   and MCP client configurations updated to the new binary and server name.
 
@@ -34,7 +34,7 @@ First tagged release.
 ### Added
 
 - MCP stdio server with six tools: `search`, `outline`, `read`, `references`,
-  `impact`, `health` (schema in `crates/dowser-engine/src/tools.json`).
+  `impact`, `health` (schema in `crates/symslice-engine/src/tools.json`).
 - Per-response trust label `_meta.confidence` (`safe`, `partial`,
   `heuristic`, `unreliable`).
 - `self-check` command that probes the trust invariants against a workspace.

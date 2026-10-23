@@ -9,7 +9,7 @@ inc_test2
 t
 
 .claude/
-.dowser-index/
+.symslice-index/
 
 # Python bytecode and generated stress-harness reports
 __pycache__/

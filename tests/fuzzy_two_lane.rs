@@ -3,13 +3,13 @@
 
 use std::fs;
 
-use dowser_engine::config::AppConfig;
 use serde_json::json;
+use symslice_engine::config::AppConfig;
 use tempfile::tempdir;
 
 fn build_repo() -> (
     tempfile::TempDir,
-    dowser_engine::service::CodeService,
+    symslice_engine::service::CodeService,
     String,
 ) {
     let ws = tempdir().unwrap();
@@ -26,7 +26,7 @@ fn build_repo() -> (
     )
     .unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let r = svc
         .dispatch(

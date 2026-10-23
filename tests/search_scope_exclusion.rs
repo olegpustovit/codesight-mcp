@@ -1,8 +1,8 @@
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
 use serde_json::json;
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
 use tempfile::tempdir;
 
 fn ingest_code(svc: &CodeService, root: &std::path::Path) -> String {
@@ -37,7 +37,7 @@ fn exclude_drops_symbol_hits() {
     .unwrap();
 
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest_code(&svc, ws.path());
 
@@ -83,7 +83,7 @@ fn exclude_drops_file_hits() {
     fs::write(ws.path().join("src/skip/b.py"), "# TODO skip\n").unwrap();
 
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest_code(&svc, ws.path());
 
