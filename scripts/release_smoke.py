@@ -15,14 +15,14 @@ import tempfile
 async def smoke(binary: Path, version: str, check_cli: bool) -> None:
     if check_cli:
         result = subprocess.run([str(binary), '--version'], text=True, capture_output=True, check=True, timeout=10)
-        assert result.stdout.strip() == f'codesight-mcp {version}', result.stdout
-    with tempfile.TemporaryDirectory(prefix='codesight-release-') as tmp:
+        assert result.stdout.strip() == f'dowser-mcp {version}', result.stdout
+    with tempfile.TemporaryDirectory(prefix='dowser-release-') as tmp:
         root = Path(tmp)
         workspace = root / 'workspace'
         workspace.mkdir()
         source = 'def release_greeting(name):\n    return "Hello, " + name\n'
         (workspace / 'greeting.py').write_text(source)
-        env = {**os.environ, 'CODESIGHT_INDEX_DIR': str(root / 'index'), 'RUST_LOG': 'warn'}
+        env = {**os.environ, 'DOWSER_INDEX_DIR': str(root / 'index'), 'RUST_LOG': 'warn'}
         subprocess.run([str(binary), 'ingest', str(workspace)], env=env, capture_output=True, check=True, timeout=30)
         with (root / 'stderr.log').open('wb') as log:
             process = await asyncio.create_subprocess_exec(

@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -57,7 +57,7 @@ fn ingest(svc: &CodeService, root: &Path) -> String {
 fn setup_funcs_repo_fixture() -> FuncsRepoFixture {
     let workspace = tempdir().unwrap();
     let root = make_funcs_repo(workspace.path());
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(
         workspace.path().join("idx"),
     ))
     .unwrap();

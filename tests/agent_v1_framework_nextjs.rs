@@ -1,7 +1,7 @@
 //! Integration tests: agent v1 framework nextjs.
 
-use codesight_language_support::frameworks::FrameworkProvider;
-use codesight_language_support::languages::typescript::nextjs::*;
+use dowser_language_support::frameworks::FrameworkProvider;
+use dowser_language_support::languages::typescript::nextjs::*;
 
 // ── _next_route_from_path ───────────────────────────────────────────────────
 #[test]

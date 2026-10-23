@@ -3,8 +3,8 @@
 
 use std::fs;
 
-use codesight_engine::service::CodeService;
-use codesight_mcp::test_support::make_service;
+use dowser_engine::service::CodeService;
+use dowser_mcp::test_support::make_service;
 use serde_json::json;
 use tempfile::tempdir;
 

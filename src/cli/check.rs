@@ -1,8 +1,8 @@
-//! `codesight-mcp check` — operator health diagnostic.
+//! `dowser-mcp check` — operator health diagnostic.
 //!
 //! Validates the pieces an operator is most likely to get wrong: storage
 //! directory writability, workspace readability, query-pack loading,
-//! `.codesight.toml` parse, and a read of the storage schema version. Prints a
+//! `.dowser.toml` parse, and a read of the storage schema version. Prints a
 //! human-readable report to stdout and exits 0 on success, 1 on the first
 //! failure.
 
@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use codesight_engine::config::AppConfig;
+use dowser_engine::config::AppConfig;
 
 #[derive(Debug)]
 struct CheckOutcome {
@@ -53,7 +53,7 @@ pub fn run(workspace: Option<PathBuf>, savings: bool) -> anyhow::Result<bool> {
     }
 
     let mut all_ok = true;
-    println!("codesight-mcp check");
+    println!("dowser-mcp check");
     println!("===================");
     for outcome in &outcomes {
         match &outcome.status {
@@ -80,12 +80,12 @@ pub fn run(workspace: Option<PathBuf>, savings: bool) -> anyhow::Result<bool> {
 /// `_savings.json` as a two-column summary. Always exits 0 — absence of the
 /// ledger file is a legitimate "no activity yet" state, not a failure.
 fn run_savings_only(config: &AppConfig) -> anyhow::Result<bool> {
-    use codesight_engine::service::savings::SavingsLedger;
+    use dowser_engine::service::savings::SavingsLedger;
 
     let path = config.savings_file();
     let ledger = SavingsLedger::new(path.clone());
 
-    println!("codesight-mcp savings");
+    println!("dowser-mcp savings");
     println!("=====================");
     println!("  ledger path          {}", path.display());
 
@@ -123,7 +123,7 @@ fn check_storage(config: &AppConfig) -> CheckOutcome {
         );
     }
 
-    let probe = index_root.join(".codesight-check-write");
+    let probe = index_root.join(".dowser-check-write");
     match std::fs::write(&probe, b"ok") {
         Ok(()) => {
             let _ = std::fs::remove_file(&probe);
@@ -140,7 +140,7 @@ fn check_schema_version(config: &AppConfig) -> CheckOutcome {
     // The code-index schema has a forward-only migration chain (see P2).
     // We only verify the target version is reachable as a constant; we do not
     // open every repo's DB here because `check` must remain fast and stateless.
-    let target = codesight_storage::storage::migrations::CODE_INDEX_TARGET_USER_VERSION;
+    let target = dowser_storage::storage::migrations::CODE_INDEX_TARGET_USER_VERSION;
     CheckOutcome::ok(
         "schema_version",
         format!(
@@ -153,9 +153,9 @@ fn check_schema_version(config: &AppConfig) -> CheckOutcome {
 fn check_query_packs(workspace: Option<&Path>) -> CheckOutcome {
     let result = match workspace {
         Some(ws) => {
-            codesight_language_support::query_pack_catalog::QueryPackCatalog::for_workspace_root(ws)
+            dowser_language_support::query_pack_catalog::QueryPackCatalog::for_workspace_root(ws)
         }
-        None => Ok(codesight_language_support::query_pack_catalog::QueryPackCatalog::builtin()),
+        None => Ok(dowser_language_support::query_pack_catalog::QueryPackCatalog::builtin()),
     };
     match result {
         Ok(catalog) => {
@@ -184,12 +184,12 @@ fn check_workspace_readable(workspace: &Path) -> CheckOutcome {
 }
 
 fn check_project_config(workspace: &Path) -> CheckOutcome {
-    let path = workspace.join(".codesight.toml");
+    let path = workspace.join(".dowser.toml");
     if !path.exists() {
         return CheckOutcome::ok(
             "project_config",
             format!(
-                "no .codesight.toml at {} (defaults apply)",
+                "no .dowser.toml at {} (defaults apply)",
                 workspace.display()
             ),
         );
@@ -211,7 +211,7 @@ fn check_project_config(workspace: &Path) -> CheckOutcome {
 
 // ── Premium release gate ─────────────────────────────────────────────────
 //
-// `codesight-mcp check --premium-gate [--workspace PATH]` runs an end-to-end
+// `dowser-mcp check --premium-gate [--workspace PATH]` runs an end-to-end
 // probe of every P0 trust invariant. Any failure here blocks
 // the release. Thresholds are centralised here so "premium" is a measurable
 // contract, not a marketing word.
@@ -224,12 +224,12 @@ const PREMIUM_GATE_MIN_AGENT_READINESS: f64 = 0.65;
 /// Run the premium-release gate: ingest the workspace, fire the probes, and
 /// return `Ok(true)` only when every invariant holds.
 pub fn run_premium_gate(workspace: Option<PathBuf>) -> anyhow::Result<bool> {
-    use codesight_engine::service::CodeService;
+    use dowser_engine::service::CodeService;
     use serde_json::json;
 
     let ws =
         workspace.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    println!("codesight-mcp premium-gate");
+    println!("dowser-mcp premium-gate");
     println!("===========================");
     println!("  workspace            {}", ws.display());
 

@@ -8,17 +8,16 @@
 
 use std::fs;
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
 fn setup() -> (CodeService, String) {
     let dir = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        dir.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(dir.path().join("idx")))
+            .unwrap();
 
     let root = dir.path().join("test-repo");
     fs::create_dir_all(&root).unwrap();

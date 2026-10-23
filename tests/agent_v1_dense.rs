@@ -8,8 +8,8 @@
 use std::fs;
 use std::sync::OnceLock;
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
@@ -31,10 +31,9 @@ fn build_service_with_code() -> (TempDir, CodeService, String) {
         "def hello_world():\n    return 'greetings'\n\ndef goodbye():\n    return 'bye'\n",
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

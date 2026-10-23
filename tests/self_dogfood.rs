@@ -11,9 +11,9 @@
 use std::fs;
 use std::path::Path;
 
-use codesight_analysis::dead_code::dead_code_payload;
-use codesight_mcp::test_support::{index_code_fixture, open_code_store, write_files};
-use codesight_storage::storage::IndexStore;
+use dowser_analysis::dead_code::dead_code_payload;
+use dowser_mcp::test_support::{index_code_fixture, open_code_store, write_files};
+use dowser_storage::storage::IndexStore;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 

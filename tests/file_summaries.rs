@@ -2,8 +2,8 @@
 
 use std::fs;
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -84,10 +84,9 @@ fn test_heuristic_summary_single_class() {
         "class MyClass:\n    def method1(self): pass\n    def method2(self): pass\n",
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/test.py");
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
@@ -109,10 +108,9 @@ fn test_heuristic_summary_multi_function() {
         code.push_str(&format!("def func_{i}(): pass\n"));
     }
     fs::write(src.join("test.py"), &code).unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/test.py");
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
@@ -133,10 +131,9 @@ fn test_heuristic_summary_few_functions() {
         "def func_0(): pass\ndef func_1(): pass\n",
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/test.py");
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
@@ -153,10 +150,9 @@ fn test_heuristic_summary_empty() {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("test.py"), "# just a comment\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/test.py");
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
@@ -171,10 +167,9 @@ fn test_generate_file_summaries_heuristic() {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("b.py"), "def bar(): pass\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/b.py");
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
@@ -191,10 +186,9 @@ fn test_generate_file_summaries_empty_fallback() {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("c.py"), "# empty\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/c.py");
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
@@ -210,10 +204,9 @@ fn test_file_outline_includes_rust_reexports() {
     )
     .unwrap();
     fs::write(src.join("mod.rs"), "pub use crate::inner::Thing;\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = get_file_outline(&svc, &sid, "src/config/mod.rs");
     assert!(r["ok"].as_bool().unwrap(), "{r:?}");
@@ -255,10 +248,9 @@ fn test_storage_roundtrip_file_summaries() {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("hello.py"), "def hello(): pass\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest(&svc, ws.path());
 
     // Verify the outline has data
@@ -293,10 +285,9 @@ fn test_v2_index_storage() {
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("main.py"), "def main(): pass\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let _sid = ingest(&svc, ws.path());
     // If the index loaded, the v2 compat path works.
     let r = svc.dispatch("catalog_sources", json!({})).unwrap();
@@ -315,10 +306,9 @@ fn test_index_version_bumped() {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("main.py"), "def main(): pass\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest(&svc, ws.path());
     let r = svc
         .dispatch(

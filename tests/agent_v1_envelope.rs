@@ -1,13 +1,13 @@
 //! Integration tests: agent-v1 envelope and error paths.
 
-use codesight_engine::config::AppConfig;
+use dowser_engine::config::AppConfig;
 use serde_json::json;
 use tempfile::tempdir;
 
 #[test]
 fn unknown_tool_returns_envelope_error() {
     let dir = tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(
         dir.path().to_path_buf(),
     ))
     .unwrap();

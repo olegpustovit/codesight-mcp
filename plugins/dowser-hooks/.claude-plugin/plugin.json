@@ -1,0 +1,5 @@
+{
+  "name": "dowser-hooks",
+  "version": "0.1.0",
+  "description": "PreToolUse/PostToolUse/PreCompact hooks for dowser-mcp steering"
+}

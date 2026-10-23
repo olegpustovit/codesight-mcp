@@ -3,13 +3,13 @@
 
 use std::fs;
 
-use codesight_engine::config::AppConfig;
+use dowser_engine::config::AppConfig;
 use serde_json::json;
 use tempfile::tempdir;
 
 fn build_repo() -> (
     tempfile::TempDir,
-    codesight_engine::service::CodeService,
+    dowser_engine::service::CodeService,
     String,
 ) {
     let ws = tempdir().unwrap();
@@ -25,10 +25,9 @@ fn build_repo() -> (
          pub fn dispatch_concurrency() {}\n",
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

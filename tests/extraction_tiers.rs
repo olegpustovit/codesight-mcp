@@ -1,7 +1,7 @@
 use std::fs;
 
-use codesight_engine::config::AppConfig;
-use codesight_storage::db;
+use dowser_engine::config::AppConfig;
+use dowser_storage::db;
 use serde_json::json;
 
 #[test]
@@ -21,7 +21,7 @@ fn indexed_symbols_persist_extraction_tiers() {
     .unwrap();
 
     let cfg = AppConfig::new(workspace.path().join("index"));
-    let svc = codesight_mcp::test_support::make_service_from_config(cfg.clone()).unwrap();
+    let svc = dowser_mcp::test_support::make_service_from_config(cfg.clone()).unwrap();
     let indexed = svc
         .dispatch(
             "ingest_sources",

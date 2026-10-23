@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::indexing::Indexer;
-use codesight_engine::indexing::code_index::{CodeIndexOutcome, index_workspace};
-use codesight_engine::indexing::doc_index;
-use codesight_engine::repo_id::normalize_repo_id;
-use codesight_engine::service::CodeService;
-use codesight_storage::storage::IndexStore;
-use codesight_storage::storage::doc_index::{DocIndexSummary, DocStore};
+use dowser_engine::config::AppConfig;
+use dowser_engine::indexing::Indexer;
+use dowser_engine::indexing::code_index::{CodeIndexOutcome, index_workspace};
+use dowser_engine::indexing::doc_index;
+use dowser_engine::repo_id::normalize_repo_id;
+use dowser_engine::service::CodeService;
+use dowser_storage::storage::IndexStore;
+use dowser_storage::storage::doc_index::{DocIndexSummary, DocStore};
 
 fn indexer() -> std::sync::Arc<Indexer> {
     std::sync::Arc::new(Indexer::new())

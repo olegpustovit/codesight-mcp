@@ -358,200 +358,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "codesight-analysis"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "blake3",
- "codesight-core",
- "codesight-language-support",
- "codesight-storage",
- "globset",
- "ignore",
- "petgraph",
- "phf",
- "regex",
- "rustc-hash",
- "serde",
- "serde_json",
- "tempfile",
- "toml",
-]
-
-[[package]]
-name = "codesight-core"
-version = "0.1.1"
-dependencies = [
- "phf",
- "rustc-hash",
- "serde",
- "serde_json",
- "strum",
-]
-
-[[package]]
-name = "codesight-engine"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "blake3",
- "chrono",
- "codesight-analysis",
- "codesight-core",
- "codesight-language-support",
- "codesight-retrieval",
- "codesight-storage",
- "dirs",
- "globset",
- "ignore",
- "jsonschema",
- "notify",
- "notify-debouncer-full",
- "parking_lot",
- "rayon",
- "regex",
- "rmcp",
- "rusqlite",
- "rustc-hash",
- "serde",
- "serde_json",
- "similar",
- "strum",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
- "walkdir",
-]
-
-[[package]]
-name = "codesight-language-support"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "blake3",
- "codesight-core",
- "dashmap",
- "heck",
- "ignore",
- "jsonc-parser",
- "path-clean",
- "pluralizer",
- "rayon",
- "regex",
- "rustc-hash",
- "serde",
- "serde_json",
- "serde_yml",
- "streaming-iterator",
- "tempfile",
- "thiserror",
- "toml",
- "tracing",
- "tree-sitter",
- "tree-sitter-bash",
- "tree-sitter-c-sharp",
- "tree-sitter-cpp",
- "tree-sitter-css",
- "tree-sitter-dart",
- "tree-sitter-elixir",
- "tree-sitter-embedded-template",
- "tree-sitter-erlang",
- "tree-sitter-fortran",
- "tree-sitter-gleam",
- "tree-sitter-go",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-json",
- "tree-sitter-kotlin-ng",
- "tree-sitter-lua",
- "tree-sitter-luau",
- "tree-sitter-nix",
- "tree-sitter-ocaml",
- "tree-sitter-perl",
- "tree-sitter-php",
- "tree-sitter-python",
- "tree-sitter-ruby",
- "tree-sitter-rust",
- "tree-sitter-scss",
- "tree-sitter-sequel",
- "tree-sitter-swift",
- "tree-sitter-typescript",
- "tree-sitter-xml",
- "tree-sitter-yaml",
- "walkdir",
-]
-
-[[package]]
-name = "codesight-mcp"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "cargo_metadata",
- "chrono",
- "clap",
- "codesight-analysis",
- "codesight-core",
- "codesight-engine",
- "codesight-language-support",
- "codesight-retrieval",
- "codesight-storage",
- "rmcp",
- "rustc-hash",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "walkdir",
-]
-
-[[package]]
-name = "codesight-retrieval"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "blake3",
- "codesight-core",
- "codesight-storage",
- "dirs",
- "heck",
- "htmd",
- "jsonc-parser",
- "model2vec-rs",
- "nucleo-matcher",
- "pulldown-cmark",
- "rustc-hash",
- "serde_json",
- "serde_yml",
- "strsim",
- "tracing",
-]
-
-[[package]]
-name = "codesight-storage"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "codesight-core",
- "criterion",
- "ignore",
- "rusqlite",
- "rustc-hash",
- "serde",
- "serde_json",
- "sqlite-vec",
- "tempfile",
- "thiserror",
- "tracing",
- "walkdir",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -833,6 +639,200 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "dowser-analysis"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "dowser-core",
+ "dowser-language-support",
+ "dowser-storage",
+ "globset",
+ "ignore",
+ "petgraph",
+ "phf",
+ "regex",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "dowser-core"
+version = "0.1.1"
+dependencies = [
+ "phf",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "strum",
+]
+
+[[package]]
+name = "dowser-engine"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "chrono",
+ "dirs",
+ "dowser-analysis",
+ "dowser-core",
+ "dowser-language-support",
+ "dowser-retrieval",
+ "dowser-storage",
+ "globset",
+ "ignore",
+ "jsonschema",
+ "notify",
+ "notify-debouncer-full",
+ "parking_lot",
+ "rayon",
+ "regex",
+ "rmcp",
+ "rusqlite",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "similar",
+ "strum",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
+name = "dowser-language-support"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "dashmap",
+ "dowser-core",
+ "heck",
+ "ignore",
+ "jsonc-parser",
+ "path-clean",
+ "pluralizer",
+ "rayon",
+ "regex",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "streaming-iterator",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-c-sharp",
+ "tree-sitter-cpp",
+ "tree-sitter-css",
+ "tree-sitter-dart",
+ "tree-sitter-elixir",
+ "tree-sitter-embedded-template",
+ "tree-sitter-erlang",
+ "tree-sitter-fortran",
+ "tree-sitter-gleam",
+ "tree-sitter-go",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-kotlin-ng",
+ "tree-sitter-lua",
+ "tree-sitter-luau",
+ "tree-sitter-nix",
+ "tree-sitter-ocaml",
+ "tree-sitter-perl",
+ "tree-sitter-php",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
+ "tree-sitter-rust",
+ "tree-sitter-scss",
+ "tree-sitter-sequel",
+ "tree-sitter-swift",
+ "tree-sitter-typescript",
+ "tree-sitter-xml",
+ "tree-sitter-yaml",
+ "walkdir",
+]
+
+[[package]]
+name = "dowser-mcp"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "cargo_metadata",
+ "chrono",
+ "clap",
+ "dowser-analysis",
+ "dowser-core",
+ "dowser-engine",
+ "dowser-language-support",
+ "dowser-retrieval",
+ "dowser-storage",
+ "rmcp",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
+]
+
+[[package]]
+name = "dowser-retrieval"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "dirs",
+ "dowser-core",
+ "dowser-storage",
+ "heck",
+ "htmd",
+ "jsonc-parser",
+ "model2vec-rs",
+ "nucleo-matcher",
+ "pulldown-cmark",
+ "rustc-hash",
+ "serde_json",
+ "serde_yml",
+ "strsim",
+ "tracing",
+]
+
+[[package]]
+name = "dowser-storage"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "criterion",
+ "dowser-core",
+ "ignore",
+ "rusqlite",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "sqlite-vec",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "walkdir",
 ]
 
 [[package]]

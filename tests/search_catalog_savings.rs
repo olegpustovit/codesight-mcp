@@ -1,7 +1,7 @@
 use std::fs;
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -33,10 +33,9 @@ fn search_catalog_savings_use_rg_equivalent_not_repo_bytes() {
     fs::write(src.join("main.py"), "def hello():\n    return 1\n").unwrap();
     fs::write(src.join("huge_blob.py"), "x".repeat(400_000)).unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let response = svc
@@ -79,10 +78,9 @@ fn search_catalog_count_mode_emits_no_inflated_baseline() {
     fs::write(src.join("main.py"), "def hello():\n    return 1\n").unwrap();
     fs::write(src.join("huge_blob.py"), "y".repeat(400_000)).unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let response = svc

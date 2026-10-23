@@ -6,15 +6,15 @@ Linux and macOS users do not need Rust. Download the pinned installer, then run
 it to install **v0.1.1** in `~/.local/bin`:
 
 ```sh
-curl -fL https://github.com/olegpustovit/codesight-mcp/releases/download/v0.1.1/install.sh -o /tmp/codesight-install.sh
-sh /tmp/codesight-install.sh v0.1.1
-"$HOME/.local/bin/codesight-mcp" --version
+curl -fL https://github.com/olegpustovit/dowser-mcp/releases/download/v0.1.1/install.sh -o /tmp/dowser-install.sh
+sh /tmp/dowser-install.sh v0.1.1
+"$HOME/.local/bin/dowser-mcp" --version
 ```
 
 The installer detects your OS and architecture, downloads the matching archive,
 verifies its SHA-256 checksum, and checks the binary version before replacing an
 existing installation. It requires `curl`, `tar`, and `sha256sum` or `shasum`.
-Set `CODESIGHT_INSTALL_DIR=/absolute/directory` to choose another location.
+Set `DOWSER_INSTALL_DIR=/absolute/directory` to choose another location.
 Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile for CLI use;
 the client examples below use the absolute path and do not depend on `PATH`.
 
@@ -32,18 +32,18 @@ and cannot run these glibc builds directly.
 ### Manual download and updates
 
 All archives, per-file checksums and `SHA256SUMS` are on the
-[v0.1.1 release page](https://github.com/olegpustovit/codesight-mcp/releases/tag/v0.1.1).
+[v0.1.1 release page](https://github.com/olegpustovit/dowser-mcp/releases/tag/v0.1.1).
 For example, on Linux x86_64:
 
 ```sh
-archive=codesight-mcp-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
-base=https://github.com/olegpustovit/codesight-mcp/releases/download/v0.1.1
+archive=dowser-mcp-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
+base=https://github.com/olegpustovit/dowser-mcp/releases/download/v0.1.1
 curl -fLO "$base/$archive"
 curl -fLO "$base/$archive.sha256"
 sha256sum -c "$archive.sha256"   # macOS: shasum -a 256 -c "$archive.sha256"
-tar -xzf "$archive" codesight-mcp
+tar -xzf "$archive" dowser-mcp
 mkdir -p "$HOME/.local/bin"
-install -m 755 codesight-mcp "$HOME/.local/bin/codesight-mcp"
+install -m 755 dowser-mcp "$HOME/.local/bin/dowser-mcp"
 ```
 
 There is no automatic update. To update, download the installer from the desired
@@ -51,7 +51,7 @@ release and run it with that same version. Running the commands above again
 reinstalls v0.1.1. Restart your MCP client after an update. Archives include the
 license, third-party notices and `BUILD-INFO.txt` with the exact source commit.
 
-## Add Codesight to your coding agent
+## Add Dowser to your coding agent
 
 Choose the repository you want the agent to work on and index it first. Replace
 `/absolute/path/to/your/repo` below. The server keeps its SQLite index outside
@@ -59,37 +59,37 @@ your repository and makes no network or model API calls.
 
 ```sh
 cd /absolute/path/to/your/repo
-"$HOME/.local/bin/codesight-mcp" ingest "$PWD"
-"$HOME/.local/bin/codesight-mcp" check --workspace "$PWD"
+"$HOME/.local/bin/dowser-mcp" ingest "$PWD"
+"$HOME/.local/bin/dowser-mcp" check --workspace "$PWD"
 ```
 
 The first tool call can index automatically, but pre-indexing avoids a cold-call
 timeout on a large repository. By default the index is under
-`~/.local/share/codesight-mcp` on Linux and
-`~/Library/Application Support/codesight-mcp` on macOS;
-`CODESIGHT_INDEX_DIR` overrides that location.
+`~/.local/share/dowser-mcp` on Linux and
+`~/Library/Application Support/dowser-mcp` on macOS;
+`DOWSER_INDEX_DIR` overrides that location.
 
 ### Claude Code
 
 Run this from the target repository:
 
 ```sh
-claude mcp add --transport stdio --scope local codesight -- \
-  "$HOME/.local/bin/codesight-mcp" serve --workspace "$PWD"
-claude mcp get codesight
+claude mcp add --transport stdio --scope local dowser -- \
+  "$HOME/.local/bin/dowser-mcp" serve --workspace "$PWD"
+claude mcp get dowser
 ```
 
 Restart Claude Code and check `/mcp`. The server is configured for this
 repository. See [Claude Code's MCP documentation](https://code.claude.com/docs/en/mcp).
 Optional routing hooks are in
-[`plugins/codesight-hooks`](../plugins/codesight-hooks/README.md).
+[`plugins/dowser-hooks`](../plugins/dowser-hooks/README.md).
 
 ### Codex
 
 Run this from the target repository:
 
 ```sh
-codex mcp add codesight -- "$HOME/.local/bin/codesight-mcp" serve --workspace "$PWD"
+codex mcp add dowser -- "$HOME/.local/bin/dowser-mcp" serve --workspace "$PWD"
 codex mcp list
 ```
 
@@ -99,8 +99,8 @@ Restart Codex after adding it. You can instead add this to the repository's
 trusted `.codex/config.toml`, replacing both absolute paths:
 
 ```toml
-[mcp_servers.codesight]
-command = "/absolute/path/to/.local/bin/codesight-mcp"
+[mcp_servers.dowser]
+command = "/absolute/path/to/.local/bin/dowser-mcp"
 args = ["serve", "--workspace", "/absolute/path/to/your/repo"]
 ```
 
@@ -114,8 +114,8 @@ with the absolute path printed by the installer:
 ```json
 {
   "mcpServers": {
-    "codesight": {
-      "command": "/absolute/path/to/.local/bin/codesight-mcp",
+    "dowser": {
+      "command": "/absolute/path/to/.local/bin/dowser-mcp",
       "args": ["serve", "--workspace", "${workspaceFolder}"]
     }
   }
@@ -133,9 +133,9 @@ Requirements: stable Rust with edition 2024 support, a C and C++ compiler
 SQLite is bundled. From a checkout of this repository:
 
 ```sh
-cargo install --locked --path .   # installs ~/.cargo/bin/codesight-mcp
+cargo install --locked --path .   # installs ~/.cargo/bin/dowser-mcp
 # or
-cargo build --locked --release --bin codesight-mcp
+cargo build --locked --release --bin dowser-mcp
 ```
 
 The release profile uses LTO with one codegen unit. No profile overrides are
@@ -145,8 +145,8 @@ outline/read content and installer checks before publication.
 
 ## Paper and reproduction package
 
-The [SANER 2027 Tool Demo paper and artifact release](https://github.com/olegpustovit/codesight-mcp/releases/tag/saner-2027-artifact-v1)
-contains the paper PDF, LaTeX manuscript source (`codesight-source.zip`),
+The [SANER 2027 Tool Demo paper and artifact release](https://github.com/olegpustovit/dowser-mcp/releases/tag/saner-2027-artifact-v1)
+contains the paper PDF, LaTeX manuscript source (`dowser-source.zip`),
 reproduction archive and checksums. GitHub’s automatic **Source code** downloads
 on that release contain the measured software snapshot. This is a submission
 candidate, with no claim of submission or acceptance. The reported study uses revision `5d0f620adda96e2d39b2259e188a48e318ad4208`; later fixes and v0.1.1
@@ -156,13 +156,13 @@ reproduce the paper and v0.1.1 for the current installable tool.
 ## Tools
 
 The authoritative schema is
-[`crates/codesight-engine/src/tools.json`](../crates/codesight-engine/src/tools.json).
+[`crates/dowser-engine/src/tools.json`](../crates/dowser-engine/src/tools.json).
 Every tool returns `{ok, data, _meta: {confidence, timing_ms, tokens_saved?}, warnings}`.
 On failure the shape is `{ok: false, error: {category, code, message, detail}}`.
 
 Symbol refs are strings in the form `path::QualifiedName#kind`. Kinds come
 from the index, so a Rust enum is `#type` (for example
-`crates/codesight-core/src/core/symbols.rs::FactQuality#type`) and a method is
+`crates/dowser-core/src/core/symbols.rs::FactQuality#type`) and a method is
 `path::Type.method#function`. To find exact ids, call `outline view=file` or
 `search`.
 
@@ -203,14 +203,14 @@ Hard rules enforced in code and tests:
 Example from this repository:
 
 ```text
-impact {"analysis":"blast_radius","ref":"crates/codesight-core/src/core/symbols.rs::FactQuality#type"}
+impact {"analysis":"blast_radius","ref":"crates/dowser-core/src/core/symbols.rs::FactQuality#type"}
 → historical v0.1.0 output: confidence=safe, symbol_scoped_file_count=10,
-  weak_files_text_mentions=[crates/codesight-core/src/lib.rs, crates/codesight-language-support/src/traits.rs]
+  weak_files_text_mentions=[crates/dowser-core/src/lib.rs, crates/dowser-language-support/src/traits.rs]
 
 impact {"analysis":"blast_radius","ref":"no/such/file.rs::FactQuality#enum"}
 → ok=false, error.code=NOT_FOUND ("file is not in the index")
 
-references {"kind":"importers","path":"crates/codesight-core/src/lib.rs"}
+references {"kind":"importers","path":"crates/dowser-core/src/lib.rs"}
 → ok, confidence=partial, importer_count=76
 ```
 
@@ -220,7 +220,7 @@ references {"kind":"importers","path":"crates/codesight-core/src/lib.rs"}
 It exits non-zero if any probe fails.
 
 ```sh
-codesight-mcp self-check --workspace .
+dowser-mcp self-check --workspace .
 ```
 
 Output on this repository for v0.1.0 (release build; `tool_latency` was 807.5 ms with a debug build):
@@ -250,15 +250,15 @@ results as indicative only.
 
 | Command | Purpose |
 |---|---|
-| `codesight-mcp serve [--workspace PATH]` | MCP over stdio (default when no subcommand is given) |
-| `codesight-mcp ingest PATH [--domains code\|docs\|auto] [--full]` | Index a path and print the envelope |
-| `codesight-mcp search SOURCE_ID QUERY [--limit N] [--domain code\|docs\|hybrid]` | Diagnostic search against an indexed source (`source_id` is printed by `ingest`) |
-| `codesight-mcp check [--workspace PATH] [--savings]` | Storage, schema, query packs, `.codesight.toml`; `--savings` prints the token-savings ledger |
-| `codesight-mcp init [--workspace] [--claude-code] [--force]` | Write a commented `.codesight.toml`, or a `.mcp.json` entry |
-| `codesight-mcp hook-pretooluse` / `hook-posttooluse` / `hook-precompact` | Claude Code hook entry points |
+| `dowser-mcp serve [--workspace PATH]` | MCP over stdio (default when no subcommand is given) |
+| `dowser-mcp ingest PATH [--domains code\|docs\|auto] [--full]` | Index a path and print the envelope |
+| `dowser-mcp search SOURCE_ID QUERY [--limit N] [--domain code\|docs\|hybrid]` | Diagnostic search against an indexed source (`source_id` is printed by `ingest`) |
+| `dowser-mcp check [--workspace PATH] [--savings]` | Storage, schema, query packs, `.dowser.toml`; `--savings` prints the token-savings ledger |
+| `dowser-mcp init [--workspace] [--claude-code] [--force]` | Write a commented `.dowser.toml`, or a `.mcp.json` entry |
+| `dowser-mcp hook-pretooluse` / `hook-posttooluse` / `hook-precompact` | Claude Code hook entry points |
 
-Environment: `CODESIGHT_INDEX_DIR` (index location), `CODESIGHT_LOG_FORMAT`
-(`pretty` or `json`; logs go to stderr), `CODESIGHT_PATH_MAP` (path-prefix
+Environment: `DOWSER_INDEX_DIR` (index location), `DOWSER_LOG_FORMAT`
+(`pretty` or `json`; logs go to stderr), `DOWSER_PATH_MAP` (path-prefix
 remapping for Docker or remote dev), and `RUST_LOG` (standard `EnvFilter`).
 
 ## Limitations
@@ -268,7 +268,7 @@ These were observed on this repository while preparing v0.1.0:
 - **Cold first call.** If the repository isn't indexed, the first tool call
   starts indexing. In one run, `outline view=repo` hit its 5 s timeout and
   returned `TIMEOUT`, and the next `search` returned no items. Run
-  `codesight-mcp ingest .` first. Timeout budgets: `read` 3 s, `search` /
+  `dowser-mcp ingest .` first. Timeout budgets: `read` 3 s, `search` /
   `outline` / `references` 5 s, `impact` / `health` 15 s.
 - **Name-based references, not resolved bindings.** Primary reference and
   blast-radius results use definitions and grammar identifier tokens. Comments

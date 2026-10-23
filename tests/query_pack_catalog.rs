@@ -2,13 +2,13 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use codesight_language_support::LanguageRegistry;
-use codesight_language_support::query_pack_catalog::QueryPackCatalog;
-use codesight_language_support::scm_engine::ScmExtractor;
+use dowser_language_support::LanguageRegistry;
+use dowser_language_support::query_pack_catalog::QueryPackCatalog;
+use dowser_language_support::scm_engine::ScmExtractor;
 
 fn query_dirs_on_disk() -> BTreeSet<String> {
-    let languages_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/codesight-language-support/src/languages");
+    let languages_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/dowser-language-support/src/languages");
     fs::read_dir(languages_root)
         .unwrap()
         .filter_map(|entry| {
@@ -78,8 +78,8 @@ fn override_backed_query_packs_still_compile_for_wrapper_delegation() {
 
 #[test]
 fn builtin_query_packs_use_canonical_tags_layout() {
-    let languages_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/codesight-language-support/src/languages");
+    let languages_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/dowser-language-support/src/languages");
     let legacy_paths: Vec<String> = fs::read_dir(languages_root)
         .unwrap()
         .filter_map(|entry| {
@@ -96,9 +96,9 @@ fn builtin_query_packs_use_canonical_tags_layout() {
 }
 
 #[test]
-fn codesight_queries_convention_loads_packs_without_toml_config() {
+fn dowser_queries_convention_loads_packs_without_toml_config() {
     let workspace = tempfile::tempdir().unwrap();
-    let pack_dir = workspace.path().join(".codesight/queries/toyjson");
+    let pack_dir = workspace.path().join(".dowser/queries/toyjson");
     fs::create_dir_all(&pack_dir).unwrap();
     fs::write(
         pack_dir.join("tags.scm"),
@@ -126,7 +126,7 @@ fn codesight_queries_convention_loads_packs_without_toml_config() {
 fn workspace_query_pack_root_supports_pack_toml_metadata() {
     let workspace = tempfile::tempdir().unwrap();
     fs::write(
-        workspace.path().join(".codesight.toml"),
+        workspace.path().join(".dowser.toml"),
         "query_pack_roots = [\"queries\"]\n",
     )
     .unwrap();
@@ -166,7 +166,7 @@ fn workspace_query_pack_root_supports_pack_toml_metadata() {
 fn workspace_query_pack_missing_required_metadata_is_rejected() {
     let workspace = tempfile::tempdir().unwrap();
     fs::write(
-        workspace.path().join(".codesight.toml"),
+        workspace.path().join(".dowser.toml"),
         "query_pack_roots = [\"queries\"]\n",
     )
     .unwrap();

@@ -3,8 +3,8 @@
 use std::fs;
 use std::time::Instant;
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -15,7 +15,7 @@ use tempfile::tempdir;
 /// Build the same 5-file synthetic repo from the reference test.
 ///
 /// Returns the repo root (the `src` subdir). Callers must ingest this path
-/// rather than the shared tempdir — otherwise codesight's own index dir
+/// rather than the shared tempdir — otherwise dowser's own index dir
 /// (a sibling of `src` under the tempdir) gets picked up by the walker and
 /// session-ledger JSON keys leak into the symbol set between calls.
 fn build_search_perf_repo(parent: &std::path::Path) -> std::path::PathBuf {
@@ -135,9 +135,8 @@ fn setup_perf_repo() -> PerfRepo {
     let ws = tempdir().unwrap();
     let root = build_search_perf_repo(ws.path());
     let idx_root = ws.path().join("idx");
-    let svc =
-        codesight_mcp::test_support::make_service_from_config(AppConfig::new(idx_root.clone()))
-            .unwrap();
+    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(idx_root.clone()))
+        .unwrap();
     let source_id = ingest(&svc, &root);
     PerfRepo {
         _ws: ws,
@@ -149,7 +148,7 @@ fn setup_perf_repo() -> PerfRepo {
 
 impl PerfRepo {
     fn fresh_service(&self) -> CodeService {
-        codesight_mcp::test_support::make_service_from_config(AppConfig::new(self.idx_root.clone()))
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(self.idx_root.clone()))
             .unwrap()
     }
 }
@@ -339,10 +338,9 @@ fn case_scores_stable_across_two_calls() {
     // The Rust search_catalog surfaces per-result `score` in every item.
     let ws = tempdir().unwrap();
     let src_root = build_search_perf_repo(ws.path());
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let source_id = ingest(&svc, &src_root);
 
     let r1 = search(&svc, &source_id, "parse file", 5);

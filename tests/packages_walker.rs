@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::Path;
 
-use codesight_language_support::packages::walker::{MAX_DEPTH, discover_package_names};
+use dowser_language_support::packages::walker::{MAX_DEPTH, discover_package_names};
 use tempfile::tempdir;
 
 fn write(root: &Path, rel: &str, content: &str) {

@@ -1,9 +1,9 @@
 //! FEEDBACK.md §3a regression: oversized `read_content` responses must
 //! per-ref-stub the later refs instead of dumping a JSON-escaped preview.
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
-use codesight_mcp::test_support::{index_code_fixture, write_files};
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
+use dowser_mcp::test_support::{index_code_fixture, write_files};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 

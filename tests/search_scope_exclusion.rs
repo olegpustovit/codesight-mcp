@@ -1,7 +1,7 @@
 use std::fs;
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -36,10 +36,9 @@ fn exclude_drops_symbol_hits() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let result = svc
@@ -83,10 +82,9 @@ fn exclude_drops_file_hits() {
     fs::write(ws.path().join("src/keep/a.py"), "# TODO keep\n").unwrap();
     fs::write(ws.path().join("src/skip/b.py"), "# TODO skip\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let sid = ingest_code(&svc, ws.path());
 
     let result = svc

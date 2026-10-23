@@ -65,5 +65,5 @@ jobs:
           if-no-files-found: warn
       - name: self-check
         env:
-          CODESIGHT_INDEX_DIR: ${{ runner.temp }}/codesight-index
+          DOWSER_INDEX_DIR: ${{ runner.temp }}/dowser-index
         run: cargo run --quiet -- self-check --workspace .
