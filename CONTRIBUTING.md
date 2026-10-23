@@ -25,11 +25,11 @@ Integration tests are compiled into a single `integration` binary
 
 ## Rules that tests enforce
 
-- `crates/codesight-engine/src/tools.json` is the public contract. If you
+- `crates/dowser-engine/src/tools.json` is the public contract. If you
   change a tool's schema, change the adapter in `service/agent_v1/cutplan.rs`
   and its tests in the same commit.
 - `tests/routing_drift.rs` fails if `AGENTS.md`, `README.md`, or the routing
-  rule in `plugins/codesight-mcp` mention a retired tool name, a
+  rule in `plugins/dowser-mcp` mention a retired tool name, a
   `mode=`/`view=`/`kind=`/`analysis=` value that isn't in `tools.json`, or an
   undeclared warning code.
 - `tests/crate_graph.rs` enforces the crate dependency rules described in

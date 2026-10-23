@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 use std::fs;
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -13,10 +13,9 @@ fn build_service() -> (CodeService, tempfile::TempDir) {
     let src = ws.path().join("src");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("main.py"), "def hello():\n    return 1\n").unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     (svc, ws)
 }
 

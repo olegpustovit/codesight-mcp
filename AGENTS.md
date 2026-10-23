@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`codesight-mcp` — local MCP server for structural, token-efficient code
+`dowser-mcp` — local MCP server for structural, token-efficient code
 retrieval. Rust workspace at the repo root. Onboarding: [`README.md`](README.md).
 
 ## Identity
@@ -10,7 +10,7 @@ Three rules are non-negotiable:
 - **Consolidated tools.** Six tools (`search`, `outline`, `read`, `references`,
   `impact`, `health`), dispatched by `mode` / `view` / `kind` / `analysis`
   enums. Never split a consolidated tool into parallel names. Authoritative
-  schema: [`crates/codesight-engine/src/tools.json`](crates/codesight-engine/src/tools.json).
+  schema: [`crates/dowser-engine/src/tools.json`](crates/dowser-engine/src/tools.json).
 - **Stateless per-request.** The agent owns session state. Any session
   awareness we add is opt-in, never a mandatory protocol.
 - **No LLM calls from inside the server.** The agent *is* the LLM; summaries
@@ -23,7 +23,7 @@ Three rules are non-negotiable:
 ### 1. Shrink the code. Always.
 
 - LoC and per-module cyclomatic complexity only go down or stay flat. 
-- Defaults come from `crates/codesight-analysis/src/thresholds.rs` — plain
+- Defaults come from `crates/dowser-analysis/src/thresholds.rs` — plain
   constants in `pub const THRESHOLDS: Thresholds = Thresholds { ... }`,
   surfaced by `health analysis=quality_signal`. Edit the constants
   directly if a threshold has to move.
@@ -51,15 +51,15 @@ Three rules are non-negotiable:
   aliases, and useless surfaces aggressively — update `src/tools.json` +
   tests in the same patch.
 
-### 2. Dogfood `codesight-mcp` for every lookup.
+### 2. Dogfood `dowser-mcp` for every lookup.
 
 If we don't use it on ourselves we won't notice when it breaks.
 
-**Default → codesight mapping.** Every row is a *reach*: if you catch
+**Default → dowser mapping.** Every row is a *reach*: if you catch
 yourself typing the left column, stop and use the right column. The 6-tool
-surface is authoritative — see [`tools.json`](crates/codesight-engine/src/tools.json).
+surface is authoritative — see [`tools.json`](crates/dowser-engine/src/tools.json).
 
-| Default (don't) | Codesight (do) | Args |
+| Default (don't) | Dowser (do) | Args |
 |---|---|---|
 | `Grep` a symbol/fn/type name | `search` | `mode=keyword`, opt. `scope=` / `fuzzy=true` |
 | `Grep` substring across files | `search` | `mode=keyword`, opt. `scope=*.md` to narrow |
@@ -106,14 +106,14 @@ surface is authoritative — see [`tools.json`](crates/codesight-engine/src/tool
 - **Read the warnings.** `confidence: "partial"` always carries a code:
   `NO_EXACT_MATCH`, `AMBIGUOUS_IDENTIFIER`, `OVERBROAD_QUERY`,
   `NL_DEGRADED`, `TRUNCATED`, etc. Full taxonomy in
-  [`warnings.rs`](crates/codesight-engine/src/service/agent_v1/warnings.rs).
+  [`warnings.rs`](crates/dowser-engine/src/service/agent_v1/warnings.rs).
 - **`_meta.tokens_saved` is the scoreboard for `mode=keyword|nl`.** For
   `mode=regex`, the meta carries `bytes_scanned` + `files_scanned` instead
   — regex inherently can't beat raw grep on tokens, so the metric is
   mode-conditional.
 - **Quality loop on risky edits**: `health analysis=quality_signal
   scope="…"` before; check `agent_readiness_score` and `weakest_dimension`.
-- **Fallback only when codesight can't answer** (missing grammar, tool
+- **Fallback only when dowser can't answer** (missing grammar, tool
   under repair). Native `Grep`/`Read` remain correct for writing,
   running tests, and editing — not for read/search.
 
@@ -172,32 +172,32 @@ roll back the same session.
 
 | Path | Purpose |
 |---|---|
-| [`src/`](src/) | Binary crate: CLI subcommands + stdio MCP entry point. Thin wiring only — all engine logic lives in `crates/codesight-engine`. |
+| [`src/`](src/) | Binary crate: CLI subcommands + stdio MCP entry point. Thin wiring only — all engine logic lives in `crates/dowser-engine`. |
 | [`src/cli/`](src/cli/) | Operator subcommands (`check`, `init`, hooks). |
-| [`crates/codesight-engine/`](crates/codesight-engine) | **L1 engine.** MCP tool dispatch, indexing orchestration, `AppConfig`, security, server support, `tools.json` contract, stdio JSON-RPC framing (`rpc.rs`). |
-| [`crates/codesight-engine/src/tools.json`](crates/codesight-engine/src/tools.json) | **Frozen MCP contract.** Schema + handler ship together. |
-| [`crates/codesight-core/`](crates/codesight-core) | L0 primitives: `Symbol`, `FactQuality`, pipeline types, `LanguageId` constants. |
-| [`crates/codesight-language-support/`](crates/codesight-language-support) | **L0.75.** One folder per language under `src/languages/<lang>/` — owns identity, grammar + SCM (embedded via `include_str!` from `queries/`), symbol extraction, import extraction + resolution, package discovery, entrypoints, tests, visibility, complexity, and framework providers. Single `Language` trait with default bodies; overrides are opt-in. Host profiles (openapi, ansible) are sibling `Language` impls that share the host grammar. |
-| [`crates/codesight-analysis/`](crates/codesight-analysis) | Quality, impact, graph analysis (cycles, coupling, call graph, layer checks). |
-| [`crates/codesight-retrieval/`](crates/codesight-retrieval) | BM25, fuzzy, embedder, section builders. |
-| [`crates/codesight-storage/`](crates/codesight-storage) | WAL SQLite + forward-only migrations. |
+| [`crates/dowser-engine/`](crates/dowser-engine) | **L1 engine.** MCP tool dispatch, indexing orchestration, `AppConfig`, security, server support, `tools.json` contract, stdio JSON-RPC framing (`rpc.rs`). |
+| [`crates/dowser-engine/src/tools.json`](crates/dowser-engine/src/tools.json) | **Frozen MCP contract.** Schema + handler ship together. |
+| [`crates/dowser-core/`](crates/dowser-core) | L0 primitives: `Symbol`, `FactQuality`, pipeline types, `LanguageId` constants. |
+| [`crates/dowser-language-support/`](crates/dowser-language-support) | **L0.75.** One folder per language under `src/languages/<lang>/` — owns identity, grammar + SCM (embedded via `include_str!` from `queries/`), symbol extraction, import extraction + resolution, package discovery, entrypoints, tests, visibility, complexity, and framework providers. Single `Language` trait with default bodies; overrides are opt-in. Host profiles (openapi, ansible) are sibling `Language` impls that share the host grammar. |
+| [`crates/dowser-analysis/`](crates/dowser-analysis) | Quality, impact, graph analysis (cycles, coupling, call graph, layer checks). |
+| [`crates/dowser-retrieval/`](crates/dowser-retrieval) | BM25, fuzzy, embedder, section builders. |
+| [`crates/dowser-storage/`](crates/dowser-storage) | WAL SQLite + forward-only migrations. |
 | [`tests/`](tests) | Integration tests. `tests/crate_graph.rs` enforces layering. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Crate split, data flow, FactQuality, SQLite config. |
 
 Layer invariants (enforced by `tests/crate_graph.rs`):
 
-- **L0** (primitives): `codesight-core` ← `-analysis` / `-retrieval` /
+- **L0** (primitives): `dowser-core` ← `-analysis` / `-retrieval` /
   `-storage`. No upward deps.
-- **L0.75** (language support): `codesight-language-support` owns every
-  per-language heuristic. May depend only on `codesight-core`. Never reaches
+- **L0.75** (language support): `dowser-language-support` owns every
+  per-language heuristic. May depend only on `dowser-core`. Never reaches
   upward into engine, analysis, retrieval, or storage.
-- **L1** (engine): `codesight-engine` depends on L0 + language-support +
+- **L1** (engine): `dowser-engine` depends on L0 + language-support +
   analysis + retrieval + storage. Dispatch, indexing, security, and
   stdio JSON-RPC framing all live here.
 
 ## Working rules
 
-1. `agent-v1` + `crates/codesight-engine/src/tools.json` is the only public
+1. `agent-v1` + `crates/dowser-engine/src/tools.json` is the only public
    MCP surface. Extensibility via `view`/`analysis` enums — never parallel
    tool names.
 2. **No backwards compatibility. Zero.** No shims, aliases, dual paths,
@@ -207,9 +207,9 @@ Layer invariants (enforced by `tests/crate_graph.rs`):
    with it.
 3. Structural parsers (tree-sitter, `.scm`, injections) before string
    scanning. Heuristics live at the edges.
-4. New languages land as `crates/codesight-language-support/src/languages/<lang>/` — one folder with `mod.rs` (struct + `impl Language`), `queries/tags.scm`, and any per-language overrides (imports, extractor, packages, complexity). SCM is `include_str!`-embedded, not read from disk. Sibling profile variants (openapi, ansible) register as additional `Language` impls that share the host grammar.
+4. New languages land as `crates/dowser-language-support/src/languages/<lang>/` — one folder with `mod.rs` (struct + `impl Language`), `queries/tags.scm`, and any per-language overrides (imports, extractor, packages, complexity). SCM is `include_str!`-embedded, not read from disk. Sibling profile variants (openapi, ansible) register as additional `Language` impls that share the host grammar.
 5. Keep `lib.rs` skeletal — module declarations and re-exports.
-6. All SQLite through `codesight_storage::db::open_rw`/`open_ro`.
+6. All SQLite through `dowser_storage::db::open_rw`/`open_ro`.
 7. All logs through `tracing`. No bare `eprintln!`/`println!` in libraries.
    Subscriber → stderr; stdout is reserved for JSON-RPC.
 8. Typed errors inside crates (`thiserror`); `ToolError` at the MCP
@@ -223,7 +223,7 @@ Day-to-day (targeted, always):
 ```bash
 cargo nextest run --lib                          # crate lib tests
 cargo nextest run --test <name>                  # one integration binary
-cargo nextest run -p codesight-storage --lib
+cargo nextest run -p dowser-storage --lib
 cargo nextest run -E 'test(my_case)'
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all

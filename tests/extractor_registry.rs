@@ -1,9 +1,9 @@
 use rustc_hash::FxHashSet;
 use std::path::Path;
 
-use codesight_core::ExtractionTier;
-use codesight_language_support::LanguageRegistry;
-use codesight_language_support::query_pack_catalog::GrammarCatalog;
+use dowser_core::ExtractionTier;
+use dowser_language_support::LanguageRegistry;
+use dowser_language_support::query_pack_catalog::GrammarCatalog;
 
 fn curated_languages() -> FxHashSet<String> {
     LanguageRegistry::builtin()

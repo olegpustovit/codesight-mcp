@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dowser": {
+      "command": "dowser-mcp",
+      "args": ["serve"]
+    }
+  }
+}

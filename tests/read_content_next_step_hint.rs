@@ -4,8 +4,8 @@
 
 use std::fs;
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -18,7 +18,7 @@ fn setup() -> (tempfile::TempDir, tempfile::TempDir, CodeService, String) {
         "def hinted():\n    return 'hi'\n",
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
+    let svc = dowser_mcp::test_support::make_service_from_config(AppConfig::new(
         idx.path().to_path_buf(),
     ))
     .unwrap();

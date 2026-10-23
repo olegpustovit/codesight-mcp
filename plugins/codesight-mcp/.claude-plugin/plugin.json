@@ -1,5 +1,0 @@
-{
-  "name": "codesight-mcp",
-  "version": "0.1.0",
-  "description": "Registers codesight-mcp MCP server and installs code exploration routing policy"
-}

@@ -1,17 +1,17 @@
 [workspace]
 members = [
     ".",
-    "crates/codesight-analysis",
-    "crates/codesight-core",
-    "crates/codesight-engine",
-    "crates/codesight-language-support",
-    "crates/codesight-retrieval",
-    "crates/codesight-storage",
+    "crates/dowser-analysis",
+    "crates/dowser-core",
+    "crates/dowser-engine",
+    "crates/dowser-language-support",
+    "crates/dowser-retrieval",
+    "crates/dowser-storage",
 ]
 resolver = "2"
 
 [package]
-name = "codesight-mcp"
+name = "dowser-mcp"
 version = "0.1.0"
 edition = "2024"
 description = "Token-efficient code & documentation retrieval MCP server with AST-based symbol extraction"
@@ -29,12 +29,12 @@ path = "tests/all.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
-codesight-analysis = { path = "crates/codesight-analysis" }
-codesight-core = { path = "crates/codesight-core" }
-codesight-engine = { path = "crates/codesight-engine" }
-codesight-language-support = { path = "crates/codesight-language-support" }
-codesight-retrieval = { path = "crates/codesight-retrieval" }
-codesight-storage = { path = "crates/codesight-storage" }
+dowser-analysis = { path = "crates/dowser-analysis" }
+dowser-core = { path = "crates/dowser-core" }
+dowser-engine = { path = "crates/dowser-engine" }
+dowser-language-support = { path = "crates/dowser-language-support" }
+dowser-retrieval = { path = "crates/dowser-retrieval" }
+dowser-storage = { path = "crates/dowser-storage" }
 rmcp = { version = "3.6", default-features = false, features = ["server", "transport-io", "macros"] }
 rustc-hash = "2"
 chrono = { version = "0.4", features = ["serde"] }

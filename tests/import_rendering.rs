@@ -3,11 +3,11 @@
 //! and the rendered lines must round-trip back through the language's
 //! `extract_imports` parser to the same structured edges.
 
-use codesight_language_support::builtin_registry;
-use codesight_language_support::imports_types::ImportEdge;
+use dowser_language_support::builtin_registry;
+use dowser_language_support::imports_types::ImportEdge;
 use std::path::Path;
 
-fn lang_for(path: &str) -> &'static dyn codesight_language_support::traits::Language {
+fn lang_for(path: &str) -> &'static dyn dowser_language_support::traits::Language {
     builtin_registry()
         .for_path(Path::new(path))
         .expect("language registered")

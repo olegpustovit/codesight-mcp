@@ -2,11 +2,11 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use codesight_language_support::dep_graph::build_dependency_graph;
-use codesight_language_support::imports_orchestration::extract_imports;
-use codesight_language_support::languages::python::imports::resolve_imports_to_files;
-use codesight_language_support::languages::typescript::TypeScript;
-use codesight_language_support::languages::typescript::tsconfig::{
+use dowser_language_support::dep_graph::build_dependency_graph;
+use dowser_language_support::imports_orchestration::extract_imports;
+use dowser_language_support::languages::python::imports::resolve_imports_to_files;
+use dowser_language_support::languages::typescript::TypeScript;
+use dowser_language_support::languages::typescript::tsconfig::{
     load_tsconfig_aliases, parse_tsconfig_paths,
 };
 
@@ -18,7 +18,7 @@ fn resolve_specifier(
     source_files: &FxHashSet<String>,
     alias_map: Option<&FxHashMap<String, Vec<String>>>,
 ) -> Option<String> {
-    codesight_language_support::imports_orchestration::resolve_specifier(
+    dowser_language_support::imports_orchestration::resolve_specifier(
         &TypeScript,
         specifier,
         from_file,
@@ -771,8 +771,8 @@ fn resolve_specifier_find_importers_jsonc_tsconfig_nested_layout() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -892,8 +892,8 @@ fn find_importers_python_importers() {
 #[test]
 fn find_importers_not_indexed_repo() {
     let ws = tempfile::tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
 
@@ -922,8 +922,8 @@ fn find_importers_old_index_graceful_note() {
     let src = ws.path();
     std::fs::write(src.join("app.js"), "function main() {}\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1087,8 +1087,8 @@ fn find_references_named_import_match() {
     .unwrap();
     std::fs::write(src.join("unrelated.js"), "function foo() {}\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1150,8 +1150,8 @@ fn find_references_specifier_stem_match() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1197,8 +1197,8 @@ fn find_references_case_insensitive_match() {
     std::fs::write(src.join("utils.js"), "export function Helper() {}\n").unwrap();
     std::fs::write(src.join("app.js"), "import { Helper } from './utils';\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1237,8 +1237,8 @@ fn find_references_no_false_positives() {
     std::fs::write(src.join("foo.js"), "export function foo() {}\n").unwrap();
     std::fs::write(src.join("bar.js"), "import { bar } from './something';\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1292,8 +1292,8 @@ fn find_references_does_not_emit_line_zero_text_matches() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1346,8 +1346,8 @@ fn find_references_does_not_emit_line_zero_text_matches() {
 #[test]
 fn find_references_not_indexed() {
     let ws = tempfile::tempdir().unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
 
@@ -1387,8 +1387,8 @@ fn find_references_dbt_ref_reference() {
     .unwrap();
     std::fs::write(src.join("unrelated.sql"), "SELECT 1\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1458,8 +1458,8 @@ fn imports_persistence_saved_in_index() {
     std::fs::write(src.join("utils.js"), "export const x = 1;\n").unwrap();
     std::fs::write(src.join("app.js"), "import { x } from './utils';\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1506,8 +1506,8 @@ fn imports_persistence_dbt_refs_saved_in_index() {
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1538,15 +1538,14 @@ fn imports_persistence_dbt_refs_saved_in_index() {
         serde_json::json!(["fact_orders.sql"])
     );
     assert_eq!(data["complete"], false);
-    let database =
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")).repo_db_path(sid);
-    let store = codesight_storage::storage::IndexStore::open_existing(database)
+    let database = dowser_engine::config::AppConfig::new(ws.path().join("idx")).repo_db_path(sid);
+    let store = dowser_storage::storage::IndexStore::open_existing(database)
         .unwrap()
         .unwrap();
     assert!(
         store.dependency_graph_with_import_quality().unwrap()["fact_orders.sql"].contains(&(
             "dim_client.sql".into(),
-            codesight_core::symbols::FactQuality::Heuristic
+            dowser_core::symbols::FactQuality::Heuristic
         ))
     );
     assert!(
@@ -1562,8 +1561,8 @@ fn imports_persistence_merged_on_incremental() {
     std::fs::write(src.join("utils.js"), "export const x = 1;\n").unwrap();
     std::fs::write(src.join("app.js"), "import { x } from './utils';\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1641,8 +1640,8 @@ import UserTable from './components/UserTable.vue'
     )
     .unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")),
+    let svc = dowser_mcp::test_support::make_service_from_config(
+        dowser_engine::config::AppConfig::new(ws.path().join("idx")),
     )
     .unwrap();
     let r = svc
@@ -1677,15 +1676,14 @@ import UserTable from './components/UserTable.vue'
         serde_json::json!(["src/App.vue"])
     );
     assert_eq!(data["complete"], false);
-    let database =
-        codesight_engine::config::AppConfig::new(ws.path().join("idx")).repo_db_path(sid);
-    let store = codesight_storage::storage::IndexStore::open_existing(database)
+    let database = dowser_engine::config::AppConfig::new(ws.path().join("idx")).repo_db_path(sid);
+    let store = dowser_storage::storage::IndexStore::open_existing(database)
         .unwrap()
         .unwrap();
     assert!(
         store.dependency_graph_with_import_quality().unwrap()["src/App.vue"].contains(&(
             "src/components/UserTable.vue".into(),
-            codesight_core::symbols::FactQuality::Heuristic
+            dowser_core::symbols::FactQuality::Heuristic
         ))
     );
     assert!(

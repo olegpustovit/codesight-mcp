@@ -1,5 +1,5 @@
 //! Root binary build script: macOS SDK linker flag only. The engine crate
-//! owns the CODESIGHT_BUILD_* compile-time env vars, and the extractors crate
+//! owns the DOWSER_BUILD_* compile-time env vars, and the extractors crate
 //! owns its own query pack generator.
 
 #[cfg(target_os = "macos")]

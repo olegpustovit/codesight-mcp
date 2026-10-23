@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "dowser": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--quiet",
+        "--",
+        "serve"
+      ]
+    }
+  }
+}

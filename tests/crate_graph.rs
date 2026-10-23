@@ -15,13 +15,13 @@ fn workspace_crate_dependency_invariants_hold() {
 
     let names: Vec<&str> = workspace_members.iter().map(|p| p.name.as_str()).collect();
     for expected in [
-        "codesight-mcp",
-        "codesight-analysis",
-        "codesight-core",
-        "codesight-engine",
-        "codesight-language-support",
-        "codesight-retrieval",
-        "codesight-storage",
+        "dowser-mcp",
+        "dowser-analysis",
+        "dowser-core",
+        "dowser-engine",
+        "dowser-language-support",
+        "dowser-retrieval",
+        "dowser-storage",
     ] {
         assert!(
             names.contains(&expected),
@@ -29,15 +29,15 @@ fn workspace_crate_dependency_invariants_hold() {
         );
     }
     for gone in [
-        "codesight-backend",
-        "codesight-extractors",
-        "codesight-imports",
+        "dowser-backend",
+        "dowser-extractors",
+        "dowser-imports",
         "mcp-rpc",
     ] {
         assert!(
             !names.contains(&gone),
             "{gone} has been deleted; tree-sitter extraction flows through \
-             codesight-language-support directly"
+             dowser-language-support directly"
         );
     }
 
@@ -60,54 +60,50 @@ fn workspace_crate_dependency_invariants_hold() {
 
     // ── L0: primitives ──────────────────────────────────────────────────
     assert!(
-        ws_deps("codesight-core").is_empty(),
-        "codesight-core must have no workspace deps"
+        ws_deps("dowser-core").is_empty(),
+        "dowser-core must have no workspace deps"
     );
     assert_eq!(
-        ws_deps("codesight-storage"),
-        vec!["codesight-core"],
+        ws_deps("dowser-storage"),
+        vec!["dowser-core"],
         "storage may only depend on core"
     );
     assert_eq!(
-        ws_deps("codesight-analysis"),
-        vec![
-            "codesight-core",
-            "codesight-language-support",
-            "codesight-storage",
-        ],
+        ws_deps("dowser-analysis"),
+        vec!["dowser-core", "dowser-language-support", "dowser-storage",],
         "analysis depends on core + language-support + storage"
     );
     assert_eq!(
-        ws_deps("codesight-retrieval"),
-        vec!["codesight-core", "codesight-storage"],
+        ws_deps("dowser-retrieval"),
+        vec!["dowser-core", "dowser-storage"],
         "retrieval depends on core + storage only"
     );
 
     // ── L0.75: language support — owns every per-language behavior ──────
     //
-    // May depend only on L0 primitives (codesight-core). Must never reach
+    // May depend only on L0 primitives (dowser-core). Must never reach
     // upward into engine, analysis, retrieval, or storage — otherwise the
     // "one crate owns language behavior" contract collapses.
-    let lang_deps = ws_deps("codesight-language-support");
+    let lang_deps = ws_deps("dowser-language-support");
     for banned in [
-        "codesight-analysis",
-        "codesight-engine",
-        "codesight-retrieval",
-        "codesight-storage",
+        "dowser-analysis",
+        "dowser-engine",
+        "dowser-retrieval",
+        "dowser-storage",
     ] {
         assert!(
             !lang_deps.contains(&banned.to_string()),
-            "codesight-language-support must not depend on {banned}: {lang_deps:?}"
+            "dowser-language-support must not depend on {banned}: {lang_deps:?}"
         );
     }
 
     // ── L1: engine ──────────────────────────────────────────────────────
-    let engine_deps = ws_deps("codesight-engine");
+    let engine_deps = ws_deps("dowser-engine");
     for required in [
-        "codesight-storage",
-        "codesight-analysis",
-        "codesight-retrieval",
-        "codesight-language-support",
+        "dowser-storage",
+        "dowser-analysis",
+        "dowser-retrieval",
+        "dowser-language-support",
     ] {
         assert!(
             engine_deps.contains(&required.to_string()),
@@ -117,19 +113,19 @@ fn workspace_crate_dependency_invariants_hold() {
 
     // No workspace crate may depend on the product binary crate.
     for pkg_name in &names {
-        if *pkg_name == "codesight-mcp" {
+        if *pkg_name == "dowser-mcp" {
             continue;
         }
         assert!(
-            !ws_deps(pkg_name).contains(&"codesight-mcp".to_string()),
-            "{pkg_name} must not depend on codesight-mcp"
+            !ws_deps(pkg_name).contains(&"dowser-mcp".to_string()),
+            "{pkg_name} must not depend on dowser-mcp"
         );
     }
 
     // Root binary depends on engine. The MCP protocol layer is now `rmcp`
     // (external crate), so there's no internal workspace member for it.
-    let root_deps = ws_deps("codesight-mcp");
-    let required = "codesight-engine";
+    let root_deps = ws_deps("dowser-mcp");
+    let required = "dowser-engine";
     assert!(
         root_deps.contains(&required.to_string()),
         "root missing required dep {required}: {root_deps:?}"
@@ -137,7 +133,7 @@ fn workspace_crate_dependency_invariants_hold() {
 }
 
 /// L0.75 content lint: per-language behavior lives in
-/// `codesight-language-support`. The analysis and engine crates must not
+/// `dowser-language-support`. The analysis and engine crates must not
 /// branch on language-name string literals or on raw source-file extensions
 /// — both belong behind a `Language` trait method.
 #[test]
@@ -187,10 +183,7 @@ fn analysis_and_engine_have_no_per_language_branches() {
     }
 
     let mut offenders: Vec<String> = Vec::new();
-    for root in [
-        "crates/codesight-analysis/src",
-        "crates/codesight-engine/src",
-    ] {
+    for root in ["crates/dowser-analysis/src", "crates/dowser-engine/src"] {
         let mut files = Vec::new();
         walk(Path::new(root), &mut files);
         for file in files {

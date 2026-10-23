@@ -1,5 +1,5 @@
-//! codesight-mcp binary crate: CLI subcommands + stdio MCP server entry point.
-//! Business logic lives in `codesight-engine`. JSON-RPC framing lives in
+//! dowser-mcp binary crate: CLI subcommands + stdio MCP server entry point.
+//! Business logic lives in `dowser-engine`. JSON-RPC framing lives in
 //! `mcp-rpc`.
 
 pub mod cli;

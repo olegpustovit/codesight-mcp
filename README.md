@@ -1,4 +1,4 @@
-# codesight-mcp
+# dowser-mcp
 
 A local [MCP](https://modelcontextprotocol.io) server that gives coding agents
 structural answers about a repository (symbols, references, imports, blast
@@ -11,7 +11,7 @@ error. It never gets a file-level guess presented as an answer.
 
 - Rust workspace, 7 crates (root binary plus 6 libraries under `crates/`).
 - 29 tree-sitter grammar crates. 46 language modules under
-  `crates/codesight-language-support/src/languages/`; some of them (Vue, Razor,
+  `crates/dowser-language-support/src/languages/`; some of them (Vue, Razor,
   Blade and others) use heuristic extractors instead of a grammar.
 - No network calls or LLM calls at runtime. The `mode=nl` search uses a
   vendored static embedding model (`potion-base-8M`, MIT) compiled into the
@@ -24,9 +24,9 @@ Requirements: stable Rust with edition 2024 support, a C and C++ compiler
 SQLite is bundled.
 
 ```sh
-cargo install --path .        # installs ~/.cargo/bin/codesight-mcp
+cargo install --path .        # installs ~/.cargo/bin/dowser-mcp
 # or
-cargo build --release         # target/release/codesight-mcp
+cargo build --release         # target/release/dowser-mcp
 ```
 
 On an 8-core Debian 13 box with Rust 1.99.1 and dependencies already compiled,
@@ -42,23 +42,23 @@ first call can time out on a large repository, so index ahead of time:
 
 ```sh
 cd /path/to/repo
-codesight-mcp ingest .        # prints the ingest envelope as JSON
-codesight-mcp check --workspace .
+dowser-mcp ingest .        # prints the ingest envelope as JSON
+dowser-mcp check --workspace .
 ```
 
 Indexing this repository (494 code files, 14 doc files, 4,791 symbols) took
-about 5.5 s with a debug build. The index lives under `CODESIGHT_INDEX_DIR`, or
-by default the OS data directory: `~/.local/share/codesight-mcp` on Linux,
-`~/Library/Application Support/codesight-mcp` on macOS. Nothing is written
+about 5.5 s with a debug build. The index lives under `DOWSER_INDEX_DIR`, or
+by default the OS data directory: `~/.local/share/dowser-mcp` on Linux,
+`~/Library/Application Support/dowser-mcp` on macOS. Nothing is written
 into the repository.
 
 ### Claude Code
 
 ```sh
 cd /path/to/repo
-codesight-mcp init --claude-code       # writes/merges ./.mcp.json
+dowser-mcp init --claude-code       # writes/merges ./.mcp.json
 # or
-claude mcp add codesight -- "$(command -v codesight-mcp)" serve
+claude mcp add dowser -- "$(command -v dowser-mcp)" serve
 ```
 
 Resulting `.mcp.json`:
@@ -66,22 +66,22 @@ Resulting `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "codesight": { "command": "/abs/path/to/codesight-mcp", "args": ["serve"] }
+    "dowser": { "command": "/abs/path/to/dowser-mcp", "args": ["serve"] }
   }
 }
 ```
 
 Claude Code starts the server from the directory you run `claude` in. If you
 start it somewhere else, add `"--workspace", "/path/to/repo"` to `args`. Optional hooks that steer Claude Code away from native
-Grep/Glob are in [`plugins/codesight-hooks`](plugins/codesight-hooks/README.md).
+Grep/Glob are in [`plugins/dowser-hooks`](plugins/dowser-hooks/README.md).
 
 ### Codex
 
 `~/.codex/config.toml` (or a project-scoped `.codex/config.toml`):
 
 ```toml
-[mcp_servers.codesight]
-command = "/abs/path/to/codesight-mcp"
+[mcp_servers.dowser]
+command = "/abs/path/to/dowser-mcp"
 args = ["serve"]
 cwd = "/path/to/repo"
 ```
@@ -94,9 +94,9 @@ explicitly. `.cursor/mcp.json` in the repository:
 ```json
 {
   "mcpServers": {
-    "codesight": {
+    "dowser": {
       "type": "stdio",
-      "command": "/abs/path/to/codesight-mcp",
+      "command": "/abs/path/to/dowser-mcp",
       "args": ["serve", "--workspace", "${workspaceFolder}"]
     }
   }
@@ -109,13 +109,13 @@ use it.
 ## Tools
 
 The authoritative schema is
-[`crates/codesight-engine/src/tools.json`](crates/codesight-engine/src/tools.json).
+[`crates/dowser-engine/src/tools.json`](crates/dowser-engine/src/tools.json).
 Every tool returns `{ok, data, _meta: {confidence, timing_ms, tokens_saved?}, warnings}`.
 On failure the shape is `{ok: false, error: {category, code, message, detail}}`.
 
 Symbol refs are strings in the form `path::QualifiedName#kind`. Kinds come
 from the index, so a Rust enum is `#type` (for example
-`crates/codesight-core/src/core/symbols.rs::FactQuality#type`) and a method is
+`crates/dowser-core/src/core/symbols.rs::FactQuality#type`) and a method is
 `path::Type.method#function`. To find exact ids, call `outline view=file` or
 `search`.
 
@@ -156,14 +156,14 @@ Hard rules enforced in code and tests:
 Example from this repository:
 
 ```text
-impact {"analysis":"blast_radius","ref":"crates/codesight-core/src/core/symbols.rs::FactQuality#type"}
+impact {"analysis":"blast_radius","ref":"crates/dowser-core/src/core/symbols.rs::FactQuality#type"}
 → historical v0.1.0 output: confidence=safe, symbol_scoped_file_count=10,
-  weak_files_text_mentions=[crates/codesight-core/src/lib.rs, crates/codesight-language-support/src/traits.rs]
+  weak_files_text_mentions=[crates/dowser-core/src/lib.rs, crates/dowser-language-support/src/traits.rs]
 
 impact {"analysis":"blast_radius","ref":"no/such/file.rs::FactQuality#enum"}
 → ok=false, error.code=NOT_FOUND ("file is not in the index")
 
-references {"kind":"importers","path":"crates/codesight-core/src/lib.rs"}
+references {"kind":"importers","path":"crates/dowser-core/src/lib.rs"}
 → ok, confidence=partial, importer_count=76
 ```
 
@@ -173,7 +173,7 @@ references {"kind":"importers","path":"crates/codesight-core/src/lib.rs"}
 It exits non-zero if any probe fails.
 
 ```sh
-codesight-mcp self-check --workspace .
+dowser-mcp self-check --workspace .
 ```
 
 Output on this repository for v0.1.0 (release build; `tool_latency` was 807.5 ms with a debug build):
@@ -203,15 +203,15 @@ results as indicative only.
 
 | Command | Purpose |
 |---|---|
-| `codesight-mcp serve [--workspace PATH]` | MCP over stdio (default when no subcommand is given) |
-| `codesight-mcp ingest PATH [--domains code\|docs\|auto] [--full]` | Index a path and print the envelope |
-| `codesight-mcp search SOURCE_ID QUERY [--limit N] [--domain code\|docs\|hybrid]` | Diagnostic search against an indexed source (`source_id` is printed by `ingest`) |
-| `codesight-mcp check [--workspace PATH] [--savings]` | Storage, schema, query packs, `.codesight.toml`; `--savings` prints the token-savings ledger |
-| `codesight-mcp init [--workspace] [--claude-code] [--force]` | Write a commented `.codesight.toml`, or a `.mcp.json` entry |
-| `codesight-mcp hook-pretooluse` / `hook-posttooluse` / `hook-precompact` | Claude Code hook entry points |
+| `dowser-mcp serve [--workspace PATH]` | MCP over stdio (default when no subcommand is given) |
+| `dowser-mcp ingest PATH [--domains code\|docs\|auto] [--full]` | Index a path and print the envelope |
+| `dowser-mcp search SOURCE_ID QUERY [--limit N] [--domain code\|docs\|hybrid]` | Diagnostic search against an indexed source (`source_id` is printed by `ingest`) |
+| `dowser-mcp check [--workspace PATH] [--savings]` | Storage, schema, query packs, `.dowser.toml`; `--savings` prints the token-savings ledger |
+| `dowser-mcp init [--workspace] [--claude-code] [--force]` | Write a commented `.dowser.toml`, or a `.mcp.json` entry |
+| `dowser-mcp hook-pretooluse` / `hook-posttooluse` / `hook-precompact` | Claude Code hook entry points |
 
-Environment: `CODESIGHT_INDEX_DIR` (index location), `CODESIGHT_LOG_FORMAT`
-(`pretty` or `json`; logs go to stderr), `CODESIGHT_PATH_MAP` (path-prefix
+Environment: `DOWSER_INDEX_DIR` (index location), `DOWSER_LOG_FORMAT`
+(`pretty` or `json`; logs go to stderr), `DOWSER_PATH_MAP` (path-prefix
 remapping for Docker or remote dev), and `RUST_LOG` (standard `EnvFilter`).
 
 ## Limitations
@@ -221,7 +221,7 @@ These were observed on this repository while preparing v0.1.0:
 - **Cold first call.** If the repository isn't indexed, the first tool call
   starts indexing. In one run, `outline view=repo` hit its 5 s timeout and
   returned `TIMEOUT`, and the next `search` returned no items. Run
-  `codesight-mcp ingest .` first. Timeout budgets: `read` 3 s, `search` /
+  `dowser-mcp ingest .` first. Timeout budgets: `read` 3 s, `search` /
   `outline` / `references` 5 s, `impact` / `health` 15 s.
 - **Name-based references, not resolved bindings.** Primary reference and
   blast-radius results use definitions and grammar identifier tokens. Comments

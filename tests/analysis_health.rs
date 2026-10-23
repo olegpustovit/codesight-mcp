@@ -2,9 +2,9 @@
 //! reachability + graph counters so the "dead-code false positive" class
 //! is observable via the tool itself rather than by eyeballing output.
 
-use codesight_engine::config::AppConfig;
-use codesight_engine::service::CodeService;
-use codesight_mcp::test_support::{index_code_fixture, write_files};
+use dowser_engine::config::AppConfig;
+use dowser_engine::service::CodeService;
+use dowser_mcp::test_support::{index_code_fixture, write_files};
 use serde_json::json;
 use tempfile::tempdir;
 

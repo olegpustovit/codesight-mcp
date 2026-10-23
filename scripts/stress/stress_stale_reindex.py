@@ -17,14 +17,14 @@ Targeted repro for the real bug behind "search_catalog gets stuck 120s":
    120-second watchdog — exactly what the user reported.
 
 This script forces condition (1) by rewriting a tracked doc file's mtime
-*before* calling `search_catalog domain=docs`. If codesight ever returns
+*before* calling `search_catalog domain=docs`. If dowser ever returns
 HANG (empty-wire) for an otherwise-well-formed call, the bug is
 reproduced.
 
 Run:
     python3 scripts/stress/stress_stale_reindex.py \
-        [--bin target/release/codesight-mcp] \
-        [--source OlegHQ/codesight-mcp]
+        [--bin target/release/dowser-mcp] \
+        [--source OlegHQ/dowser-mcp]
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def candidate_doc_files() -> list[Path]:
     # Files most likely to be indexed by the docs domain on this repo.
     names = [
         "README.md", "AGENTS.md", "CLAUDE.md", "ARCHITECTURE.md",
-        "REFACTOR_WORKLOG.md", "CODESIGHT_FEEDBACK.md", "CONFIGURATION.md",
+        "REFACTOR_WORKLOG.md", "DOWSER_FEEDBACK.md", "CONFIGURATION.md",
         "AGENT_READINESS_V2.md", "IDF_REPLACEMENT.md", "MITIGATION_PLAN.md",
     ]
     return [REPO_ROOT / n for n in names]
@@ -73,7 +73,7 @@ def run_once(bin_path: Path, source: str, wire_timeout_s: float) -> dict:
         _, warm_ms, warm_hung = client.call_tool(
             "search_catalog",
             {"source_id": source, "domain": "docs",
-             "query": "CODESIGHT_FEEDBACK", "query_mode": "keyword", "limit": 5},
+             "query": "DOWSER_FEEDBACK", "query_mode": "keyword", "limit": 5},
             timeout_s=wire_timeout_s,
         )
         print(f"    warmup: {warm_ms*1000:.1f}ms  hung={warm_hung}")
@@ -95,7 +95,7 @@ def run_once(bin_path: Path, source: str, wire_timeout_s: float) -> dict:
             _, ms, hung = client.call_tool(
                 "search_catalog",
                 {"source_id": source, "domain": "docs",
-                 "query": f"CODESIGHT_FEEDBACK {i}",
+                 "query": f"DOWSER_FEEDBACK {i}",
                  "query_mode": "keyword", "limit": 5},
                 timeout_s=wire_timeout_s,
             )
@@ -125,8 +125,8 @@ def run_once(bin_path: Path, source: str, wire_timeout_s: float) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bin", default=str(REPO_ROOT / "target/release/codesight-mcp"))
-    ap.add_argument("--source", default="OlegHQ/codesight-mcp")
+    ap.add_argument("--bin", default=str(REPO_ROOT / "target/release/dowser-mcp"))
+    ap.add_argument("--source", default="OlegHQ/dowser-mcp")
     ap.add_argument("--wire-timeout-s", type=float, default=15.0,
                     help="How long the test client waits for each reply before calling it hung.")
     args = ap.parse_args()

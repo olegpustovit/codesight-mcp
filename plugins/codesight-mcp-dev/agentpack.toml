@@ -1,3 +1,0 @@
-name = "codesight-mcp-dev"
-version = "0.1.0"
-description = "Dev-mode codesight-mcp: MCP server via cargo run + hooks + routing policy. For dogfooding on the codesight repo itself."

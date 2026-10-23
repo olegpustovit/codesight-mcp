@@ -12,13 +12,13 @@
 
 use std::fs;
 
-use codesight_engine::config::AppConfig;
+use dowser_engine::config::AppConfig;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
 fn build_fixture() -> (
     tempfile::TempDir,
-    codesight_engine::service::CodeService,
+    dowser_engine::service::CodeService,
     String,
 ) {
     let ws = tempdir().unwrap();
@@ -34,10 +34,9 @@ fn build_fixture() -> (
     fs::write(src.join("mod.py"), &big).unwrap();
     fs::write(src.join("unrelated.py"), "def other(): return 1\n").unwrap();
 
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

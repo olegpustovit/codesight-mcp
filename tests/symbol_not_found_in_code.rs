@@ -4,13 +4,13 @@
 
 use std::fs;
 
-use codesight_engine::config::AppConfig;
+use dowser_engine::config::AppConfig;
 use serde_json::json;
 use tempfile::tempdir;
 
 fn build_doc_only_repo() -> (
     tempfile::TempDir,
-    codesight_engine::service::CodeService,
+    dowser_engine::service::CodeService,
     String,
 ) {
     let ws = tempdir().unwrap();
@@ -27,10 +27,9 @@ fn build_doc_only_repo() -> (
         "# Design\n\nOnce upon a time `frobnicate_widget` was the entry point.\n",
     )
     .unwrap();
-    let svc = codesight_mcp::test_support::make_service_from_config(AppConfig::new(
-        ws.path().join("idx"),
-    ))
-    .unwrap();
+    let svc =
+        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+            .unwrap();
     let r = svc
         .dispatch(
             "ingest_sources",

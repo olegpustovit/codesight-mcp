@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use codesight_engine::{config::AppConfig, service::CodeService};
-use codesight_mcp::cli::{check, hooks, init};
+use dowser_engine::{config::AppConfig, service::CodeService};
+use dowser_mcp::cli::{check, hooks, init};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 mod stdio_io;
@@ -16,10 +16,10 @@ enum LogFormat {
 }
 
 #[derive(Parser)]
-#[command(name = "codesight-mcp", about = "MCP server (stdio JSON-RPC)")]
+#[command(name = "dowser-mcp", about = "MCP server (stdio JSON-RPC)")]
 struct Args {
     /// Log output format (stderr only; JSON-RPC stays on stdout).
-    #[arg(long, value_enum, default_value_t = LogFormat::Pretty, env = "CODESIGHT_LOG_FORMAT")]
+    #[arg(long, value_enum, default_value_t = LogFormat::Pretty, env = "DOWSER_LOG_FORMAT")]
     log_format: LogFormat,
 
     #[command(subcommand)]
@@ -38,7 +38,7 @@ enum Command {
     },
     /// Operator health check: storage, schema, query packs, project config.
     Check {
-        /// Optional workspace path whose `.codesight.toml` and readability are checked.
+        /// Optional workspace path whose `.dowser.toml` and readability are checked.
         #[arg(long)]
         workspace: Option<PathBuf>,
         /// Instead of the health checks, print the cumulative token + cost
@@ -97,10 +97,10 @@ enum Command {
     HookPreCompact,
     /// Generate a commented config template or wire this binary into Claude Code.
     Init {
-        /// Write to `./.codesight.toml` (current workspace). Default scope.
+        /// Write to `./.dowser.toml` (current workspace). Default scope.
         #[arg(long)]
         workspace: bool,
-        /// Write/merge a `codesight` entry into `./.mcp.json` so Claude Code
+        /// Write/merge a `dowser` entry into `./.mcp.json` so Claude Code
         /// discovers this binary in the current workspace.
         #[arg(long = "claude-code")]
         claude_code: bool,
@@ -117,8 +117,8 @@ fn main() {
         Command::Serve { workspace } => match run(workspace.as_deref()) {
             Ok(()) => 0,
             Err(error) => {
-                tracing::error!(error = %error, "codesight-mcp startup or runtime failed");
-                eprintln!("codesight-mcp: {error:#}");
+                tracing::error!(error = %error, "dowser-mcp startup or runtime failed");
+                eprintln!("dowser-mcp: {error:#}");
                 1
             }
         },
@@ -136,7 +136,7 @@ fn main() {
                 Ok(true) => 0,
                 Ok(false) => 1,
                 Err(error) => {
-                    eprintln!("codesight-mcp check: {error:#}");
+                    eprintln!("dowser-mcp check: {error:#}");
                     1
                 }
             }
@@ -145,7 +145,7 @@ fn main() {
             Ok(true) => 0,
             Ok(false) => 1,
             Err(error) => {
-                eprintln!("codesight-mcp self-check: {error:#}");
+                eprintln!("dowser-mcp self-check: {error:#}");
                 1
             }
         },
@@ -156,7 +156,7 @@ fn main() {
         } => match run_ingest(&path, &domains, full) {
             Ok(()) => 0,
             Err(error) => {
-                eprintln!("codesight-mcp ingest: {error:#}");
+                eprintln!("dowser-mcp ingest: {error:#}");
                 1
             }
         },
@@ -168,7 +168,7 @@ fn main() {
         } => match run_search(&source_id, &query, limit, domain.as_deref()) {
             Ok(()) => 0,
             Err(error) => {
-                eprintln!("codesight-mcp search: {error:#}");
+                eprintln!("dowser-mcp search: {error:#}");
                 1
             }
         },
@@ -182,7 +182,7 @@ fn main() {
         } => match init::run(workspace, claude_code, force) {
             Ok(()) => 0,
             Err(error) => {
-                eprintln!("codesight-mcp init: {error:#}");
+                eprintln!("dowser-mcp init: {error:#}");
                 1
             }
         },
@@ -192,7 +192,7 @@ fn main() {
 
 fn init_tracing(log_format: LogFormat) {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new("warn,codesight_mcp=info,codesight_storage=info,codesight_extractors=info")
+        EnvFilter::new("warn,dowser_mcp=info,dowser_storage=info,dowser_extractors=info")
     });
     let stderr = std::io::stderr;
     match log_format {
@@ -217,10 +217,10 @@ fn run(workspace: Option<&std::path::Path>) -> anyhow::Result<()> {
             .map_err(|err| anyhow::anyhow!("cannot use --workspace {}: {err}", dir.display()))?;
     }
     tracing::info!(
-        version = codesight_engine::config::BUILD_VERSION,
-        sha = codesight_engine::config::BUILD_SHA,
-        build_time = codesight_engine::config::BUILD_TIME,
-        "codesight-mcp starting"
+        version = dowser_engine::config::BUILD_VERSION,
+        sha = dowser_engine::config::BUILD_SHA,
+        build_time = dowser_engine::config::BUILD_TIME,
+        "dowser-mcp starting"
     );
     let config = AppConfig::load();
     let service = CodeService::new(config)?;
@@ -234,13 +234,13 @@ fn run(workspace: Option<&std::path::Path>) -> anyhow::Result<()> {
 }
 
 async fn run_rmcp_stdio(service: Arc<CodeService>) -> anyhow::Result<()> {
-    use codesight_engine::config::defaults::SHUTDOWN_DRAIN_SECS;
+    use dowser_engine::config::defaults::SHUTDOWN_DRAIN_SECS;
     use rmcp::ServiceExt;
     use rmcp::transport::stdio_pipes;
 
     let transport = stdio_pipes();
     #[cfg(debug_assertions)]
-    let running = if std::env::var_os("CODESIGHT_TEST_BLOCKING_STDIO").is_some() {
+    let running = if std::env::var_os("DOWSER_TEST_BLOCKING_STDIO").is_some() {
         service
             .clone()
             .serve((
