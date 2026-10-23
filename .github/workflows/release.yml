@@ -113,7 +113,11 @@ jobs:
 
           Every native binary passed --version, fresh indexing, MCP initialize, six-tool discovery, outline/read content, and installer tamper/failed-update checks before publication. Archives include LICENSE, NOTICE and BUILD-INFO.txt with the exact source commit and compiler.
 
-          See the repository README for checksum-verified installation and Claude Code, Codex and Cursor setup. The installer defaults to ~/.local/bin and accepts an explicit version. Linux requires the standard C/C++ runtime libraries. macOS binaries are not signed or notarized.
+          Install on macOS or Linux:
+
+              curl -fsSL https://github.com/olegpustovit/symslice-mcp/releases/latest/download/install.sh | sh
+
+          Then index your repository with `symslice-mcp ingest .` and connect your agent: with agentpack, `agentpack add olegpustovit/symslice-mcp/plugins/symslice-mcp` sets it up for Claude Code, Codex, Cursor, OpenCode, Grok and Antigravity. Step-by-step setup for each agent is in the README. The installer checks the archive's SHA-256 checksum, defaults to ~/.local/bin and accepts an explicit version (`| sh -s -- vX.Y.Z`). Linux requires the standard C/C++ runtime libraries. macOS binaries are not signed or notarized.
 
           Paper, measured source and reproduction package: https://github.com/olegpustovit/symslice-mcp/releases/tag/saner-2027-artifact-v2. That study evaluates an earlier revision; later fixes and this release have not been reevaluated in the paper.
           NOTES

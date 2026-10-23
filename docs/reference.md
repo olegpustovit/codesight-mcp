@@ -2,8 +2,14 @@
 
 ## Install a prebuilt release
 
-Linux and macOS users do not need Rust. Download the pinned installer, then run
-it to install **v0.2.0** in `~/.local/bin`:
+Linux and macOS users do not need Rust. The quickest way installs the latest
+release in `~/.local/bin`:
+
+```sh
+curl -fsSL https://github.com/olegpustovit/symslice-mcp/releases/latest/download/install.sh | sh
+```
+
+To pin a version, download that release's installer and run it with the version:
 
 ```sh
 curl -fL https://github.com/olegpustovit/symslice-mcp/releases/download/v0.2.0/install.sh -o /tmp/symslice-install.sh
