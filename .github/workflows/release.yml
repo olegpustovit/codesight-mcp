@@ -115,6 +115,6 @@ jobs:
 
           See the repository README for checksum-verified installation and Claude Code, Codex and Cursor setup. The installer defaults to ~/.local/bin and accepts an explicit version. Linux requires the standard C/C++ runtime libraries. macOS binaries are not signed or notarized.
 
-          Paper, measured source and reproduction package: https://github.com/olegpustovit/dowser-mcp/releases/tag/saner-2027-artifact-v1. That study evaluates an earlier revision; later fixes and this release have not been reevaluated in the paper.
+          Paper, measured source and reproduction package: https://github.com/olegpustovit/dowser-mcp/releases/tag/saner-2027-artifact-v2. That study evaluates an earlier revision; later fixes and this release have not been reevaluated in the paper.
           NOTES
           gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "Dowser $GITHUB_REF_NAME" --notes-file release-notes.md --latest

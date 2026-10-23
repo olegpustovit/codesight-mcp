@@ -401,7 +401,7 @@ def main() -> int:
     ap.add_argument("--bin", default=str(DEFAULT_BIN), help="Path to dowser-mcp binary.")
     ap.add_argument("--workspace", default=str(REPO_ROOT),
                     help="Workspace the server runs inside (cwd + .dowser.toml lookup).")
-    ap.add_argument("--source", default="OlegHQ/dowser-mcp",
+    ap.add_argument("--source", default="olegpustovit/dowser-mcp",
                     help="source_id to hammer.")
     ap.add_argument("--soft-deadline-ms", type=int, default=5000,
                     help="Any call slower than this counts as a failure.")

@@ -24,7 +24,7 @@ reproduced.
 Run:
     python3 scripts/stress/stress_stale_reindex.py \
         [--bin target/release/dowser-mcp] \
-        [--source OlegHQ/dowser-mcp]
+        [--source olegpustovit/dowser-mcp]
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ def run_once(bin_path: Path, source: str, wire_timeout_s: float) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bin", default=str(REPO_ROOT / "target/release/dowser-mcp"))
-    ap.add_argument("--source", default="OlegHQ/dowser-mcp")
+    ap.add_argument("--source", default="olegpustovit/dowser-mcp")
     ap.add_argument("--wire-timeout-s", type=float, default=15.0,
                     help="How long the test client waits for each reply before calling it hung.")
     args = ap.parse_args()

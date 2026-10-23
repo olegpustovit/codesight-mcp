@@ -145,13 +145,15 @@ outline/read content and installer checks before publication.
 
 ## Paper and reproduction package
 
-The [SANER 2027 Tool Demo paper and artifact release](https://github.com/olegpustovit/dowser-mcp/releases/tag/saner-2027-artifact-v1)
+The [SANER 2027 Tool Demo paper and artifact release](https://github.com/olegpustovit/dowser-mcp/releases/tag/saner-2027-artifact-v2)
 contains the paper PDF, LaTeX manuscript source archive,
-reproduction archive and checksums. GitHub’s automatic **Source code** downloads
-on that release contain the measured software snapshot. This is a submission
-candidate, with no claim of submission or acceptance. The reported study uses revision `5d0f620adda96e2d39b2259e188a48e318ad4208`; later fixes, v0.1.1 and v0.2.0
-have not been reevaluated in that study. Use that release’s automatic software source download to
-reproduce the paper and v0.2.0 for the current installable tool.
+reproduction archive and checksums. The reported study uses revision
+`5d0f620adda96e2d39b2259e188a48e318ad4208`. GitHub’s automatic **Source code**
+downloads on that release, and the tag `evaluated-5d0f620`, contain that revision
+with only the project's names changed to their current form. Later fixes, v0.1.1
+and v0.2.0 have not been reevaluated in that study. This is a submission
+candidate, with no claim of submission or acceptance. Use that release’s source
+download to reproduce the paper and v0.2.0 for the current installable tool.
 
 ## Tools
 

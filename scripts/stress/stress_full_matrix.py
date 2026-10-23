@@ -585,7 +585,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bin", default=str(DEFAULT_BIN))
     ap.add_argument("--workspace", default=str(REPO_ROOT))
-    ap.add_argument("--source", default="OlegHQ/dowser-mcp")
+    ap.add_argument("--source", default="olegpustovit/dowser-mcp")
     ap.add_argument("--soft-deadline-ms", type=int, default=1500,
                     help="Warn below the 2000ms handler cap.")
     ap.add_argument("--repeat", type=int, default=3)
