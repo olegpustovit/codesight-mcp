@@ -3,9 +3,9 @@
 
 use std::fs;
 
-use dowser_engine::service::CodeService;
-use dowser_mcp::test_support::make_service;
 use serde_json::json;
+use symslice_engine::service::CodeService;
+use symslice_mcp::test_support::make_service;
 use tempfile::tempdir;
 
 fn build_multi_module_repo() -> (CodeService, tempfile::TempDir, String) {

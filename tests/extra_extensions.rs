@@ -3,7 +3,7 @@
 use rustc_hash::FxHashMap;
 use std::path::Path;
 
-use dowser_language_support::LanguageRegistry;
+use symslice_language_support::LanguageRegistry;
 
 fn lang_at(reg: &LanguageRegistry, path: &str) -> Option<&'static str> {
     reg.for_path(Path::new(path)).map(|lang| lang.id().as_str())

@@ -13,16 +13,16 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for ObservedWriter<W> {
         cx: &mut Context<'_>,
         bytes: &[u8],
     ) -> Poll<io::Result<usize>> {
-        tracing::trace!(target: "dowser_mcp::stdio_io", bytes = bytes.len(), "poll_write entered");
+        tracing::trace!(target: "symslice_mcp::stdio_io", bytes = bytes.len(), "poll_write entered");
         let result = Pin::new(&mut self.get_mut().0).poll_write(cx, bytes);
-        tracing::trace!(target: "dowser_mcp::stdio_io", ?result, "poll_write returned");
+        tracing::trace!(target: "symslice_mcp::stdio_io", ?result, "poll_write returned");
         result
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        tracing::trace!(target: "dowser_mcp::stdio_io", "poll_flush entered");
+        tracing::trace!(target: "symslice_mcp::stdio_io", "poll_flush entered");
         let result = Pin::new(&mut self.get_mut().0).poll_flush(cx);
-        tracing::trace!(target: "dowser_mcp::stdio_io", ?result, "poll_flush returned");
+        tracing::trace!(target: "symslice_mcp::stdio_io", ?result, "poll_flush returned");
         result
     }
 

@@ -3,8 +3,8 @@
 use rustc_hash::FxHashMap;
 use std::path::Path;
 
-use dowser_language_support::frameworks::profiles::{detect_framework, profile_to_meta};
-use dowser_language_support::frameworks::{
+use symslice_language_support::frameworks::profiles::{detect_framework, profile_to_meta};
+use symslice_language_support::frameworks::{
     EnrichableSymbol, ExtraImport, FileContext, FrameworkProvider, FrameworkRegistry,
     collect_extra_imports, collect_metadata, enrich_symbol,
 };

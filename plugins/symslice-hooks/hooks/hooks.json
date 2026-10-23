@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [{ "type": "command", "command": "symslice-mcp hook-pretooluse" }]
+      },
+      {
+        "matcher": "Grep",
+        "hooks": [{ "type": "command", "command": "symslice-mcp hook-pretooluse" }]
+      },
+      {
+        "matcher": "Glob",
+        "hooks": [{ "type": "command", "command": "symslice-mcp hook-pretooluse" }]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "symslice-mcp hook-pretooluse" }]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "symslice-mcp hook-pretooluse" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "symslice-mcp hook-posttooluse" }]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": "symslice-mcp hook-precompact" }]
+      }
+    ]
+  }
+}

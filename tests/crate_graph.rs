@@ -15,13 +15,13 @@ fn workspace_crate_dependency_invariants_hold() {
 
     let names: Vec<&str> = workspace_members.iter().map(|p| p.name.as_str()).collect();
     for expected in [
-        "dowser-mcp",
-        "dowser-analysis",
-        "dowser-core",
-        "dowser-engine",
-        "dowser-language-support",
-        "dowser-retrieval",
-        "dowser-storage",
+        "symslice-mcp",
+        "symslice-analysis",
+        "symslice-core",
+        "symslice-engine",
+        "symslice-language-support",
+        "symslice-retrieval",
+        "symslice-storage",
     ] {
         assert!(
             names.contains(&expected),
@@ -29,15 +29,15 @@ fn workspace_crate_dependency_invariants_hold() {
         );
     }
     for gone in [
-        "dowser-backend",
-        "dowser-extractors",
-        "dowser-imports",
+        "symslice-backend",
+        "symslice-extractors",
+        "symslice-imports",
         "mcp-rpc",
     ] {
         assert!(
             !names.contains(&gone),
             "{gone} has been deleted; tree-sitter extraction flows through \
-             dowser-language-support directly"
+             symslice-language-support directly"
         );
     }
 
@@ -60,50 +60,54 @@ fn workspace_crate_dependency_invariants_hold() {
 
     // ── L0: primitives ──────────────────────────────────────────────────
     assert!(
-        ws_deps("dowser-core").is_empty(),
-        "dowser-core must have no workspace deps"
+        ws_deps("symslice-core").is_empty(),
+        "symslice-core must have no workspace deps"
     );
     assert_eq!(
-        ws_deps("dowser-storage"),
-        vec!["dowser-core"],
+        ws_deps("symslice-storage"),
+        vec!["symslice-core"],
         "storage may only depend on core"
     );
     assert_eq!(
-        ws_deps("dowser-analysis"),
-        vec!["dowser-core", "dowser-language-support", "dowser-storage",],
+        ws_deps("symslice-analysis"),
+        vec![
+            "symslice-core",
+            "symslice-language-support",
+            "symslice-storage",
+        ],
         "analysis depends on core + language-support + storage"
     );
     assert_eq!(
-        ws_deps("dowser-retrieval"),
-        vec!["dowser-core", "dowser-storage"],
+        ws_deps("symslice-retrieval"),
+        vec!["symslice-core", "symslice-storage"],
         "retrieval depends on core + storage only"
     );
 
     // ── L0.75: language support — owns every per-language behavior ──────
     //
-    // May depend only on L0 primitives (dowser-core). Must never reach
+    // May depend only on L0 primitives (symslice-core). Must never reach
     // upward into engine, analysis, retrieval, or storage — otherwise the
     // "one crate owns language behavior" contract collapses.
-    let lang_deps = ws_deps("dowser-language-support");
+    let lang_deps = ws_deps("symslice-language-support");
     for banned in [
-        "dowser-analysis",
-        "dowser-engine",
-        "dowser-retrieval",
-        "dowser-storage",
+        "symslice-analysis",
+        "symslice-engine",
+        "symslice-retrieval",
+        "symslice-storage",
     ] {
         assert!(
             !lang_deps.contains(&banned.to_string()),
-            "dowser-language-support must not depend on {banned}: {lang_deps:?}"
+            "symslice-language-support must not depend on {banned}: {lang_deps:?}"
         );
     }
 
     // ── L1: engine ──────────────────────────────────────────────────────
-    let engine_deps = ws_deps("dowser-engine");
+    let engine_deps = ws_deps("symslice-engine");
     for required in [
-        "dowser-storage",
-        "dowser-analysis",
-        "dowser-retrieval",
-        "dowser-language-support",
+        "symslice-storage",
+        "symslice-analysis",
+        "symslice-retrieval",
+        "symslice-language-support",
     ] {
         assert!(
             engine_deps.contains(&required.to_string()),
@@ -113,19 +117,19 @@ fn workspace_crate_dependency_invariants_hold() {
 
     // No workspace crate may depend on the product binary crate.
     for pkg_name in &names {
-        if *pkg_name == "dowser-mcp" {
+        if *pkg_name == "symslice-mcp" {
             continue;
         }
         assert!(
-            !ws_deps(pkg_name).contains(&"dowser-mcp".to_string()),
-            "{pkg_name} must not depend on dowser-mcp"
+            !ws_deps(pkg_name).contains(&"symslice-mcp".to_string()),
+            "{pkg_name} must not depend on symslice-mcp"
         );
     }
 
     // Root binary depends on engine. The MCP protocol layer is now `rmcp`
     // (external crate), so there's no internal workspace member for it.
-    let root_deps = ws_deps("dowser-mcp");
-    let required = "dowser-engine";
+    let root_deps = ws_deps("symslice-mcp");
+    let required = "symslice-engine";
     assert!(
         root_deps.contains(&required.to_string()),
         "root missing required dep {required}: {root_deps:?}"
@@ -133,7 +137,7 @@ fn workspace_crate_dependency_invariants_hold() {
 }
 
 /// L0.75 content lint: per-language behavior lives in
-/// `dowser-language-support`. The analysis and engine crates must not
+/// `symslice-language-support`. The analysis and engine crates must not
 /// branch on language-name string literals or on raw source-file extensions
 /// — both belong behind a `Language` trait method.
 #[test]
@@ -183,7 +187,7 @@ fn analysis_and_engine_have_no_per_language_branches() {
     }
 
     let mut offenders: Vec<String> = Vec::new();
-    for root in ["crates/dowser-analysis/src", "crates/dowser-engine/src"] {
+    for root in ["crates/symslice-analysis/src", "crates/symslice-engine/src"] {
         let mut files = Vec::new();
         walk(Path::new(root), &mut files);
         for file in files {

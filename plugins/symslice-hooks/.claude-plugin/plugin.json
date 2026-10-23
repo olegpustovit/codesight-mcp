@@ -1,0 +1,5 @@
+{
+  "name": "symslice-hooks",
+  "version": "0.1.0",
+  "description": "PreToolUse/PostToolUse/PreCompact hooks for symslice-mcp steering"
+}

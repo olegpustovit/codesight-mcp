@@ -1,0 +1,3 @@
+name = "symslice-mcp-dev"
+version = "0.1.0"
+description = "Dev-mode symslice-mcp: MCP server via cargo run + hooks + routing policy. For dogfooding on the symslice repo itself."

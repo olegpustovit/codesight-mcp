@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Stress test the dowser-mcp `search_catalog` handler (and friends) over stdio
+Stress test the symslice-mcp `search_catalog` handler (and friends) over stdio
 JSON-RPC. Fires a battery of real-world + adversarial queries, records per-call
 wall-clock latency, and flags anything that:
 
   - exceeds the documented `HANDLER_TIMEOUT_MS` (2000ms) budget, or
-  - silently hangs without producing a response (classic dowser bug:
+  - silently hangs without producing a response (classic symslice bug:
     `dispatch_with_timeout` Err is swallowed in `handle_request` so the
     client never sees a reply).
 
@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BIN = REPO_ROOT / "target" / "release" / "dowser-mcp"
+DEFAULT_BIN = REPO_ROOT / "target" / "release" / "symslice-mcp"
 
 
 # ---------------------------------------------------------------------------
@@ -47,14 +47,14 @@ DEFAULT_BIN = REPO_ROOT / "target" / "release" / "dowser-mcp"
 class McpClient:
     """
     Minimal JSON-RPC-over-stdio client. Single pending request at a time is
-    fine for stress testing because dowser serializes permits internally
+    fine for stress testing because symslice serializes permits internally
     (DISPATCH_CONCURRENCY=4) and each request carries a unique id.
     """
 
     def __init__(self, bin_path: Path, workspace: Path, env_overrides: dict[str, str] | None = None):
         env = os.environ.copy()
-        env.setdefault("DOWSER_LOG_FORMAT", "json")
-        env.setdefault("RUST_LOG", "warn,dowser_mcp=warn")
+        env.setdefault("SYMSLICE_LOG_FORMAT", "json")
+        env.setdefault("RUST_LOG", "warn,symslice_mcp=warn")
         if env_overrides:
             env.update(env_overrides)
         self.proc = subprocess.Popen(
@@ -182,10 +182,10 @@ def build_cases(source_id: str) -> list[Case]:
     return [
         # -------------------- reported hang reproducer --------------------
         Case(
-            "repro_docs_dowser_feedback_md",
+            "repro_docs_symslice_feedback_md",
             "search_catalog",
             {
-                "source_id": S, "domain": "docs", "query": "DOWSER_FEEDBACK.md",
+                "source_id": S, "domain": "docs", "query": "SYMSLICE_FEEDBACK.md",
                 "query_mode": "keyword", "limit": 10, "max_tokens": 3000,
             },
             note="Exact reproducer from user bug report (120s hang in MCP client).",
@@ -193,7 +193,7 @@ def build_cases(source_id: str) -> list[Case]:
         # -------------------- tokenization corner cases -------------------
         Case(
             "docs_single_long_token", "search_catalog",
-            {"source_id": S, "domain": "docs", "query": "DOWSER", "query_mode": "keyword", "limit": 10},
+            {"source_id": S, "domain": "docs", "query": "SYMSLICE", "query_mode": "keyword", "limit": 10},
         ),
         Case(
             "docs_filename_with_dot", "search_catalog",
@@ -398,10 +398,10 @@ def run_case(client: McpClient, case: Case, soft_deadline_ms: int) -> CaseResult
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bin", default=str(DEFAULT_BIN), help="Path to dowser-mcp binary.")
+    ap.add_argument("--bin", default=str(DEFAULT_BIN), help="Path to symslice-mcp binary.")
     ap.add_argument("--workspace", default=str(REPO_ROOT),
-                    help="Workspace the server runs inside (cwd + .dowser.toml lookup).")
-    ap.add_argument("--source", default="OlegHQ/dowser-mcp",
+                    help="Workspace the server runs inside (cwd + .symslice.toml lookup).")
+    ap.add_argument("--source", default="OlegHQ/symslice-mcp",
                     help="source_id to hammer.")
     ap.add_argument("--soft-deadline-ms", type=int, default=5000,
                     help="Any call slower than this counts as a failure.")

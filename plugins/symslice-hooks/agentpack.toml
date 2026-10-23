@@ -1,0 +1,3 @@
+name = "symslice-hooks"
+version = "0.1.0"
+description = "Claude Code hooks that steer agents toward symslice-mcp tools instead of native Read/Grep/Glob"

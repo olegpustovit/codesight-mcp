@@ -2,11 +2,11 @@
 
 use std::process::Command;
 
-use dowser_analysis::quality::hotspots_payload;
-use dowser_engine::config::AppConfig;
-use dowser_mcp::test_support::{index_code_fixture, open_code_store, write_files};
-use dowser_storage::storage::IndexStore;
 use serde_json::{Value, json};
+use symslice_analysis::quality::hotspots_payload;
+use symslice_engine::config::AppConfig;
+use symslice_mcp::test_support::{index_code_fixture, open_code_store, write_files};
+use symslice_storage::storage::IndexStore;
 use tempfile::tempdir;
 
 fn build_repo() -> (tempfile::TempDir, AppConfig, String, IndexStore) {
@@ -143,7 +143,7 @@ fn hotspots_min_complexity_filter() {
 fn hotspots_missing_repo_returns_error() {
     let ws = tempdir().unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let r = svc
         .dispatch(
@@ -163,7 +163,7 @@ fn hotspots_timing_present() {
     let src = ws.path().join("src");
     write_files(&src, &[("a.py", "def sample():\n    return 1\n")]).unwrap();
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let indexed = svc
         .dispatch(

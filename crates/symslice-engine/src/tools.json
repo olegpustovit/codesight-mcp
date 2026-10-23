@@ -1,0 +1,139 @@
+[
+  {
+    "name": "search",
+    "capabilities_version": "v3",
+    "description": "Ranked search over symbols, doc sections, and raw file text — preferred over native Grep. `mode=keyword` (default) is the fastest path for identifiers; `mode=regex` scans file text; `mode=nl` is a question-shaped query that defaults to code-only and falls back to BM25 when embeddings are unavailable. `scope` is a glob (`*.md`, `crates/foo/**`) that narrows both file paths and unit kinds in one knob — there is no separate `unit_kinds`/`file_pattern`. With `fuzzy=true`, fuzzy hits are labeled in `items[]` with `match_type: \"exact\"` (literal-equal), `\"prefix\"` (case-insensitive prefix), `\"partial\"` (BM25 token-overlap), or `\"fuzzy\"` (nucleo-matcher). Calibration warnings (`NO_EXACT_MATCH`, `AMBIGUOUS_IDENTIFIER`, `OVERBROAD_QUERY`) demote `confidence` to `partial` when results are suggestive rather than authoritative. Mode-conditional meta: `mode=keyword|nl` emits `_meta.tokens_saved`; `mode=regex` emits `_meta.bytes_scanned` and `_meta.files_scanned` instead — regex inherently can't beat raw `rg` on tokens, so the savings field is meaningless there. Frozen envelope: `{ok, data, _meta:{confidence, timing_ms, …}, warnings}`.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["query"],
+      "properties": {
+        "query": { "type": "string", "description": "Search text (or regex pattern when `mode=regex`)." },
+        "mode": {
+          "type": "string",
+          "enum": ["keyword", "regex", "nl"],
+          "default": "keyword",
+          "description": "`keyword` (default): identifier / BM25. `regex`: file-text scan. `nl`: dense / hybrid retrieval, code-only by default."
+        },
+        "scope": {
+          "type": "string",
+          "description": "Glob narrowing path *and* unit kind in one knob. `*.md` → docs only; `crates/foo/**` → that crate; omit for the whole repo."
+        },
+        "limit": { "type": "integer", "default": 25, "description": "Global cap on items returned (across all files)." },
+        "per_file_limit": { "type": "integer", "description": "`mode=regex` only: optional ripgrep-style per-file cap on hits. When set, no single file contributes more than this many hits even if `limit` would allow it. Ignored for keyword/NL." },
+        "max_tokens": { "type": "integer", "description": "Soft cap on serialized item bytes (~4 bytes/token)." },
+        "fuzzy": { "type": "boolean", "default": false, "description": "Merge nucleo-matcher fuzzy hits into `items[]` with `match_type: \"fuzzy\"` / `\"prefix\"` / `\"partial\"`." }
+      }
+    },
+    "examples": [
+      { "name": "find a symbol by name", "args": { "query": "rename_safety_payload" } },
+      { "name": "regex over source files", "args": { "mode": "regex", "query": "TODO\\(.*\\)" } },
+      { "name": "doc-only search", "args": { "query": "rename safety", "scope": "*.md" } },
+      { "name": "natural language", "args": { "mode": "nl", "query": "how does regex routing work" } }
+    ]
+  },
+  {
+    "name": "outline",
+    "capabilities_version": "v3",
+    "description": "Structural views — call this before reading any whole file. `view=file` returns a symbol list for one file (or batch via `paths`); `view=repo` returns a workspace summary (crates, top modules by centrality, languages). Centrality is cached in SQLite and recomputed only on reingest, so the repo view is fast on repeat calls. Frozen envelope: `{ok, data, _meta:{confidence, timing_ms, tokens_saved}, warnings}`. Repository views describe indexed files only: coverage.scope=indexed_files_only, repository_coverage_complete=false and INDEX_SCOPE_ONLY; unsupported, ignored or unindexed files may be absent.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["view"],
+      "properties": {
+        "view": { "type": "string", "enum": ["file", "repo"], "description": "Which structural view to render." },
+        "path": { "type": "string", "description": "`view=file`: file path." },
+        "paths": { "type": "array", "items": { "type": "string" }, "description": "`view=file`: batch form (mutually exclusive with `path`)." },
+        "max_tokens": { "type": "integer", "description": "Token budget (~4 bytes/token) for `view=repo`." }
+      }
+    },
+    "examples": [
+      { "name": "outline before reading", "args": { "view": "file", "path": "src/lib.rs" } },
+      { "name": "workspace overview", "args": { "view": "repo" } }
+    ]
+  },
+  {
+    "name": "read",
+    "capabilities_version": "v3",
+    "description": "Batch-read symbols, doc sections, or bounded file ranges in one call. Refs are strings only:\n  - `\"path:N-M\"` — line range\n  - `\"path:N\"` — single line\n  - `\"path::Name#kind\"` — symbol by qualified name\n  - `\"id:<stable_id>\"` — symbol by stable id\n  - `\"section:path::heading\"` — doc section\nWhole-file reads emit `confidence: partial` with an `outline_first` hint pointing at the matching `outline` call. Per-ref `truncated: true` when `max_tokens` is exceeded. With `with_neighbors=true`, structural neighbors (import + reference graph, no string-match) are appended.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["refs"],
+      "properties": {
+        "refs": { "type": "array", "items": { "type": "string" }, "description": "Refs to read in input order." },
+        "context_lines": { "type": "integer", "default": 0, "description": "Lines of before/after context per ref." },
+        "max_tokens": { "type": "integer", "description": "Soft token budget for the combined payload (~4 bytes/token)." },
+        "with_neighbors": { "type": "boolean", "default": false, "description": "Append structural neighbors (import + reference graph). No string-match neighbors." }
+      }
+    },
+    "examples": [
+      { "name": "batch range reads", "args": { "refs": ["src/lib.rs:1-40", "src/main.rs:10-25"] } },
+      { "name": "symbol by qualified name", "args": { "refs": ["src/lib.rs::main#function"] } },
+      { "name": "with neighbors", "args": { "refs": ["src/lib.rs::main#function"], "with_neighbors": true } }
+    ]
+  },
+  {
+    "name": "references",
+    "capabilities_version": "v3",
+    "description": "Reference candidates and import-edge queries. Symbol rows use name-based grammar identifier syntax, not resolved bindings; aliases and shadowing remain unresolved and confidence is partial. `kind=symbol` enumerates references to a symbol — items carry `{file, line, column, identifier, enclosing_symbol, enclosing_kind, body_match_kind}`, where `identifier` is the searched name (not the enclosing function). Unparsed non-definition text stays in `weak_hits[]` when `include_weak=true`; symbol-reference confidence remains partial. `kind=imports` returns structural outgoing imports in `imports` and unique heuristic basename guesses in `candidate_imports`; `kind=importers` returns resolved incoming imports in `importers`, separately labeled heuristic import-resolution or name-usage candidates in `candidate_usage_importers`, unbounded totals, and truncation; structural and candidate lists share `limit`. Both import views are partial and incomplete; duplicate basename guesses remain unresolved and empty lists do not prove dependency absence. Imports/importers reject unindexed target paths. Outgoing imports also reject languages without an import extractor; incoming edges can target any indexed file.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["symbol", "imports", "importers"], "description": "Which reference query to run." },
+        "ref": { "type": "string", "description": "`kind=symbol`: symbol ref string (`\"path::Name#kind\"` or `\"id:<stable_id>\"`)." },
+        "path": { "type": "string", "description": "`kind=imports` / `kind=importers`: file path." },
+        "limit": { "type": "integer", "default": 50, "description": "Max items returned." },
+        "scope": { "type": "string", "description": "Optional path glob restricting where to search." },
+        "include_weak": { "type": "boolean", "default": false, "description": "Include text-mention `weak_hits[]` alongside name-based identifier syntax candidates; no binding resolution is implied." }
+      }
+    },
+    "examples": [
+      { "name": "references to a symbol", "args": { "kind": "symbol", "ref": "crates/symslice-core/src/core/symbols.rs::FactQuality#type" } },
+      { "name": "what this file imports", "args": { "kind": "imports", "path": "crates/symslice-core/src/lib.rs" } },
+      { "name": "who imports this file", "args": { "kind": "importers", "path": "crates/symslice-core/src/lib.rs" } }
+    ]
+  },
+  {
+    "name": "impact",
+    "capabilities_version": "v3",
+    "description": "Change-oriented analyses backed by the structural reference graph. `analysis=blast_radius` returns candidate files containing definitions or name-matched grammar identifiers with partial confidence (not binding resolution; comments/string contents remain separate weak mentions; text-only evidence has unreliable confidence; never returns file-importer counts). `analysis=rename_safety` reports name-based collision candidates but cannot establish binding completeness: `safe: null`, `status: \"undecided\"`, `complete: false`, partial confidence. `identifier_match_pct` is the fraction of syntax rather than weak text candidates, never a safety/coverage guarantee.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["analysis", "ref"],
+      "properties": {
+        "analysis": { "type": "string", "enum": ["blast_radius", "rename_safety"], "description": "Which analysis to run." },
+        "ref": { "type": "string", "description": "Symbol ref string (`\"path::Name#kind\"` or `\"id:<stable_id>\"`)." },
+        "new_name": { "type": "string", "description": "`rename_safety`: proposed new symbol name." },
+        "limit": { "type": "integer", "default": 50, "description": "`blast_radius`: max files returned." },
+        "max_tokens": { "type": "integer", "description": "Soft byte budget for the response (~4 bytes/token)." }
+      }
+    },
+    "examples": [
+      { "name": "blast radius", "args": { "analysis": "blast_radius", "ref": "crates/symslice-core/src/core/symbols.rs::FactQuality#type" } },
+      { "name": "rename safety", "args": { "analysis": "rename_safety", "ref": "crates/symslice-core/src/core/symbols.rs::FactQuality#type", "new_name": "FactGrade" } }
+    ]
+  },
+  {
+    "name": "health",
+    "capabilities_version": "v3",
+    "description": "Quality signals. `quality_signal` reports the four agent-readiness dimensions (navigability, comprehensibility, verifiability, change_safety) plus structural root causes. `hotspots` returns top-N functions by churn × cyclomatic. `dead_code` walks reachability + a string-literal-dispatch heuristic; cli/bin/hooks/main paths are capped at confidence < 0.5 with a `MANUAL_REVIEW_REQUIRED` warning since externally-invoked entry points can't be statically reached. `repo_health` aggregates the others plus cycle count, using cached dead-code output to stay under the warm SLA. `test_gaps` ranks heuristic candidates lacking an indexed test-file dependency (not executed coverage) by `cyclomatic × (1 + fan_in) × (1 + ln(1 + churn))`. Health describes the indexed subset, with INDEX_SCOPE_ONLY and partial confidence; it is not a complete repository audit.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["analysis"],
+      "properties": {
+        "analysis": { "type": "string", "enum": ["quality_signal", "hotspots", "dead_code", "repo_health", "test_gaps"], "description": "Which analysis to run." },
+        "scope": { "type": "string", "description": "Optional path prefix to scope the analysis." },
+        "top_n": { "type": "integer", "description": "`hotspots` / `dead_code`: cap returned list." },
+        "min_confidence": { "type": "number", "description": "`dead_code`: minimum confidence threshold (default 0.5)." },
+        "include_tests": { "type": "boolean", "description": "`dead_code`: include test files / inline test functions. Default false." },
+        "max_tokens": { "type": "integer", "description": "Soft token budget for the response (~4 bytes/token)." }
+      }
+    },
+    "examples": [
+      { "name": "agent-readiness for a slice", "args": { "analysis": "quality_signal", "scope": "crates/symslice-engine/src/" } },
+      { "name": "hotspots", "args": { "analysis": "hotspots", "top_n": 25 } },
+      { "name": "dead code", "args": { "analysis": "dead_code", "top_n": 25 } },
+      { "name": "repo health", "args": { "analysis": "repo_health" } },
+      { "name": "test gaps", "args": { "analysis": "test_gaps", "top_n": 25 } }
+    ]
+  }
+]

@@ -1,8 +1,8 @@
-//! `dowser-mcp init` — generate an operator config template.
+//! `symslice-mcp init` — generate an operator config template.
 //!
 //! Two scopes:
-//! - `--workspace` writes `./.dowser.toml` (applies to the current repo).
-//! - `--claude-code` writes `./.mcp.json` with a `dowser` server entry so
+//! - `--workspace` writes `./.symslice.toml` (applies to the current repo).
+//! - `--claude-code` writes `./.mcp.json` with a `symslice` server entry so
 //!   Claude Code picks up this binary in the current workspace.
 //!
 //! Without any flag, defaults to `--workspace`. Refuses to overwrite without
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
-const WORKSPACE_TEMPLATE: &str = r#"# dowser-mcp workspace configuration.
+const WORKSPACE_TEMPLATE: &str = r#"# symslice-mcp workspace configuration.
 #
 # This file is read from the current workspace root. See CONFIGURATION.md for
 # every available knob.
@@ -41,11 +41,11 @@ languages = [
 # Additional directories to search for tree-sitter query packs, in priority
 # order. Relative paths are resolved against the workspace root.
 # query_pack_roots = [
-#     ".dowser/queries",
+#     ".symslice/queries",
 # ]
 "#;
 
-/// Run `dowser-mcp init` with the given flags.
+/// Run `symslice-mcp init` with the given flags.
 pub fn run(_workspace: bool, claude_code: bool, force: bool) -> anyhow::Result<()> {
     if claude_code {
         let cwd = std::env::current_dir().context("failed to resolve current directory")?;
@@ -56,7 +56,7 @@ pub fn run(_workspace: bool, claude_code: bool, force: bool) -> anyhow::Result<(
     }
 
     let cwd = std::env::current_dir().context("failed to resolve current directory")?;
-    let path = cwd.join(".dowser.toml");
+    let path = cwd.join(".symslice.toml");
     write_template(&path, WORKSPACE_TEMPLATE, force)?;
     println!("wrote {}", path.display());
     Ok(())
@@ -71,7 +71,7 @@ fn current_executable_path() -> String {
         .ok()
         .and_then(|p| p.canonicalize().ok())
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "dowser-mcp".to_string())
+        .unwrap_or_else(|| "symslice-mcp".to_string())
 }
 
 fn build_claude_code_server_entry() -> Value {
@@ -82,7 +82,7 @@ fn build_claude_code_server_entry() -> Value {
     })
 }
 
-/// Write or merge a `.mcp.json` with a `dowser` MCP server entry. When the
+/// Write or merge a `.mcp.json` with a `symslice` MCP server entry. When the
 /// file already exists and `force` is false, the write is refused; when it
 /// exists and `force` is true, we merge instead of clobbering so any other
 /// servers the user configured survive.
@@ -91,7 +91,7 @@ fn write_claude_code_entry(dir: &Path, force: bool) -> anyhow::Result<PathBuf> {
     let mut root: Value = if path.exists() {
         if !force {
             bail!(
-                "{} already exists; rerun with --force to overwrite the dowser entry",
+                "{} already exists; rerun with --force to overwrite the symslice entry",
                 path.display()
             );
         }
@@ -112,7 +112,7 @@ fn write_claude_code_entry(dir: &Path, force: bool) -> anyhow::Result<PathBuf> {
     let servers_obj = servers
         .as_object_mut()
         .context(".mcp.json `mcpServers` must be a JSON object")?;
-    servers_obj.insert("dowser".to_string(), build_claude_code_server_entry());
+    servers_obj.insert("symslice".to_string(), build_claude_code_server_entry());
 
     let pretty = serde_json::to_string_pretty(&root)? + "\n";
     fs::write(&path, pretty).with_context(|| format!("failed to write {}", path.display()))?;
@@ -122,7 +122,7 @@ fn write_claude_code_entry(dir: &Path, force: bool) -> anyhow::Result<PathBuf> {
 fn print_claude_code_cli_hint() {
     let exe = current_executable_path();
     println!("\nEquivalent CLI command (global registration):");
-    println!("  claude mcp add dowser {exe}");
+    println!("  claude mcp add symslice {exe}");
 }
 
 fn write_template(path: &Path, body: &str, force: bool) -> anyhow::Result<()> {
@@ -145,7 +145,7 @@ fn write_template(path: &Path, body: &str, force: bool) -> anyhow::Result<()> {
 /// template + overwrite logic the CLI uses.
 #[cfg(test)]
 pub(crate) fn run_workspace_at(dir: &Path, force: bool) -> anyhow::Result<PathBuf> {
-    let path = dir.join(".dowser.toml");
+    let path = dir.join(".symslice.toml");
     write_template(&path, WORKSPACE_TEMPLATE, force)?;
     Ok(path)
 }
@@ -195,10 +195,10 @@ mod tests {
         assert!(path.exists());
         let body = fs::read_to_string(&path).unwrap();
         let v: Value = serde_json::from_str(&body).unwrap();
-        let dowser = &v["mcpServers"]["dowser"];
-        assert!(dowser.is_object(), "dowser entry missing: {body}");
-        assert_eq!(dowser["args"][0], "serve");
-        assert!(dowser["command"].is_string());
+        let symslice = &v["mcpServers"]["symslice"];
+        assert!(symslice.is_object(), "symslice entry missing: {body}");
+        assert_eq!(symslice["args"][0], "serve");
+        assert!(symslice["command"].is_string());
     }
 
     #[test]
@@ -228,8 +228,8 @@ mod tests {
             "merge dropped 'other' entry: {body}"
         );
         assert!(
-            v["mcpServers"]["dowser"].is_object(),
-            "merge missing 'dowser': {body}"
+            v["mcpServers"]["symslice"].is_object(),
+            "merge missing 'symslice': {body}"
         );
     }
 }

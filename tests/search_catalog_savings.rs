@@ -1,8 +1,8 @@
 use std::fs;
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
 use serde_json::json;
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
 use tempfile::tempdir;
 
 fn ingest_code(svc: &CodeService, root: &std::path::Path) -> String {
@@ -34,7 +34,7 @@ fn search_catalog_savings_use_rg_equivalent_not_repo_bytes() {
     fs::write(src.join("huge_blob.py"), "x".repeat(400_000)).unwrap();
 
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest_code(&svc, ws.path());
 
@@ -79,7 +79,7 @@ fn search_catalog_count_mode_emits_no_inflated_baseline() {
     fs::write(src.join("huge_blob.py"), "y".repeat(400_000)).unwrap();
 
     let svc =
-        dowser_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
+        symslice_mcp::test_support::make_service_from_config(AppConfig::new(ws.path().join("idx")))
             .unwrap();
     let sid = ingest_code(&svc, ws.path());
 

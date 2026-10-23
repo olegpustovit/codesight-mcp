@@ -2,7 +2,7 @@
 //!
 //! All three read JSON from stdin (Claude Code hook protocol), decide on an
 //! action, and write JSON/stderr. They must complete in <50ms with no network
-//! I/O. The only runtime dependency is the dowser-mcp binary on PATH.
+//! I/O. The only runtime dependency is the symslice-mcp binary on PATH.
 //!
 //! Policy:
 //!   - `Read` is **never** intercepted. Claude's Edit/Write tools require a
@@ -10,7 +10,7 @@
 //!   - `Grep`, `Glob`, and exploration-style `Bash` commands (grep/rg/find/
 //!     cat/head/tail/less/more/wc/awk/sed) are hard-blocked via structured
 //!     `permissionDecision: deny`, with `additionalContext` telling the model
-//!     which dowser-mcp tool to use instead.
+//!     which symslice-mcp tool to use instead.
 //!   - Known build/VCS/runtime Bash prefixes (`SAFE_BASH_PREFIXES`) pass
 //!     through without inspection.
 
@@ -23,8 +23,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use dowser_engine::server_support::agent_readiness_cache;
-use dowser_engine::service::savings::SavingsLedger;
+use symslice_engine::server_support::agent_readiness_cache;
+use symslice_engine::service::savings::SavingsLedger;
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ struct HookInput {
 
 // ── Public entry points ──────────────────────────────────────────────────
 
-/// `dowser-mcp hook-pretooluse` — reads hook JSON from stdin, classifies,
+/// `symslice-mcp hook-pretooluse` — reads hook JSON from stdin, classifies,
 /// and emits structured `permissionDecision: deny` for exploration calls.
 /// Exit 0 always; Claude reads the decision from stdout JSON.
 pub fn run_pretooluse() -> i32 {
@@ -71,7 +71,7 @@ pub fn run_pretooluse() -> i32 {
     }
 }
 
-/// `dowser-mcp hook-posttooluse` — fires after Edit/Write to auto-reindex
+/// `symslice-mcp hook-posttooluse` — fires after Edit/Write to auto-reindex
 /// and surface refactor-shaped edit hints.
 pub fn run_posttooluse() -> i32 {
     let input = match read_hook_input() {
@@ -95,7 +95,7 @@ pub fn run_posttooluse() -> i32 {
     }
 
     // Reindex is handled in-process by the long-lived MCP server's file watcher
-    // (see `WatcherManager` in `crates/dowser-engine/src/service/file_watcher.rs`).
+    // (see `WatcherManager` in `crates/symslice-engine/src/service/file_watcher.rs`).
     // The watcher activates after the first `ingest_sources` call for a workspace
     // and auto-reindexes touched files with a 500ms notify-debounce.
 
@@ -119,7 +119,7 @@ pub fn run_posttooluse() -> i32 {
     0
 }
 
-/// `dowser-mcp hook-precompact` — returns session snapshot as additionalContext.
+/// `symslice-mcp hook-precompact` — returns session snapshot as additionalContext.
 pub fn run_precompact() -> i32 {
     let _input = read_hook_input(); // consume stdin even if unused
 
@@ -242,7 +242,7 @@ fn handle_bash(tool_input: &Value) -> i32 {
             "Bash '{}' → use: read refs=[\"path:N-M\"] (or outline view=file path=... first)",
             cmd_name
         ),
-        _ => format!("Bash '{}' → use dowser-mcp tools instead", cmd_name),
+        _ => format!("Bash '{}' → use symslice-mcp tools instead", cmd_name),
     };
 
     emit_deny(&suggestion);
@@ -317,7 +317,7 @@ fn is_code_file(path: &str) -> bool {
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    dowser_language_support::is_code_extension(ext)
+    symslice_language_support::is_code_extension(ext)
 }
 
 #[derive(Copy, Clone)]
@@ -327,7 +327,7 @@ enum IndexableDomain {
 }
 
 /// Classify a target path. `None` means truly non-indexable (binary, lock,
-/// image) — the hook should pass through. `Some(_)` means dowser can
+/// image) — the hook should pass through. `Some(_)` means symslice can
 /// handle it and the hook should deny with the matching suggestion.
 fn indexable_domain(path: &str) -> Option<IndexableDomain> {
     let ext = Path::new(path)
@@ -337,10 +337,10 @@ fn indexable_domain(path: &str) -> Option<IndexableDomain> {
     if ext.is_empty() {
         return Some(IndexableDomain::Code);
     }
-    if dowser_language_support::is_code_extension(ext) {
+    if symslice_language_support::is_code_extension(ext) {
         return Some(IndexableDomain::Code);
     }
-    if dowser_language_support::is_doc_extension(ext) {
+    if symslice_language_support::is_doc_extension(ext) {
         return Some(IndexableDomain::Docs);
     }
     None
@@ -459,9 +459,9 @@ fn use_path_prefix(line: &str) -> Option<String> {
 /// `evaluate_impact analysis=blast_radius` has not yet been called in this
 /// session. Returns `false` on any I/O error so the hook stays silent.
 fn index_storage_dir() -> PathBuf {
-    std::env::var_os(dowser_engine::config::env::INDEX_DIR)
+    std::env::var_os(symslice_engine::config::env::INDEX_DIR)
         .map(PathBuf::from)
-        .unwrap_or_else(dowser_engine::config::default_index_root)
+        .unwrap_or_else(symslice_engine::config::default_index_root)
 }
 
 fn should_emit_refactor_hint(prefix: &str) -> bool {
@@ -526,11 +526,11 @@ fn build_session_snapshot() -> String {
     };
 
     format!(
-        "## dowser session snapshot\n\
+        "## symslice session snapshot\n\
          - Session started: {}\n\
          - Total tokens saved: {}\n\
          - Tools: {}\n\n\
-         Prefer dowser-mcp tools for code exploration.",
+         Prefer symslice-mcp tools for code exploration.",
         started_at,
         format_number(total_saved),
         tools_str

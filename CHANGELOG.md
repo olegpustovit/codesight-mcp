@@ -24,7 +24,7 @@ First tagged release.
 ### Added
 
 - MCP stdio server with six tools: `search`, `outline`, `read`, `references`,
-  `impact`, `health` (schema in `crates/dowser-engine/src/tools.json`).
+  `impact`, `health` (schema in `crates/symslice-engine/src/tools.json`).
 - Per-response trust label `_meta.confidence` (`safe`, `partial`,
   `heuristic`, `unreliable`).
 - `self-check` command that probes the trust invariants against a workspace.

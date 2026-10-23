@@ -1,10 +1,10 @@
 //! FEEDBACK.md §3a regression: oversized `read_content` responses must
 //! per-ref-stub the later refs instead of dumping a JSON-escaped preview.
 
-use dowser_engine::config::AppConfig;
-use dowser_engine::service::CodeService;
-use dowser_mcp::test_support::{index_code_fixture, write_files};
 use serde_json::{Value, json};
+use symslice_engine::config::AppConfig;
+use symslice_engine::service::CodeService;
+use symslice_mcp::test_support::{index_code_fixture, write_files};
 use tempfile::tempdir;
 
 fn make_service_with(index_root: &std::path::Path) -> CodeService {

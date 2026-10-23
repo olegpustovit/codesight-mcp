@@ -642,14 +642,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "dowser-analysis"
+name = "symslice-analysis"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
- "dowser-core",
- "dowser-language-support",
- "dowser-storage",
+ "symslice-core",
+ "symslice-language-support",
+ "symslice-storage",
  "globset",
  "ignore",
  "petgraph",
@@ -663,7 +663,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dowser-core"
+name = "symslice-core"
 version = "0.1.0"
 dependencies = [
  "phf",
@@ -674,18 +674,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "dowser-engine"
+name = "symslice-engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
  "chrono",
  "dirs",
- "dowser-analysis",
- "dowser-core",
- "dowser-language-support",
- "dowser-retrieval",
- "dowser-storage",
+ "symslice-analysis",
+ "symslice-core",
+ "symslice-language-support",
+ "symslice-retrieval",
+ "symslice-storage",
  "globset",
  "ignore",
  "jsonschema",
@@ -710,13 +710,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "dowser-language-support"
+name = "symslice-language-support"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
  "dashmap",
- "dowser-core",
+ "symslice-core",
  "heck",
  "ignore",
  "jsonc-parser",
@@ -768,19 +768,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "dowser-mcp"
+name = "symslice-mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
  "chrono",
  "clap",
- "dowser-analysis",
- "dowser-core",
- "dowser-engine",
- "dowser-language-support",
- "dowser-retrieval",
- "dowser-storage",
+ "symslice-analysis",
+ "symslice-core",
+ "symslice-engine",
+ "symslice-language-support",
+ "symslice-retrieval",
+ "symslice-storage",
  "rmcp",
  "rustc-hash",
  "serde",
@@ -795,14 +795,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "dowser-retrieval"
+name = "symslice-retrieval"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
  "dirs",
- "dowser-core",
- "dowser-storage",
+ "symslice-core",
+ "symslice-storage",
  "heck",
  "htmd",
  "jsonc-parser",
@@ -817,12 +817,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "dowser-storage"
+name = "symslice-storage"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "criterion",
- "dowser-core",
+ "symslice-core",
  "ignore",
  "rusqlite",
  "rustc-hash",

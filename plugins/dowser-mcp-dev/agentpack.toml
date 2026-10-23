@@ -1,3 +1,0 @@
-name = "dowser-mcp-dev"
-version = "0.1.0"
-description = "Dev-mode dowser-mcp: MCP server via cargo run + hooks + routing policy. For dogfooding on the dowser repo itself."

@@ -2,8 +2,8 @@
 
 use rustc_hash::FxHashMap;
 
-use dowser_language_support::frameworks::FrameworkProvider;
-use dowser_language_support::languages::sql::dbt::*;
+use symslice_language_support::frameworks::FrameworkProvider;
+use symslice_language_support::languages::sql::dbt::*;
 
 // ── _detect_dbt_project ─────────────────────────────────────────────────────
 #[test]

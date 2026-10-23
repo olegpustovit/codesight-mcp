@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Full tool × enum stress matrix for dowser-mcp. Covers every
+Full tool × enum stress matrix for symslice-mcp. Covers every
 evaluate_quality analysis, every inspect_graph type, every
 inspect_structure view, every assemble_context mode, every
 evaluate_impact analysis, and every manage_indexes action we can
@@ -37,14 +37,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BIN = REPO_ROOT / "target" / "release" / "dowser-mcp"
+DEFAULT_BIN = REPO_ROOT / "target" / "release" / "symslice-mcp"
 
 
 class McpClient:
     def __init__(self, bin_path: Path, workspace: Path):
         env = os.environ.copy()
-        env.setdefault("DOWSER_LOG_FORMAT", "json")
-        env.setdefault("RUST_LOG", "warn,dowser_mcp=warn")
+        env.setdefault("SYMSLICE_LOG_FORMAT", "json")
+        env.setdefault("RUST_LOG", "warn,symslice_mcp=warn")
         self.proc = subprocess.Popen(
             [str(bin_path), "serve"],
             cwd=str(workspace),
@@ -165,15 +165,15 @@ MANY_FILES_SAMPLE = [
     "src/indexing/code_index.rs",
     "src/indexing/doc_index.rs",
     "src/mcp.rs",
-    "crates/dowser-storage/src/storage/index_store.rs",
-    "crates/dowser-storage/src/storage/analysis_reads.rs",
-    "crates/dowser-storage/src/storage/symbol_reads.rs",
-    "crates/dowser-storage/src/storage/graph_reads.rs",
-    "crates/dowser-analysis/src/lib.rs",
-    "crates/dowser-extractors/src/lib.rs",
-    "crates/dowser-retrieval/src/lib.rs",
-    "crates/dowser-core/src/lib.rs",
-    "crates/dowser-framework/src/lib.rs",
+    "crates/symslice-storage/src/storage/index_store.rs",
+    "crates/symslice-storage/src/storage/analysis_reads.rs",
+    "crates/symslice-storage/src/storage/symbol_reads.rs",
+    "crates/symslice-storage/src/storage/graph_reads.rs",
+    "crates/symslice-analysis/src/lib.rs",
+    "crates/symslice-extractors/src/lib.rs",
+    "crates/symslice-retrieval/src/lib.rs",
+    "crates/symslice-core/src/lib.rs",
+    "crates/symslice-framework/src/lib.rs",
 ]
 MANY_REFS_SYMBOLS = [
     {"kind": "symbol", "stable_id": f"src/service/agent_v1/util.rs::{name}#function"}
@@ -585,7 +585,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bin", default=str(DEFAULT_BIN))
     ap.add_argument("--workspace", default=str(REPO_ROOT))
-    ap.add_argument("--source", default="OlegHQ/dowser-mcp")
+    ap.add_argument("--source", default="OlegHQ/symslice-mcp")
     ap.add_argument("--soft-deadline-ms", type=int, default=1500,
                     help="Warn below the 2000ms handler cap.")
     ap.add_argument("--repeat", type=int, default=3)

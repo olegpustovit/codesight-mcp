@@ -6,6 +6,6 @@ version = "0.0.1"
 [dependencies]
 "github.com/oleghq/agent-configs/plugins/rust-dev" = {}
 "github.com/oleghq/agent-configs/plugins/simplifier" = {}
-dowser-mcp-dev = { path = "plugins/dowser-mcp-dev" }
+symslice-mcp-dev = { path = "plugins/symslice-mcp-dev" }
 "github.com/anthropics/skills/skills/skill-creator" = {}
 # "github.com/owner/repo/path" = {}

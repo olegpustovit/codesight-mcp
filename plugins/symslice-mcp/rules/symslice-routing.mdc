@@ -1,0 +1,136 @@
+---
+description: symslice-mcp code exploration routing — prefer structured retrieval over native tools
+alwaysApply: true
+---
+
+## Code Exploration Policy — symslice-mcp
+
+This workspace has symslice-mcp indexed. **Always use symslice tools for code
+exploration. Never fall back to Read, Grep, Glob, or Bash for code discovery.**
+
+Exception: use native `Read` only when your client requires a Read-before-Edit
+acknowledgement. That is a client quirk, not the normal discovery path.
+
+## The 6-tool surface
+
+The MCP server ships exactly six tools. Every analysis is a variant on one of
+them, dispatched by a `mode` / `view` / `kind` / `analysis` enum. The
+authoritative schema lives in `crates/symslice-engine/src/tools.json`; the
+test `tests/routing_drift.rs` enforces that this skill stays in sync with it.
+
+| Tool | Variants | Required args | What it does |
+|---|---|---|---|
+| `search` | `mode=keyword` (default) / `regex` / `nl` | `query` | Ranked search over symbols, doc sections, and raw file text. |
+| `outline` | `view=file` / `view=repo` | `view` | Structural views — call before reading any whole file. |
+| `read` | (ref form) | `refs` | Batch-read symbols, doc sections, or bounded file ranges. |
+| `references` | `kind=symbol` / `imports` / `importers` | `kind` | Reference and import-edge queries with structural resolution. |
+| `impact` | `analysis=blast_radius` / `rename_safety` | `analysis`, `ref` | Pre-refactor change-impact analyses. |
+| `health` | `analysis=quality_signal` / `hotspots` / `dead_code` / `repo_health` / `test_gaps` | `analysis` | Quality / dead-code / repo health signals. |
+
+### `read` ref forms (strings)
+
+- `"path:N-M"` — line range
+- `"path:N"` — single line
+- `"path::Name#kind"` — symbol by qualified name (e.g. `"src/lib.rs::main#function"`)
+- `"id:<stable_id>"` — symbol by stable id (returned in earlier search/outline output)
+- `"section:path::heading"` — doc section by heading text
+
+## Default → symslice mapping
+
+| Default (don't) | Symslice (do) | Args |
+|---|---|---|
+| `Grep` a symbol/fn/type name | `search` | `mode=keyword`, opt. `scope=` / `fuzzy=true` |
+| `Grep` substring across files | `search` | `mode=keyword`, opt. `scope=*.md` to narrow |
+| `Grep -E` regex over files | `search` | `mode=regex` |
+| Natural-language question | `search` | `mode=nl` |
+| Unsure of the exact name | `search` | `fuzzy=true` |
+| `Glob` / `find` / `ls -R` | `outline` | `view=repo` |
+| File outline before reading | `outline` | `view=file path=…` (batch via `paths`) |
+| `Read` a known file range | `read` | `refs=["path:N-M"]` |
+| `Read` a function/class body | `read` | `refs=["path::Name#kind"]` or `["id:<sid>"]` |
+| Batch read N files/symbols | `read` | one call with N refs — never N calls |
+| `Read` a markdown section | `read` | `refs=["section:path::Heading"]` |
+| File's outgoing imports | `references` | `kind=imports path=…` |
+| Incoming imports | `references` | `kind=importers path=…` |
+| Where is X referenced | `references` | `kind=symbol ref="path::Name#kind"` |
+| Pre-refactor: who breaks? | `impact` | `analysis=blast_radius ref=…` |
+| Rename safety check | `impact` | `analysis=rename_safety ref=… new_name=…` |
+| Hotspots / complexity | `health` | `analysis=hotspots top_n=N` |
+| Dead code | `health` | `analysis=dead_code top_n=N` |
+| Per-slice agent readiness | `health` | `analysis=quality_signal scope=…` |
+| Repo health summary | `health` | `analysis=repo_health` |
+| Untested entry points | `health` | `analysis=test_gaps top_n=N` |
+
+## Reading code
+
+1. **Outline before reading.** `outline view=file path=<path>` first. Pick
+   the symbols you need; then read only those.
+2. **Batch reads.** `read` takes an array of `refs` — one call, not N.
+3. **Whole-file reads emit warnings.** Reading `path` (no slice, no symbol)
+   returns `confidence: "partial"` plus `OUTLINE_FIRST` and (if large)
+   `TOKEN_HEAVY_READ`. Heed those before re-reading the same file.
+
+## Searching
+
+- **Pick `mode`**: `keyword` for identifiers (fastest), `regex` for patterns,
+  `nl` for question-shaped queries.
+- **Narrow with `scope`**: glob narrowing path *and* unit kind in one knob
+  (`*.md` → docs only; `crates/foo/**` → that crate). There is no separate
+  `unit_kinds` / `file_pattern`.
+- **Limits**: `limit` is a *global* item cap (not per-file). For regex with
+  many hits per file, also pass `per_file_limit=N` if you need ripgrep-style
+  semantics.
+
+## After editing
+
+The PostToolUse hook fires on Edit/Write and spawns an incremental reingest
+of the touched file in the background. Your next `search` / `outline` /
+`read` call will see the updated source. If reindex is mid-flight and your
+query touches an in-flight file, the response carries a
+`STALE_DATA_WARNING` — wait one more retrieval call (~100 ms) and re-query.
+
+## Trust calibration
+
+Read the response envelope, not just the items.
+
+- **`_meta.confidence: "safe"`** — result is authoritative.
+- **`_meta.confidence: "partial"`** — calibration signal (see warnings).
+- **`_meta.confidence: "unreliable"`** — language has no scope analyzer or
+  the analysis can't prove safety. Treat as a hint, not a fact.
+
+Common warning codes (full taxonomy in
+`crates/symslice-engine/src/service/agent_v1/warnings.rs`):
+
+- `NO_EXACT_MATCH` — no item literally matched the query identifier.
+- `AMBIGUOUS_IDENTIFIER` — top-K scores cluster; ranker can't distinguish.
+- `OVERBROAD_QUERY` — `total_matches > limit × 10`; narrow the query.
+- `NL_DEGRADED` — NL fell back to BM25 because the dense lane timed out.
+- `TRUNCATED` — result list was capped by `limit`.
+- `REGEX_OVERFLOW` — regex dropped per-file matches at the global limit.
+- `OUTLINE_FIRST` / `SUGGEST_OUTLINE` / `TOKEN_HEAVY_READ` — read-time nudges.
+- `PARTIAL_BATCH` — at least one ref in a `read` batch errored.
+- `MANUAL_REVIEW_REQUIRED` — dead-code finding under cli/bin/main/hooks paths.
+- `GRAPH_USAGE_HEURISTIC` — importers result mixes structural + heuristic edges.
+- `STALE_DATA_WARNING` — reindex in flight for a touched file.
+
+## Efficiency rules
+
+- **Outline first**, then read targeted symbols.
+- **Batch reads.** N refs in one call.
+- **Narrow scope.** A `scope=` glob is the cheapest token saver.
+- **Budget tokens**: `max_tokens=4000` for browsing, `8000` for deep reads.
+- **`_meta.tokens_saved` is the scoreboard for `mode=keyword|nl`**. For
+  `mode=regex`, the response carries `_meta.bytes_scanned` instead — regex
+  inherently can't beat raw grep on tokens.
+- **Don't paginate hundreds of matches.** Re-shape the query: tighter
+  `query`, narrower `scope`, drop file-text hits via `mode=keyword`.
+
+## Cross-skill composition
+
+When `health analysis=quality_signal` reports a weak dimension on a Rust
+file, defer to the sibling skill that owns the cure rather than reasoning
+about module layout inline:
+
+- Low `comprehensibility` / tangled module tree → `agentpack-bundle:rust-modularity`.
+- Ambiguous enum-vs-trait / pattern choice → `agentpack-bundle:rust-design-patterns`.
+- Performance regressions / hot paths → `agentpack-bundle:rust-perf-analyzer`.

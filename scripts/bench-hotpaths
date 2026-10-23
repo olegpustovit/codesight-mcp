@@ -2,16 +2,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/target/release/dowser-mcp"
+BIN="$ROOT/target/release/symslice-mcp"
 
 if [[ ! -x "$BIN" ]]; then
   echo "Building release binary..."
   cargo build --release --manifest-path "$ROOT/Cargo.toml" 2>&1 | tail -1
 fi
 
-export DOWSER_INDEX_DIR
-DOWSER_INDEX_DIR=$(mktemp -d)
-trap 'rm -rf "$DOWSER_INDEX_DIR"' EXIT
+export SYMSLICE_INDEX_DIR
+SYMSLICE_INDEX_DIR=$(mktemp -d)
+trap 'rm -rf "$SYMSLICE_INDEX_DIR"' EXIT
 
 ts() { python3 -c "import time; print(time.monotonic())"; }
 
@@ -61,7 +61,7 @@ echo
 
 # ── E9: incremental delete + rename scenarios ────────────────────────────
 FIXTURE_ROOT=$(mktemp -d)
-trap 'rm -rf "$DOWSER_INDEX_DIR" "$FIXTURE_ROOT"' EXIT
+trap 'rm -rf "$SYMSLICE_INDEX_DIR" "$FIXTURE_ROOT"' EXIT
 mkdir -p "$FIXTURE_ROOT/src"
 cat >"$FIXTURE_ROOT/src/a.py" <<'PY'
 def foo():

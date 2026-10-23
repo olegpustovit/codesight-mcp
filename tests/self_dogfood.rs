@@ -11,10 +11,10 @@
 use std::fs;
 use std::path::Path;
 
-use dowser_analysis::dead_code::dead_code_payload;
-use dowser_mcp::test_support::{index_code_fixture, open_code_store, write_files};
-use dowser_storage::storage::IndexStore;
 use serde_json::{Value, json};
+use symslice_analysis::dead_code::dead_code_payload;
+use symslice_mcp::test_support::{index_code_fixture, open_code_store, write_files};
+use symslice_storage::storage::IndexStore;
 use tempfile::tempdir;
 
 fn dead_files(store: &IndexStore) -> Vec<String> {

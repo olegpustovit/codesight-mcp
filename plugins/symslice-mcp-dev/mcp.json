@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "symslice": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--quiet",
+        "--",
+        "serve"
+      ]
+    }
+  }
+}

@@ -1,5 +1,0 @@
-{
-  "name": "dowser-mcp",
-  "version": "0.1.0",
-  "description": "Registers dowser-mcp MCP server and installs code exploration routing policy"
-}
