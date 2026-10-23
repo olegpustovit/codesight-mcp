@@ -1,4 +1,4 @@
-# dowser-mcp
+# Dowser
 
 A local MCP server for searching and reading source code. It indexes a repository into SQLite and uses tree-sitter and language-specific extractors to return symbols, references and code-analysis results over stdio.
 
@@ -37,5 +37,7 @@ By default, indexes live outside the source tree in the platform data directory.
 The source build and synthetic MCP workflow passed on Linux ARM64 with Rust 1.96.0. That check does not establish every language's reference resolution, rename safety, quality metrics or performance. Name-based references can be partial, import extraction varies by language, and indexes can become stale. Read the [limitations](docs/reference.md#limitations) before using analysis results to plan edits.
 
 The reference preserves older release-specific examples and smoke-check claims with their original version labels. The new fixture capture does not revalidate those broader claims.
+
+The [SANER 2027 Tool Demo paper](docs/reference.md#paper-and-reproduction-package) evaluated an earlier revision, `5d0f620`; later changes, including the 0.2.0 rename to Dowser, have not been reevaluated in that study.
 
 [Architecture](ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Apache-2.0 license](LICENSE) · [Third-party notices](NOTICE)

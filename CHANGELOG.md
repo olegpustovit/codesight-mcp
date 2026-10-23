@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 — 2026-10-23
+
+### Changed
+
+- Renamed the project to Dowser. The package and binary are now `dowser-mcp`,
+  environment variables use the `DOWSER_*` prefix, and configuration and index
+  paths (`.dowser.toml`, `.dowser/`, the platform data directory `dowser-mcp`)
+  and the MCP server name changed accordingly. Existing indexes must be rebuilt
+  and MCP client configurations updated to the new binary and server name.
+
+## v0.1.1 — 2026-10-22
 
 - Capture whole JSON keys once and decode names/IDs, including escaped and empty keys, while preserving pair spans and custom scope prefixes.
 - Remove deleted files and symbols when an extractor-version refresh disables fingerprint reuse.

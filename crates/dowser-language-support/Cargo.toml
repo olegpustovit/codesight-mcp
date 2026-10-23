@@ -1,6 +1,6 @@
 [package]
 name = "dowser-language-support"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 description = "L0.75 — one folder per language owns identity, extraction, imports, packages, liveness, visibility, complexity, and host profiles."
 build = "build.rs"

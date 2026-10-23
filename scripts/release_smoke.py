@@ -93,7 +93,7 @@ async def smoke(binary: Path, version: str, check_cli: bool) -> None:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary', type=Path)
-    parser.add_argument('--version', default='0.1.1')
+    parser.add_argument('--version', default='0.2.0')
     parser.add_argument('--skip-cli-version', action='store_true', help='Diagnostic only for pre-release binaries lacking --version')
     args = parser.parse_args()
     asyncio.run(smoke(args.binary.resolve(), args.version, not args.skip_cli_version))

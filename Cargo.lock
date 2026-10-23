@@ -643,7 +643,7 @@ dependencies = [
 
 [[package]]
 name = "dowser-analysis"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "dowser-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "phf",
  "rustc-hash",
@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "dowser-engine"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -711,7 +711,7 @@ dependencies = [
 
 [[package]]
 name = "dowser-language-support"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -769,7 +769,7 @@ dependencies = [
 
 [[package]]
 name = "dowser-mcp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -796,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "dowser-retrieval"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "dowser-storage"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "criterion",

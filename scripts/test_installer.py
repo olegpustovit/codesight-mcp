@@ -19,7 +19,7 @@ args = parser.parse_args()
 installer = Path(__file__).resolve().parents[1] / 'install.sh'
 system = {'Linux': 'unknown-linux-gnu', 'Darwin': 'apple-darwin'}[platform.system()]
 machine = {'x86_64': 'x86_64', 'aarch64': 'aarch64', 'arm64': 'aarch64'}[platform.machine()]
-archive_name = f'dowser-mcp-v0.1.1-{machine}-{system}.tar.gz'
+archive_name = f'dowser-mcp-v0.2.0-{machine}-{system}.tar.gz'
 with tempfile.TemporaryDirectory(prefix='dowser-installer-') as tmp:
     root = Path(tmp)
     downloads = root / 'downloads'
@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix='dowser-installer-') as tmp:
     if args.binary:
         shutil.copyfile(args.binary.resolve(), payload)
     else:
-        payload.write_text('#!/bin/sh\nprintf "dowser-mcp 0.1.1\\n"\n')
+        payload.write_text('#!/bin/sh\nprintf "dowser-mcp 0.2.0\\n"\n')
     payload.chmod(0o755)
     archive = downloads / archive_name
     with tarfile.open(archive, 'w:gz') as bundle:
@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='dowser-installer-') as tmp:
 set -eu
 for arg do
   case "$arg" in
-    https://github.com/olegpustovit/dowser-mcp/releases/download/v0.1.1/*) url=$arg ;;
+    https://github.com/olegpustovit/dowser-mcp/releases/download/v0.2.0/*) url=$arg ;;
   esac
   if [ "${previous:-}" = -o ]; then destination=$arg; fi
   previous=$arg
@@ -56,14 +56,14 @@ cp "$TEST_DOWNLOADS/${url##*/}" "$destination"
     destination = root / 'install path with spaces'
     env = {**os.environ, 'PATH': f'{mock_bin}{os.pathsep}{os.environ["PATH"]}',
            'TEST_DOWNLOADS': str(downloads), 'DOWSER_INSTALL_DIR': str(destination)}
-    def install(version='v0.1.1'):
+    def install(version='v0.2.0'):
         return subprocess.run(['sh', str(installer), version], env=env, text=True, capture_output=True, timeout=20)
 
     result = install()
     assert result.returncode == 0, result.stderr
     installed = destination / 'dowser-mcp'
     assert installed.read_bytes() == payload.read_bytes()
-    assert subprocess.check_output([str(installed), '--version'], text=True).strip() == 'dowser-mcp 0.1.1'
+    assert subprocess.check_output([str(installed), '--version'], text=True).strip() == 'dowser-mcp 0.2.0'
     # An update corrupted in transit must fail without removing the working binary.
     before = installed.read_bytes()
     archive.write_bytes(archive.read_bytes() + b'corrupt-download')

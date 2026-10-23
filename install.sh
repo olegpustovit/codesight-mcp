@@ -2,10 +2,10 @@
 # Install an explicitly versioned native release. No Rust toolchain required.
 set -eu
 
-version=${1:-v0.1.1}
+version=${1:-v0.2.0}
 case "$version" in
   v[0-9]*.[0-9]*.[0-9]*) ;;
-  *) echo 'Usage: sh install.sh [vVERSION] (for example v0.1.1)' >&2; exit 1 ;;
+  *) echo 'Usage: sh install.sh [vVERSION] (for example v0.2.0)' >&2; exit 1 ;;
 esac
 case "$version" in *[!a-zA-Z0-9.-]*) echo 'Invalid version' >&2; exit 1 ;; esac
 case "$(uname -s)/$(uname -m)" in

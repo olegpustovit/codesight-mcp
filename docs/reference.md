@@ -3,11 +3,11 @@
 ## Install a prebuilt release
 
 Linux and macOS users do not need Rust. Download the pinned installer, then run
-it to install **v0.1.1** in `~/.local/bin`:
+it to install **v0.2.0** in `~/.local/bin`:
 
 ```sh
-curl -fL https://github.com/olegpustovit/dowser-mcp/releases/download/v0.1.1/install.sh -o /tmp/dowser-install.sh
-sh /tmp/dowser-install.sh v0.1.1
+curl -fL https://github.com/olegpustovit/dowser-mcp/releases/download/v0.2.0/install.sh -o /tmp/dowser-install.sh
+sh /tmp/dowser-install.sh v0.2.0
 "$HOME/.local/bin/dowser-mcp" --version
 ```
 
@@ -32,12 +32,12 @@ and cannot run these glibc builds directly.
 ### Manual download and updates
 
 All archives, per-file checksums and `SHA256SUMS` are on the
-[v0.1.1 release page](https://github.com/olegpustovit/dowser-mcp/releases/tag/v0.1.1).
+[v0.2.0 release page](https://github.com/olegpustovit/dowser-mcp/releases/tag/v0.2.0).
 For example, on Linux x86_64:
 
 ```sh
-archive=dowser-mcp-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
-base=https://github.com/olegpustovit/dowser-mcp/releases/download/v0.1.1
+archive=dowser-mcp-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+base=https://github.com/olegpustovit/dowser-mcp/releases/download/v0.2.0
 curl -fLO "$base/$archive"
 curl -fLO "$base/$archive.sha256"
 sha256sum -c "$archive.sha256"   # macOS: shasum -a 256 -c "$archive.sha256"
@@ -48,7 +48,7 @@ install -m 755 dowser-mcp "$HOME/.local/bin/dowser-mcp"
 
 There is no automatic update. To update, download the installer from the desired
 release and run it with that same version. Running the commands above again
-reinstalls v0.1.1. Restart your MCP client after an update. Archives include the
+reinstalls v0.2.0. Restart your MCP client after an update. Archives include the
 license, third-party notices and `BUILD-INFO.txt` with the exact source commit.
 
 ## Add Dowser to your coding agent
@@ -146,12 +146,12 @@ outline/read content and installer checks before publication.
 ## Paper and reproduction package
 
 The [SANER 2027 Tool Demo paper and artifact release](https://github.com/olegpustovit/dowser-mcp/releases/tag/saner-2027-artifact-v1)
-contains the paper PDF, LaTeX manuscript source (`dowser-source.zip`),
+contains the paper PDF, LaTeX manuscript source archive,
 reproduction archive and checksums. GitHub’s automatic **Source code** downloads
 on that release contain the measured software snapshot. This is a submission
-candidate, with no claim of submission or acceptance. The reported study uses revision `5d0f620adda96e2d39b2259e188a48e318ad4208`; later fixes and v0.1.1
+candidate, with no claim of submission or acceptance. The reported study uses revision `5d0f620adda96e2d39b2259e188a48e318ad4208`; later fixes, v0.1.1 and v0.2.0
 have not been reevaluated in that study. Use that release’s automatic software source download to
-reproduce the paper and v0.1.1 for the current installable tool.
+reproduce the paper and v0.2.0 for the current installable tool.
 
 ## Tools
 
